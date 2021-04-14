@@ -16,3 +16,4 @@ A template project for Rust applications. Suggestions for additions are very wel
  - To test, use `cargo test`.
  - To lint, use `cargo clippy`.
  - To format, use `cargo fmt`.
+ - To build (compile), use `cargo build`.
