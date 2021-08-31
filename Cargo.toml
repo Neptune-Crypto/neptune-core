@@ -1,10 +1,11 @@
 [package]
-name = "rust-template-project"
+name = "neptune-core"
 version = "0.1.0"
-authors = ["Philip Munksgaard <philip@munksgaard.me>"]
+authors = ["sword-smith <thv@neptune.cash>", "Alan Szepieniec <as@neptune.cash>"]
 edition = "2018"
 
 [dependencies]
 anyhow = "1.0" # Error trait and generalized error handling
 structopt = { version = "0.3", features = [ "paw" ] } # Command-line argument parsing
 paw = "1.0" # Command-line argument parsing
+log = { version = "0.4", features = [ "std" ] }

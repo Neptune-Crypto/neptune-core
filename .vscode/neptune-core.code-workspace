@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"rust.all_features": true,
+		"rust.clippy_preference": "on",
+		"rust.unstable_features": true,
+		"rust-client.updateOnStartup": true,
+		"rust.show_warnings": true,
+		"rust.build_on_save": false,
+		"rust.show_hover_context": true,
+		"editor.formatOnSave": true,
+		"[rust]": {
+			"editor.defaultFormatter": "rust-lang.rust"
+		}
+	}
+}

@@ -1,17 +1,18 @@
 use anyhow::Result;
+use log::{debug, error, info, trace, warn};
 use structopt::StructOpt;
-
-/// See the [structopt
-/// documentation](https://docs.rs/structopt/0.3.21/structopt) for more
-/// information.
-#[derive(StructOpt)]
-#[structopt(
-    name = "rust-template-project",
-    about = "A template you can use for your own projects."
-)]
-struct Args {}
+mod args;
+mod logger;
 
 #[paw::main]
-fn main(_args: Args) -> Result<()> {
-    rust_template_project::my_library_function()
+fn main(_args: args::Args) -> Result<()> {
+    let args: args::Args = StructOpt::from_args();
+    println!("{:?}", args);
+    logger::Logger::init(args);
+    trace!("hi from trace");
+    debug!("hi from debug");
+    info!("hi from info");
+    warn!("hi from warn");
+    error!("hi from error");
+    neptune_core::my_library_function()
 }
