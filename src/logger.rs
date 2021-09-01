@@ -3,6 +3,10 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::path::Path;
+extern crate chrono;
+use chrono::offset::Local;
+use chrono::DateTime;
+use std::time::SystemTime;
 
 #[derive(Debug)]
 pub struct Logger {
@@ -23,13 +27,25 @@ impl log::Log for Logger {
                     Err(err) => println!("Failed to create logging file. Error: {:?}", err),
                 }
             }
+
             let mut log_file = OpenOptions::new()
                 .write(true)
                 .append(true)
                 .open(self.log_file_name.clone())
-                .expect(format!("failed to open log file: \"{}\"", self.log_file_name).as_str());
+                .unwrap_or_else(|_| panic!("failed to open log file: \"{}\"", self.log_file_name));
+            let system_time = SystemTime::now();
+            let datetime: DateTime<Local> = system_time.into();
             log_file
-                .write(format!("{} - {}\n", record.level(), record.args()).as_bytes())
+                .write_all(
+                    format!(
+                        "{} {}  {}: {}\n",
+                        datetime.format("%Y-%m-%dT%TZ"),
+                        record.target(),
+                        record.level(),
+                        record.args()
+                    )
+                    .as_bytes(),
+                )
                 .expect("Unable to write log file");
         }
     }
@@ -46,7 +62,7 @@ impl Logger {
         }
     }
 
-    pub fn init(opt: crate::args::Args) -> () {
+    pub fn init(opt: crate::args::Args) {
         let logger: Logger = Logger {
             log_file_name: opt.log_file_name.clone(),
             verbose: opt.verbose,
