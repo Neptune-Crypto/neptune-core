@@ -11,11 +11,19 @@ pub struct Args {
     #[structopt(short, long)]
     pub mine: bool,
 
-    /// Set mining argument to participate in competitive mining
+    /// Port on which to listen for connections
     #[structopt(short, long, default_value = "9798")]
     pub port: u16,
 
-    /// Set mining argument to participate in competitive mining
+    /// IP on which to listen for connections
     #[structopt(short, long, default_value = "127.0.0.1")]
     pub listen_addr: IpAddr,
+
+    /// IPs of nodes to connect to, e.g.: --node-ips 8.8.8.8 --node-ips 8.8.4.4
+    #[structopt(short, long)]
+    pub node_ips: Vec<std::net::IpAddr>,
+
+    /// Set this argument to connect to testnet
+    #[structopt(long)]
+    pub testnet: bool,
 }
