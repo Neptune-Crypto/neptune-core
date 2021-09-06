@@ -1,47 +1,70 @@
-use anyhow::{bail, Result};
-use std::str;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use anyhow::Result;
+use futures::sink::SinkExt;
+use futures::stream::TryStreamExt;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio_serde::formats::*;
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
+
+mod model;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
 
 #[instrument]
-pub async fn outgoing_transaction<S>(mut stream: S) -> Result<()>
+pub async fn outgoing_transaction<S>(stream: S) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
     info!("Established connection");
-    stream.write_all(MAGIC_STRING).await?;
 
-    let mut buffer = [0; 1024];
-    let len: usize = stream.read(&mut buffer).await?;
-    let response_string = match str::from_utf8(&buffer[..len]) {
-        Ok(v) => v,
-        Err(e) => bail!("Invalid UTF-8 sequence: {}", e),
-    };
-    info!("Got response {}", response_string);
+    // Delimit frames using a length header
+    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
+
+    // Serialize frames with bincode
+    let mut serialized =
+        tokio_serde::SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
+
+    serialized
+        .send(model::Message::MagicValue(Vec::from(MAGIC_STRING)))
+        .await?;
+
+    if let Some(msg) = &mut serialized.try_next().await? {
+        info!("Got response {:?}", msg);
+    }
 
     Ok(())
 }
 
 #[instrument]
-pub async fn incoming_transaction<S>(mut stream: S) -> Result<()>
+pub async fn incoming_transaction<S>(stream: S) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
-    let mut buffer = [0; 1024];
+    info!("Established connection");
 
-    let len = stream.read(&mut buffer).await?;
+    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
 
-    if !buffer.starts_with(MAGIC_STRING) {
-        bail!("Invalid magic string: {:?}", &buffer[..len]);
+    // Deserialize frames
+    let mut deserialized = tokio_serde::SymmetricallyFramed::new(
+        length_delimited,
+        SymmetricalBincode::<model::Message>::default(),
+    );
+
+    // Spawn a task that prints all received messages to STDOUT
+    loop {
+        match deserialized.try_next().await? {
+            Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING => {
+                info!("Got correct magic value!");
+                deserialized.send(model::Message::NewBlock(42)).await?;
+            }
+            Some(msg) => {
+                info!("Got some other value: {:?}", msg);
+            }
+            None => break,
+        }
     }
-
-    let response = "Hello Neptune!\n";
-
-    stream.write_all(response.as_bytes()).await?;
 
     Ok(())
 }
