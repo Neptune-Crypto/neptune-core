@@ -35,6 +35,8 @@ where
         info!("Got response {:?}", msg);
     }
 
+    serialized.send(model::Message::Bye).await?;
+
     Ok(())
 }
 
@@ -134,7 +136,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_succeed() -> Result<()> {
+    async fn test_incoming_transaction_succeed() -> Result<()> {
         let mock = Builder::new()
             .read(&to_bytes(&model::Message::MagicValue(
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -151,7 +153,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_fail() -> Result<()> {
+    async fn test_incoming_transaction_fail() -> Result<()> {
         let mock = Builder::new()
             .read(&to_bytes(&model::Message::MagicValue(
                 MAGIC_STRING_RESPONSE.to_vec(),
@@ -163,5 +165,22 @@ mod tests {
         } else {
             bail!("Expected error from run")
         }
+    }
+
+    #[tokio::test]
+    async fn test_outgoing_transaction_succeed() -> Result<()> {
+        let mock = Builder::new()
+            .write(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_REQUEST.to_vec(),
+            ))?)
+            .read(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_RESPONSE.to_vec(),
+            ))?)
+            .write(&to_bytes(&model::Message::Bye)?)
+            .build();
+
+        outgoing_transaction(mock).await?;
+
+        Ok(())
     }
 }
