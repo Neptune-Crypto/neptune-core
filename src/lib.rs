@@ -1,5 +1,4 @@
 use anyhow::{bail, Result};
-use std::net::SocketAddr;
 use std::str;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -9,7 +8,7 @@ use tracing::{debug, error, info, instrument, warn};
 pub const MAGIC_STRING: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
 
 #[instrument]
-pub async fn outgoing_transaction<S>(mut stream: S, peer_address: SocketAddr) -> Result<()>
+pub async fn outgoing_transaction<S>(mut stream: S) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
@@ -28,7 +27,7 @@ where
 }
 
 #[instrument]
-pub async fn incoming_transaction<S>(mut stream: S, peer_address: SocketAddr) -> Result<()>
+pub async fn incoming_transaction<S>(mut stream: S) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
@@ -52,9 +51,9 @@ pub async fn initiate_connection(peer_address: std::net::SocketAddr) {
     debug!("Attempting to initiate connection");
     match tokio::net::TcpStream::connect(peer_address).await {
         Err(e) => {
-            warn!("Failed to establish connection to {}.\n{}", peer_address, e);
+            warn!("Failed to establish connection: {}", e);
         }
-        Ok(stream) => match outgoing_transaction(stream, peer_address).await {
+        Ok(stream) => match outgoing_transaction(stream).await {
             Ok(()) => (),
             Err(e) => error!("An error occurred: {}. Connection closing", e),
         },
@@ -65,10 +64,9 @@ pub async fn initiate_connection(peer_address: std::net::SocketAddr) {
 
 #[instrument]
 pub async fn receive_connection(stream: TcpStream) {
-    let peer_address: std::net::SocketAddr = stream.peer_addr().unwrap();
     info!("Connection established");
 
-    match incoming_transaction(stream, peer_address).await {
+    match incoming_transaction(stream).await {
         Ok(()) => (),
         Err(e) => error!("An error occurred: {}. Connection closing", e),
     };
@@ -80,11 +78,6 @@ pub async fn receive_connection(stream: TcpStream) {
 mod tests {
     use super::*;
     use std::convert::TryInto;
-    use std::str::FromStr;
-
-    fn get_dummy_address() -> SocketAddr {
-        std::net::SocketAddr::from_str("127.0.0.1:8080").unwrap()
-    }
 
     #[tokio::test]
     async fn test_run_succeed() -> Result<()> {
@@ -93,7 +86,7 @@ mod tests {
         buffer.write(MAGIC_STRING).await?;
         buffer.set_position(0);
 
-        incoming_transaction(&mut buffer, get_dummy_address()).await?;
+        incoming_transaction(&mut buffer).await?;
 
         buffer.set_position(MAGIC_STRING.len().try_into().unwrap());
         let mut res = [0; 1024];
@@ -111,7 +104,7 @@ mod tests {
         buffer.write(&s[..]).await?;
         buffer.set_position(0);
 
-        if let Err(_) = incoming_transaction(&mut buffer, get_dummy_address()).await {
+        if let Err(_) = incoming_transaction(&mut buffer).await {
             Ok(())
         } else {
             bail!("Expected error from run")
