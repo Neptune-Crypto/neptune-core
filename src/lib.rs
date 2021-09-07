@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -10,7 +10,8 @@ use tracing::{debug, error, info, instrument, warn};
 mod model;
 
 /// Magic string to ensure other program is Neptune Core
-pub const MAGIC_STRING: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
+pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
+pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
 
 #[instrument]
 pub async fn outgoing_transaction<S>(stream: S) -> Result<()>
@@ -27,7 +28,7 @@ where
         tokio_serde::SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
 
     serialized
-        .send(model::Message::MagicValue(Vec::from(MAGIC_STRING)))
+        .send(model::Message::MagicValue(Vec::from(MAGIC_STRING_REQUEST)))
         .await?;
 
     if let Some(msg) = &mut serialized.try_next().await? {
@@ -52,15 +53,17 @@ where
         SymmetricalBincode::<model::Message>::default(),
     );
 
-    // Spawn a task that prints all received messages to STDOUT
     loop {
         match deserialized.try_next().await? {
-            Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING => {
-                info!("Got correct magic value!");
-                deserialized.send(model::Message::NewBlock(42)).await?;
+            Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING_REQUEST => {
+                debug!("Got correct magic value!");
+                deserialized
+                    .send(model::Message::MagicValue(MAGIC_STRING_RESPONSE.to_vec()))
+                    .await?;
             }
-            Some(msg) => {
-                info!("Got some other value: {:?}", msg);
+            Some(_) => {
+                warn!("Got bad magic value!");
+                bail!("Got bad magic value!");
             }
             None => break,
         }
@@ -100,33 +103,52 @@ pub async fn receive_connection(stream: TcpStream) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryInto;
+    use anyhow::bail;
+    use std::io::{Cursor, Read};
+    use std::pin::Pin;
+    use tokio_serde::Serializer;
+
+    async fn get_transport(
+        message: &model::Message,
+    ) -> tokio_util::codec::Framed<Cursor<Vec<u8>>, tokio_util::codec::LengthDelimitedCodec> {
+        let mut transport = Framed::new(Cursor::new(Vec::new()), LengthDelimitedCodec::new());
+        let mut formating = SymmetricalBincode::<model::Message>::default();
+        let bytes = Pin::new(&mut formating).serialize(message).unwrap();
+        let frame = bytes::Bytes::from(bytes);
+        transport.send(frame).await.unwrap();
+
+        transport
+    }
 
     #[tokio::test]
     async fn test_run_succeed() -> Result<()> {
-        use std::io::Cursor;
-        let mut buffer = Cursor::new(Vec::new());
-        buffer.write(MAGIC_STRING).await?;
+        let transport =
+            get_transport(&model::Message::MagicValue(MAGIC_STRING_REQUEST.to_vec())).await;
+        let mut buffer: Cursor<Vec<u8>> = transport.into_inner();
+        let request_length = buffer.position();
         buffer.set_position(0);
-
         incoming_transaction(&mut buffer).await?;
-
-        buffer.set_position(MAGIC_STRING.len().try_into().unwrap());
+        buffer.set_position(request_length);
         let mut res = [0; 1024];
-        let bytes = buffer.read(&mut res).await?;
-        assert_eq!(&res[..bytes], &b"Hello Neptune!\n"[..]);
+        let bytes = buffer.read(&mut res).unwrap();
+
+        let expected_transport =
+            get_transport(&model::Message::MagicValue(MAGIC_STRING_RESPONSE.to_vec())).await;
+        let mut expected_buffer = expected_transport.into_inner();
+        expected_buffer.set_position(0);
+        let mut expected_res = [0; 1024];
+        let expected_bytes = expected_buffer.read(&mut expected_res).unwrap();
+
+        assert_eq!(expected_res[..expected_bytes], res[..bytes]);
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_run_fail() -> Result<()> {
-        let s = b"BLABLABLA";
-        use std::io::Cursor;
-        let mut buffer = Cursor::new(Vec::with_capacity(MAGIC_STRING.len()));
-        buffer.write(&s[..]).await?;
+        let transport = get_transport(&model::Message::MagicValue(b"BLABLABLA".to_vec())).await;
+        let mut buffer: Cursor<Vec<u8>> = transport.into_inner();
         buffer.set_position(0);
-
         if let Err(_) = incoming_transaction(&mut buffer).await {
             Ok(())
         } else {
