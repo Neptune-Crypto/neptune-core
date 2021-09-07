@@ -53,17 +53,30 @@ where
         SymmetricalBincode::<model::Message>::default(),
     );
 
+    match deserialized.try_next().await? {
+        Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING_REQUEST => {
+            info!("Got correct magic value!");
+            deserialized
+                .send(model::Message::MagicValue(MAGIC_STRING_RESPONSE.to_vec()))
+                .await?;
+        }
+        Some(model::Message::MagicValue(v)) => {
+            bail!("Got invalid magic value: {:?}", v);
+        }
+        v => {
+            bail!("Expected magic value, got {:?}", v);
+        }
+    }
+
     loop {
         match deserialized.try_next().await? {
-            Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING_REQUEST => {
-                debug!("Got correct magic value!");
-                deserialized
-                    .send(model::Message::MagicValue(MAGIC_STRING_RESPONSE.to_vec()))
-                    .await?;
+            Some(model::Message::Bye) => {
+                info!("Got bye");
+                break;
             }
-            Some(_) => {
-                warn!("Got bad magic value!");
-                bail!("Got bad magic value!");
+            Some(v) => {
+                info!("Got message: {:?}", v);
+                deserialized.send(model::Message::NewBlock(42)).await?;
             }
             None => break,
         }
@@ -103,53 +116,49 @@ pub async fn receive_connection(stream: TcpStream) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::bail;
-    use std::io::{Cursor, Read};
+    use bytes::{Bytes, BytesMut};
     use std::pin::Pin;
     use tokio_serde::Serializer;
+    use tokio_test::io::Builder;
+    use tokio_util::codec::Encoder;
 
-    async fn get_transport(
-        message: &model::Message,
-    ) -> tokio_util::codec::Framed<Cursor<Vec<u8>>, tokio_util::codec::LengthDelimitedCodec> {
-        let mut transport = Framed::new(Cursor::new(Vec::new()), LengthDelimitedCodec::new());
+    fn to_bytes(message: &model::Message) -> Result<Bytes> {
+        let mut transport = LengthDelimitedCodec::new();
         let mut formating = SymmetricalBincode::<model::Message>::default();
-        let bytes = Pin::new(&mut formating).serialize(message).unwrap();
-        let frame = bytes::Bytes::from(bytes);
-        transport.send(frame).await.unwrap();
-
-        transport
+        let mut buf = BytesMut::new();
+        let () = transport.encode(
+            Bytes::from(Pin::new(&mut formating).serialize(message)?),
+            &mut buf,
+        )?;
+        Ok(buf.freeze())
     }
 
     #[tokio::test]
     async fn test_run_succeed() -> Result<()> {
-        let transport =
-            get_transport(&model::Message::MagicValue(MAGIC_STRING_REQUEST.to_vec())).await;
-        let mut buffer: Cursor<Vec<u8>> = transport.into_inner();
-        let request_length = buffer.position();
-        buffer.set_position(0);
-        incoming_transaction(&mut buffer).await?;
-        buffer.set_position(request_length);
-        let mut res = [0; 1024];
-        let bytes = buffer.read(&mut res).unwrap();
+        let mock = Builder::new()
+            .read(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_REQUEST.to_vec(),
+            ))?)
+            .write(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_RESPONSE.to_vec(),
+            ))?)
+            .read(&to_bytes(&model::Message::Bye)?)
+            .build();
 
-        let expected_transport =
-            get_transport(&model::Message::MagicValue(MAGIC_STRING_RESPONSE.to_vec())).await;
-        let mut expected_buffer = expected_transport.into_inner();
-        expected_buffer.set_position(0);
-        let mut expected_res = [0; 1024];
-        let expected_bytes = expected_buffer.read(&mut expected_res).unwrap();
-
-        assert_eq!(expected_res[..expected_bytes], res[..bytes]);
+        incoming_transaction(mock).await?;
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_run_fail() -> Result<()> {
-        let transport = get_transport(&model::Message::MagicValue(b"BLABLABLA".to_vec())).await;
-        let mut buffer: Cursor<Vec<u8>> = transport.into_inner();
-        buffer.set_position(0);
-        if let Err(_) = incoming_transaction(&mut buffer).await {
+        let mock = Builder::new()
+            .read(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_RESPONSE.to_vec(),
+            ))?)
+            .build();
+
+        if let Err(_) = incoming_transaction(mock).await {
             Ok(())
         } else {
             bail!("Expected error from run")

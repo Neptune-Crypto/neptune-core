@@ -5,4 +5,5 @@ pub enum Message {
     MagicValue(Vec<u8>),
     NewBlock(u32),
     NewTransaction(i32),
+    Bye,
 }
