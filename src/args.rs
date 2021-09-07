@@ -12,16 +12,16 @@ pub struct Args {
     pub mine: bool,
 
     /// Port on which to listen for connections
-    #[structopt(short, long, default_value = "9798")]
+    #[structopt(long, default_value = "9798")]
     pub port: u16,
 
     /// IP on which to listen for connections
     #[structopt(short, long, default_value = "127.0.0.1")]
     pub listen_addr: IpAddr,
 
-    /// IPs of nodes to connect to, e.g.: --node-ips 8.8.8.8 --node-ips 8.8.4.4
-    #[structopt(short, long)]
-    pub node_ips: Vec<std::net::IpAddr>,
+    /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337
+    #[structopt(long)]
+    pub peers: Vec<std::net::SocketAddr>,
 
     /// Set this argument to connect to testnet
     #[structopt(long)]

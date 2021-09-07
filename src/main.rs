@@ -1,6 +1,5 @@
 use anyhow::Result;
-use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info, instrument};
+use tokio::net::TcpListener;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 mod args;
@@ -23,29 +22,24 @@ pub async fn main(args: args::Args) -> Result<()> {
         .map_err(|_err| eprintln!("Unable to set global default subscriber"))
         .expect("Failed to set log subscriber");
 
-    // Bind socket to port on network
+    // Bind socket to port on this machine
     let listener = TcpListener::bind((args.listen_addr, args.port))
         .await
-        .unwrap();
+        .unwrap_or_else(|_| panic!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", args.listen_addr, args.port));
 
+    // Connect to peers
+    for peer in args.peers {
+        tokio::spawn(async move {
+            neptune_core::initiate_connection(peer).await;
+        });
+    }
+
+    // Handle incoming connections
     loop {
         // The second item contains the IP and port of the new connection.
         let (stream, _) = listener.accept().await?;
         tokio::spawn(async move {
-            handle_connection(stream).await;
+            neptune_core::receive_connection(stream).await;
         });
     }
-}
-
-#[instrument]
-async fn handle_connection(stream: TcpStream) {
-    let peer_address = stream.peer_addr();
-    info!("Connection established with {:?}", peer_address);
-
-    match neptune_core::run(stream).await {
-        Ok(()) => (),
-        Err(e) => error!("An error occurred: {}. Connection closing", e),
-    };
-
-    info!("Connection with {:?} closing", peer_address);
 }
