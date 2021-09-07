@@ -32,7 +32,6 @@ pub async fn incoming_transaction<S>(mut stream: S, peer_address: SocketAddr) ->
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
-    info!("Established connection");
     let mut buffer = [0; 1024];
 
     let len = stream.read(&mut buffer).await?;
