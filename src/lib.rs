@@ -31,8 +31,13 @@ where
         .send(model::Message::MagicValue(Vec::from(MAGIC_STRING_REQUEST)))
         .await?;
 
-    if let Some(msg) = &mut serialized.try_next().await? {
-        info!("Got response {:?}", msg);
+    match serialized.try_next().await? {
+        Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING_RESPONSE => {
+            debug!("Got correct magic value response!");
+        }
+        v => {
+            bail!("Expected magic value, got {:?}", v);
+        }
     }
 
     serialized.send(model::Message::Bye).await?;
