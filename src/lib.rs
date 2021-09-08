@@ -1,7 +1,10 @@
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
@@ -10,6 +13,8 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
 mod model;
+mod peer;
+use peer::Peer;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -26,10 +31,13 @@ pub async fn connection_handler(
         .await
         .unwrap_or_else(|_| panic!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", listen_addr, port));
 
+    let peer_map = Arc::new(Mutex::new(HashMap::new()));
+
     // Connect to peers
     for peer in peers {
+        let thread_arc = Arc::clone(&peer_map);
         tokio::spawn(async move {
-            initiate_connection(peer).await;
+            initiate_connection(peer, thread_arc).await;
         });
     }
 
@@ -37,14 +45,19 @@ pub async fn connection_handler(
     loop {
         // The second item contains the IP and port of the new connection.
         let (stream, _) = listener.accept().await?;
+        let thread_arc = Arc::clone(&peer_map);
         tokio::spawn(async move {
-            receive_connection(stream).await;
+            receive_connection(stream, thread_arc).await;
         });
     }
 }
 
 #[instrument]
-pub async fn outgoing_transaction<S>(stream: S) -> Result<()>
+pub async fn outgoing_transaction<S>(
+    stream: S,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    peer_address: std::net::SocketAddr,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
@@ -70,13 +83,31 @@ where
         }
     }
 
+    // Add peer to peer map if not already there
+    let new_peer = Peer {
+        address: peer_address,
+        banscore: 0,
+        inbound: false,
+        last_seen: SystemTime::now(),
+        version: "0.1.0".to_string(), // TODO: FIX
+    };
+    if let Ok(mut x) = peer_map.lock() {
+        x.entry(peer_address).or_insert(new_peer);
+    } else {
+        bail!("Failed to lock peer map");
+    }
+
     serialized.send(model::Message::Bye).await?;
 
     Ok(())
 }
 
 #[instrument]
-pub async fn incoming_transaction<S>(stream: S) -> Result<()>
+pub async fn incoming_transaction<S>(
+    stream: S,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    peer_address: std::net::SocketAddr,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
@@ -105,6 +136,20 @@ where
         }
     }
 
+    // Add peer to peer map if not already there
+    let new_peer = Peer {
+        address: peer_address,
+        banscore: 0,
+        inbound: true,
+        last_seen: SystemTime::now(),
+        version: "0.1.0".to_string(), // TODO: FIX
+    };
+    if let Ok(mut x) = peer_map.lock() {
+        x.entry(peer_address).or_insert(new_peer);
+    } else {
+        bail!("Failed to lock peer map");
+    }
+
     // Loop for further messages
     loop {
         match deserialized.try_next().await? {
@@ -124,13 +169,16 @@ where
 }
 
 #[instrument]
-pub async fn initiate_connection(peer_address: std::net::SocketAddr) {
+pub async fn initiate_connection(
+    peer_address: std::net::SocketAddr,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+) {
     debug!("Attempting to initiate connection");
     match tokio::net::TcpStream::connect(peer_address).await {
         Err(e) => {
             warn!("Failed to establish connection: {}", e);
         }
-        Ok(stream) => match outgoing_transaction(stream).await {
+        Ok(stream) => match outgoing_transaction(stream, peer_map, peer_address).await {
             Ok(()) => (),
             Err(e) => error!("An error occurred: {}. Connection closing", e),
         },
@@ -140,10 +188,14 @@ pub async fn initiate_connection(peer_address: std::net::SocketAddr) {
 }
 
 #[instrument]
-pub async fn receive_connection(stream: TcpStream) {
+pub async fn receive_connection(
+    stream: TcpStream,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+) {
     info!("Connection established");
 
-    match incoming_transaction(stream).await {
+    let peer_address: SocketAddr = stream.peer_addr().unwrap();
+    match incoming_transaction(stream, peer_map, peer_address).await {
         Ok(()) => (),
         Err(e) => error!("An error occurred: {}. Connection closing", e),
     };
@@ -156,9 +208,18 @@ mod tests {
     use super::*;
     use bytes::{Bytes, BytesMut};
     use std::pin::Pin;
+    use std::str::FromStr;
     use tokio_serde::Serializer;
     use tokio_test::io::Builder;
     use tokio_util::codec::Encoder;
+
+    fn get_peer_map() -> Arc<Mutex<HashMap<SocketAddr, Peer>>> {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
+    fn get_dummy_address() -> SocketAddr {
+        std::net::SocketAddr::from_str("127.0.0.1:8080").unwrap()
+    }
 
     fn to_bytes(message: &model::Message) -> Result<Bytes> {
         let mut transport = LengthDelimitedCodec::new();
@@ -191,7 +252,7 @@ mod tests {
             .read(&to_bytes(&model::Message::Bye)?)
             .build();
 
-        incoming_transaction(mock).await?;
+        incoming_transaction(mock, get_peer_map(), get_dummy_address()).await?;
 
         Ok(())
     }
@@ -204,7 +265,7 @@ mod tests {
             ))?)
             .build();
 
-        if let Err(_) = incoming_transaction(mock).await {
+        if let Err(_) = incoming_transaction(mock, get_peer_map(), get_dummy_address()).await {
             Ok(())
         } else {
             bail!("Expected error from run")
@@ -223,7 +284,7 @@ mod tests {
             .write(&to_bytes(&model::Message::Bye)?)
             .build();
 
-        outgoing_transaction(mock).await?;
+        outgoing_transaction(mock, get_peer_map(), get_dummy_address()).await?;
 
         Ok(())
     }
