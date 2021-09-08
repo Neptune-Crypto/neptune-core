@@ -1,7 +1,9 @@
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
+use std::net::{IpAddr, SocketAddr};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio_serde::formats::*;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -12,6 +14,34 @@ mod model;
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
 pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
+
+#[instrument]
+pub async fn connection_handler(
+    listen_addr: IpAddr,
+    port: u16,
+    peers: Vec<SocketAddr>,
+) -> Result<()> {
+    // Bind socket to port on this machine
+    let listener = TcpListener::bind((listen_addr, port))
+        .await
+        .unwrap_or_else(|_| panic!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", listen_addr, port));
+
+    // Connect to peers
+    for peer in peers {
+        tokio::spawn(async move {
+            initiate_connection(peer).await;
+        });
+    }
+
+    // Handle incoming connections
+    loop {
+        // The second item contains the IP and port of the new connection.
+        let (stream, _) = listener.accept().await?;
+        tokio::spawn(async move {
+            receive_connection(stream).await;
+        });
+    }
+}
 
 #[instrument]
 pub async fn outgoing_transaction<S>(stream: S) -> Result<()>
@@ -52,14 +82,14 @@ where
 {
     info!("Established connection");
 
+    // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
-
-    // Deserialize frames
     let mut deserialized = tokio_serde::SymmetricallyFramed::new(
         length_delimited,
         SymmetricalBincode::<model::Message>::default(),
     );
 
+    // Await and respond to 1st incoming message
     match deserialized.try_next().await? {
         Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING_REQUEST => {
             info!("Got correct magic value!");
@@ -75,6 +105,7 @@ where
         }
     }
 
+    // Loop for further messages
     loop {
         match deserialized.try_next().await? {
             Some(model::Message::Bye) => {
