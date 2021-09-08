@@ -252,7 +252,12 @@ mod tests {
             .read(&to_bytes(&model::Message::Bye)?)
             .build();
 
-        incoming_transaction(mock, get_peer_map(), get_dummy_address()).await?;
+        let peer_map = get_peer_map();
+        incoming_transaction(mock, peer_map.clone(), get_dummy_address()).await?;
+        match peer_map.lock().unwrap().keys().len() {
+            1 => (),
+            _ => bail!("Incorrect number of maps in peer map"),
+        };
 
         Ok(())
     }
@@ -284,7 +289,12 @@ mod tests {
             .write(&to_bytes(&model::Message::Bye)?)
             .build();
 
-        outgoing_transaction(mock, get_peer_map(), get_dummy_address()).await?;
+        let peer_map = get_peer_map();
+        outgoing_transaction(mock, peer_map.clone(), get_dummy_address()).await?;
+        match peer_map.lock().unwrap().keys().len() {
+            1 => (),
+            _ => bail!("Incorrect number of maps in peer map"),
+        };
 
         Ok(())
     }
