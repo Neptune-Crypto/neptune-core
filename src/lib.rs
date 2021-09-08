@@ -137,6 +137,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_incoming_transaction_succeed() -> Result<()> {
+        // This builds a mock object which expects to have a certain
+        // sequence of methods called on it: First it expects to have
+        // the `MAGIC_STRING_REQUEST` and then the `MAGIC_STRING_RESPONSE`
+        // value written. This is followed by a read of the bye message,
+        // as this is a way to close the connection by the peer initiating
+        // the connection. If this sequence is not followed, the `mock`
+        // object will panic, and the `await` operator will evaluate
+        // to Error.
         let mock = Builder::new()
             .read(&to_bytes(&model::Message::MagicValue(
                 MAGIC_STRING_REQUEST.to_vec(),
