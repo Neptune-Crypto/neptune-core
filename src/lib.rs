@@ -1,47 +1,88 @@
 use anyhow::{bail, Result};
-use std::str;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use futures::sink::SinkExt;
+use futures::stream::TryStreamExt;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio_serde::formats::*;
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
+mod model;
+
 /// Magic string to ensure other program is Neptune Core
-pub const MAGIC_STRING: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
+pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
+pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
 
 #[instrument]
-pub async fn outgoing_transaction<S>(mut stream: S) -> Result<()>
+pub async fn outgoing_transaction<S>(stream: S) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
     info!("Established connection");
-    stream.write_all(MAGIC_STRING).await?;
 
-    let mut buffer = [0; 1024];
-    let len: usize = stream.read(&mut buffer).await?;
-    let response_string = match str::from_utf8(&buffer[..len]) {
-        Ok(v) => v,
-        Err(e) => bail!("Invalid UTF-8 sequence: {}", e),
-    };
-    info!("Got response {}", response_string);
+    // Delimit frames using a length header
+    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
+
+    // Serialize frames with bincode
+    let mut serialized =
+        tokio_serde::SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
+
+    serialized
+        .send(model::Message::MagicValue(Vec::from(MAGIC_STRING_REQUEST)))
+        .await?;
+
+    if let Some(msg) = &mut serialized.try_next().await? {
+        info!("Got response {:?}", msg);
+    }
+
+    serialized.send(model::Message::Bye).await?;
 
     Ok(())
 }
 
 #[instrument]
-pub async fn incoming_transaction<S>(mut stream: S) -> Result<()>
+pub async fn incoming_transaction<S>(stream: S) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
-    let mut buffer = [0; 1024];
+    info!("Established connection");
 
-    let len = stream.read(&mut buffer).await?;
+    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
 
-    if !buffer.starts_with(MAGIC_STRING) {
-        bail!("Invalid magic string: {:?}", &buffer[..len]);
+    // Deserialize frames
+    let mut deserialized = tokio_serde::SymmetricallyFramed::new(
+        length_delimited,
+        SymmetricalBincode::<model::Message>::default(),
+    );
+
+    match deserialized.try_next().await? {
+        Some(model::Message::MagicValue(v)) if &v[..] == MAGIC_STRING_REQUEST => {
+            info!("Got correct magic value!");
+            deserialized
+                .send(model::Message::MagicValue(MAGIC_STRING_RESPONSE.to_vec()))
+                .await?;
+        }
+        Some(model::Message::MagicValue(v)) => {
+            bail!("Got invalid magic value: {:?}", v);
+        }
+        v => {
+            bail!("Expected magic value, got {:?}", v);
+        }
     }
 
-    let response = "Hello Neptune!\n";
-
-    stream.write_all(response.as_bytes()).await?;
+    loop {
+        match deserialized.try_next().await? {
+            Some(model::Message::Bye) => {
+                info!("Got bye");
+                break;
+            }
+            Some(v) => {
+                info!("Got message: {:?}", v);
+                deserialized.send(model::Message::NewBlock(42)).await?;
+            }
+            None => break,
+        }
+    }
 
     Ok(())
 }
@@ -77,37 +118,77 @@ pub async fn receive_connection(stream: TcpStream) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::TryInto;
+    use bytes::{Bytes, BytesMut};
+    use std::pin::Pin;
+    use tokio_serde::Serializer;
+    use tokio_test::io::Builder;
+    use tokio_util::codec::Encoder;
+
+    fn to_bytes(message: &model::Message) -> Result<Bytes> {
+        let mut transport = LengthDelimitedCodec::new();
+        let mut formating = SymmetricalBincode::<model::Message>::default();
+        let mut buf = BytesMut::new();
+        let () = transport.encode(
+            Bytes::from(Pin::new(&mut formating).serialize(message)?),
+            &mut buf,
+        )?;
+        Ok(buf.freeze())
+    }
 
     #[tokio::test]
-    async fn test_run_succeed() -> Result<()> {
-        use std::io::Cursor;
-        let mut buffer = Cursor::new(Vec::new());
-        buffer.write(MAGIC_STRING).await?;
-        buffer.set_position(0);
+    async fn test_incoming_transaction_succeed() -> Result<()> {
+        // This builds a mock object which expects to have a certain
+        // sequence of methods called on it: First it expects to have
+        // the `MAGIC_STRING_REQUEST` and then the `MAGIC_STRING_RESPONSE`
+        // value written. This is followed by a read of the bye message,
+        // as this is a way to close the connection by the peer initiating
+        // the connection. If this sequence is not followed, the `mock`
+        // object will panic, and the `await` operator will evaluate
+        // to Error.
+        let mock = Builder::new()
+            .read(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_REQUEST.to_vec(),
+            ))?)
+            .write(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_RESPONSE.to_vec(),
+            ))?)
+            .read(&to_bytes(&model::Message::Bye)?)
+            .build();
 
-        incoming_transaction(&mut buffer).await?;
-
-        buffer.set_position(MAGIC_STRING.len().try_into().unwrap());
-        let mut res = [0; 1024];
-        let bytes = buffer.read(&mut res).await?;
-        assert_eq!(&res[..bytes], &b"Hello Neptune!\n"[..]);
+        incoming_transaction(mock).await?;
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_run_fail() -> Result<()> {
-        let s = b"BLABLABLA";
-        use std::io::Cursor;
-        let mut buffer = Cursor::new(Vec::with_capacity(MAGIC_STRING.len()));
-        buffer.write(&s[..]).await?;
-        buffer.set_position(0);
+    async fn test_incoming_transaction_fail() -> Result<()> {
+        let mock = Builder::new()
+            .read(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_RESPONSE.to_vec(),
+            ))?)
+            .build();
 
-        if let Err(_) = incoming_transaction(&mut buffer).await {
+        if let Err(_) = incoming_transaction(mock).await {
             Ok(())
         } else {
             bail!("Expected error from run")
         }
+    }
+
+    #[tokio::test]
+    async fn test_outgoing_transaction_succeed() -> Result<()> {
+        let mock = Builder::new()
+            .write(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_REQUEST.to_vec(),
+            ))?)
+            .read(&to_bytes(&model::Message::MagicValue(
+                MAGIC_STRING_RESPONSE.to_vec(),
+            ))?)
+            .write(&to_bytes(&model::Message::Bye)?)
+            .build();
+
+        outgoing_transaction(mock).await?;
+
+        Ok(())
     }
 }
