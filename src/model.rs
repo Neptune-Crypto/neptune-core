@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PeerMessage {
     MagicValue((Vec<u8>, String)),
     NewBlock(u32),
     NewTransaction(i32),
+    PeerListRequest,
+    PeerListResponse(Vec<SocketAddr>),
     Bye,
 }
 

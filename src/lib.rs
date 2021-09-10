@@ -87,6 +87,7 @@ pub async fn peer_loop<S>(
     >,
     mut from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<model::ToMainMessage>,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + std::marker::Unpin,
@@ -104,6 +105,15 @@ where
                         info!("Got bye. Closing connection to peer");
                         println!("Got bye. Closing connection to peer");
                         break;
+                    }
+                    Some(PeerMessage::PeerListRequest) => {
+                        let peer_addresses: Vec<SocketAddr>;
+                        if let Ok(x) = peer_map.lock() {
+                            peer_addresses = x.keys().cloned().collect();
+                        } else {
+                            bail!("Failed to lock mutex");
+                        }
+                        serialized.send(PeerMessage::PeerListResponse(peer_addresses)).await?;
                     }
                     Some(msg) => {
                         warn!("Uninplemented peer message received. Got: {:?}", msg);
@@ -177,7 +187,7 @@ where
     }
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(serialized, from_main_rx, to_main_tx).await?;
+    peer_loop(serialized, from_main_rx, to_main_tx, peer_map).await?;
 
     Ok(())
 }
@@ -238,7 +248,7 @@ where
     }
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(deserialized, from_main_rx, to_main_tx).await?;
+    peer_loop(deserialized, from_main_rx, to_main_tx, peer_map).await?;
 
     Ok(())
 }
