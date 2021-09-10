@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -88,7 +89,7 @@ pub async fn peer_loop<S>(
     to_main_tx: mpsc::Sender<model::ToMainMessage>,
 ) -> Result<()>
 where
-    S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
+    S: AsyncRead + AsyncWrite + Debug + std::marker::Unpin,
 {
     loop {
         select! {
@@ -126,7 +127,7 @@ pub async fn outgoing_transaction<S>(
     peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
     peer_address: std::net::SocketAddr,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
-    to_main_tx: mpsc::Sender<model::ToMainMessage>,
+    to_main_tx: mpsc::Sender<ToMainMessage>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
@@ -187,7 +188,7 @@ pub async fn incoming_transaction<S>(
     peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
     peer_address: std::net::SocketAddr,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
-    to_main_tx: mpsc::Sender<model::ToMainMessage>,
+    to_main_tx: mpsc::Sender<ToMainMessage>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
@@ -247,7 +248,7 @@ pub async fn initiate_connection(
     peer_address: std::net::SocketAddr,
     peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
-    to_main_tx: mpsc::Sender<model::ToMainMessage>,
+    to_main_tx: mpsc::Sender<ToMainMessage>,
 ) {
     debug!("Attempting to initiate connection");
     match tokio::net::TcpStream::connect(peer_address).await {
@@ -272,7 +273,7 @@ pub async fn receive_connection(
     stream: TcpStream,
     peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
-    to_main_tx: mpsc::Sender<model::ToMainMessage>,
+    to_main_tx: mpsc::Sender<ToMainMessage>,
 ) {
     info!("Connection established");
 
@@ -309,7 +310,7 @@ mod tests {
 
     fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
         let mut transport = LengthDelimitedCodec::new();
-        let mut formating = SymmetricalBincode::<model::PeerMessage>::default();
+        let mut formating = SymmetricalBincode::<PeerMessage>::default();
         let mut buf = BytesMut::new();
         let () = transport.encode(
             Bytes::from(Pin::new(&mut formating).serialize(message)?),
@@ -329,7 +330,7 @@ mod tests {
         // object will panic, and the `await` operator will evaluate
         // to Error.
         let mock = Builder::new()
-            .read(&to_bytes(&model::PeerMessage::MagicValue(
+            .read(&to_bytes(&PeerMessage::MagicValue((
                 MAGIC_STRING_REQUEST.to_vec(),
                 get_dummy_version(),
             )))?)
