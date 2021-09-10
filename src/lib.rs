@@ -23,7 +23,8 @@ use peer::Peer;
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
 pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
-pub const CHANNEL_MESSAGE_CAPACITY: usize = 1000;
+const CHANNEL_MESSAGE_CAPACITY: usize = 1000;
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[instrument]
 pub async fn connection_handler(
@@ -144,12 +145,15 @@ where
 
     // Make Neptune handshake
     serialized
-        .send(model::PeerMessage::MagicValue(Vec::from(
-            MAGIC_STRING_REQUEST,
+        .send(PeerMessage::MagicValue((
+            Vec::from(MAGIC_STRING_REQUEST),
+            VERSION.to_string(),
         )))
         .await?;
+    let peer_version;
     match serialized.try_next().await? {
-        Some(model::PeerMessage::MagicValue(v)) if &v[..] == MAGIC_STRING_RESPONSE => {
+        Some(PeerMessage::MagicValue((v, version))) if &v[..] == MAGIC_STRING_RESPONSE => {
+            peer_version = version;
             debug!("Got correct magic value response!");
         }
         v => {
@@ -163,7 +167,7 @@ where
         banscore: 0,
         inbound: false,
         last_seen: SystemTime::now(),
-        version: "0.1.0".to_string(), // TODO: FIX
+        version: peer_version,
     };
     if let Ok(mut x) = peer_map.lock() {
         x.entry(peer_address).or_insert(new_peer);
@@ -194,20 +198,23 @@ where
     let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
     let mut deserialized = tokio_serde::SymmetricallyFramed::new(
         length_delimited,
-        SymmetricalBincode::<model::PeerMessage>::default(),
+        SymmetricalBincode::<PeerMessage>::default(),
     );
 
     // Complete Neptune handshake
+    let peer_version;
     match deserialized.try_next().await? {
-        Some(model::PeerMessage::MagicValue(v)) if &v[..] == MAGIC_STRING_REQUEST => {
+        Some(PeerMessage::MagicValue((v, version))) if &v[..] == MAGIC_STRING_REQUEST => {
             info!("Got correct magic value!");
+            peer_version = version;
             deserialized
-                .send(model::PeerMessage::MagicValue(
+                .send(PeerMessage::MagicValue((
                     MAGIC_STRING_RESPONSE.to_vec(),
-                ))
+                    VERSION.to_string(),
+                )))
                 .await?;
         }
-        Some(model::PeerMessage::MagicValue(v)) => {
+        Some(PeerMessage::MagicValue(v)) => {
             bail!("Got invalid magic value: {:?}", v);
         }
         v => {
@@ -221,7 +228,7 @@ where
         banscore: 0,
         inbound: true,
         last_seen: SystemTime::now(),
-        version: "0.1.0".to_string(), // TODO: FIX
+        version: peer_version,
     };
     if let Ok(mut x) = peer_map.lock() {
         x.entry(peer_address).or_insert(new_peer);
@@ -296,7 +303,11 @@ mod tests {
         std::net::SocketAddr::from_str("127.0.0.1:8080").unwrap()
     }
 
-    fn to_bytes(message: &model::PeerMessage) -> Result<Bytes> {
+    fn get_dummy_version() -> String {
+        "0.1.0".to_string()
+    }
+
+    fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
         let mut transport = LengthDelimitedCodec::new();
         let mut formating = SymmetricalBincode::<model::PeerMessage>::default();
         let mut buf = BytesMut::new();
@@ -320,11 +331,13 @@ mod tests {
         let mock = Builder::new()
             .read(&to_bytes(&model::PeerMessage::MagicValue(
                 MAGIC_STRING_REQUEST.to_vec(),
-            ))?)
-            .write(&to_bytes(&model::PeerMessage::MagicValue(
+                get_dummy_version(),
+            )))?)
+            .write(&to_bytes(&PeerMessage::MagicValue((
                 MAGIC_STRING_RESPONSE.to_vec(),
-            ))?)
-            .read(&to_bytes(&model::PeerMessage::Bye)?)
+                get_dummy_version(),
+            )))?)
+            .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 
         let (from_main_tx, mut _from_main_rx1) =
@@ -353,9 +366,10 @@ mod tests {
     #[tokio::test]
     async fn test_incoming_transaction_fail() -> Result<()> {
         let mock = Builder::new()
-            .read(&to_bytes(&model::PeerMessage::MagicValue(
+            .read(&to_bytes(&PeerMessage::MagicValue((
                 MAGIC_STRING_RESPONSE.to_vec(),
-            ))?)
+                get_dummy_version(),
+            )))?)
             .build();
 
         let (from_main_tx, mut _from_main_rx1) =
@@ -382,13 +396,15 @@ mod tests {
     #[tokio::test]
     async fn test_outgoing_transaction_succeed() -> Result<()> {
         let mock = Builder::new()
-            .write(&to_bytes(&model::PeerMessage::MagicValue(
+            .write(&to_bytes(&PeerMessage::MagicValue((
                 MAGIC_STRING_REQUEST.to_vec(),
-            ))?)
-            .read(&to_bytes(&model::PeerMessage::MagicValue(
+                get_dummy_version(),
+            )))?)
+            .read(&to_bytes(&PeerMessage::MagicValue((
                 MAGIC_STRING_RESPONSE.to_vec(),
-            ))?)
-            .read(&to_bytes(&model::PeerMessage::Bye)?)
+                get_dummy_version(),
+            )))?)
+            .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 
         let (from_main_tx, mut _from_main_rx1) =

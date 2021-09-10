@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PeerMessage {
-    MagicValue(Vec<u8>),
+    MagicValue((Vec<u8>, String)),
     NewBlock(u32),
     NewTransaction(i32),
     Bye,
