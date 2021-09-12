@@ -25,3 +25,4 @@ futures = "0.3.17"
 
 [dev-dependencies]
 tokio-test = "0.4.2"
+pin-project-lite = "0.2.4"

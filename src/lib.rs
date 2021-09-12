@@ -79,15 +79,14 @@ pub async fn connection_handler(
 
 /// Loop for the peer threads. Awaits either a message from the peer over TCP,
 /// or a message from main over the main-to-peer-threads broadcast channel.
-#[instrument]
 pub async fn peer_loop<S>(
     mut serialized: S,
     mut from_main_rx: broadcast::Receiver<FromMainMessage>,
-    to_main_tx: mpsc::Sender<model::ToMainMessage>,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    _to_main_tx: mpsc::Sender<model::ToMainMessage>,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
 ) -> Result<()>
 where
-    S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Debug + Unpin,
+    S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
 {
     loop {
@@ -297,12 +296,75 @@ pub async fn receive_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Error;
     use bytes::{Bytes, BytesMut};
+    use futures::sink;
+    use futures::stream;
+    use futures::task::{Context, Poll};
+    use pin_project_lite::pin_project;
+    use std::marker::PhantomData;
     use std::pin::Pin;
     use std::str::FromStr;
     use tokio_serde::Serializer;
     use tokio_test::io::Builder;
     use tokio_util::codec::Encoder;
+
+    pin_project! {
+    #[derive(Debug)]
+    pub struct SinkStream<Sink: sink::Sink<Item>, Stream: stream::Stream, Item> {
+        #[pin]
+        sink: Sink,
+        #[pin]
+        stream: Stream,
+        item: PhantomData<Item>,
+    }
+    }
+
+    impl<Sink: sink::Sink<Item>, Stream: stream::Stream, Item> SinkStream<Sink, Stream, Item> {
+        pub fn new(sink: Sink, stream: Stream) -> SinkStream<Sink, Stream, Item> {
+            SinkStream {
+                sink,
+                stream,
+                item: PhantomData,
+            }
+        }
+    }
+
+    impl<Sink: sink::Sink<Item> + Unpin, Stream: stream::Stream, Item> sink::Sink<Item>
+        for SinkStream<Sink, Stream, Item>
+    {
+        type Error = Sink::Error;
+
+        fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.project().sink.poll_ready(cx)
+        }
+
+        fn start_send(self: Pin<&mut Self>, item: Item) -> Result<(), Self::Error> {
+            self.project().sink.start_send(item)
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.project().sink.poll_flush(cx)
+        }
+
+        fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.project().sink.poll_close(cx)
+        }
+    }
+
+    impl<Sink: sink::Sink<Item>, Stream: stream::Stream, Item> stream::Stream
+        for SinkStream<Sink, Stream, Item>
+    {
+        type Item = Stream::Item;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            self.project().stream.poll_next(cx)
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.stream.size_hint()
+        }
+    }
 
     fn get_peer_map() -> Arc<Mutex<HashMap<SocketAddr, Peer>>> {
         Arc::new(Mutex::new(HashMap::new()))
@@ -437,5 +499,19 @@ mod tests {
         };
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_peer_loop_bye() -> Result<()> {
+        let sink = sink::drain();
+        let stream = stream::once(Box::pin(async { Ok::<_, Error>(PeerMessage::Bye) }));
+        let ss = SinkStream::new(sink, stream);
+
+        let (from_main_tx, mut _from_main_rx1) = broadcast::channel::<FromMainMessage>(1);
+        let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<ToMainMessage>(1);
+
+        let peer_map = get_peer_map();
+        let from_main_rx_clone = from_main_tx.subscribe();
+        peer_loop(ss, from_main_rx_clone, to_main_tx, peer_map.clone()).await
     }
 }
