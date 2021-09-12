@@ -131,7 +131,7 @@ where
 #[instrument]
 pub async fn outgoing_transaction<S>(
     stream: S,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     peer_address: std::net::SocketAddr,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<ToMainMessage>,
@@ -192,7 +192,7 @@ where
 #[instrument]
 pub async fn incoming_transaction<S>(
     stream: S,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     peer_address: std::net::SocketAddr,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<ToMainMessage>,
@@ -253,7 +253,7 @@ where
 #[instrument]
 pub async fn initiate_connection(
     peer_address: std::net::SocketAddr,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<ToMainMessage>,
 ) {
@@ -278,7 +278,7 @@ pub async fn initiate_connection(
 #[instrument]
 pub async fn receive_connection(
     stream: TcpStream,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<ToMainMessage>,
 ) {
