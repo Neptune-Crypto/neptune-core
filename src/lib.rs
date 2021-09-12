@@ -1,8 +1,9 @@
 use anyhow::{bail, Result};
-use futures::sink::SinkExt;
-use futures::stream::TryStreamExt;
+use futures::sink::{Sink, SinkExt};
+use futures::stream::{TryStream, TryStreamExt};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::marker::Unpin;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -80,17 +81,14 @@ pub async fn connection_handler(
 /// or a message from main over the main-to-peer-threads broadcast channel.
 #[instrument]
 pub async fn peer_loop<S>(
-    mut serialized: SymmetricallyFramed<
-        Framed<S, LengthDelimitedCodec>,
-        PeerMessage,
-        Bincode<PeerMessage, PeerMessage>,
-    >,
+    mut serialized: S,
     mut from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<model::ToMainMessage>,
     peer_map: Arc<Mutex<HashMap<SocketAddr, peer::Peer>>>,
 ) -> Result<()>
 where
-    S: AsyncRead + AsyncWrite + Debug + std::marker::Unpin,
+    S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Debug + Unpin,
+    <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
 {
     loop {
         select! {
@@ -140,7 +138,7 @@ pub async fn outgoing_transaction<S>(
     to_main_tx: mpsc::Sender<ToMainMessage>,
 ) -> Result<()>
 where
-    S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
+    S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
     info!("Established connection");
 
