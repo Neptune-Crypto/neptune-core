@@ -131,7 +131,6 @@ where
                 println!("Got message from main: {:?}", val);
             }
         }
-        // TODO: Add signal::ctrl_c/shutdown handling here
     }
 
     Ok(())
