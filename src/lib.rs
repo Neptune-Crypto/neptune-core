@@ -166,16 +166,15 @@ where
             VERSION.to_string(),
         )))
         .await?;
-    let peer_version;
-    match serialized.try_next().await? {
+    let peer_version: String = match serialized.try_next().await? {
         Some(PeerMessage::MagicValue((v, version))) if &v[..] == MAGIC_STRING_RESPONSE => {
-            peer_version = version;
             debug!("Got correct magic value response!");
+            version
         }
         v => {
             bail!("Expected magic value, got {:?}", v);
         }
-    }
+    };
 
     // Add peer to peer map if not already there
     let new_peer = Peer {
@@ -225,25 +224,21 @@ where
     );
 
     // Complete Neptune handshake
-    let peer_version;
-    match deserialized.try_next().await? {
+    let peer_version: String = match deserialized.try_next().await? {
         Some(PeerMessage::MagicValue((v, version))) if &v[..] == MAGIC_STRING_REQUEST => {
-            info!("Got correct magic value!");
-            peer_version = version;
+            debug!("Got correct magic value request!");
             deserialized
                 .send(PeerMessage::MagicValue((
                     MAGIC_STRING_RESPONSE.to_vec(),
                     VERSION.to_string(),
                 )))
                 .await?;
-        }
-        Some(PeerMessage::MagicValue(v)) => {
-            bail!("Got invalid magic value: {:?}", v);
+            version
         }
         v => {
             bail!("Expected magic value, got {:?}", v);
         }
-    }
+    };
 
     // Add peer to peer map if not already there
     let new_peer = Peer {
