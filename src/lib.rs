@@ -84,6 +84,7 @@ pub async fn peer_loop<S>(
     mut from_main_rx: broadcast::Receiver<FromMainMessage>,
     _to_main_tx: mpsc::Sender<model::ToMainMessage>,
     peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    peer_address: &SocketAddr,
 ) -> Result<()>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
@@ -95,12 +96,20 @@ where
                 match peer_message {
                     None => {
                         info!("Peer closed connection.");
-                        println!("Peer closed connection.");
+                        if let Ok(mut x) = peer_map.lock() {
+                            x.remove(peer_address).unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?", peer_address));
+                        } else {
+                            bail!("Failed to lock peer map");
+                        }
                         break;
                     }
                     Some(PeerMessage::Bye) => {
                         info!("Got bye. Closing connection to peer");
-                        println!("Got bye. Closing connection to peer");
+                        if let Ok(mut x) = peer_map.lock() {
+                            x.remove(peer_address).unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?", peer_address));
+                        } else {
+                            bail!("Failed to lock peer map");
+                        }
                         break;
                     }
                     Some(PeerMessage::PeerListRequest) => {
@@ -184,7 +193,14 @@ where
     }
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(serialized, from_main_rx, to_main_tx, peer_map).await?;
+    peer_loop(
+        serialized,
+        from_main_rx,
+        to_main_tx,
+        peer_map,
+        &peer_address,
+    )
+    .await?;
 
     Ok(())
 }
@@ -245,7 +261,14 @@ where
     }
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(deserialized, from_main_rx, to_main_tx, peer_map).await?;
+    peer_loop(
+        deserialized,
+        from_main_rx,
+        to_main_tx,
+        peer_map,
+        &peer_address,
+    )
+    .await?;
 
     Ok(())
 }
@@ -374,6 +397,16 @@ mod tests {
         std::net::SocketAddr::from_str("127.0.0.1:8080").unwrap()
     }
 
+    fn get_dummy_peer(address: SocketAddr) -> Peer {
+        Peer {
+            address,
+            banscore: 0,
+            inbound: false,
+            last_seen: SystemTime::now(),
+            version: get_dummy_version(),
+        }
+    }
+
     fn get_dummy_version() -> String {
         "0.1.0".to_string()
     }
@@ -426,8 +459,10 @@ mod tests {
             to_main_tx,
         )
         .await?;
+
+        // Verify that peer map is empty after connection has been closed
         match peer_map.lock().unwrap().keys().len() {
-            1 => (),
+            0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
 
@@ -493,8 +528,10 @@ mod tests {
             to_main_tx,
         )
         .await?;
+
+        // Verify that peer map is empty after connection has been closed
         match peer_map.lock().unwrap().keys().len() {
-            1 => (),
+            0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
 
@@ -511,7 +548,19 @@ mod tests {
         let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<ToMainMessage>(1);
 
         let peer_map = get_peer_map();
+        let peer_address = get_dummy_address();
+        peer_map
+            .lock()
+            .unwrap()
+            .insert(peer_address, get_dummy_peer(peer_address));
         let from_main_rx_clone = from_main_tx.subscribe();
-        peer_loop(ss, from_main_rx_clone, to_main_tx, peer_map.clone()).await
+        peer_loop(
+            ss,
+            from_main_rx_clone,
+            to_main_tx,
+            peer_map.clone(),
+            &peer_address,
+        )
+        .await
     }
 }
