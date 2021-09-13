@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::net::TcpStream;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::formats::*;
@@ -65,8 +64,12 @@ pub async fn connection_handler(
                 let thread_arc = Arc::clone(&peer_map);
                 let from_main_rx_clone: broadcast::Receiver<FromMainMessage> = from_main_tx.subscribe();
                 let to_main_tx_clone: mpsc::Sender<ToMainMessage> = to_main_tx.clone();
+                let peer_address = stream.peer_addr().unwrap();
                 tokio::spawn(async move {
-                    receive_connection(stream, thread_arc, from_main_rx_clone, to_main_tx_clone).await;
+                    match incoming_transaction(stream, thread_arc, peer_address, from_main_rx_clone, to_main_tx_clone).await {
+                        Ok(()) => (),
+                        Err(err) => error!("Got error: {:?}", err),
+                    }
                 });
             }
             Some(msg) = to_main_rx.recv() => {
@@ -287,24 +290,6 @@ pub async fn initiate_connection(
                 Err(e) => error!("An error occurred: {}. Connection closing", e),
             }
         }
-    };
-
-    info!("Connection closing");
-}
-
-#[instrument]
-pub async fn receive_connection(
-    stream: TcpStream,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
-    from_main_rx: broadcast::Receiver<FromMainMessage>,
-    to_main_tx: mpsc::Sender<ToMainMessage>,
-) {
-    info!("Connection established");
-
-    let peer_address: SocketAddr = stream.peer_addr().unwrap();
-    match incoming_transaction(stream, peer_map, peer_address, from_main_rx, to_main_tx).await {
-        Ok(()) => (),
-        Err(e) => error!("An error occurred: {}. Connection closing", e),
     };
 
     info!("Connection closing");
