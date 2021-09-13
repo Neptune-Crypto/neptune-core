@@ -354,6 +354,7 @@ dependencies = [
  "chrono",
  "futures",
  "paw",
+ "pin-project-lite",
  "serde",
  "structopt",
  "tokio",
