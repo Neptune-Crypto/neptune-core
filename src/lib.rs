@@ -51,7 +51,7 @@ pub async fn connection_handler(
     let listen_addr_socket = SocketAddr::new(listen_addr, port);
     let own_handshake_data = HandshakeData {
         extra_values: HashMap::new(),
-        listen_addr: Some(listen_addr_socket),
+        listen_address: Some(listen_addr_socket),
         testnet,
         version: VERSION.to_string(),
     };
@@ -422,7 +422,7 @@ mod tests {
     fn get_dummy_handshake_data() -> HandshakeData {
         HandshakeData {
             extra_values: HashMap::new(),
-            listen_addr: Some(get_dummy_address()),
+            listen_address: Some(get_dummy_address()),
             testnet: false,
             version: get_dummy_version(),
         }

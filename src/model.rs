@@ -7,7 +7,7 @@ pub struct HandshakeData {
     // The `extra_values` field makes it possible to add data here in a backwards-compatible
     // manner.
     pub extra_values: HashMap<String, String>,
-    pub listen_addr: Option<SocketAddr>,
+    pub listen_address: Option<SocketAddr>,
     pub testnet: bool,
     pub version: String,
 }
