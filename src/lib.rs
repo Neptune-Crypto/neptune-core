@@ -69,7 +69,7 @@ pub async fn connection_handler(
                 thread_arc,
                 from_main_rx_clone,
                 to_main_tx_clone,
-                own_handshake_data_clone,
+                &own_handshake_data_clone,
             )
             .await;
         });
@@ -167,7 +167,7 @@ pub async fn outgoing_transaction<S>(
     peer_address: std::net::SocketAddr,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<ToMainMessage>,
-    own_handshake: HandshakeData,
+    own_handshake_data: &HandshakeData,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
@@ -188,11 +188,19 @@ where
     serialized
         .send(PeerMessage::Handshake((
             Vec::from(MAGIC_STRING_REQUEST),
-            own_handshake,
+            own_handshake_data.to_owned(),
         )))
         .await?;
     let peer_handshake_data: HandshakeData = match serialized.try_next().await? {
         Some(PeerMessage::Handshake((v, hsd))) if &v[..] == MAGIC_STRING_RESPONSE => {
+            if hsd.network != own_handshake_data.network {
+                bail!(
+                    "Cannot connect with {}: Peer runs {}, this client runs {}.",
+                    peer_address,
+                    hsd.network,
+                    own_handshake_data.network,
+                );
+            }
             debug!("Got correct magic value response!");
             hsd
         }
@@ -252,6 +260,14 @@ where
     // Complete Neptune handshake
     let peer_handshake_data: HandshakeData = match deserialized.try_next().await? {
         Some(PeerMessage::Handshake((v, hsd))) if &v[..] == MAGIC_STRING_REQUEST => {
+            if hsd.network != own_handshake_data.network {
+                bail!(
+                    "Cannot connect with {}: Peer runs {}, this client runs {}.",
+                    peer_address,
+                    hsd.network,
+                    own_handshake_data.network,
+                );
+            }
             debug!("Got correct magic value request!");
             deserialized
                 .send(PeerMessage::Handshake((
@@ -299,7 +315,7 @@ pub async fn initiate_connection(
     peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     from_main_rx: broadcast::Receiver<FromMainMessage>,
     to_main_tx: mpsc::Sender<ToMainMessage>,
-    own_handshake: HandshakeData,
+    own_handshake_data: &HandshakeData,
 ) {
     debug!("Attempting to initiate connection");
     match tokio::net::TcpStream::connect(peer_address).await {
@@ -313,7 +329,7 @@ pub async fn initiate_connection(
                 peer_address,
                 from_main_rx,
                 to_main_tx,
-                own_handshake,
+                own_handshake_data,
             )
             .await
             {
@@ -421,11 +437,11 @@ mod tests {
         "0.1.0".to_string()
     }
 
-    fn get_dummy_handshake_data() -> HandshakeData {
+    fn get_dummy_handshake_data(network: Network) -> HandshakeData {
         HandshakeData {
             extra_values: HashMap::new(),
             listen_address: Some(get_dummy_address()),
-            network: Network::Testnet,
+            network,
             version: get_dummy_version(),
         }
     }
@@ -454,11 +470,11 @@ mod tests {
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake((
                 MAGIC_STRING_REQUEST.to_vec(),
-                get_dummy_handshake_data(),
+                get_dummy_handshake_data(Network::Main),
             )))?)
             .write(&to_bytes(&PeerMessage::Handshake((
                 MAGIC_STRING_RESPONSE.to_vec(),
-                get_dummy_handshake_data(),
+                get_dummy_handshake_data(Network::Main),
             )))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
@@ -476,7 +492,7 @@ mod tests {
             get_dummy_address(),
             from_main_rx_clone,
             to_main_tx,
-            get_dummy_handshake_data(),
+            get_dummy_handshake_data(Network::Main),
         )
         .await?;
 
@@ -490,11 +506,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_incoming_transaction_fail() -> Result<()> {
+    async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake((
                 MAGIC_STRING_RESPONSE.to_vec(),
-                get_dummy_handshake_data(),
+                get_dummy_handshake_data(Network::Main),
             )))?)
             .build();
 
@@ -510,7 +526,38 @@ mod tests {
             get_dummy_address(),
             from_main_rx_clone,
             to_main_tx,
-            get_dummy_handshake_data(),
+            get_dummy_handshake_data(Network::Main),
+        )
+        .await
+        {
+            Ok(())
+        } else {
+            bail!("Expected error from run")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
+        let mock = Builder::new()
+            .read(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_REQUEST.to_vec(),
+                get_dummy_handshake_data(Network::Testnet),
+            )))?)
+            .build();
+
+        let (from_main_tx, mut _from_main_rx1) =
+            broadcast::channel::<FromMainMessage>(CHANNEL_MESSAGE_CAPACITY);
+        let (to_main_tx, mut _to_main_rx1) =
+            mpsc::channel::<ToMainMessage>(CHANNEL_MESSAGE_CAPACITY);
+        let from_main_rx_clone = from_main_tx.subscribe();
+
+        if let Err(_) = incoming_transaction(
+            mock,
+            get_peer_map(),
+            get_dummy_address(),
+            from_main_rx_clone,
+            to_main_tx,
+            get_dummy_handshake_data(Network::Main),
         )
         .await
         {
@@ -525,11 +572,11 @@ mod tests {
         let mock = Builder::new()
             .write(&to_bytes(&PeerMessage::Handshake((
                 MAGIC_STRING_REQUEST.to_vec(),
-                get_dummy_handshake_data(),
+                get_dummy_handshake_data(Network::Main),
             )))?)
             .read(&to_bytes(&PeerMessage::Handshake((
                 MAGIC_STRING_RESPONSE.to_vec(),
-                get_dummy_handshake_data(),
+                get_dummy_handshake_data(Network::Main),
             )))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
@@ -547,7 +594,7 @@ mod tests {
             get_dummy_address(),
             from_main_rx_clone,
             to_main_tx,
-            get_dummy_handshake_data(),
+            &get_dummy_handshake_data(Network::Main),
         )
         .await?;
 
