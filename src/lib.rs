@@ -260,6 +260,15 @@ where
     // Complete Neptune handshake
     let peer_handshake_data: HandshakeData = match deserialized.try_next().await? {
         Some(PeerMessage::Handshake((v, hsd))) if &v[..] == MAGIC_STRING_REQUEST => {
+            // Send handshake answer to peer
+            deserialized
+                .send(PeerMessage::Handshake((
+                    MAGIC_STRING_RESPONSE.to_vec(),
+                    own_handshake_data.clone(),
+                )))
+                .await?;
+
+            // Verify peer network before moving on
             if hsd.network != own_handshake_data.network {
                 bail!(
                     "Cannot connect with {}: Peer runs {}, this client runs {}.",
@@ -269,12 +278,6 @@ where
                 );
             }
             debug!("Got correct magic value request!");
-            deserialized
-                .send(PeerMessage::Handshake((
-                    MAGIC_STRING_RESPONSE.to_vec(),
-                    own_handshake_data,
-                )))
-                .await?;
             hsd
         }
         v => {
@@ -542,6 +545,10 @@ mod tests {
             .read(&to_bytes(&PeerMessage::Handshake((
                 MAGIC_STRING_REQUEST.to_vec(),
                 get_dummy_handshake_data(Network::Testnet),
+            )))?)
+            .write(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                get_dummy_handshake_data(Network::Main),
             )))?)
             .build();
 
