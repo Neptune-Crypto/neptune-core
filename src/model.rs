@@ -1,3 +1,4 @@
+use super::config_models::network::Network;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -8,7 +9,7 @@ pub struct HandshakeData {
     // manner.
     pub extra_values: HashMap<String, String>,
     pub listen_address: Option<SocketAddr>,
-    pub testnet: bool,
+    pub network: Network,
     pub version: String,
 }
 

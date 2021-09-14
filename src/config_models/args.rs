@@ -1,6 +1,8 @@
+use super::network::Network;
 use std::net::IpAddr;
 use structopt::StructOpt;
 
+/// Decalarative specification of command-line arguments
 /// See the [structopt
 /// documentation](https://docs.rs/structopt/0.3.21/structopt) for more
 /// information.
@@ -24,6 +26,6 @@ pub struct Args {
     pub peers: Vec<std::net::SocketAddr>,
 
     /// Set this argument to connect to testnet
-    #[structopt(long)]
-    pub testnet: bool,
+    #[structopt(long, short, default_value = "main")]
+    pub network: Network,
 }

@@ -1,6 +1,12 @@
+pub mod config_models;
+mod model;
+mod peer;
 use anyhow::{anyhow, bail, Context, Result};
+use config_models::network::Network;
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
+use model::{FromMainMessage, HandshakeData, PeerMessage, ToMainMessage};
+use peer::Peer;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::Unpin;
@@ -16,11 +22,6 @@ use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
-mod model;
-use model::{FromMainMessage, HandshakeData, PeerMessage, ToMainMessage};
-mod peer;
-use peer::Peer;
-
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
 pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
@@ -32,7 +33,7 @@ pub async fn connection_handler(
     listen_addr: IpAddr,
     port: u16,
     peers: Vec<SocketAddr>,
-    testnet: bool,
+    network: Network,
 ) -> Result<()> {
     // Bind socket to port on this machine
     let listener = TcpListener::bind((listen_addr, port))
@@ -52,7 +53,7 @@ pub async fn connection_handler(
     let own_handshake_data = HandshakeData {
         extra_values: HashMap::new(),
         listen_address: Some(listen_addr_socket),
-        testnet,
+        network,
         version: VERSION.to_string(),
     };
 
@@ -424,7 +425,7 @@ mod tests {
         HandshakeData {
             extra_values: HashMap::new(),
             listen_address: Some(get_dummy_address()),
-            testnet: false,
+            network: Network::Testnet,
             version: get_dummy_version(),
         }
     }
