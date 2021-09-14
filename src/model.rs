@@ -13,6 +13,22 @@ pub struct HandshakeData {
     pub version: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct Transaction {
+    amount: u64,
+}
+
+#[derive(Clone, Debug)]
+pub enum ToMiner {
+    NewBlock(u32),
+}
+
+#[derive(Clone, Debug)]
+pub enum FromMiner {
+    Empty,
+    NewBlock(u32),
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PeerMessage {
     Handshake((Vec<u8>, HandshakeData)),
@@ -21,6 +37,11 @@ pub enum PeerMessage {
     PeerListRequest,
     PeerListResponse(Vec<SocketAddr>),
     Bye,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PeerStateData {
+    pub highest_shared_block_height: u32,
 }
 
 #[derive(Clone, Debug)]

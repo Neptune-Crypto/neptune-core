@@ -1,11 +1,14 @@
 pub mod config_models;
+mod mine;
 mod model;
 mod peer;
 use anyhow::{anyhow, bail, Context, Result};
 use config_models::network::Network;
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
-use model::{FromMainMessage, HandshakeData, PeerMessage, ToMainMessage};
+use model::{
+    FromMainMessage, FromMiner, HandshakeData, PeerMessage, PeerStateData, ToMainMessage, ToMiner,
+};
 use peer::Peer;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -16,7 +19,7 @@ use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -34,6 +37,7 @@ pub async fn connection_handler(
     port: u16,
     peers: Vec<SocketAddr>,
     network: Network,
+    mine: bool,
 ) -> Result<()> {
     // Bind socket to port on this machine
     let listener = TcpListener::bind((listen_addr, port))
@@ -75,6 +79,18 @@ pub async fn connection_handler(
         });
     }
 
+    // Start handling of mining
+    let (to_miner_tx, to_miner_rx) = watch::channel::<ToMiner>(ToMiner::NewBlock(0));
+    let (from_miner_tx, mut from_miner_rx) = watch::channel::<FromMiner>(FromMiner::Empty);
+    if mine && network == Network::RegTest {
+        tokio::spawn(async move {
+            mine::mock_regtest_mine(to_miner_rx, from_miner_tx)
+                .await
+                .map_err(|_e| anyhow!("Mining process stopped."))
+                .expect("Error in mining thread.");
+        });
+    }
+
     // Handle incoming connections and messages from peer threads
     loop {
         select! {
@@ -94,6 +110,25 @@ pub async fn connection_handler(
             }
             Some(msg) = to_main_rx.recv() => {
                 info!("Received message sent to main thread. Got: {:?}", msg);
+                match msg {
+                    ToMainMessage::NewBlock(bh) => {
+                        to_miner_tx.send(ToMiner::NewBlock(bh))?;
+                        from_main_tx.send(FromMainMessage::NewBlock(bh))?;
+                    }
+                    ToMainMessage::NewTransaction(_txs) => {
+                        error!("Unimplemented txs msg received");
+                    }
+                }
+            }
+            _ = from_miner_rx.changed() => {
+                let main_message: FromMiner = from_miner_rx.borrow().clone();
+                match main_message {
+                    FromMiner::Empty => (),
+                    FromMiner::NewBlock(block_height) => {
+                        info!("Miner found new block: {}", block_height);
+                        from_main_tx.send(FromMainMessage::NewBlock(block_height))?;
+                    }
+                }
             }
             // TODO: Add signal::ctrl_c/shutdown handling here
         }
@@ -105,7 +140,7 @@ pub async fn connection_handler(
 pub async fn peer_loop<S>(
     mut serialized: S,
     mut from_main_rx: broadcast::Receiver<FromMainMessage>,
-    _to_main_tx: mpsc::Sender<model::ToMainMessage>,
+    to_main_tx: mpsc::Sender<model::ToMainMessage>,
     peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     peer_address: &SocketAddr,
 ) -> Result<()>
@@ -113,6 +148,15 @@ where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
 {
+    let mut peer_state_info = PeerStateData {
+        highest_shared_block_height: 0,
+    };
+
+    // TODO: THV: own_state_info should be shared among all threads, I think.
+    let mut own_state_info = PeerStateData {
+        highest_shared_block_height: 0,
+    };
+
     loop {
         select! {
             Ok(peer_message) = serialized.try_next() => {
@@ -146,13 +190,36 @@ where
                             .collect();
                         serialized.send(PeerMessage::PeerListResponse(peer_addresses)).await?;
                     }
+                    Some(PeerMessage::NewBlock(bh)) => {
+                        info!("Got block height notification from peer, block height {}", bh);
+                        peer_state_info.highest_shared_block_height = bh;
+                        if own_state_info.highest_shared_block_height < bh {
+                            to_main_tx.send(ToMainMessage::NewBlock(bh)).await?;
+                            own_state_info.highest_shared_block_height = bh;
+                        }
+                    }
                     Some(msg) => {
                         warn!("Uninplemented peer message received. Got: {:?}", msg);
                     }
                 }
             }
-            val = from_main_rx.recv() => {
-                info!("Got message from main: {:?}", val);
+            Ok(main_msg) = from_main_rx.recv() => {
+                info!("Got message from main: {:?}", main_msg);
+                match main_msg {
+                    FromMainMessage::NewBlock(bh) => {
+                        if own_state_info.highest_shared_block_height < bh {
+                            own_state_info.highest_shared_block_height = bh;
+                        }
+
+                        if peer_state_info.highest_shared_block_height < bh {
+                            serialized.send(PeerMessage::NewBlock(bh)).await?;
+                            peer_state_info.highest_shared_block_height = bh;
+                        }
+                    }
+                    FromMainMessage::NewTransaction(nt) => {
+                        serialized.send(PeerMessage::NewTransaction(nt)).await?;
+                    }
+                }
             }
         }
     }

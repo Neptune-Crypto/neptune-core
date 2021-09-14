@@ -25,7 +25,7 @@ pub struct Args {
     #[structopt(long)]
     pub peers: Vec<std::net::SocketAddr>,
 
-    /// Set this argument to connect to testnet
+    /// Specify Set to `main`, `testnet`, or `regtest`
     #[structopt(long, short, default_value = "main")]
     pub network: Network,
 }
