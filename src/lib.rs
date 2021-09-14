@@ -120,7 +120,7 @@ where
                         info!("Peer closed connection.");
                         peer_map
                             .lock()
-                            .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+                            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .remove(peer_address)
                             .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                       peer_address));
@@ -130,7 +130,7 @@ where
                         info!("Got bye. Closing connection to peer");
                         peer_map
                             .lock()
-                            .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+                            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .remove(peer_address)
                             .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                        peer_address));
@@ -139,7 +139,7 @@ where
                     Some(PeerMessage::PeerListRequest) => {
                         let peer_addresses = peer_map
                             .lock()
-                            .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+                            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .keys()
                             .cloned()
                             .collect();
@@ -210,7 +210,7 @@ where
     };
     peer_map
         .lock()
-        .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
         .entry(peer_address)
         .or_insert(new_peer);
 
