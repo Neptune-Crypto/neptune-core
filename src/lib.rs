@@ -145,12 +145,11 @@ where
                     }
                     Some(msg) => {
                         warn!("Uninplemented peer message received. Got: {:?}", msg);
-                        println!("Uninplemented peer message received. Got: {:?}", msg);
                     }
                 }
             }
             val = from_main_rx.recv() => {
-                println!("Got message from main: {:?}", val);
+                info!("Got message from main: {:?}", val);
             }
         }
     }
