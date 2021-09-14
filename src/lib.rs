@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
 use std::collections::HashMap;
@@ -118,29 +118,31 @@ where
                 match peer_message {
                     None => {
                         info!("Peer closed connection.");
-                        if let Ok(mut x) = peer_map.lock() {
-                            x.remove(peer_address).unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?", peer_address));
-                        } else {
-                            bail!("Failed to lock peer map");
-                        }
+                        peer_map
+                            .lock()
+                            .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+                            .remove(peer_address)
+                            .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
+                                                      peer_address));
                         break;
                     }
                     Some(PeerMessage::Bye) => {
                         info!("Got bye. Closing connection to peer");
-                        if let Ok(mut x) = peer_map.lock() {
-                            x.remove(peer_address).unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?", peer_address));
-                        } else {
-                            bail!("Failed to lock peer map");
-                        }
+                        peer_map
+                            .lock()
+                            .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+                            .remove(peer_address)
+                            .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
+                                                       peer_address));
                         break;
                     }
                     Some(PeerMessage::PeerListRequest) => {
-                        let peer_addresses: Vec<SocketAddr>;
-                        if let Ok(x) = peer_map.lock() {
-                            peer_addresses = x.keys().cloned().collect();
-                        } else {
-                            bail!("Failed to lock mutex");
-                        }
+                        let peer_addresses = peer_map
+                            .lock()
+                            .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+                            .keys()
+                            .cloned()
+                            .collect();
                         serialized.send(PeerMessage::PeerListResponse(peer_addresses)).await?;
                     }
                     Some(msg) => {
@@ -206,11 +208,11 @@ where
         last_seen: SystemTime::now(),
         version: peer_handshake_data.version,
     };
-    if let Ok(mut x) = peer_map.lock() {
-        x.entry(peer_address).or_insert(new_peer);
-    } else {
-        bail!("Failed to lock peer map");
-    }
+    peer_map
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+        .entry(peer_address)
+        .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
     peer_loop(
@@ -271,11 +273,11 @@ where
         last_seen: SystemTime::now(),
         version: peer_handshake_data.version,
     };
-    if let Ok(mut x) = peer_map.lock() {
-        x.entry(peer_address).or_insert(new_peer);
-    } else {
-        bail!("Failed to lock peer map");
-    }
+    peer_map
+        .lock()
+        .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+        .entry(peer_address)
+        .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
     peer_loop(
