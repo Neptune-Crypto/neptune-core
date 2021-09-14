@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ pub async fn connection_handler(
     // Bind socket to port on this machine
     let listener = TcpListener::bind((listen_addr, port))
         .await
-        .unwrap_or_else(|_| panic!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", listen_addr, port));
+        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", listen_addr, port))?;
 
     let peer_map = Arc::new(Mutex::new(HashMap::new()));
 
