@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::{sleep, Duration};
 use tracing::{info, instrument};
 
-const MOCK_REGTEST_MINE_INTERVAL_SECONDS: u64 = 10;
+const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 10;
 
 static mut BLOCK_HEIGHT: u64 = 0;
 
@@ -56,6 +56,7 @@ pub async fn mock_regtest_mine(
     // on making it perfect.
     unsafe {
         loop {
+            let rand_time: u64 = rand::random::<u64>() % 10;
             select! {
                 _ = from_main.changed() => {
                     let main_message: ToMiner = from_main.borrow().clone();
@@ -69,7 +70,7 @@ pub async fn mock_regtest_mine(
                         ToMiner::Empty => ()
                     }
                 }
-                _ = sleep(Duration::from_secs(MOCK_REGTEST_MINE_INTERVAL_SECONDS)) => {
+                _ = sleep(Duration::from_secs(MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS + rand_time)) => {
                     BLOCK_HEIGHT += 1;
 
                     to_main.send(FromMinerToMain::NewBlock(Box::new(make_mock_block(BLOCK_HEIGHT)))).await?;
