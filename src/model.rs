@@ -1,6 +1,5 @@
 use super::config_models::network::Network;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 
@@ -11,9 +10,6 @@ type BlockHash = [u8; 32];
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HandshakeData {
-    // The `extra_values` field makes it possible to add data here in a backwards-compatible
-    // manner.
-    pub extra_values: HashMap<String, String>,
     pub listen_address: Option<SocketAddr>,
     pub network: Network,
     pub version: String,

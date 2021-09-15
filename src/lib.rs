@@ -62,7 +62,6 @@ pub async fn connection_handler(
     // Create handshake data
     let listen_addr_socket = SocketAddr::new(listen_addr, port);
     let own_handshake_data = HandshakeData {
-        extra_values: HashMap::new(),
         listen_address: Some(listen_addr_socket),
         network,
         version: VERSION.to_string(),

@@ -94,7 +94,6 @@ fn get_dummy_version() -> String {
 
 fn get_dummy_handshake_data(network: Network) -> HandshakeData {
     HandshakeData {
-        extra_values: HashMap::new(),
         listen_address: Some(get_dummy_address()),
         network,
         version: get_dummy_version(),
