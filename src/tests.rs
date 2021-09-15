@@ -287,3 +287,47 @@ async fn test_peer_loop_bye() -> Result<()> {
     )
     .await
 }
+
+#[tokio::test]
+async fn test_peer_loop_peer_list() -> Result<()> {
+    let buf = Arc::new(Mutex::new(vec![]));
+    let sink = sink::unfold((), |(), m: PeerMessage| {
+        let buf = buf.clone();
+        async move {
+            buf.lock().unwrap().push(m);
+            Ok::<_, futures::never::Never>(())
+        }
+    });
+    futures::pin_mut!(sink);
+    let stream = stream::iter(vec![
+        Ok::<_, Error>(PeerMessage::PeerListRequest),
+        Ok::<_, Error>(PeerMessage::Bye),
+    ]);
+    let ss = SinkStream::new(sink, stream);
+
+    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
+    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+
+    let peer_map = get_peer_map();
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+    peer_loop(
+        ss,
+        from_main_rx_clone,
+        to_main_tx,
+        peer_map.clone(),
+        &peer_address,
+    )
+    .await?;
+
+    assert_eq!(
+        vec!(PeerMessage::PeerListResponse(vec![peer_address])),
+        *buf.lock().unwrap()
+    );
+
+    Ok(())
+}

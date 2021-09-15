@@ -9,7 +9,7 @@ use crate::big_array::BigArray;
 type BlockHeight = u64;
 type BlockHash = [u8; 32];
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HandshakeData {
     // The `extra_values` field makes it possible to add data here in a backwards-compatible
     // manner.
@@ -19,7 +19,7 @@ pub struct HandshakeData {
     pub version: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Utxo {
     #[serde(with = "BigArray")]
     pub pol0: [u32; 2048],
@@ -27,7 +27,7 @@ pub struct Utxo {
     pub pol1: [u32; 2048],
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
     pub input: Vec<Utxo>,
     pub output: Vec<Utxo>,
@@ -35,7 +35,7 @@ pub struct Transaction {
     pub proof: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Block {
     pub version_bits: [u8; 4],
     pub timestamp: SystemTime,
@@ -58,7 +58,7 @@ pub struct Block {
 
 /// Used to tell peers that a new block has been found without having to
 /// send the entire block
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PeerBlockNotification {
     pub hash: BlockHash,
     pub height: BlockHeight,
@@ -84,7 +84,7 @@ pub enum FromMinerToMain {
     NewBlock(Box<Block>),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum PeerMessage {
     Handshake((Vec<u8>, HandshakeData)),
     Block(Box<Block>),
