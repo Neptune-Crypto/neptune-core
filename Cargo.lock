@@ -356,6 +356,7 @@ dependencies = [
  "paw",
  "pin-project-lite",
  "serde",
+ "serde_derive",
  "structopt",
  "tokio",
  "tokio-serde",
