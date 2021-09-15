@@ -134,7 +134,7 @@ pub async fn connection_handler(
                 match main_message {
                     FromMinerToMain::NewBlock(block) => {
                         info!("Miner found new block: {}", block.height);
-                        peer_broadcast_tx.send(MainToPeerThread::NewBlock(block))?;
+                        peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block))?;
                         // TODO: Store block into own database
                     }
                 }
@@ -228,15 +228,25 @@ where
             Ok(main_msg) = from_main_rx.recv() => {
                 // info!("Got message from main: {:?}", main_msg);
                 match main_msg {
-                    MainToPeerThread::NewBlock(block) => {
+                    // If this client found a block, we need to share it ASAP.
+                    MainToPeerThread::BlockFromMiner(block) => {
+                        info!("peer_loop got NewBlockFromMiner message from main");
+                        let new_block_height = block.height;
+                        if new_block_height > own_state_info.highest_shared_block_height {
+                            serialized.send(PeerMessage::Block(block)).await?;
+                            peer_state_info.highest_shared_block_height = new_block_height;
+                            own_state_info.highest_shared_block_height = new_block_height;
+                        }
+                    }
+                    MainToPeerThread::Block(block) => {
                         info!("peer_loop got NewBlock message from main");
                         let new_block_height = block.height;
                         if new_block_height > peer_state_info.highest_shared_block_height {
                             peer_state_info.highest_shared_block_height = new_block_height;
-                            serialized.send(PeerMessage::Block(block)).await?;
+                            serialized.send(PeerMessage::BlockNotification((*block).into())).await?;
                         }
                     }
-                    MainToPeerThread::NewTransaction(nt) => {
+                    MainToPeerThread::Transaction(nt) => {
                         info!("peer_loop got NetTransaction message from main");
                         serialized.send(PeerMessage::NewTransaction(nt)).await?;
                     }

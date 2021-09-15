@@ -100,8 +100,9 @@ pub struct PeerStateData {
 
 #[derive(Clone, Debug)]
 pub enum MainToPeerThread {
-    NewBlock(Box<Block>),
-    NewTransaction(i32),
+    Block(Box<Block>),
+    BlockFromMiner(Box<Block>),
+    Transaction(i32),
 }
 
 #[derive(Clone, Debug)]
