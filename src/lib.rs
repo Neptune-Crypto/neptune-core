@@ -146,7 +146,7 @@ pub async fn connection_handler(
 pub async fn peer_loop<S>(
     mut serialized: S,
     mut from_main_rx: broadcast::Receiver<MainToPeerThread>,
-    _to_main_tx: mpsc::Sender<model::PeerThreadToMain>,
+    to_main_tx: mpsc::Sender<model::PeerThreadToMain>,
     peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     peer_address: &SocketAddr,
 ) -> Result<()>
@@ -203,8 +203,9 @@ where
                         // TODO: All validation of block, increase ban score if block is bad
                         if own_state_info.highest_shared_block_height < new_block_height {
                             own_state_info.highest_shared_block_height = new_block_height;
-                            // TODO: I get a stack overflow if next line is not commented out.
-                            // to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
+                            // TODO: The following line *has* produced stack overflows on a lightweight
+                            // computer. Why?
+                            to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
                             info!("Updated block info by block from peer. block height {}", new_block_height);
                         }
                     }
