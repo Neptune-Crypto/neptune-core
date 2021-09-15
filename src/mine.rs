@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::{sleep, Duration};
 use tracing::{info, instrument};
 
-const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 10;
+const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 4;
 
 static mut BLOCK_HEIGHT: u64 = 0;
 
@@ -63,8 +63,8 @@ pub async fn mock_regtest_mine(
                     match main_message {
                         ToMiner::NewBlock(block) => {
                             if block.height > BLOCK_HEIGHT {
-                                info!("Miner thread received new regtest mock block from main thread");
                                 BLOCK_HEIGHT = block.height;
+                                info!("Miner thread received regtest block height {}", BLOCK_HEIGHT);
                             }
                         }
                         ToMiner::Empty => ()
