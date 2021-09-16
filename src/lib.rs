@@ -147,7 +147,7 @@ pub async fn connection_handler(
 /// Loop for the peer threads. Awaits either a message from the peer over TCP,
 /// or a message from main over the main-to-peer-threads broadcast channel.
 pub async fn peer_loop<S>(
-    mut serialized: S,
+    mut peer: S,
     mut from_main_rx: broadcast::Receiver<MainToPeerThread>,
     to_main_tx: mpsc::Sender<model::PeerThreadToMain>,
     peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
@@ -168,7 +168,7 @@ where
 
     loop {
         select! {
-            Ok(peer_message) = serialized.try_next() => {
+            Ok(peer_message) = peer.try_next() => {
                 match peer_message {
                     None => {
                         info!("Peer closed connection.");
@@ -197,7 +197,7 @@ where
                             .keys()
                             .cloned()
                             .collect();
-                        serialized.send(PeerMessage::PeerListResponse(peer_addresses)).await?;
+                        peer.send(PeerMessage::PeerListResponse(peer_addresses)).await?;
                     }
                     Some(PeerMessage::Block(block)) => {
                         info!("Got new block from peer, block height {}", block.height);
@@ -215,7 +215,7 @@ where
                     Some(PeerMessage::BlockNotification(block_notification)) => {
                         peer_state_info.highest_shared_block_height = block_notification.height;
                         if own_state_info.highest_shared_block_height < block_notification.height {
-                            serialized.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
+                            peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
                             // TODO: Add logic to fetch, verify, and store response from peer
                             info!("Sent BlockRequestByHeight to peer");
                         }
@@ -233,7 +233,7 @@ where
                         info!("peer_loop got NewBlockFromMiner message from main");
                         let new_block_height = block.height;
                         if new_block_height > own_state_info.highest_shared_block_height {
-                            serialized.send(PeerMessage::Block(block)).await?;
+                            peer.send(PeerMessage::Block(block)).await?;
                             peer_state_info.highest_shared_block_height = new_block_height;
                             own_state_info.highest_shared_block_height = new_block_height;
                         }
@@ -243,12 +243,12 @@ where
                         let new_block_height = block.height;
                         if new_block_height > peer_state_info.highest_shared_block_height {
                             peer_state_info.highest_shared_block_height = new_block_height;
-                            serialized.send(PeerMessage::BlockNotification((*block).into())).await?;
+                            peer.send(PeerMessage::BlockNotification((*block).into())).await?;
                         }
                     }
                     MainToPeerThread::Transaction(nt) => {
                         info!("peer_loop got NetTransaction message from main");
-                        serialized.send(PeerMessage::NewTransaction(nt)).await?;
+                        peer.send(PeerMessage::NewTransaction(nt)).await?;
                     }
                 }
             }
@@ -276,20 +276,19 @@ where
     let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
 
     // Serialize frames with bincode
-    let mut serialized: SymmetricallyFramed<
+    let mut peer: SymmetricallyFramed<
         Framed<S, LengthDelimitedCodec>,
         PeerMessage,
         Bincode<PeerMessage, PeerMessage>,
     > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
 
     // Make Neptune handshake
-    serialized
-        .send(PeerMessage::Handshake((
-            Vec::from(MAGIC_STRING_REQUEST),
-            own_handshake_data.to_owned(),
-        )))
-        .await?;
-    let peer_handshake_data: HandshakeData = match serialized.try_next().await? {
+    peer.send(PeerMessage::Handshake((
+        Vec::from(MAGIC_STRING_REQUEST),
+        own_handshake_data.to_owned(),
+    )))
+    .await?;
+    let peer_handshake_data: HandshakeData = match peer.try_next().await? {
         Some(PeerMessage::Handshake((v, hsd))) if &v[..] == MAGIC_STRING_RESPONSE => {
             if hsd.network != own_handshake_data.network {
                 bail!(
@@ -322,14 +321,7 @@ where
         .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(
-        serialized,
-        from_main_rx,
-        to_main_tx,
-        peer_map,
-        &peer_address,
-    )
-    .await?;
+    peer_loop(peer, from_main_rx, to_main_tx, peer_map, &peer_address).await?;
 
     Ok(())
 }
@@ -350,21 +342,20 @@ where
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
-    let mut deserialized = tokio_serde::SymmetricallyFramed::new(
+    let mut peer = tokio_serde::SymmetricallyFramed::new(
         length_delimited,
         SymmetricalBincode::<PeerMessage>::default(),
     );
 
     // Complete Neptune handshake
-    let peer_handshake_data: HandshakeData = match deserialized.try_next().await? {
+    let peer_handshake_data: HandshakeData = match peer.try_next().await? {
         Some(PeerMessage::Handshake((v, hsd))) if &v[..] == MAGIC_STRING_REQUEST => {
             // Send handshake answer to peer
-            deserialized
-                .send(PeerMessage::Handshake((
-                    MAGIC_STRING_RESPONSE.to_vec(),
-                    own_handshake_data.clone(),
-                )))
-                .await?;
+            peer.send(PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                own_handshake_data.clone(),
+            )))
+            .await?;
 
             // Verify peer network before moving on
             if hsd.network != own_handshake_data.network {
@@ -398,14 +389,7 @@ where
         .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(
-        deserialized,
-        from_main_rx,
-        to_main_tx,
-        peer_map,
-        &peer_address,
-    )
-    .await?;
+    peer_loop(peer, from_main_rx, to_main_tx, peer_map, &peer_address).await?;
 
     Ok(())
 }
