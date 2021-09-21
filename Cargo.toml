@@ -21,6 +21,8 @@ tokio-serde = { version = "0.8.0", features = ["bincode"] }
 tracing = "0.1.5"
 tracing-subscriber = "0.2.20"
 serde = { version = "1.0", features = ["derive"] }
+serde_derive = "1.0"
+rand = "0.8"
 futures = "0.3.17"
 
 [dev-dependencies]
