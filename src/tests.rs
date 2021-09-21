@@ -139,7 +139,7 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let peer_map = get_peer_map();
-    incoming_transaction(
+    answer_peer(
         mock,
         peer_map.clone(),
         get_dummy_address(),
@@ -172,7 +172,7 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    if let Err(_) = incoming_transaction(
+    if let Err(_) = answer_peer(
         mock,
         get_peer_map(),
         get_dummy_address(),
@@ -206,7 +206,7 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    if let Err(_) = incoming_transaction(
+    if let Err(_) = answer_peer(
         mock,
         get_peer_map(),
         get_dummy_address(),
@@ -242,7 +242,7 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
 
     let peer_map = get_peer_map();
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
-    outgoing_transaction(
+    call_peer(
         mock,
         peer_map.clone(),
         get_dummy_address(),

@@ -39,7 +39,7 @@ const MINER_CHANNEL_CAPACITY: usize = 3;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[instrument]
-pub async fn connection_handler(
+pub async fn initialize(
     listen_addr: IpAddr,
     port: u16,
     peers: Vec<SocketAddr>,
@@ -75,7 +75,7 @@ pub async fn connection_handler(
         let to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = to_main_tx.clone();
         let own_handshake_data_clone = own_handshake_data.clone();
         tokio::spawn(async move {
-            initiate_connection(
+            call_peer_wrapper(
                 peer,
                 thread_arc,
                 peer_broadcast_rx_clone,
@@ -110,7 +110,7 @@ pub async fn connection_handler(
                 let peer_address = stream.peer_addr().unwrap();
                 let own_handshake_data_clone = own_handshake_data.clone();
                 tokio::spawn(async move {
-                    match incoming_transaction(stream, thread_arc, peer_address, from_main_rx_clone, to_main_tx_clone, own_handshake_data_clone).await {
+                    match answer_peer(stream, thread_arc, peer_address, from_main_rx_clone, to_main_tx_clone, own_handshake_data_clone).await {
                         Ok(()) => (),
                         Err(err) => error!("Got error: {:?}", err),
                     }
@@ -259,7 +259,40 @@ where
 }
 
 #[instrument]
-pub async fn outgoing_transaction<S>(
+pub async fn call_peer_wrapper(
+    peer_address: std::net::SocketAddr,
+    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    from_main_rx: broadcast::Receiver<MainToPeerThread>,
+    to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    own_handshake_data: &HandshakeData,
+) {
+    debug!("Attempting to initiate connection");
+    match tokio::net::TcpStream::connect(peer_address).await {
+        Err(e) => {
+            warn!("Failed to establish connection: {}", e);
+        }
+        Ok(stream) => {
+            match call_peer(
+                stream,
+                peer_map,
+                peer_address,
+                from_main_rx,
+                to_main_tx,
+                own_handshake_data,
+            )
+            .await
+            {
+                Ok(()) => (),
+                Err(e) => error!("An error occurred: {}. Connection closing", e),
+            }
+        }
+    };
+
+    info!("Connection closing");
+}
+
+#[instrument]
+pub async fn call_peer<S>(
     stream: S,
     peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     peer_address: std::net::SocketAddr,
@@ -327,7 +360,7 @@ where
 }
 
 #[instrument]
-pub async fn incoming_transaction<S>(
+pub async fn answer_peer<S>(
     stream: S,
     peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     peer_address: std::net::SocketAddr,
@@ -392,37 +425,4 @@ where
     peer_loop(peer, from_main_rx, to_main_tx, peer_map, &peer_address).await?;
 
     Ok(())
-}
-
-#[instrument]
-pub async fn initiate_connection(
-    peer_address: std::net::SocketAddr,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
-    from_main_rx: broadcast::Receiver<MainToPeerThread>,
-    to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    own_handshake_data: &HandshakeData,
-) {
-    debug!("Attempting to initiate connection");
-    match tokio::net::TcpStream::connect(peer_address).await {
-        Err(e) => {
-            warn!("Failed to establish connection: {}", e);
-        }
-        Ok(stream) => {
-            match outgoing_transaction(
-                stream,
-                peer_map,
-                peer_address,
-                from_main_rx,
-                to_main_tx,
-                own_handshake_data,
-            )
-            .await
-            {
-                Ok(()) => (),
-                Err(e) => error!("An error occurred: {}. Connection closing", e),
-            }
-        }
-    };
-
-    info!("Connection closing");
 }
