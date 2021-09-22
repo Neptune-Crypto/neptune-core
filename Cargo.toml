@@ -10,21 +10,21 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-anyhow = "1.0" # Error trait and generalized error handling
-bytes = "1.1"
+anyhow = "1" # Error trait and generalized error handling
+bytes = "1"
 chrono = "0.4"
-futures = "0.3.17"
-paw = "1.0" # Command-line argument parsing
+futures = "0.3"
+paw = "1" # Command-line argument parsing
 rand = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-serde_derive = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_derive = "1"
 structopt = { version = "0.3", features = [ "paw" ] } # Command-line argument parsing
 tokio = { version = "1", features = ["full"] }
-tokio-serde = { version = "0.8.0", features = ["bincode"] }
-tokio-util = { version = "0.6.8", features = ["codec"] }
-tracing = "0.1.5"
-tracing-subscriber = "0.2.20"
+tokio-serde = { version = "0.8", features = ["bincode"] }
+tokio-util = { version = "0.6", features = ["codec"] }
+tracing = "0.1"
+tracing-subscriber = "0.2"
 
 [dev-dependencies]
-pin-project-lite = "0.2.4"
-tokio-test = "0.4.2"
+pin-project-lite = "0.2"
+tokio-test = "0.4"
