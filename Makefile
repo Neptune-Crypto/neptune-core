@@ -56,3 +56,4 @@ help:
 
 clean:
 	@rm -rf target
+	cargo clean
