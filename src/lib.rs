@@ -96,8 +96,7 @@ pub async fn initialize(
         tokio::spawn(async move {
             mine::mock_regtest_mine(to_miner_rx, from_miner_tx)
                 .await
-                .map_err(|_e| anyhow!("Mining process stopped."))
-                .expect("Error in mining thread.");
+                .expect("Error in mining thread");
         });
     }
 

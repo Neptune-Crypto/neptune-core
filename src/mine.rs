@@ -1,5 +1,5 @@
 use crate::model::{Block, FromMinerToMain, ToMiner, Transaction, Utxo};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -51,8 +51,12 @@ pub async fn mock_regtest_mine(
     loop {
         let rand_time: u64 = rand::random::<u64>() % 10;
         select! {
-            _ = from_main.changed() => {
-                let main_message: ToMiner = from_main.borrow().clone();
+            changed = from_main.changed() => {
+                if let e@Err(_) = changed {
+                    return e.context("Miner failed to read from watch channel");
+                }
+
+                let main_message: ToMiner = from_main.borrow_and_update().clone();
                 match main_message {
                     ToMiner::NewBlock(block) => {
                         if block.height > block_height {
