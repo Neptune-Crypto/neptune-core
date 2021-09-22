@@ -55,7 +55,8 @@ pub async fn initialize(
     let peer_map = Arc::new(Mutex::new(HashMap::new()));
 
     // Construct the broadcast channel to communicate from the main thread to peer threads
-    let (peer_broadcast_tx, _) = broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
+    let (peer_broadcast_tx, _peer_broadcast_rx) =
+        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
 
     // Add the MPSC (multi-producer, single consumer) channel for peer-thread-to-main communication
     let (to_main_tx, mut to_main_rx) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
@@ -135,7 +136,8 @@ pub async fn initialize(
                 match main_message {
                     FromMinerToMain::NewBlock(block) => {
                         info!("Miner found new block: {}", block.height);
-                        peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block))?;
+                        peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block))
+                            .expect("Peer handler broadcast channel prematurely closed. This should never happen.");
                         // TODO: Store block into own database
                     }
                 }
