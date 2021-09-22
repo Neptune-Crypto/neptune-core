@@ -1,5 +1,5 @@
 [package]
-authors = ["sword-smith <thv@neptune.cash>", "Alan Szepieniec <as@neptune.cash>"]
+authors = ["sword-smith <thv@neptune.cash>", "Alan Szepieniec <as@neptune.cash>", "Philip Munksgaard <philip@munksgaard.me>"]
 edition = "2018"
 name = "neptune-core"
 version = "0.1.0"
