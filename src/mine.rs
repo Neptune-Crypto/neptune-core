@@ -8,8 +8,6 @@ use tracing::{info, instrument};
 
 const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 4;
 
-static mut BLOCK_HEIGHT: u64 = 0;
-
 fn make_mock_block(height: u64) -> Block {
     let utxo_pol = [0u32; 2048];
     let utxo = Utxo {
@@ -49,33 +47,27 @@ pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<ToMiner>,
     to_main: mpsc::Sender<FromMinerToMain>,
 ) -> Result<()> {
-    // This is unsafe because the Rust compiler will not allow manipulation of a static
-    // data type (BLOCK_HEIGHT) in an async function. This is because updates to it are
-    // not thread-safe. But if we only run *one* mining thread, this should be fine.
-    // Also: This is a mock example, and we don't need to spend too much mental effort
-    // on making it perfect.
-    unsafe {
-        loop {
-            let rand_time: u64 = rand::random::<u64>() % 10;
-            select! {
-                _ = from_main.changed() => {
-                    let main_message: ToMiner = from_main.borrow().clone();
-                    match main_message {
-                        ToMiner::NewBlock(block) => {
-                            if block.height > BLOCK_HEIGHT {
-                                BLOCK_HEIGHT = block.height;
-                                info!("Miner thread received regtest block height {}", BLOCK_HEIGHT);
-                            }
+    let mut block_height = 0u64;
+    loop {
+        let rand_time: u64 = rand::random::<u64>() % 10;
+        select! {
+            _ = from_main.changed() => {
+                let main_message: ToMiner = from_main.borrow().clone();
+                match main_message {
+                    ToMiner::NewBlock(block) => {
+                        if block.height > block_height {
+                            block_height = block.height;
+                            info!("Miner thread received regtest block height {}", block_height);
                         }
-                        ToMiner::Empty => ()
                     }
+                    ToMiner::Empty => ()
                 }
-                _ = sleep(Duration::from_secs(MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS + rand_time)) => {
-                    BLOCK_HEIGHT += 1;
+            }
+            _ = sleep(Duration::from_secs(MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS + rand_time)) => {
+                block_height += 1;
 
-                    to_main.send(FromMinerToMain::NewBlock(Box::new(make_mock_block(BLOCK_HEIGHT)))).await?;
-                    info!("Found new regtest block with block height {}", BLOCK_HEIGHT);
-                }
+                to_main.send(FromMinerToMain::NewBlock(Box::new(make_mock_block(block_height)))).await?;
+                info!("Found new regtest block with block height {}", block_height);
             }
         }
     }
