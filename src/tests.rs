@@ -1,74 +1,15 @@
 use super::*;
 
-use anyhow::Error;
 use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::str::FromStr;
 use tokio_serde::Serializer;
 use tokio_test::io::Builder;
 use tokio_util::codec::Encoder;
-
-pin_project! {
-#[derive(Debug)]
-pub struct SinkStream<Sink: sink::Sink<Item>, Stream: stream::Stream, Item> {
-    #[pin]
-    sink: Sink,
-    #[pin]
-    stream: Stream,
-    item: PhantomData<Item>,
-}
-}
-
-impl<Sink: sink::Sink<Item>, Stream: stream::Stream, Item> SinkStream<Sink, Stream, Item> {
-    pub fn new(sink: Sink, stream: Stream) -> SinkStream<Sink, Stream, Item> {
-        SinkStream {
-            sink,
-            stream,
-            item: PhantomData,
-        }
-    }
-}
-
-impl<Sink: sink::Sink<Item> + Unpin, Stream: stream::Stream, Item> sink::Sink<Item>
-    for SinkStream<Sink, Stream, Item>
-{
-    type Error = Sink::Error;
-
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().sink.poll_ready(cx)
-    }
-
-    fn start_send(self: Pin<&mut Self>, item: Item) -> Result<(), Self::Error> {
-        self.project().sink.start_send(item)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().sink.poll_flush(cx)
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.project().sink.poll_close(cx)
-    }
-}
-
-impl<Sink: sink::Sink<Item>, Stream: stream::Stream, Item> stream::Stream
-    for SinkStream<Sink, Stream, Item>
-{
-    type Item = Stream::Item;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().stream.poll_next(cx)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.stream.size_hint()
-    }
-}
 
 fn get_peer_map() -> Arc<Mutex<HashMap<SocketAddr, Peer>>> {
     Arc::new(Mutex::new(HashMap::new()))
@@ -261,11 +202,90 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     Ok(())
 }
 
+pin_project! {
+#[derive(Debug)]
+pub struct Mock<Item> {
+    #[pin]
+    actions: Box<Vec<Action<Item>>>,
+}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MockError {
+    WrongSend,
+    UnexpectedSend,
+    UnexpectedRead,
+}
+
+impl std::fmt::Display for MockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MockError::WrongSend => write!(f, "WrongSend"),
+            MockError::UnexpectedSend => write!(f, "UnexpectedSend"),
+            MockError::UnexpectedRead => write!(f, "UnexpectedRead"),
+        }
+    }
+}
+
+impl std::error::Error for MockError {}
+
+#[derive(Debug, Clone)]
+pub enum Action<Item> {
+    Read(Item),
+    Write(Item),
+    // Todo: Some tests with these things
+    // Wait(Duration),
+    // ReadError(Option<Arc<io::Error>>),
+    // WriteError(Option<Arc<io::Error>>),
+}
+
+impl<Item> Mock<Item> {
+    pub fn new(actions: Vec<Action<Item>>) -> Mock<Item> {
+        Mock {
+            actions: Box::new(actions.into_iter().rev().collect()),
+        }
+    }
+}
+
+impl<Item: PartialEq> sink::Sink<Item> for Mock<Item> {
+    type Error = MockError;
+
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Item) -> Result<(), Self::Error> {
+        match (self.actions.pop(), item) {
+            (Some(Action::Write(a)), item) if item == a => Ok(()),
+            (Some(Action::Write(_)), _) => Err(MockError::WrongSend),
+            _ => Err(MockError::UnexpectedSend),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<Item> stream::Stream for Mock<Item> {
+    type Item = Result<Item, MockError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(Action::Read(a)) = self.actions.pop() {
+            Poll::Ready(Some(Ok(a)))
+        } else {
+            Poll::Ready(Some(Err(MockError::UnexpectedRead)))
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_peer_loop_bye() -> Result<()> {
-    let sink = sink::drain();
-    let stream = stream::once(Box::pin(async { Ok::<_, Error>(PeerMessage::Bye) }));
-    let ss = SinkStream::new(sink, stream);
+    let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
     let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
@@ -278,7 +298,7 @@ async fn test_peer_loop_bye() -> Result<()> {
         .insert(peer_address, get_dummy_peer(peer_address));
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     peer_loop(
-        ss,
+        mock,
         from_main_rx_clone,
         to_main_tx,
         peer_map.clone(),
@@ -289,44 +309,31 @@ async fn test_peer_loop_bye() -> Result<()> {
 
 #[tokio::test]
 async fn test_peer_loop_peer_list() -> Result<()> {
-    let buf = Arc::new(Mutex::new(vec![]));
-    let sink = sink::unfold((), |(), m: PeerMessage| {
-        let buf = buf.clone();
-        async move {
-            buf.lock().unwrap().push(m);
-            Ok::<_, futures::never::Never>(())
-        }
-    });
-    futures::pin_mut!(sink);
-    let stream = stream::iter(vec![
-        Ok::<_, Error>(PeerMessage::PeerListRequest),
-        Ok::<_, Error>(PeerMessage::Bye),
-    ]);
-    let ss = SinkStream::new(sink, stream);
-
-    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
-
     let peer_map = get_peer_map();
     let peer_address = get_dummy_address();
     peer_map
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::PeerListRequest),
+        Action::Write(PeerMessage::PeerListResponse(vec![peer_address])),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
+    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
     peer_loop(
-        ss,
+        mock,
         from_main_rx_clone,
         to_main_tx,
         peer_map.clone(),
         &peer_address,
     )
     .await?;
-
-    assert_eq!(
-        vec!(PeerMessage::PeerListResponse(vec![peer_address])),
-        *buf.lock().unwrap()
-    );
 
     Ok(())
 }
