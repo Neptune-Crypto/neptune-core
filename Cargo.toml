@@ -3,6 +3,7 @@ authors = ["sword-smith <thv@neptune.cash>", "Alan Szepieniec <as@neptune.cash>"
 edition = "2018"
 name = "neptune-core"
 version = "0.1.0"
+default-run = "neptune-core"
 
 [dev-dependencies.cargo-husky]
 default-features = false # Disable features which are enabled by default
@@ -24,10 +25,11 @@ serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 structopt = { version = "0.3", features = [ "paw" ] } # Command-line argument parsing
 tokio = { version = "1", features = ["full"] }
-tokio-serde = { version = "0.8", features = ["bincode"] }
+tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.6", features = ["codec"] }
 tracing = "0.1"
 tracing-subscriber = "0.2"
+tarpc = { version = "0.27", features = ["tokio1", "serde-transport", "tcp"] }
 
 [dev-dependencies]
 pin-project-lite = "0.2"
