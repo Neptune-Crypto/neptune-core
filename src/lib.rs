@@ -122,9 +122,11 @@ pub async fn initialize(
                 match msg {
                     PeerThreadToMain::NewBlock(block) => {
                         if mine {
-                            to_miner_tx.send(ToMiner::NewBlock(block))?;
+                            to_miner_tx.send(ToMiner::NewBlock(block.clone()))?;
                         }
-                        // TODO: Share this block with other miners by sending broadcast to peer threads
+
+                        peer_broadcast_tx.send(MainToPeerThread::Block(block))
+                            .expect("Peer handler broadcast was closed. This should never happen");
                     }
                     PeerThreadToMain::NewTransaction(_txs) => {
                         error!("Unimplemented txs msg received");

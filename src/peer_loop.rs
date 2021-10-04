@@ -90,6 +90,10 @@ where
                                     info!("Sent BlockRequestByHeight to peer");
                                 }
                             }
+                            Some(PeerMessage::BlockRequestByHeight(_height)) => {
+                                // TODO: Fetch block from database and send this to peer
+                                // also update peer_info with this block height
+                            }
                             Some(msg) => {
                                 warn!("Uninplemented peer message received. Got: {:?}", msg);
                             }
@@ -107,10 +111,12 @@ where
                 }
             }
             Ok(main_msg) = from_main_rx.recv() => {
-                // info!("Got message from main: {:?}", main_msg);
                 match main_msg {
-                    // If this client found a block, we need to share it ASAP.
+                    // Handle the case where a block was found in this program instance
                     MainToPeerThread::BlockFromMiner(block) => {
+                        // If this client found a block, we need to share it immediately
+                        // to reduce the risk that someone else finds another one and shares
+                        // it faster.
                         info!("peer_loop got NewBlockFromMiner message from main");
                         let new_block_height = block.height;
                         if new_block_height > own_state_info.highest_shared_block_height {
