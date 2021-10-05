@@ -1,5 +1,6 @@
 pub mod big_array;
 pub mod config_models;
+mod database;
 mod mine;
 mod model;
 mod peer;
@@ -10,9 +11,13 @@ mod tests;
 
 use anyhow::{anyhow, bail, Context, Result};
 use config_models::network::Network;
+use database::model::{BlockHash, BlockHeight, Databases};
 use directories::ProjectDirs;
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
+use leveldb::database::Database;
+use leveldb::kv::KV;
+use leveldb::options::{Options, ReadOptions, WriteOptions};
 use model::{
     FromMinerToMain, HandshakeData, MainToPeerThread, PeerMessage, PeerThreadToMain, ToMiner,
 };
@@ -22,7 +27,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::Unpin;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -40,6 +45,8 @@ pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
 const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
+const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
 
 fn get_database_root_path() -> Result<PathBuf> {
     let data_home = if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
@@ -51,6 +58,52 @@ fn get_database_root_path() -> Result<PathBuf> {
     data_home
 }
 
+fn initialize_databases(root_path: &Path) -> Databases {
+    // Create directory for database if it does not exist
+    std::fs::create_dir_all(root_path).unwrap_or_else(|_| {
+        panic!(
+            "Failed to create database directory in {}",
+            root_path.to_string_lossy()
+        )
+    });
+
+    let mut block_height_to_hash_path = root_path.to_owned();
+    block_height_to_hash_path.push(BLOCK_HEIGHT_TO_HASH_DB_NAME);
+    let mut block_hash_to_block_path = root_path.to_owned();
+    block_hash_to_block_path.push(BLOCK_HASH_TO_BLOCK_DB_NAME);
+
+    let mut hash_options = Options::new();
+    hash_options.create_if_missing = true;
+    let block_hash_to_block: Database<BlockHash> =
+        match Database::open(block_hash_to_block_path.as_path(), hash_options) {
+            Ok(db) => db,
+            Err(e) => {
+                panic!(
+                    "failed to open {} database: {:?}",
+                    BLOCK_HASH_TO_BLOCK_DB_NAME, e
+                )
+            }
+        };
+
+    let mut height_options = Options::new();
+    height_options.create_if_missing = true;
+    let block_height_to_hash: Database<BlockHeight> =
+        match Database::open(block_height_to_hash_path.as_path(), height_options) {
+            Ok(db) => db,
+            Err(e) => {
+                panic!(
+                    "failed to open {} database: {:?}",
+                    BLOCK_HASH_TO_BLOCK_DB_NAME, e
+                )
+            }
+        };
+
+    Databases {
+        block_hash_to_block,
+        block_height_to_hash,
+    }
+}
+
 #[instrument]
 pub async fn initialize(
     listen_addr: IpAddr,
@@ -60,8 +113,38 @@ pub async fn initialize(
     mine: bool,
 ) -> Result<()> {
     // Connect to database
-    let path = get_database_root_path().expect("Failed to get database path");
-    debug!("Database root path is {:?}", path);
+    let path_buf = get_database_root_path().expect("Failed to get database path");
+    let root_path = path_buf.as_path();
+    debug!("Database root path is {:?}", root_path);
+
+    let databases: Arc<Mutex<Databases>> = Arc::new(Mutex::new(initialize_databases(root_path)));
+
+    let write_opts = WriteOptions::new();
+    let block_height_0 = BlockHeight::from(0);
+    {
+        let databases_obj = databases
+            .lock()
+            .unwrap_or_else(|_| panic!("Failed to lock database object"));
+        match databases_obj
+            .block_height_to_hash
+            .put(write_opts, block_height_0, &[1])
+        {
+            Ok(_) => (),
+            Err(e) => {
+                panic!("failed to write to database: {:?}", e)
+            }
+        };
+
+        let read_opts = ReadOptions::new();
+        let data = databases_obj
+            .block_height_to_hash
+            .get(read_opts, block_height_0)
+            .expect("Failed to get genesis block");
+        assert!(data.is_some());
+        assert_eq!(data, Some(vec![1]));
+
+        info!("res: {:?}", data);
+    }
 
     // Bind socket to port on this machine
     let listener = TcpListener::bind((listen_addr, port))
