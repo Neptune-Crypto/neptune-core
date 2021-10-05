@@ -10,6 +10,7 @@ mod tests;
 
 use anyhow::{anyhow, bail, Context, Result};
 use config_models::network::Network;
+use directories::ProjectDirs;
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use model::{
@@ -21,6 +22,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::Unpin;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -39,6 +41,16 @@ const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn get_database_root_path() -> Result<PathBuf> {
+    let data_home = if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
+        Ok(proj_dirs.data_dir().to_path_buf())
+    } else {
+        bail!("Could not determine data directory");
+    };
+
+    data_home
+}
+
 #[instrument]
 pub async fn initialize(
     listen_addr: IpAddr,
@@ -47,6 +59,10 @@ pub async fn initialize(
     network: Network,
     mine: bool,
 ) -> Result<()> {
+    // Connect to database
+    let path = get_database_root_path().expect("Failed to get database path");
+    debug!("Database root path is {:?}", path);
+
     // Bind socket to port on this machine
     let listener = TcpListener::bind((listen_addr, port))
         .await
