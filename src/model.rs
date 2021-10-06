@@ -1,12 +1,22 @@
 use super::config_models::network::Network;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::big_array::BigArray;
+use crate::database::model::Databases;
+use crate::peer::Peer;
 
 type BlockHeight = u64;
 type BlockHash = [u8; 32];
+
+#[derive(Debug)]
+pub struct State {
+    pub peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    pub databases: Arc<Mutex<Databases>>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HandshakeData {

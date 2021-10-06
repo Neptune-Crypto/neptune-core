@@ -19,7 +19,7 @@ use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions, WriteOptions};
 use model::{
-    FromMinerToMain, HandshakeData, MainToPeerThread, PeerMessage, PeerThreadToMain, ToMiner,
+    FromMinerToMain, HandshakeData, MainToPeerThread, PeerMessage, PeerThreadToMain, State, ToMiner,
 };
 use peer::Peer;
 use peer_loop::peer_loop;
@@ -170,7 +170,12 @@ pub async fn initialize(
 
     // Connect to peers
     for peer in peers {
-        let thread_arc = Arc::clone(&peer_map);
+        let peer_map_thread = Arc::clone(&peer_map);
+        let databases_thread = Arc::clone(&databases);
+        let state = State {
+            peer_map: peer_map_thread,
+            databases: databases_thread,
+        };
         let peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             peer_broadcast_tx.subscribe();
         let to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = to_main_tx.clone();
@@ -178,7 +183,7 @@ pub async fn initialize(
         tokio::spawn(async move {
             call_peer_wrapper(
                 peer,
-                thread_arc,
+                state,
                 peer_broadcast_rx_clone,
                 to_main_tx_clone,
                 &own_handshake_data_clone,
@@ -204,13 +209,18 @@ pub async fn initialize(
         select! {
             // The second item contains the IP and port of the new connection.
             Ok((stream, _)) = listener.accept() => {
-                let thread_arc = Arc::clone(&peer_map);
+                let peer_map_thread = Arc::clone(&peer_map);
+                let databases_thread = Arc::clone(&databases);
+                let state = State {
+                    peer_map: peer_map_thread,
+                    databases: databases_thread,
+                };
                 let from_main_rx_clone: broadcast::Receiver<MainToPeerThread> = peer_broadcast_tx.subscribe();
                 let to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();
                 let own_handshake_data_clone = own_handshake_data.clone();
                 tokio::spawn(async move {
-                    match answer_peer(stream, thread_arc, peer_address, from_main_rx_clone, to_main_tx_clone, own_handshake_data_clone).await {
+                    match answer_peer(stream, state, peer_address, from_main_rx_clone, to_main_tx_clone, own_handshake_data_clone).await {
                         Ok(()) => (),
                         Err(err) => error!("Got error: {:?}", err),
                     }
@@ -250,7 +260,7 @@ pub async fn initialize(
 #[instrument]
 pub async fn call_peer_wrapper(
     peer_address: std::net::SocketAddr,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    state: State,
     from_main_rx: broadcast::Receiver<MainToPeerThread>,
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: &HandshakeData,
@@ -263,7 +273,7 @@ pub async fn call_peer_wrapper(
         Ok(stream) => {
             match call_peer(
                 stream,
-                peer_map,
+                state,
                 peer_address,
                 from_main_rx,
                 to_main_tx,
@@ -283,7 +293,7 @@ pub async fn call_peer_wrapper(
 #[instrument]
 pub async fn call_peer<S>(
     stream: S,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    state: State,
     peer_address: std::net::SocketAddr,
     from_main_rx: broadcast::Receiver<MainToPeerThread>,
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
@@ -336,14 +346,15 @@ where
         last_seen: SystemTime::now(),
         version: peer_handshake_data.version,
     };
-    peer_map
+    state
+        .peer_map
         .lock()
         .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
         .entry(peer_address)
         .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(peer, from_main_rx, to_main_tx, peer_map, &peer_address).await?;
+    peer_loop(peer, from_main_rx, to_main_tx, state, &peer_address).await?;
 
     Ok(())
 }
@@ -351,7 +362,7 @@ where
 #[instrument]
 pub async fn answer_peer<S>(
     stream: S,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    state: State,
     peer_address: std::net::SocketAddr,
     from_main_rx: broadcast::Receiver<MainToPeerThread>,
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
@@ -404,14 +415,15 @@ where
         last_seen: SystemTime::now(),
         version: peer_handshake_data.version,
     };
-    peer_map
+    state
+        .peer_map
         .lock()
         .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
         .entry(peer_address)
         .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(peer, from_main_rx, to_main_tx, peer_map, &peer_address).await?;
+    peer_loop(peer, from_main_rx, to_main_tx, state, &peer_address).await?;
 
     Ok(())
 }

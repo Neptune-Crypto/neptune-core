@@ -1,12 +1,9 @@
-use crate::model::{MainToPeerThread, PeerMessage, PeerStateData, PeerThreadToMain};
-use crate::peer::Peer;
+use crate::model::{MainToPeerThread, PeerMessage, PeerStateData, PeerThreadToMain, State};
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
-use std::collections::HashMap;
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
@@ -17,7 +14,7 @@ pub async fn peer_loop<S>(
     mut peer: S,
     mut from_main_rx: broadcast::Receiver<MainToPeerThread>,
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    state: State,
     peer_address: &SocketAddr,
 ) -> Result<()>
 where
@@ -42,7 +39,7 @@ where
                         match peer_message {
                             None => {
                                 info!("Peer closed connection.");
-                                peer_map
+                                state.peer_map
                                     .lock()
                                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
@@ -52,7 +49,7 @@ where
                             }
                             Some(PeerMessage::Bye) => {
                                 info!("Got bye. Closing connection to peer");
-                                peer_map
+                                state.peer_map
                                     .lock()
                                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
@@ -61,7 +58,7 @@ where
                                 break;
                             }
                             Some(PeerMessage::PeerListRequest) => {
-                                let peer_addresses = peer_map
+                                let peer_addresses = state.peer_map
                                     .lock()
                                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .keys()
@@ -100,7 +97,7 @@ where
                         }
                     }
                     Err(e) => {
-                        peer_map
+                        state.peer_map
                             .lock()
                             .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .remove(peer_address)

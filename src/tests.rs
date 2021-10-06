@@ -5,14 +5,41 @@ use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
+use rand::{distributions::Alphanumeric, Rng};
+use std::env;
 use std::pin::Pin;
 use std::str::FromStr;
 use tokio_serde::Serializer;
 use tokio_test::io::Builder;
 use tokio_util::codec::Encoder;
 
+const UNIT_TEST_DB_DIRECTORY: &str = "neptune_unit_test_databases";
+
 fn get_peer_map() -> Arc<Mutex<HashMap<SocketAddr, Peer>>> {
     Arc::new(Mutex::new(HashMap::new()))
+}
+
+// Create databases for unit tests on disk, and return objects for them.
+// For now, we use databases on disk, but it would be nicer to use
+// something that is in-memory only.
+fn get_unit_test_database() -> Result<Arc<Mutex<Databases>>> {
+    let temp_dir = env::temp_dir();
+    let mut path = temp_dir.to_owned();
+    path.push(UNIT_TEST_DB_DIRECTORY);
+
+    // Create a randomly named directory to allow the tests to run in parallel.
+    // If this is not done, the parallel execution of unit tests will fail as
+    // they each hold a lock on the database.
+    let random_directory: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(20)
+        .map(char::from)
+        .collect();
+    path.push(random_directory);
+
+    let db = initialize_databases(path.as_path());
+
+    Ok(Arc::new(Mutex::new(db)))
 }
 
 fn get_dummy_address() -> SocketAddr {
@@ -80,9 +107,14 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let peer_map = get_peer_map();
+    let databases = get_unit_test_database()?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
     answer_peer(
         mock,
-        peer_map.clone(),
+        state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
@@ -113,9 +145,16 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
+    let peer_map = get_peer_map();
+    let databases = get_unit_test_database()?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
+
     if let Err(_) = answer_peer(
         mock,
-        get_peer_map(),
+        state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
@@ -147,9 +186,16 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
+    let peer_map = get_peer_map();
+    let databases = get_unit_test_database()?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
+
     if let Err(_) = answer_peer(
         mock,
-        get_peer_map(),
+        state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
@@ -182,10 +228,15 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
 
     let peer_map = get_peer_map();
+    let databases = get_unit_test_database()?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     call_peer(
         mock,
-        peer_map.clone(),
+        state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
@@ -296,15 +347,13 @@ async fn test_peer_loop_bye() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
+    let databases = get_unit_test_database()?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
-    peer_loop(
-        mock,
-        from_main_rx_clone,
-        to_main_tx,
-        peer_map.clone(),
-        &peer_address,
-    )
-    .await
+    peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await
 }
 
 #[tokio::test]
@@ -315,6 +364,11 @@ async fn test_peer_loop_peer_list() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
+    let databases = get_unit_test_database()?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::PeerListRequest),
@@ -326,14 +380,7 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    peer_loop(
-        mock,
-        from_main_rx_clone,
-        to_main_tx,
-        peer_map.clone(),
-        &peer_address,
-    )
-    .await?;
+    peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
     Ok(())
 }
