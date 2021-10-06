@@ -113,7 +113,7 @@ pub async fn initialize(
     mine: bool,
 ) -> Result<()> {
     // Connect to database
-    let path_buf = get_database_root_path().expect("Failed to get database path");
+    let path_buf = get_database_root_path()?;
     let root_path = path_buf.as_path();
     debug!("Database root path is {:?}", root_path);
 
