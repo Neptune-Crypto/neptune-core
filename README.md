@@ -32,7 +32,8 @@ For development purposes it can sometimes be nice to get a more succint logging 
 sed 's/.*neptune_core:\+\(.*\)/\1/g'
 ```
 
+## Push and branch policy
+During initial development, anyone can push to any branches, but if the branch is prepended with a person's initials, only that person should force push to their branch. Please don't force-push to master without asking the other developers. When force-pushing to *any* branch please use `--force-with-lease` as this only overwrites the branch if the `HEAD` of the remote branch is the same as the `HEAD` of the local version of this branch. This policy will be restricted as more developers get onboard or at the latest after main net launch.
 
 ## Notes
-
 The `Makefile` recipes set the flag `RUSTFLAGS=-Dwarnings` and this sometimes makes the recompilation **much** slower than without this flag, as `cargo` for some reason rebuilds the entire crate when this flag is set and a minor change is made in a test. So it is much faster to run the tests using cargo and then use the `make test` command before e.g. committing to ensure that the test build does not produce any warnings.
