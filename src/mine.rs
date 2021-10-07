@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::{sleep, Duration};
 use tracing::{info, instrument};
 
-const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 4;
+const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 8;
 
 fn make_mock_block(height: u64) -> Block {
     let utxo_pol = [0u32; 2048];
@@ -38,7 +38,7 @@ fn make_mock_block(height: u64) -> Block {
         mix_proof: vec![],
         edge_mmra: utxo,
         edge_mmra_update: vec![],
-        hash: [0u8; 32],
+        hash: rand::random(),
     }
 }
 
@@ -49,7 +49,7 @@ pub async fn mock_regtest_mine(
 ) -> Result<()> {
     let mut block_height = 0u64;
     loop {
-        let rand_time: u64 = rand::random::<u64>() % 10;
+        let rand_time: u64 = rand::random::<u64>() % 15;
         select! {
             changed = from_main.changed() => {
                 if let e@Err(_) = changed {
@@ -70,8 +70,9 @@ pub async fn mock_regtest_mine(
             _ = sleep(Duration::from_secs(MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS + rand_time)) => {
                 block_height += 1;
 
-                to_main.send(FromMinerToMain::NewBlock(Box::new(make_mock_block(block_height)))).await?;
-                info!("Found new regtest block with block height {}", block_height);
+                let new_fake_block = make_mock_block(block_height);
+                info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.height, new_fake_block.hash);
+                to_main.send(FromMinerToMain::NewBlock(Box::new(new_fake_block))).await?;
             }
         }
     }

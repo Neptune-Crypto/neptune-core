@@ -234,6 +234,15 @@ pub async fn initialize(
                             to_miner_tx.send(ToMiner::NewBlock(block.clone()))?;
                         }
 
+                        // Store block in database
+                        {
+                            let db = databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
+                            let write_opts = WriteOptions::new();
+                            db.block_hash_to_block.put(write_opts, BlockHash::from(block.hash), &bincode::serialize(&block).expect("Failed to serialize block"))?;
+                            db.block_height_to_hash.put(write_opts, BlockHeight::from(block.height), &block.hash)?;
+                            debug!("Storing block {:?} in database", block.hash);
+                        }
+
                         peer_broadcast_tx.send(MainToPeerThread::Block(block))
                             .expect("Peer handler broadcast was closed. This should never happen");
                     }
