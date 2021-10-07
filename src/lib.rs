@@ -245,10 +245,18 @@ pub async fn initialize(
             Some(main_message) = from_miner_rx.recv() => {
                 match main_message {
                     FromMinerToMain::NewBlock(block) => {
+                        // When receiving a block from a peer thread, we assume it is verified.
+                        // It is the peer thread's responsibility to verify the block.
                         info!("Miner found new block: {}", block.height);
-                        peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block))
+                        peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block.clone()))
                             .expect("Peer handler broadcast channel prematurely closed. This should never happen.");
-                        // TODO: Store block into own database
+
+                        {
+                            let db = databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
+                            let write_opts = WriteOptions::new();
+                            db.block_hash_to_block.put(write_opts, BlockHash::from(block.hash), &bincode::serialize(&block).expect("Failed to serialize block"))?;
+                            db.block_height_to_hash.put(write_opts, BlockHeight::from(block.height), &block.hash)?;
+                        }
                     }
                 }
             }

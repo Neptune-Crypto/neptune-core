@@ -1,7 +1,12 @@
+use crate::database::block_hash_to_block::BlockHash;
+use crate::database::block_height_to_hash::BlockHeight;
 use crate::model::{MainToPeerThread, PeerMessage, PeerStateData, PeerThreadToMain, State};
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
+use leveldb::kv::KV;
+use leveldb::options::ReadOptions;
+use std::convert::TryInto;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use tokio::select;
@@ -33,6 +38,7 @@ where
 
     loop {
         select! {
+            // Handle peer messages
             peer_message = peer.try_next() => {
                 match peer_message {
                     Ok(peer_message) => {
@@ -83,11 +89,31 @@ where
                                 peer_state_info.highest_shared_block_height = block_notification.height;
                                 if own_state_info.highest_shared_block_height < block_notification.height {
                                     peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
+
+                                    // The response should be caught by `PeerMessage::Block` above
+
                                     // TODO: Add logic to fetch, verify, and store response from peer
                                     info!("Sent BlockRequestByHeight to peer");
                                 }
                             }
-                            Some(PeerMessage::BlockRequestByHeight(_height)) => {
+                            Some(PeerMessage::BlockRequestByHeight(block_height)) => {
+                                {
+                                    let db = state.databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
+                                    let read_opts_hash = ReadOptions::new();
+                                    let hash_res = db.block_height_to_hash.get(read_opts_hash, BlockHeight::from(block_height)).expect("Failed to read from database");
+                                    let _resp = match hash_res {
+                                        None => PeerMessage::BlockResponseByHeight(None),
+                                        Some(hash) => {
+                                            let read_opts_block = ReadOptions::new();
+                                            let hash_array: [u8; 32] = hash.try_into().unwrap_or_else(|v: Vec<u8>| panic!("Expected a Vec of length {} but it was {}", 32, v.len()));
+                                            let block_response = match db.block_hash_to_block.get(read_opts_block, BlockHash::from(hash_array)).expect("Failed to read from database") {
+                                                None => panic!("Failed to find block with hash {:?}", hash_array),
+                                                Some(block_bytes) => PeerMessage::BlockResponseByHeight(bincode::deserialize(&block_bytes)?),
+                                            };
+                                            block_response
+                                        }
+                                    };
+                                }
                                 // TODO: Fetch block from database and send this to peer
                                 // also update peer_info with this block height
                             }
@@ -107,6 +133,8 @@ where
                     }
                 }
             }
+
+            // Handle messages from main thread
             Ok(main_msg) = from_main_rx.recv() => {
                 match main_msg {
                     // Handle the case where a block was found in this program instance
