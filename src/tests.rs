@@ -22,7 +22,7 @@ fn get_peer_map() -> Arc<Mutex<HashMap<SocketAddr, Peer>>> {
 // Create databases for unit tests on disk, and return objects for them.
 // For now, we use databases on disk, but it would be nicer to use
 // something that is in-memory only.
-fn get_unit_test_database() -> Result<Arc<Mutex<Databases>>> {
+fn get_unit_test_database(network: Network) -> Result<Arc<Mutex<Databases>>> {
     let temp_dir = env::temp_dir();
     let mut path = temp_dir.to_owned();
     path.push(UNIT_TEST_DB_DIRECTORY);
@@ -37,7 +37,7 @@ fn get_unit_test_database() -> Result<Arc<Mutex<Databases>>> {
         .collect();
     path.push(random_directory);
 
-    let db = initialize_databases(path.as_path());
+    let db = initialize_databases(path.as_path(), network);
 
     Ok(Arc::new(Mutex::new(db)))
 }
@@ -89,14 +89,15 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     // the connection. If this sequence is not followed, the `mock`
     // object will panic, and the `await` operator will evaluate
     // to Error.
+    let network = Network::Main;
     let mock = Builder::new()
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_REQUEST.to_vec(),
-            get_dummy_handshake_data(Network::Main),
+            get_dummy_handshake_data(network),
         )))?)
         .write(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_RESPONSE.to_vec(),
-            get_dummy_handshake_data(Network::Main),
+            get_dummy_handshake_data(network),
         )))?)
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
@@ -107,7 +108,7 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let peer_map = get_peer_map();
-    let databases = get_unit_test_database()?;
+    let databases = get_unit_test_database(network)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
@@ -133,10 +134,11 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
 
 #[tokio::test]
 async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
+    let network = Network::Main;
     let mock = Builder::new()
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_RESPONSE.to_vec(),
-            get_dummy_handshake_data(Network::Main),
+            get_dummy_handshake_data(network),
         )))?)
         .build();
 
@@ -146,7 +148,7 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let peer_map = get_peer_map();
-    let databases = get_unit_test_database()?;
+    let databases = get_unit_test_database(network)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
@@ -187,7 +189,7 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let peer_map = get_peer_map();
-    let databases = get_unit_test_database()?;
+    let databases = get_unit_test_database(Network::Main)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
@@ -211,14 +213,15 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
 
 #[tokio::test]
 async fn test_outgoing_transaction_succeed() -> Result<()> {
+    let network = Network::Main;
     let mock = Builder::new()
         .write(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_REQUEST.to_vec(),
-            get_dummy_handshake_data(Network::Main),
+            get_dummy_handshake_data(network),
         )))?)
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_RESPONSE.to_vec(),
-            get_dummy_handshake_data(Network::Main),
+            get_dummy_handshake_data(network),
         )))?)
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
@@ -228,7 +231,7 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
 
     let peer_map = get_peer_map();
-    let databases = get_unit_test_database()?;
+    let databases = get_unit_test_database(network)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
@@ -347,7 +350,7 @@ async fn test_peer_loop_bye() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
-    let databases = get_unit_test_database()?;
+    let databases = get_unit_test_database(Network::Main)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
@@ -364,7 +367,7 @@ async fn test_peer_loop_peer_list() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
-    let databases = get_unit_test_database()?;
+    let databases = get_unit_test_database(Network::Main)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,

@@ -58,18 +58,21 @@ fn get_database_root_path() -> Result<PathBuf> {
     data_home
 }
 
-fn initialize_databases(root_path: &Path) -> Databases {
+fn initialize_databases(root_path: &Path, network: Network) -> Databases {
+    let mut path = root_path.to_owned();
+    path.push(network.to_string());
+
     // Create directory for database if it does not exist
-    std::fs::create_dir_all(root_path).unwrap_or_else(|_| {
+    std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
         panic!(
             "Failed to create database directory in {}",
-            root_path.to_string_lossy()
+            path.to_string_lossy()
         )
     });
 
-    let mut block_height_to_hash_path = root_path.to_owned();
+    let mut block_height_to_hash_path = path.to_owned();
     block_height_to_hash_path.push(BLOCK_HEIGHT_TO_HASH_DB_NAME);
-    let mut block_hash_to_block_path = root_path.to_owned();
+    let mut block_hash_to_block_path = path;
     block_hash_to_block_path.push(BLOCK_HASH_TO_BLOCK_DB_NAME);
 
     let mut hash_options = Options::new();
@@ -117,7 +120,8 @@ pub async fn initialize(
     let root_path = path_buf.as_path();
     debug!("Database root path is {:?}", root_path);
 
-    let databases: Arc<Mutex<Databases>> = Arc::new(Mutex::new(initialize_databases(root_path)));
+    let databases: Arc<Mutex<Databases>> =
+        Arc::new(Mutex::new(initialize_databases(root_path, network)));
 
     let write_opts = WriteOptions::new();
     let block_height_0 = BlockHeight::from(0);

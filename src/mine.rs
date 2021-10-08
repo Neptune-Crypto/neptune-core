@@ -8,6 +8,7 @@ use tracing::{info, instrument};
 
 const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 8;
 
+/// Return a fake block with a random hash
 fn make_mock_block(height: u64) -> Block {
     let utxo_pol = [0u32; 2048];
     let utxo = Utxo {
