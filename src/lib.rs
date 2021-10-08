@@ -230,6 +230,8 @@ pub async fn initialize(
                 info!("Received message sent to main thread.");
                 match msg {
                     PeerThreadToMain::NewBlock(block) => {
+                        // When receiving a block from a peer thread, we assume it is verified.
+                        // It is the peer thread's responsibility to verify the block.
                         if mine {
                             to_miner_tx.send(ToMiner::NewBlock(block.clone()))?;
                         }
@@ -254,12 +256,12 @@ pub async fn initialize(
             Some(main_message) = from_miner_rx.recv() => {
                 match main_message {
                     FromMinerToMain::NewBlock(block) => {
-                        // When receiving a block from a peer thread, we assume it is verified.
-                        // It is the peer thread's responsibility to verify the block.
+                        // When receiving a block from the miner threa, we assume it is valid
                         info!("Miner found new block: {}", block.height);
                         peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block.clone()))
                             .expect("Peer handler broadcast channel prematurely closed. This should never happen.");
 
+                        // Store block in database
                         {
                             let db = databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
                             let write_opts = WriteOptions::new();
