@@ -11,7 +11,7 @@ mod tests;
 
 use anyhow::{anyhow, bail, Context, Result};
 use config_models::network::Network;
-use database::model::{BlockHash, BlockHeight, Databases};
+use database::model::Databases;
 use directories::ProjectDirs;
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
@@ -19,7 +19,8 @@ use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions, WriteOptions};
 use model::{
-    FromMinerToMain, HandshakeData, MainToPeerThread, PeerMessage, PeerThreadToMain, State, ToMiner,
+    BlockHash, BlockHeight, FromMinerToMain, HandshakeData, MainToPeerThread, PeerMessage,
+    PeerThreadToMain, State, ToMiner,
 };
 use peer::Peer;
 use peer_loop::peer_loop;
@@ -244,8 +245,9 @@ pub async fn initialize(
                         {
                             let db = databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
                             let write_opts = WriteOptions::new();
-                            db.block_hash_to_block.put(write_opts, BlockHash::from(block.hash), &bincode::serialize(&block).expect("Failed to serialize block"))?;
-                            db.block_height_to_hash.put(write_opts, BlockHeight::from(block.height), &block.hash)?;
+                            let block_hash_raw: [u8; 32] = block.hash.into();
+                            db.block_hash_to_block.put(write_opts, block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
+                            db.block_height_to_hash.put(write_opts, block.height, &block_hash_raw)?;
                             debug!("Storing block {:?} in database", block.hash);
                         }
 
@@ -269,8 +271,9 @@ pub async fn initialize(
                         {
                             let db = databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
                             let write_opts = WriteOptions::new();
-                            db.block_hash_to_block.put(write_opts, BlockHash::from(block.hash), &bincode::serialize(&block).expect("Failed to serialize block"))?;
-                            db.block_height_to_hash.put(write_opts, BlockHeight::from(block.height), &block.hash)?;
+                            let block_hash_raw: [u8; 32] = block.hash.into();
+                            db.block_hash_to_block.put(write_opts, block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
+                            db.block_height_to_hash.put(write_opts, block.height, &block_hash_raw)?;
                         }
                     }
                 }

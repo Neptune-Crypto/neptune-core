@@ -1,6 +1,6 @@
-use crate::database::block_hash_to_block::BlockHash;
-use crate::database::block_height_to_hash::BlockHeight;
-use crate::model::{Block, MainToPeerThread, PeerMessage, PeerStateData, PeerThreadToMain, State};
+use crate::model::{
+    Block, BlockHash, MainToPeerThread, PeerMessage, PeerStateData, PeerThreadToMain, State,
+};
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
@@ -47,12 +47,12 @@ where
     <S as TryStream>::Error: std::error::Error,
 {
     let mut peer_state_info = PeerStateData {
-        highest_shared_block_height: 0,
+        highest_shared_block_height: 0.into(),
     };
 
     // TODO: THV: own_state_info should be shared among all threads, I think.
     let mut own_state_info = PeerStateData {
-        highest_shared_block_height: 0,
+        highest_shared_block_height: 0.into(),
     };
 
     loop {
@@ -139,7 +139,7 @@ where
                                 {
                                     let db = state.databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
                                     let read_opts_hash = ReadOptions::new();
-                                    let hash_res = db.block_height_to_hash.get(read_opts_hash, BlockHeight::from(block_height)).expect("Failed to read from database");
+                                    let hash_res = db.block_height_to_hash.get(read_opts_hash, block_height).expect("Failed to read from database");
                                     resp = match hash_res {
                                         None => PeerMessage::BlockResponseByHeight(None),
                                         Some(hash) => {

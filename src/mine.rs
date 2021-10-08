@@ -1,4 +1,4 @@
-use crate::model::{Block, FromMinerToMain, ToMiner, Transaction, Utxo};
+use crate::model::{Block, BlockHash, BlockHeight, FromMinerToMain, ToMiner, Transaction, Utxo};
 use anyhow::{Context, Result};
 use std::time::SystemTime;
 use tokio::select;
@@ -22,12 +22,13 @@ fn make_mock_block(height: u64) -> Block {
         public_scripts: vec![],
         proof: vec![],
     };
+    let block_hash_raw: [u8; 32] = rand::random();
     Block {
         version_bits: [0u8; 4],
         timestamp: SystemTime::now(),
-        height,
+        height: BlockHeight::from(height),
         nonce: [0u8; 32],
-        predecessor: [0u8; 32],
+        predecessor: BlockHash::from([0u8; 32]),
         predecessor_proof: vec![],
         accumulated_pow_line: 0u128,
         accumulated_pow_family: 0u128,
@@ -39,7 +40,7 @@ fn make_mock_block(height: u64) -> Block {
         mix_proof: vec![],
         edge_mmra: utxo,
         edge_mmra_update: vec![],
-        hash: rand::random(),
+        hash: BlockHash::from(block_hash_raw),
     }
 }
 
@@ -60,10 +61,8 @@ pub async fn mock_regtest_mine(
                 let main_message: ToMiner = from_main.borrow_and_update().clone();
                 match main_message {
                     ToMiner::NewBlock(block) => {
-                        if block.height > block_height {
-                            block_height = block.height;
-                            info!("Miner thread received regtest block height {}", block_height);
-                        }
+                        block_height = block.height.into();
+                        info!("Miner thread received regtest block height {}", block_height);
                     }
                     ToMiner::Empty => ()
                 }

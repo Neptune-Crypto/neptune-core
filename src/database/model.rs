@@ -1,7 +1,6 @@
 use std::fmt;
 
-pub use super::block_hash_to_block::BlockHash;
-pub use super::block_height_to_hash::BlockHeight;
+use crate::model::{BlockHash, BlockHeight};
 use leveldb::database::Database;
 
 pub struct Databases {
