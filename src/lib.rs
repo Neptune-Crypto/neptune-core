@@ -157,6 +157,7 @@ pub async fn initialize(
         .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", listen_addr, port))?;
 
     let peer_map = Arc::new(Mutex::new(HashMap::new()));
+    let latest_block_height = Arc::new(Mutex::new(BlockHeight::from(0))); // TODO: Set from database
 
     // Construct the broadcast channel to communicate from the main thread to peer threads
     let (peer_broadcast_tx, _peer_broadcast_rx) =
@@ -177,9 +178,11 @@ pub async fn initialize(
     for peer in peers {
         let peer_map_thread = Arc::clone(&peer_map);
         let databases_thread = Arc::clone(&databases);
+        let latest_block_height_tread = Arc::clone(&latest_block_height);
         let state = State {
             peer_map: peer_map_thread,
             databases: databases_thread,
+            latest_block_height: latest_block_height_tread,
         };
         let peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             peer_broadcast_tx.subscribe();
@@ -216,9 +219,11 @@ pub async fn initialize(
             Ok((stream, _)) = listener.accept() => {
                 let peer_map_thread = Arc::clone(&peer_map);
                 let databases_thread = Arc::clone(&databases);
+                let latest_block_height_tread = Arc::clone(&latest_block_height);
                 let state = State {
                     peer_map: peer_map_thread,
                     databases: databases_thread,
+                    latest_block_height: latest_block_height_tread,
                 };
                 let from_main_rx_clone: broadcast::Receiver<MainToPeerThread> = peer_broadcast_tx.subscribe();
                 let to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = to_main_tx.clone();

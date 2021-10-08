@@ -112,6 +112,7 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
     answer_peer(
         mock,
@@ -152,6 +153,7 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
 
     if let Err(_) = answer_peer(
@@ -193,6 +195,7 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
 
     if let Err(_) = answer_peer(
@@ -235,6 +238,7 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     call_peer(
@@ -354,6 +358,7 @@ async fn test_peer_loop_bye() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await
@@ -371,6 +376,7 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
 
     let mock = Mock::new(vec![

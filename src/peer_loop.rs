@@ -50,11 +50,6 @@ where
         highest_shared_block_height: 0.into(),
     };
 
-    // TODO: THV: own_state_info should be shared among all threads, I think.
-    let mut own_state_info = PeerStateData {
-        highest_shared_block_height: 0.into(),
-    };
-
     loop {
         select! {
             // Handle peer messages
@@ -95,42 +90,61 @@ where
                             Some(PeerMessage::Block(block)) => {
                                 debug!("Got new block from peer {}, block height {}", peer_address, block.height);
                                 let new_block_height = block.height;
-                                peer_state_info.highest_shared_block_height = new_block_height;
+
                                 // TODO: All validation of block, increase ban score if block is bad
-                                if own_state_info.highest_shared_block_height < new_block_height {
-                                    own_state_info.highest_shared_block_height = new_block_height;
-                                    // TODO: The following line *has* produced stack overflows on a lightweight
-                                    // computer. Why?
-                                    to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
-                                    info!("Updated block info by block from peer. block height {}", new_block_height);
+                                peer_state_info.highest_shared_block_height = new_block_height;
+                                // let latest_block_height = state.latest_block_height.into_inner();
+                                {
+                                    let latest_block_height = state.latest_block_height.lock().unwrap_or_else(|e| panic!("Failed to lock latest_block_height: {}", e));
+                                    if *latest_block_height < new_block_height {
+                                        match to_main_tx.send(PeerThreadToMain::NewBlock(block)).await {
+                                            Ok(()) => (),
+                                            Err(e) => panic!(e),
+                                        };
+                                        info!("Updated block info by block from peer. block height {}", new_block_height);
+                                    }
                                 }
+                                // if own_state_info.highest_shared_block_height < new_block_height {
+                                //     own_state_info.highest_shared_block_height = new_block_height;
+                                //     // TODO: The following line *has* produced stack overflows on a lightweight
+                                //     // computer. Why?
+                                //     to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
+                                //     info!("Updated block info by block from peer. block height {}", new_block_height);
+                                // }
                             }
                             Some(PeerMessage::BlockNotification(block_notification)) => {
                                 debug!("Got BlockNotification");
                                 peer_state_info.highest_shared_block_height = block_notification.height;
-                                if own_state_info.highest_shared_block_height < block_notification.height {
-                                    peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
-                                    debug!("Sent BlockRequestByHeight to peer");
+                                {
+                                    let latest_block_height = state.latest_block_height.lock().unwrap_or_else(|e| panic!("Failed to lock latest_block_height: {}", e));
+                                    if *latest_block_height < block_notification.height {
+                                        peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
+                                        debug!("Sent BlockRequestByHeight to peer");
 
-                                    // The response should be caught by `PeerMessage::Block` above
-                                    match peer.try_next().await {
-                                        Ok(Some(PeerMessage::BlockResponseByHeight(Some(received_block)))) => {
-                                            debug!("Got BlockResponseByHeight");
-                                            if block_notification.height != received_block.height {
-                                                warn!("Bad BlockResponseByHeight received");
-                                                punish(&state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY);
+                                        // The response should be caught by `PeerMessage::Block` above
+                                        match peer.try_next().await {
+                                            Ok(Some(PeerMessage::BlockResponseByHeight(Some(received_block)))) => {
+                                                debug!("Got BlockResponseByHeight");
+                                                if block_notification.height != received_block.height {
+                                                    warn!("Bad BlockResponseByHeight received");
+                                                    punish(&state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY);
+                                                    break;
+                                                }
+
+                                                // TODO: Verify received block
+                                                match to_main_tx.send(PeerThreadToMain::NewBlock(received_block)).await {
+                                                    Ok(()) => (),
+                                                    Err(e) => panic!(e),
+                                                };
+                                                debug!("Updated block info by block from peer. block height {}", block_notification.height);
                                             }
-
-                                            // TODO: Verify received block
-                                            own_state_info.highest_shared_block_height = received_block.height;
-                                            to_main_tx.send(PeerThreadToMain::NewBlock(received_block)).await?;
-                                            debug!("Updated block info by block from peer. block height {}", block_notification.height);
-                                        }
-                                        _ => {
-                                            warn!("Got invalid block response");
+                                            _ => {
+                                                warn!("Got invalid block response");
+                                            }
                                         }
                                     }
                                 }
+                                // if own_state_info.highest_shared_block_height < block_notification.height {
                             }
                             Some(PeerMessage::BlockRequestByHeight(block_height)) => {
                                 debug!("Got BlockRequestByHeight");
@@ -190,11 +204,18 @@ where
                         // it faster.
                         info!("peer_loop got NewBlockFromMiner message from main");
                         let new_block_height = block.height;
-                        if new_block_height > own_state_info.highest_shared_block_height {
-                            peer.send(PeerMessage::Block(block)).await?;
-                            peer_state_info.highest_shared_block_height = new_block_height;
-                            own_state_info.highest_shared_block_height = new_block_height;
+                        {
+                            let latest_block_height = state.latest_block_height.lock().unwrap_or_else(|e| panic!("Failed to lock latest_block_height: {}", e));
+                            if *latest_block_height < new_block_height {
+                                peer.send(PeerMessage::Block(block)).await?;
+                                peer_state_info.highest_shared_block_height = new_block_height;
+                            }
                         }
+                        // if new_block_height > own_state_info.highest_shared_block_height {
+                        //     peer.send(PeerMessage::Block(block)).await?;
+                        //     peer_state_info.highest_shared_block_height = new_block_height;
+                        //     own_state_info.highest_shared_block_height = new_block_height;
+                        // }
                     }
                     MainToPeerThread::Block(block) => {
                         info!("NewBlock message from main");

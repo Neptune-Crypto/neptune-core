@@ -96,6 +96,7 @@ impl Display for BlockHeight {
 pub struct State {
     pub peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
     pub databases: Arc<Mutex<Databases>>,
+    pub latest_block_height: Arc<Mutex<BlockHeight>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
