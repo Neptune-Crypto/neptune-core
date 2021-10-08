@@ -6,8 +6,9 @@ use std::collections::HashMap;
 use std::convert::{From, TryInto};
 use std::fmt::Display;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::sync::Mutex;
 
 use crate::big_array::BigArray;
 use crate::database::model::Databases;

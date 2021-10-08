@@ -9,7 +9,7 @@ mod peer_loop;
 #[cfg(test)]
 mod tests;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use config_models::network::Network;
 use database::model::Databases;
 use directories::ProjectDirs;
@@ -29,12 +29,12 @@ use std::fmt::Debug;
 use std::marker::Unpin;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch, Mutex};
 use tokio_serde::formats::*;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -127,9 +127,7 @@ pub async fn initialize(
     let write_opts = WriteOptions::new();
     let block_height_0 = BlockHeight::from(0);
     {
-        let databases_obj = databases
-            .lock()
-            .unwrap_or_else(|_| panic!("Failed to lock database object"));
+        let databases_obj = databases.lock().await;
         match databases_obj
             .block_height_to_hash
             .put(write_opts, block_height_0, &[1])
@@ -248,7 +246,7 @@ pub async fn initialize(
 
                         // Store block in database
                         {
-                            let db = databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
+                            let db = databases.lock().await;
                             let write_opts = WriteOptions::new();
                             let block_hash_raw: [u8; 32] = block.hash.into();
                             db.block_hash_to_block.put(write_opts, block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
@@ -274,7 +272,7 @@ pub async fn initialize(
 
                         // Store block in database
                         {
-                            let db = databases.lock().unwrap_or_else(|e| panic!("Failed to lock database ARC: {}", e));
+                            let db = databases.lock().await;
                             let write_opts = WriteOptions::new();
                             let block_hash_raw: [u8; 32] = block.hash.into();
                             db.block_hash_to_block.put(write_opts, block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
@@ -380,7 +378,7 @@ where
     state
         .peer_map
         .lock()
-        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
+        .await
         .entry(peer_address)
         .or_insert(new_peer);
 
@@ -449,7 +447,7 @@ where
     state
         .peer_map
         .lock()
-        .map_err(|e| anyhow!("Failed to lock peer map: {}", e))?
+        .await
         .entry(peer_address)
         .or_insert(new_peer);
 

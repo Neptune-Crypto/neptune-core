@@ -125,7 +125,7 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     .await?;
 
     // Verify that peer map is empty after connection has been closed
-    match peer_map.lock().unwrap().keys().len() {
+    match peer_map.lock().await.keys().len() {
         0 => (),
         _ => bail!("Incorrect number of maps in peer map"),
     };
@@ -252,7 +252,7 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     .await?;
 
     // Verify that peer map is empty after connection has been closed
-    match peer_map.lock().unwrap().keys().len() {
+    match peer_map.lock().await.keys().len() {
         0 => (),
         _ => bail!("Incorrect number of maps in peer map"),
     };
@@ -352,7 +352,7 @@ async fn test_peer_loop_bye() -> Result<()> {
     let peer_address = get_dummy_address();
     peer_map
         .lock()
-        .unwrap()
+        .await
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
     let state = State {
@@ -370,7 +370,7 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     let peer_address = get_dummy_address();
     peer_map
         .lock()
-        .unwrap()
+        .await
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
     let state = State {
