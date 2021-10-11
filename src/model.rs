@@ -104,7 +104,7 @@ impl Display for BlockHeight {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct LatestBlockInfo {
     pub height: BlockHeight,
     pub hash: BlockHash,

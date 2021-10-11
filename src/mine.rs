@@ -1,4 +1,6 @@
-use crate::model::{Block, BlockHash, BlockHeight, FromMinerToMain, ToMiner, Transaction, Utxo};
+use crate::model::{
+    Block, BlockHash, BlockHeight, FromMinerToMain, LatestBlockInfo, ToMiner, Transaction, Utxo,
+};
 use anyhow::{Context, Result};
 use std::time::SystemTime;
 use tokio::select;
@@ -48,8 +50,12 @@ fn make_mock_block(height: u64) -> Block {
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<ToMiner>,
     to_main: mpsc::Sender<FromMinerToMain>,
+    latest_block_info_res: Option<LatestBlockInfo>,
 ) -> Result<()> {
-    let mut block_height = 0u64;
+    let mut block_height: u64 = match latest_block_info_res {
+        None => 0u64,
+        Some(latest_block_info) => latest_block_info.height.into(),
+    };
     loop {
         let rand_time: u64 = rand::random::<u64>() % 15;
         select! {

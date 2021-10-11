@@ -139,29 +139,23 @@ pub async fn initialize(
         initialize_databases(root_path, network),
     ));
 
-    let write_opts = WriteOptions::new();
-    let block_height_0 = BlockHeight::from(0);
-    {
-        let databases_obj = databases.lock().await;
-        match databases_obj
-            .block_height_to_hash
-            .put(write_opts, block_height_0, &[1])
-        {
-            Ok(_) => (),
-            Err(e) => {
-                panic!("failed to write to database: {:?}", e)
-            }
-        };
-
-        let read_opts = ReadOptions::new();
-        let data = databases_obj
-            .block_height_to_hash
-            .get(read_opts, block_height_0)
-            .expect("Failed to get genesis block");
-        assert!(data.is_some());
-        assert_eq!(data, Some(vec![1]));
-
-        info!("res: {:?}", data);
+    // Get latest block height
+    let latest_block_info_res: Option<LatestBlockInfo> = {
+        let dbs = databases.lock().await;
+        let lookup_res = dbs
+            .latest_block
+            .get(ReadOptions::new(), DatabaseUnit())
+            .expect("Failed to get latest block info on init");
+        lookup_res.map(|bytes| {
+            bincode::deserialize(&bytes).expect("Failed to deserialize latest block info")
+        })
+    };
+    match latest_block_info_res {
+        None => info!("No previous state saved"),
+        Some(block) => info!(
+            "Latest block was block height {}, hash = {:?}",
+            block.height, block.hash
+        ),
     }
 
     // Bind socket to port on this machine
@@ -216,7 +210,7 @@ pub async fn initialize(
     let (to_miner_tx, to_miner_rx) = watch::channel::<ToMiner>(ToMiner::Empty);
     if mine && network == Network::RegTest {
         tokio::spawn(async move {
-            mine::mock_regtest_mine(to_miner_rx, from_miner_tx)
+            mine::mock_regtest_mine(to_miner_rx, from_miner_tx, latest_block_info_res)
                 .await
                 .expect("Error in mining thread");
         });
