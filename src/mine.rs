@@ -1,6 +1,6 @@
-use crate::model::{
-    Block, BlockHash, BlockHeight, FromMinerToMain, LatestBlockInfo, ToMiner, Transaction, Utxo,
-};
+use crate::models::blockchain::{Block, BlockHash, BlockHeight, Transaction, Utxo};
+use crate::models::channel::{FromMinerToMain, ToMiner};
+use crate::models::shared::LatestBlockInfo;
 use anyhow::{Context, Result};
 use std::time::SystemTime;
 use tokio::select;

@@ -1,9 +1,6 @@
-pub mod big_array;
 pub mod config_models;
-mod database;
 mod mine;
-mod model;
-mod peer;
+mod models;
 mod peer_loop;
 
 #[cfg(test)]
@@ -11,18 +8,16 @@ mod tests;
 
 use anyhow::{bail, Context, Result};
 use config_models::network::Network;
-use database::model::Databases;
 use directories::ProjectDirs;
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions, WriteOptions};
-use model::{
-    BlockHash, BlockHeight, DatabaseUnit, FromMinerToMain, HandshakeData, LatestBlockInfo,
-    MainToPeerThread, PeerMessage, PeerThreadToMain, State, ToMiner,
-};
-use peer::Peer;
+use models::blockchain::{BlockHash, BlockHeight};
+use models::database::{DatabaseUnit, Databases};
+use models::peer::Peer;
+use models::State;
 use peer_loop::peer_loop;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -39,6 +34,10 @@ use tokio_serde::formats::*;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
+
+use crate::models::channel::{FromMinerToMain, MainToPeerThread, PeerThreadToMain, ToMiner};
+use crate::models::peer::{HandshakeData, PeerMessage};
+use crate::models::shared::LatestBlockInfo;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";

@@ -1,7 +1,9 @@
-use crate::model::{
-    Block, BlockHash, DatabaseUnit, LatestBlockInfo, MainToPeerThread, PeerMessage, PeerStateData,
-    PeerThreadToMain, State,
-};
+use crate::models::blockchain::{Block, BlockHash};
+use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
+use crate::models::database::DatabaseUnit;
+use crate::models::peer::{PeerMessage, PeerStateData};
+use crate::models::shared::LatestBlockInfo;
+use crate::models::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};

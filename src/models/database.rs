@@ -1,6 +1,7 @@
 use std::fmt;
 
-use crate::model::{BlockHash, BlockHeight, DatabaseUnit};
+use crate::models::blockchain::{BlockHash, BlockHeight};
+use db_key::Key;
 use leveldb::database::Database;
 
 pub struct Databases {
@@ -18,5 +19,17 @@ pub struct Databases {
 impl fmt::Debug for Databases {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("").finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DatabaseUnit();
+impl Key for DatabaseUnit {
+    fn from_u8(_key: &[u8]) -> Self {
+        DatabaseUnit()
+    }
+
+    fn as_slice<T, F: Fn(&[u8]) -> T>(&self, f: F) -> T {
+        f(&[])
     }
 }
