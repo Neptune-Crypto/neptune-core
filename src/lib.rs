@@ -139,7 +139,7 @@ pub async fn initialize(
     ));
 
     // Get latest block height
-    let latest_block_info_res: Option<LatestBlockInfo> = {
+    let latest_block_info: Option<LatestBlockInfo> = {
         let dbs = databases.lock().await;
         let lookup_res = dbs
             .latest_block
@@ -149,7 +149,7 @@ pub async fn initialize(
             bincode::deserialize(&bytes).expect("Failed to deserialize latest block info")
         })
     };
-    match latest_block_info_res {
+    match latest_block_info {
         None => info!("No previous state saved"),
         Some(block) => info!(
             "Latest block was block height {}, hash = {:?}",
@@ -174,6 +174,7 @@ pub async fn initialize(
     // Create handshake data
     let listen_addr_socket = SocketAddr::new(listen_addr, port);
     let own_handshake_data = HandshakeData {
+        latest_block_info,
         listen_address: Some(listen_addr_socket),
         network,
         version: VERSION.to_string(),
@@ -209,7 +210,7 @@ pub async fn initialize(
     let (to_miner_tx, to_miner_rx) = watch::channel::<ToMiner>(ToMiner::Empty);
     if mine && network == Network::RegTest {
         tokio::spawn(async move {
-            mine::mock_regtest_mine(to_miner_rx, from_miner_tx, latest_block_info_res)
+            mine::mock_regtest_mine(to_miner_rx, from_miner_tx, latest_block_info)
                 .await
                 .expect("Error in mining thread");
         });

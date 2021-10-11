@@ -17,6 +17,7 @@ pub struct Peer {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HandshakeData {
+    pub latest_block_info: Option<LatestBlockInfo>,
     pub listen_address: Option<SocketAddr>,
     pub network: Network,
     pub version: String,

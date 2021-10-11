@@ -62,6 +62,7 @@ fn get_dummy_version() -> String {
 
 fn get_dummy_handshake_data(network: Network) -> HandshakeData {
     HandshakeData {
+        latest_block_info: None,
         listen_address: Some(get_dummy_address()),
         network,
         version: get_dummy_version(),
