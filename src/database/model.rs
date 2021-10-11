@@ -1,11 +1,12 @@
 use std::fmt;
 
-use crate::model::{BlockHash, BlockHeight};
+use crate::model::{BlockHash, BlockHeight, DatabaseUnit};
 use leveldb::database::Database;
 
 pub struct Databases {
     pub block_height_to_hash: Database<BlockHeight>,
     pub block_hash_to_block: Database<BlockHash>,
+    pub latest_block: Database<DatabaseUnit>,
 }
 
 // We have to implement `Debug` for `Databases` as the `State` struct

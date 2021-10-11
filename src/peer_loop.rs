@@ -1,5 +1,6 @@
 use crate::model::{
-    Block, BlockHash, MainToPeerThread, PeerMessage, PeerStateData, PeerThreadToMain, State,
+    Block, BlockHash, DatabaseUnit, LatestBlockInfo, MainToPeerThread, PeerMessage, PeerStateData,
+    PeerThreadToMain, State,
 };
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
@@ -16,9 +17,12 @@ use tracing::{debug, info, warn};
 const PEER_TOLERANCE: u8 = 50;
 const BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY: u8 = 3;
 
-pub async fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
+pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
     // (state: State, peer_address: &SocketAddr, severity: u8) => {
-    let mut peers = state.peer_map.lock().await;
+    let mut peers = state
+        .peer_map
+        .lock()
+        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
     peers
         .entry(*peer_address)
         .and_modify(|p| p.banscore += severity);
@@ -57,7 +61,8 @@ where
                             None => {
                                 info!("Peer closed connection.");
                                 state.peer_map
-                                    .lock().await
+                                    .lock()
+                                    .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
                                     .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                               peer_address));
@@ -66,7 +71,8 @@ where
                             Some(PeerMessage::Bye) => {
                                 info!("Got bye. Closing connection to peer");
                                 state.peer_map
-                                    .lock().await
+                                    .lock()
+                                    .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
                                     .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                               peer_address));
@@ -75,7 +81,8 @@ where
                             Some(PeerMessage::PeerListRequest) => {
                                 debug!("Got PeerListRequest");
                                 let peer_addresses = state.peer_map
-                                    .lock().await
+                                    .lock()
+                                    .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .keys()
                                     .cloned()
                                     .collect();
@@ -85,30 +92,41 @@ where
                                 debug!("Got new block from peer {}, block height {}", peer_address, block.height);
                                 let new_block_height = block.height;
 
-                                // TODO: All validation of block, increase ban score if block is bad
+                                // TODO: Add validation of block, increase ban score if block is bad
                                 peer_state_info.highest_shared_block_height = new_block_height;
-                                // let latest_block_height = state.latest_block_height.into_inner();
                                 {
-                                    let latest_block_height = state.latest_block_height.lock().await;
-                                    if *latest_block_height < new_block_height {
-                                        to_main_tx.send(PeerThreadToMain::NewBlock(block)).await.unwrap();
+                                    let databases = state.databases.lock().await;
+                                    let own_block_info = databases.latest_block.get(ReadOptions::new(), DatabaseUnit()).expect("Failed to read from 'latest' database");
+                                    let block_is_new = match own_block_info {
+                                        None => true,
+                                        Some(bytes) => {
+                                            let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
+                                            own_latest_block_info.height < block.height
+                                        },
+                                    };
+                                    if block_is_new {
+                                        to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
                                         info!("Updated block info by block from peer. block height {}", new_block_height);
+                                    } else {
+                                        info!("Got non-new block from peer, height: {}", new_block_height);
                                     }
                                 }
-                                // if own_state_info.highest_shared_block_height < new_block_height {
-                                //     own_state_info.highest_shared_block_height = new_block_height;
-                                //     // TODO: The following line *has* produced stack overflows on a lightweight
-                                //     // computer. Why?
-                                //     to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
-                                //     info!("Updated block info by block from peer. block height {}", new_block_height);
-                                // }
                             }
                             Some(PeerMessage::BlockNotification(block_notification)) => {
                                 debug!("Got BlockNotification");
                                 peer_state_info.highest_shared_block_height = block_notification.height;
                                 {
-                                    let latest_block_height = state.latest_block_height.lock().await;
-                                    if *latest_block_height < block_notification.height {
+                                    let databases = state.databases.lock().await;
+                                    let own_block_info = databases.latest_block.get(ReadOptions::new(), DatabaseUnit()).expect("Failed to read from 'latest' database");
+                                    let block_is_new = match own_block_info {
+                                        None => true,
+                                        Some(bytes) => {
+                                            let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
+                                            own_latest_block_info.height < block_notification.height
+                                        },
+                                    };
+
+                                    if block_is_new {
                                         peer.send(PeerMessage::BlockRequestByHeight(block_notification.height)).await?;
                                         debug!("Sent BlockRequestByHeight to peer");
 
@@ -118,12 +136,15 @@ where
                                                 debug!("Got BlockResponseByHeight");
                                                 if block_notification.height != received_block.height {
                                                     warn!("Bad BlockResponseByHeight received");
-                                                    punish(&state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY).await;
+                                                    punish(&state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY);
                                                     break;
                                                 }
 
                                                 // TODO: Verify received block
-                                                to_main_tx.send(PeerThreadToMain::NewBlock(received_block)).await.unwrap();
+                                                match to_main_tx.send(PeerThreadToMain::NewBlock(received_block)).await {
+                                                    Ok(()) => (),
+                                                    Err(e) => panic!("{}", e),
+                                                };
                                                 debug!("Updated block info by block from peer. block height {}", block_notification.height);
                                             }
                                             _ => {
@@ -131,23 +152,22 @@ where
                                             }
                                         }
                                     }
+
                                 }
-                                // if own_state_info.highest_shared_block_height < block_notification.height {
                             }
                             Some(PeerMessage::BlockRequestByHeight(block_height)) => {
                                 debug!("Got BlockRequestByHeight");
 
                                 let resp;
                                 {
-                                    let db = state.databases.lock().await;
-                                    let read_opts_hash = ReadOptions::new();
-                                    let hash_res = db.block_height_to_hash.get(read_opts_hash, block_height).expect("Failed to read from database");
+                                    let databases = state.databases.lock().await;
+                                    let hash_res = databases.block_height_to_hash.get(ReadOptions::new(), block_height).expect("Failed to read from database");
                                     resp = match hash_res {
                                         None => PeerMessage::BlockResponseByHeight(None),
                                         Some(hash) => {
                                             let read_opts_block = ReadOptions::new();
                                             let hash_array: [u8; 32] = hash.try_into().unwrap_or_else(|v: Vec<u8>| panic!("Expected a Vec of length {} but it was {}", 32, v.len()));
-                                            let block_response = match db.block_hash_to_block.get(read_opts_block, BlockHash::from(hash_array)).expect("Failed to read from database") {
+                                            let block_response = match databases.block_hash_to_block.get(read_opts_block, BlockHash::from(hash_array)).expect("Failed to read from database") {
                                                 None => panic!("Failed to find block with hash {:?}", hash_array),
                                                 Some(block_bytes) => {
                                                     let deserialized: Block = bincode::deserialize(&block_bytes)?;
@@ -172,7 +192,8 @@ where
                     }
                     Err(e) => {
                         state.peer_map
-                            .lock().await
+                            .lock()
+                            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .remove(peer_address)
                             .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                       peer_address));
@@ -191,18 +212,8 @@ where
                         // it faster.
                         info!("peer_loop got NewBlockFromMiner message from main");
                         let new_block_height = block.height;
-                        {
-                            let latest_block_height = state.latest_block_height.lock().await;
-                            if *latest_block_height < new_block_height {
-                                peer.send(PeerMessage::Block(block)).await?;
-                                peer_state_info.highest_shared_block_height = new_block_height;
-                            }
-                        }
-                        // if new_block_height > own_state_info.highest_shared_block_height {
-                        //     peer.send(PeerMessage::Block(block)).await?;
-                        //     peer_state_info.highest_shared_block_height = new_block_height;
-                        //     own_state_info.highest_shared_block_height = new_block_height;
-                        // }
+                        peer.send(PeerMessage::Block(block)).await?;
+                        peer_state_info.highest_shared_block_height = new_block_height;
                     }
                     MainToPeerThread::Block(block) => {
                         info!("NewBlock message from main");

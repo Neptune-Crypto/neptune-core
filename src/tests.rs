@@ -15,14 +15,14 @@ use tokio_util::codec::Encoder;
 
 const UNIT_TEST_DB_DIRECTORY: &str = "neptune_unit_test_databases";
 
-fn get_peer_map() -> Arc<Mutex<HashMap<SocketAddr, Peer>>> {
-    Arc::new(Mutex::new(HashMap::new()))
+fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> {
+    Arc::new(std::sync::Mutex::new(HashMap::new()))
 }
 
 // Create databases for unit tests on disk, and return objects for them.
 // For now, we use databases on disk, but it would be nicer to use
 // something that is in-memory only.
-fn get_unit_test_database(network: Network) -> Result<Arc<Mutex<Databases>>> {
+fn get_unit_test_database(network: Network) -> Result<Arc<tokio::sync::Mutex<Databases>>> {
     let temp_dir = env::temp_dir();
     let mut path = temp_dir.to_owned();
     path.push(UNIT_TEST_DB_DIRECTORY);
@@ -39,7 +39,7 @@ fn get_unit_test_database(network: Network) -> Result<Arc<Mutex<Databases>>> {
 
     let db = initialize_databases(path.as_path(), network);
 
-    Ok(Arc::new(Mutex::new(db)))
+    Ok(Arc::new(tokio::sync::Mutex::new(db)))
 }
 
 fn get_dummy_address() -> SocketAddr {
@@ -112,7 +112,6 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
-        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
     answer_peer(
         mock,
@@ -125,7 +124,7 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     .await?;
 
     // Verify that peer map is empty after connection has been closed
-    match peer_map.lock().await.keys().len() {
+    match peer_map.lock().unwrap().keys().len() {
         0 => (),
         _ => bail!("Incorrect number of maps in peer map"),
     };
@@ -153,7 +152,6 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
-        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
 
     if let Err(_) = answer_peer(
@@ -195,7 +193,6 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
-        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
 
     if let Err(_) = answer_peer(
@@ -238,7 +235,6 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     let state = State {
         peer_map: peer_map.clone(),
         databases,
-        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     call_peer(
@@ -252,7 +248,7 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     .await?;
 
     // Verify that peer map is empty after connection has been closed
-    match peer_map.lock().await.keys().len() {
+    match peer_map.lock().unwrap().keys().len() {
         0 => (),
         _ => bail!("Incorrect number of maps in peer map"),
     };
@@ -352,13 +348,12 @@ async fn test_peer_loop_bye() -> Result<()> {
     let peer_address = get_dummy_address();
     peer_map
         .lock()
-        .await
+        .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
-        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await
@@ -370,13 +365,12 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     let peer_address = get_dummy_address();
     peer_map
         .lock()
-        .await
+        .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
-        latest_block_height: Arc::new(Mutex::new(BlockHeight::from(0))),
     };
 
     let mock = Mock::new(vec![

@@ -8,11 +8,22 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::Mutex;
 
 use crate::big_array::BigArray;
 use crate::database::model::Databases;
 use crate::peer::Peer;
+
+#[derive(Clone, Copy, Debug)]
+pub struct DatabaseUnit();
+impl Key for DatabaseUnit {
+    fn from_u8(_key: &[u8]) -> Self {
+        DatabaseUnit()
+    }
+
+    fn as_slice<T, F: Fn(&[u8]) -> T>(&self, f: F) -> T {
+        f(&[])
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockHash([u8; 32]);
@@ -93,11 +104,22 @@ impl Display for BlockHeight {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatestBlockInfo {
+    pub height: BlockHeight,
+    pub hash: BlockHash,
+}
+
+impl LatestBlockInfo {
+    pub fn new(hash: BlockHash, height: BlockHeight) -> Self {
+        LatestBlockInfo { hash, height }
+    }
+}
+
 #[derive(Debug)]
 pub struct State {
-    pub peer_map: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
-    pub databases: Arc<Mutex<Databases>>,
-    pub latest_block_height: Arc<Mutex<BlockHeight>>,
+    pub peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>>,
+    pub databases: Arc<tokio::sync::Mutex<Databases>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

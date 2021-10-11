@@ -19,8 +19,8 @@ use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions, WriteOptions};
 use model::{
-    BlockHash, BlockHeight, FromMinerToMain, HandshakeData, MainToPeerThread, PeerMessage,
-    PeerThreadToMain, State, ToMiner,
+    BlockHash, BlockHeight, DatabaseUnit, FromMinerToMain, HandshakeData, LatestBlockInfo,
+    MainToPeerThread, PeerMessage, PeerThreadToMain, State, ToMiner,
 };
 use peer::Peer;
 use peer_loop::peer_loop;
@@ -34,7 +34,7 @@ use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::select;
-use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
 use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -48,6 +48,7 @@ const MINER_CHANNEL_CAPACITY: usize = 3;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
 const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
+const LATEST_BLOCK_DB_NAME: &str = "latest";
 
 fn get_database_root_path() -> Result<PathBuf> {
     let data_home = if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
@@ -73,8 +74,10 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
 
     let mut block_height_to_hash_path = path.to_owned();
     block_height_to_hash_path.push(BLOCK_HEIGHT_TO_HASH_DB_NAME);
-    let mut block_hash_to_block_path = path;
+    let mut block_hash_to_block_path = path.to_owned();
     block_hash_to_block_path.push(BLOCK_HASH_TO_BLOCK_DB_NAME);
+    let mut latest_path = path;
+    latest_path.push(LATEST_BLOCK_DB_NAME);
 
     let mut hash_options = Options::new();
     hash_options.create_if_missing = true;
@@ -102,9 +105,20 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
             }
         };
 
+    let mut latest_options = Options::new();
+    latest_options.create_if_missing = true;
+    let latest_block: Database<DatabaseUnit> =
+        match Database::open(latest_path.as_path(), latest_options) {
+            Ok(db) => db,
+            Err(e) => {
+                panic!("failed to open {} database: {:?}", LATEST_BLOCK_DB_NAME, e)
+            }
+        };
+
     Databases {
         block_hash_to_block,
         block_height_to_hash,
+        latest_block,
     }
 }
 
@@ -121,8 +135,9 @@ pub async fn initialize(
     let root_path = path_buf.as_path();
     debug!("Database root path is {:?}", root_path);
 
-    let databases: Arc<Mutex<Databases>> =
-        Arc::new(Mutex::new(initialize_databases(root_path, network)));
+    let databases: Arc<tokio::sync::Mutex<Databases>> = Arc::new(tokio::sync::Mutex::new(
+        initialize_databases(root_path, network),
+    ));
 
     let write_opts = WriteOptions::new();
     let block_height_0 = BlockHeight::from(0);
@@ -154,8 +169,7 @@ pub async fn initialize(
         .await
         .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", listen_addr, port))?;
 
-    let peer_map = Arc::new(Mutex::new(HashMap::new()));
-    let latest_block_height = Arc::new(Mutex::new(BlockHeight::from(0))); // TODO: Set from database
+    let peer_map = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
     // Construct the broadcast channel to communicate from the main thread to peer threads
     let (peer_broadcast_tx, _peer_broadcast_rx) =
@@ -176,11 +190,9 @@ pub async fn initialize(
     for peer in peers {
         let peer_map_thread = Arc::clone(&peer_map);
         let databases_thread = Arc::clone(&databases);
-        let latest_block_height_tread = Arc::clone(&latest_block_height);
         let state = State {
             peer_map: peer_map_thread,
             databases: databases_thread,
-            latest_block_height: latest_block_height_tread,
         };
         let peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             peer_broadcast_tx.subscribe();
@@ -217,11 +229,9 @@ pub async fn initialize(
             Ok((stream, _)) = listener.accept() => {
                 let peer_map_thread = Arc::clone(&peer_map);
                 let databases_thread = Arc::clone(&databases);
-                let latest_block_height_tread = Arc::clone(&latest_block_height);
                 let state = State {
                     peer_map: peer_map_thread,
                     databases: databases_thread,
-                    latest_block_height: latest_block_height_tread,
                 };
                 let from_main_rx_clone: broadcast::Receiver<MainToPeerThread> = peer_broadcast_tx.subscribe();
                 let to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = to_main_tx.clone();
@@ -247,11 +257,12 @@ pub async fn initialize(
                         // Store block in database
                         {
                             let db = databases.lock().await;
-                            let write_opts = WriteOptions::new();
                             let block_hash_raw: [u8; 32] = block.hash.into();
-                            db.block_hash_to_block.put(write_opts, block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
-                            db.block_height_to_hash.put(write_opts, block.height, &block_hash_raw)?;
-                            debug!("Storing block {:?} in database", block.hash);
+                            db.block_hash_to_block.put(WriteOptions::new(), block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
+                            db.block_height_to_hash.put(WriteOptions::new(), block.height, &block_hash_raw)?;
+                            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
+                            db.latest_block.put(WriteOptions::new(), DatabaseUnit(), &bincode::serialize(&latest_block_info).expect("Failed to serialize block"))?;
+                            debug!("Storing block {:?} in database", block_hash_raw);
                         }
 
                         peer_broadcast_tx.send(MainToPeerThread::Block(block))
@@ -273,10 +284,11 @@ pub async fn initialize(
                         // Store block in database
                         {
                             let db = databases.lock().await;
-                            let write_opts = WriteOptions::new();
                             let block_hash_raw: [u8; 32] = block.hash.into();
-                            db.block_hash_to_block.put(write_opts, block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
-                            db.block_height_to_hash.put(write_opts, block.height, &block_hash_raw)?;
+                            db.block_hash_to_block.put(WriteOptions::new(), block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
+                            db.block_height_to_hash.put(WriteOptions::new(), block.height, &block_hash_raw)?;
+                            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
+                            db.latest_block.put(WriteOptions::new(), DatabaseUnit(), &bincode::serialize(&latest_block_info).expect("Failed to serialize block"))?;
                         }
                     }
                 }
@@ -378,7 +390,7 @@ where
     state
         .peer_map
         .lock()
-        .await
+        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
         .entry(peer_address)
         .or_insert(new_peer);
 
@@ -447,7 +459,7 @@ where
     state
         .peer_map
         .lock()
-        .await
+        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
         .entry(peer_address)
         .or_insert(new_peer);
 
