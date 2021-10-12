@@ -6,6 +6,7 @@ use futures::stream;
 use futures::task::{Context, Poll};
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, Rng};
+use std::collections::hash_map::RandomState;
 use std::env;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -80,6 +81,37 @@ fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
+fn get_dummy_setup(
+    network: Network,
+) -> Result<(
+    broadcast::Sender<MainToPeerThread>,
+    broadcast::Receiver<MainToPeerThread>,
+    mpsc::Sender<PeerThreadToMain>,
+    mpsc::Receiver<PeerThreadToMain>,
+    State,
+    Arc<std::sync::Mutex<HashMap<SocketAddr, Peer, RandomState>>>,
+)> {
+    let (peer_broadcast_tx, mut _from_main_rx1) =
+        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
+    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+    let peer_map = get_peer_map();
+    let databases = get_unit_test_database(network)?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
+    Ok((
+        peer_broadcast_tx,
+        from_main_rx_clone,
+        to_main_tx,
+        _to_main_rx1,
+        state,
+        peer_map,
+    ))
+}
+
 #[tokio::test]
 async fn test_incoming_connection_succeed() -> Result<()> {
     // This builds a mock object which expects to have a certain
@@ -102,25 +134,15 @@ async fn test_incoming_connection_succeed() -> Result<()> {
         )))?)
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
-
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(network)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(network)?;
     main_loop::answer_peer(
         mock,
         state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
-        get_dummy_handshake_data(Network::Main),
+        get_dummy_handshake_data(network),
     )
     .await?;
 
@@ -143,18 +165,8 @@ async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
         )))?)
         .build();
 
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(network)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
-
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+        get_dummy_setup(network)?;
     if let Err(_) = main_loop::answer_peer(
         mock,
         state,
@@ -184,18 +196,8 @@ async fn test_incoming_connection_fail_bad_network() -> Result<()> {
         )))?)
         .build();
 
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(Network::Main)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
-
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+        get_dummy_setup(Network::Main)?;
     if let Err(_) = main_loop::answer_peer(
         mock,
         state,
@@ -227,17 +229,8 @@ async fn test_outgoing_connection_succeed() -> Result<()> {
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
 
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(network)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(Network::Main)?;
     call_peer(
         mock,
         state,
