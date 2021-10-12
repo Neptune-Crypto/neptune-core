@@ -1,13 +1,13 @@
 use super::blockchain::Block;
 
 #[derive(Clone, Debug)]
-pub enum ToMiner {
+pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
 }
 
 #[derive(Clone, Debug)]
-pub enum FromMinerToMain {
+pub enum MinerToMain {
     NewBlock(Box<Block>),
 }
 

@@ -35,7 +35,7 @@ use tokio_serde::SymmetricallyFramed;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::models::channel::{FromMinerToMain, MainToPeerThread, PeerThreadToMain, ToMiner};
+use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::{HandshakeData, PeerMessage};
 use crate::models::shared::LatestBlockInfo;
 
@@ -165,11 +165,12 @@ pub async fn initialize(
     let peer_map = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
     // Construct the broadcast channel to communicate from the main thread to peer threads
-    let (peer_broadcast_tx, _peer_broadcast_rx) =
+    let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
         broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
 
     // Add the MPSC (multi-producer, single consumer) channel for peer-thread-to-main communication
-    let (to_main_tx, mut to_main_rx) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
+    let (peer_thread_to_main_tx, mut peer_thread_to_main_rx) =
+        mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
 
     // Create handshake data
     let listen_addr_socket = SocketAddr::new(listen_addr, port);
@@ -188,16 +189,17 @@ pub async fn initialize(
             peer_map: peer_map_thread,
             databases: databases_thread,
         };
-        let peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
-            peer_broadcast_tx.subscribe();
-        let to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = to_main_tx.clone();
+        let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
+            main_to_peer_broadcast_tx.subscribe();
+        let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> =
+            peer_thread_to_main_tx.clone();
         let own_handshake_data_clone = own_handshake_data.clone();
         tokio::spawn(async move {
             call_peer_wrapper(
                 peer,
                 state,
-                peer_broadcast_rx_clone,
-                to_main_tx_clone,
+                main_to_peer_broadcast_rx_clone,
+                peer_thread_to_main_tx_clone,
                 &own_handshake_data_clone,
             )
             .await;
@@ -205,12 +207,12 @@ pub async fn initialize(
     }
 
     // Start handling of mining
-    let (from_miner_tx, mut from_miner_rx) =
-        mpsc::channel::<FromMinerToMain>(MINER_CHANNEL_CAPACITY);
-    let (to_miner_tx, to_miner_rx) = watch::channel::<ToMiner>(ToMiner::Empty);
+    let (miner_to_main_tx, mut miner_to_main_rx) =
+        mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
+    let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     if mine && network == Network::RegTest {
         tokio::spawn(async move {
-            mine::mock_regtest_mine(to_miner_rx, from_miner_tx, latest_block_info)
+            mine::mock_regtest_mine(main_to_miner_rx, miner_to_main_tx, latest_block_info)
                 .await
                 .expect("Error in mining thread");
         });
@@ -227,39 +229,39 @@ pub async fn initialize(
                     peer_map: peer_map_thread,
                     databases: databases_thread,
                 };
-                let from_main_rx_clone: broadcast::Receiver<MainToPeerThread> = peer_broadcast_tx.subscribe();
-                let to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = to_main_tx.clone();
+                let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = main_to_peer_broadcast_tx.subscribe();
+                let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = peer_thread_to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();
                 let own_handshake_data_clone = own_handshake_data.clone();
                 tokio::spawn(async move {
-                    match answer_peer(stream, state, peer_address, from_main_rx_clone, to_main_tx_clone, own_handshake_data_clone).await {
+                    match answer_peer(stream, state, peer_address, main_to_peer_broadcast_rx_clone, peer_thread_to_main_tx_clone, own_handshake_data_clone).await {
                         Ok(()) => (),
                         Err(err) => error!("Got error: {:?}", err),
                     }
                 });
             }
-            Some(msg) = to_main_rx.recv() => {
+            Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
                 match msg {
                     PeerThreadToMain::NewBlock(block) => {
                         // When receiving a block from a peer thread, we assume it is verified.
                         // It is the peer thread's responsibility to verify the block.
                         if mine {
-                            to_miner_tx.send(ToMiner::NewBlock(block.clone()))?;
+                            main_to_miner_tx.send(MainToMiner::NewBlock(block.clone()))?;
                         }
 
                         // Store block in database
+                        let block_hash_raw: [u8; 32] = block.hash.into();
+                        let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
                         {
                             let db = databases.lock().await;
-                            let block_hash_raw: [u8; 32] = block.hash.into();
                             db.block_hash_to_block.put(WriteOptions::new(), block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
                             db.block_height_to_hash.put(WriteOptions::new(), block.height, &block_hash_raw)?;
-                            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
                             db.latest_block.put(WriteOptions::new(), DatabaseUnit(), &bincode::serialize(&latest_block_info).expect("Failed to serialize block"))?;
                             debug!("Storing block {:?} in database", block_hash_raw);
                         }
 
-                        peer_broadcast_tx.send(MainToPeerThread::Block(block))
+                        main_to_peer_broadcast_tx.send(MainToPeerThread::Block(block))
                             .expect("Peer handler broadcast was closed. This should never happen");
                     }
                     PeerThreadToMain::NewTransaction(_txs) => {
@@ -267,21 +269,21 @@ pub async fn initialize(
                     }
                 }
             }
-            Some(main_message) = from_miner_rx.recv() => {
+            Some(main_message) = miner_to_main_rx.recv() => {
                 match main_message {
-                    FromMinerToMain::NewBlock(block) => {
-                        // When receiving a block from the miner threa, we assume it is valid
+                    MinerToMain::NewBlock(block) => {
+                        // When receiving a block from the miner thread, we assume it is valid
                         info!("Miner found new block: {}", block.height);
-                        peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block.clone()))
+                        main_to_peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block.clone()))
                             .expect("Peer handler broadcast channel prematurely closed. This should never happen.");
 
                         // Store block in database
+                        let block_hash_raw: [u8; 32] = block.hash.into();
+                        let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
                         {
                             let db = databases.lock().await;
-                            let block_hash_raw: [u8; 32] = block.hash.into();
                             db.block_hash_to_block.put(WriteOptions::new(), block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
                             db.block_height_to_hash.put(WriteOptions::new(), block.height, &block_hash_raw)?;
-                            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
                             db.latest_block.put(WriteOptions::new(), DatabaseUnit(), &bincode::serialize(&latest_block_info).expect("Failed to serialize block"))?;
                         }
                     }
@@ -296,8 +298,8 @@ pub async fn initialize(
 pub async fn call_peer_wrapper(
     peer_address: std::net::SocketAddr,
     state: State,
-    from_main_rx: broadcast::Receiver<MainToPeerThread>,
-    to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
+    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: &HandshakeData,
 ) {
     debug!("Attempting to initiate connection");
@@ -310,8 +312,8 @@ pub async fn call_peer_wrapper(
                 stream,
                 state,
                 peer_address,
-                from_main_rx,
-                to_main_tx,
+                main_to_peer_thread_rx,
+                peer_thread_to_main_tx,
                 own_handshake_data,
             )
             .await
@@ -330,8 +332,8 @@ pub async fn call_peer<S>(
     stream: S,
     state: State,
     peer_address: std::net::SocketAddr,
-    from_main_rx: broadcast::Receiver<MainToPeerThread>,
-    to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
+    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: &HandshakeData,
 ) -> Result<()>
 where
@@ -389,7 +391,14 @@ where
         .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(peer, from_main_rx, to_main_tx, state, &peer_address).await?;
+    peer_loop(
+        peer,
+        main_to_peer_thread_rx,
+        peer_thread_to_main_tx,
+        state,
+        &peer_address,
+    )
+    .await?;
 
     Ok(())
 }
@@ -399,8 +408,8 @@ pub async fn answer_peer<S>(
     stream: S,
     state: State,
     peer_address: std::net::SocketAddr,
-    from_main_rx: broadcast::Receiver<MainToPeerThread>,
-    to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
+    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: HandshakeData,
 ) -> Result<()>
 where
@@ -458,7 +467,14 @@ where
         .or_insert(new_peer);
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    peer_loop(peer, from_main_rx, to_main_tx, state, &peer_address).await?;
+    peer_loop(
+        peer,
+        main_to_peer_thread_rx,
+        peer_thread_to_main_tx,
+        state,
+        &peer_address,
+    )
+    .await?;
 
     Ok(())
 }
