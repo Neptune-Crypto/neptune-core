@@ -114,7 +114,7 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
         peer_map: peer_map.clone(),
         databases,
     };
-    answer_peer(
+    main_loop::answer_peer(
         mock,
         state,
         get_dummy_address(),
@@ -155,7 +155,7 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
         databases,
     };
 
-    if let Err(_) = answer_peer(
+    if let Err(_) = main_loop::answer_peer(
         mock,
         state,
         get_dummy_address(),
@@ -196,7 +196,7 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
         databases,
     };
 
-    if let Err(_) = answer_peer(
+    if let Err(_) = main_loop::answer_peer(
         mock,
         state,
         get_dummy_address(),
@@ -357,7 +357,7 @@ async fn test_peer_loop_bye() -> Result<()> {
         databases,
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
-    peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await
 }
 
 #[tokio::test]
@@ -384,7 +384,7 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
     Ok(())
 }
