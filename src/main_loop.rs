@@ -99,6 +99,93 @@ where
     Ok(())
 }
 
+async fn handle_miner_thread_message(
+    msg: MinerToMain,
+    main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
+    databases: &Arc<tokio::sync::Mutex<Databases>>,
+) -> Result<()> {
+    match msg {
+        MinerToMain::NewBlock(block) => {
+            // When receiving a block from the miner thread, we assume it is valid
+            info!("Miner found new block: {}", block.height);
+            main_to_peer_broadcast_tx
+                .send(MainToPeerThread::BlockFromMiner(block.clone()))
+                .expect(
+                    "Peer handler broadcast channel prematurely closed. This should never happen.",
+                );
+
+            // Store block in database
+            let block_hash_raw: [u8; 32] = block.hash.into();
+            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
+            {
+                let db = databases.lock().await;
+                db.block_hash_to_block.put(
+                    WriteOptions::new(),
+                    block.hash,
+                    &bincode::serialize(&block).expect("Failed to serialize block"),
+                )?;
+                db.block_height_to_hash
+                    .put(WriteOptions::new(), block.height, &block_hash_raw)?;
+                db.latest_block.put(
+                    WriteOptions::new(),
+                    DatabaseUnit(),
+                    &bincode::serialize(&latest_block_info).expect("Failed to serialize block"),
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_peer_thread_message(
+    msg: PeerThreadToMain,
+    mine: bool,
+    main_to_miner_tx: &watch::Sender<MainToMiner>,
+    databases: &Arc<tokio::sync::Mutex<Databases>>,
+    main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
+) -> Result<()> {
+    info!("Received message sent to main thread.");
+    match msg {
+        PeerThreadToMain::NewBlock(block) => {
+            // When receiving a block from a peer thread, we assume it is verified.
+            // It is the peer thread's responsibility to verify the block.
+            if mine {
+                main_to_miner_tx.send(MainToMiner::NewBlock(block.clone()))?;
+            }
+
+            // Store block in database
+            let block_hash_raw: [u8; 32] = block.hash.into();
+            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
+            {
+                let db = databases.lock().await;
+                db.block_hash_to_block.put(
+                    WriteOptions::new(),
+                    block.hash,
+                    &bincode::serialize(&block).expect("Failed to serialize block"),
+                )?;
+                db.block_height_to_hash
+                    .put(WriteOptions::new(), block.height, &block_hash_raw)?;
+                db.latest_block.put(
+                    WriteOptions::new(),
+                    DatabaseUnit(),
+                    &bincode::serialize(&latest_block_info).expect("Failed to serialize block"),
+                )?;
+                debug!("Storing block {:?} in database", block_hash_raw);
+            }
+
+            main_to_peer_broadcast_tx
+                .send(MainToPeerThread::Block(block))
+                .expect("Peer handler broadcast was closed. This should never happen");
+        }
+        PeerThreadToMain::NewTransaction(_txs) => {
+            error!("Unimplemented txs msg received");
+        }
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn main_loop(
     listener: TcpListener,
@@ -136,52 +223,10 @@ pub async fn main_loop(
             }
             Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
-                match msg {
-                    PeerThreadToMain::NewBlock(block) => {
-                        // When receiving a block from a peer thread, we assume it is verified.
-                        // It is the peer thread's responsibility to verify the block.
-                        if mine {
-                            main_to_miner_tx.send(MainToMiner::NewBlock(block.clone()))?;
-                        }
-
-                        // Store block in database
-                        let block_hash_raw: [u8; 32] = block.hash.into();
-                        let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
-                        {
-                            let db = databases.lock().await;
-                            db.block_hash_to_block.put(WriteOptions::new(), block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
-                            db.block_height_to_hash.put(WriteOptions::new(), block.height, &block_hash_raw)?;
-                            db.latest_block.put(WriteOptions::new(), DatabaseUnit(), &bincode::serialize(&latest_block_info).expect("Failed to serialize block"))?;
-                            debug!("Storing block {:?} in database", block_hash_raw);
-                        }
-
-                        main_to_peer_broadcast_tx.send(MainToPeerThread::Block(block))
-                            .expect("Peer handler broadcast was closed. This should never happen");
-                    }
-                    PeerThreadToMain::NewTransaction(_txs) => {
-                        error!("Unimplemented txs msg received");
-                    }
-                }
+                handle_peer_thread_message(msg, mine, &main_to_miner_tx, &databases, &main_to_peer_broadcast_tx).await?
             }
             Some(main_message) = miner_to_main_rx.recv() => {
-                match main_message {
-                    MinerToMain::NewBlock(block) => {
-                        // When receiving a block from the miner thread, we assume it is valid
-                        info!("Miner found new block: {}", block.height);
-                        main_to_peer_broadcast_tx.send(MainToPeerThread::BlockFromMiner(block.clone()))
-                            .expect("Peer handler broadcast channel prematurely closed. This should never happen.");
-
-                        // Store block in database
-                        let block_hash_raw: [u8; 32] = block.hash.into();
-                        let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
-                        {
-                            let db = databases.lock().await;
-                            db.block_hash_to_block.put(WriteOptions::new(), block.hash, &bincode::serialize(&block).expect("Failed to serialize block"))?;
-                            db.block_height_to_hash.put(WriteOptions::new(), block.height, &block_hash_raw)?;
-                            db.latest_block.put(WriteOptions::new(), DatabaseUnit(), &bincode::serialize(&latest_block_info).expect("Failed to serialize block"))?;
-                        }
-                    }
-                }
+                handle_miner_thread_message(main_message, &main_to_peer_broadcast_tx, &databases).await?
             }
             // TODO: Add signal::ctrl_c/shutdown handling here
         }
