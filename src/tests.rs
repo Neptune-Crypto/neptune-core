@@ -81,7 +81,7 @@ fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
 }
 
 #[tokio::test]
-async fn test_incoming_transaction_succeed() -> Result<()> {
+async fn test_incoming_connection_succeed() -> Result<()> {
     // This builds a mock object which expects to have a certain
     // sequence of methods called on it: First it expects to have
     // the `MAGIC_STRING_REQUEST` and then the `MAGIC_STRING_RESPONSE`
@@ -134,7 +134,7 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
+async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
     let network = Network::Main;
     let mock = Builder::new()
         .read(&to_bytes(&PeerMessage::Handshake((
@@ -172,7 +172,7 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
+async fn test_incoming_connection_fail_bad_network() -> Result<()> {
     let mock = Builder::new()
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_REQUEST.to_vec(),
@@ -213,7 +213,7 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_outgoing_transaction_succeed() -> Result<()> {
+async fn test_outgoing_connection_succeed() -> Result<()> {
     let network = Network::Main;
     let mock = Builder::new()
         .write(&to_bytes(&PeerMessage::Handshake((
