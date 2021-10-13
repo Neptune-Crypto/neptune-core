@@ -1,9 +1,10 @@
 use super::*;
-
+use crate::models::blockchain::{Block, Transaction, Utxo};
 use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
+use leveldb::options::WriteOptions;
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, Rng};
 use std::collections::hash_map::RandomState;
@@ -331,6 +332,42 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
+/// Return a fake block with a random hash
+fn make_mock_block(height: u64) -> Block {
+    let utxo_pol = [0u32; 2048];
+    let utxo = Utxo {
+        pol0: utxo_pol,
+        pol1: utxo_pol,
+    };
+
+    let tx = Transaction {
+        input: vec![utxo.clone()],
+        output: vec![utxo.clone()],
+        public_scripts: vec![],
+        proof: vec![],
+    };
+    let block_hash_raw: [u8; 32] = rand::random();
+    Block {
+        version_bits: [0u8; 4],
+        timestamp: SystemTime::now(),
+        height: BlockHeight::from(height),
+        nonce: [0u8; 32],
+        predecessor: BlockHash::from([0u8; 32]),
+        predecessor_proof: vec![],
+        accumulated_pow_line: 0u128,
+        accumulated_pow_family: 0u128,
+        uncles: vec![],
+        target_difficulty: 0u128,
+        retarget_proof: vec![],
+        transaction: tx,
+        mixed_edges: vec![],
+        mix_proof: vec![],
+        edge_mmra: utxo,
+        edge_mmra_update: vec![],
+        hash: BlockHash::from(block_hash_raw),
+    }
+}
+
 #[tokio::test]
 async fn test_peer_loop_bye() -> Result<()> {
     let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
@@ -350,7 +387,13 @@ async fn test_peer_loop_bye() -> Result<()> {
         databases,
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -379,5 +422,113 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
-    Ok(())
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
+    let peer_map = get_peer_map();
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let databases = get_unit_test_database(Network::Main)?;
+
+    let block_14 = make_mock_block(14);
+    let latest_block_info_14 = LatestBlockInfo::new(block_14.hash, block_14.height);
+    let block_hash_raw: [u8; 32] = block_14.hash.into();
+    {
+        let dbs = databases.lock().await;
+        dbs.latest_block.put(
+            WriteOptions::new(),
+            DatabaseUnit(),
+            &bincode::serialize(&latest_block_info_14)?,
+        )?;
+        dbs.block_hash_to_block.put(
+            WriteOptions::new(),
+            block_14.hash,
+            &bincode::serialize(&block_14)?,
+        )?;
+        dbs.block_height_to_hash.put(
+            WriteOptions::new(),
+            block_14.height,
+            &bincode::serialize(&block_hash_raw)?,
+        )?;
+    }
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases: databases,
+    };
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_14))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
+    let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    // Verify that no message was sent to main loop
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(_block)) => {
+            bail!("Block notification must not be sent for old block")
+        }
+        Some(msg) => bail!(
+            "No message must be sent to main loop when receiving old block. Got {:?}",
+            msg
+        ),
+        None => (),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
+    let peer_map = get_peer_map();
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let databases = get_unit_test_database(Network::Main)?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(make_mock_block(0)))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
+    let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    // Verify that a message was sent to `main_loop`?
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(_block)) => (),
+        _ => bail!("Did not find msg sent to main thread"),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
 }
