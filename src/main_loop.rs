@@ -5,7 +5,7 @@ use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use leveldb::kv::KV;
-use leveldb::options::WriteOptions;
+use leveldb::options::{ReadOptions, WriteOptions};
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -107,6 +107,8 @@ async fn handle_miner_thread_message(
     match msg {
         MinerToMain::NewBlock(block) => {
             // When receiving a block from the miner thread, we assume it is valid
+            // and we assume it is the longest chain even though we could have received
+            // a block from a peer thread before this event is triggered.
             info!("Miner found new block: {}", block.height);
             main_to_peer_broadcast_tx
                 .send(MainToPeerThread::BlockFromMiner(block.clone()))
@@ -148,17 +150,37 @@ async fn handle_peer_thread_message(
     info!("Received message sent to main thread.");
     match msg {
         PeerThreadToMain::NewBlock(block) => {
-            // When receiving a block from a peer thread, we assume it is verified.
-            // It is the peer thread's responsibility to verify the block.
-            if mine {
-                main_to_miner_tx.send(MainToMiner::NewBlock(block.clone()))?;
-            }
-
-            // Store block in database
-            let block_hash_raw: [u8; 32] = block.hash.into();
-            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
             {
                 let db = databases.lock().await;
+                let own_block_info = db
+                    .latest_block
+                    .get(ReadOptions::new(), DatabaseUnit())
+                    .expect("Failed to read from 'latest' database");
+
+                // If block is not new, abort
+                // Block could have been new when peer thread had a lock on the database
+                // but no longer be new now, so we have to check again
+                let block_is_new = match own_block_info {
+                    None => true,
+                    Some(bytes) => {
+                        let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
+                        own_latest_block_info.height < block.height
+                    }
+                };
+                if !block_is_new {
+                    return Ok(());
+                }
+
+                // When receiving a block from a peer thread, we assume it is verified.
+                // It is the peer thread's responsibility to verify the block.
+                if mine {
+                    main_to_miner_tx.send(MainToMiner::NewBlock(block.clone()))?;
+                }
+
+                // Store block in database
+                let block_hash_raw: [u8; 32] = block.hash.into();
+                let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
+
                 db.block_hash_to_block.put(
                     WriteOptions::new(),
                     block.hash,
