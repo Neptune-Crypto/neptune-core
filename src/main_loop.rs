@@ -24,6 +24,32 @@ use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThr
 use crate::models::peer::{HandshakeData, PeerMessage};
 use crate::models::shared::LatestBlockInfo;
 
+pub fn get_connection_status(
+    max_peers: u16,
+    state: &State,
+    own_handshake: &HandshakeData,
+    other_handshake: &HandshakeData,
+) -> ConnectionStatus {
+    let pm = state.peer_map.lock().unwrap();
+    if (max_peers as usize) <= pm.len() {
+        return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
+    }
+
+    if pm
+        .values()
+        .any(|peer| peer.instance_id == other_handshake.instance_id)
+    {
+        return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
+    }
+
+    if own_handshake.instance_id == other_handshake.instance_id {
+        return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
+    }
+
+    println!("ConnectionStatus::Accepted");
+    ConnectionStatus::Accepted
+}
+
 #[instrument]
 pub async fn answer_peer<S>(
     stream: S,
@@ -67,12 +93,8 @@ where
             }
 
             // Check if connection is allowed
-            let connected_peers_count = state.peer_map.lock().unwrap().len();
-            let connection_status = if connected_peers_count >= max_peers as usize {
-                ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded)
-            } else {
-                ConnectionStatus::Accepted
-            };
+            let connection_status =
+                get_connection_status(max_peers, &state, &own_handshake_data, &hsd);
 
             peer.send(PeerMessage::ConnectionStatus(connection_status))
                 .await?;
@@ -93,6 +115,7 @@ where
         address: peer_address,
         banscore: 0,
         inbound: true,
+        instance_id: peer_handshake_data.instance_id,
         last_seen: SystemTime::now(),
         version: peer_handshake_data.version,
     };

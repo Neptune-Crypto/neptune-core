@@ -172,6 +172,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         latest_block_info,
         listen_address: Some(listen_addr_socket),
         network: cli_args.network,
+        instance_id: rand::random(),
         version: VERSION.to_string(),
     };
 
@@ -323,6 +324,7 @@ where
         address: peer_address,
         banscore: 0,
         inbound: false,
+        instance_id: peer_handshake_data.instance_id,
         last_seen: SystemTime::now(),
         version: peer_handshake_data.version,
     };

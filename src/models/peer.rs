@@ -10,6 +10,7 @@ use std::{net::SocketAddr, time::SystemTime};
 pub struct Peer {
     pub address: SocketAddr,
     pub banscore: u8,
+    pub instance_id: u128,
     pub inbound: bool,
     pub last_seen: SystemTime,
     pub version: String,
@@ -20,6 +21,7 @@ pub struct HandshakeData {
     pub latest_block_info: Option<LatestBlockInfo>,
     pub listen_address: Option<SocketAddr>,
     pub network: Network,
+    pub instance_id: u128,
     pub version: String,
 }
 
@@ -42,7 +44,9 @@ impl From<Block> for PeerBlockNotification {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ConnectionRefusedReason {
+    AlreadyConnected,
     MaxPeerNumberExceeded,
+    SelfConnect,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
