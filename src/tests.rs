@@ -133,6 +133,9 @@ async fn test_incoming_connection_succeed() -> Result<()> {
             MAGIC_STRING_RESPONSE.to_vec(),
             get_dummy_handshake_data(network),
         )))?)
+        .write(&to_bytes(&PeerMessage::ConnectionStatus(
+            ConnectionStatus::Accepted,
+        ))?)
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
@@ -144,6 +147,7 @@ async fn test_incoming_connection_succeed() -> Result<()> {
         from_main_rx_clone,
         to_main_tx,
         get_dummy_handshake_data(network),
+        8,
     )
     .await?;
 
@@ -175,6 +179,7 @@ async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
         from_main_rx_clone,
         to_main_tx,
         get_dummy_handshake_data(Network::Main),
+        8,
     )
     .await
     {
@@ -206,6 +211,7 @@ async fn test_incoming_connection_fail_bad_network() -> Result<()> {
         from_main_rx_clone,
         to_main_tx,
         get_dummy_handshake_data(Network::Main),
+        8,
     )
     .await
     {
@@ -227,6 +233,9 @@ async fn test_outgoing_connection_succeed() -> Result<()> {
             MAGIC_STRING_RESPONSE.to_vec(),
             get_dummy_handshake_data(network),
         )))?)
+        .read(&to_bytes(&PeerMessage::ConnectionStatus(
+            ConnectionStatus::Accepted,
+        ))?)
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
 
@@ -249,6 +258,54 @@ async fn test_outgoing_connection_succeed() -> Result<()> {
     };
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
+    let mock = Builder::new()
+        .read(&to_bytes(&PeerMessage::Handshake((
+            MAGIC_STRING_REQUEST.to_vec(),
+            get_dummy_handshake_data(Network::Main),
+        )))?)
+        .write(&to_bytes(&PeerMessage::Handshake((
+            MAGIC_STRING_RESPONSE.to_vec(),
+            get_dummy_handshake_data(Network::Main),
+        )))?)
+        .build();
+
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _) =
+        get_dummy_setup(Network::Main)?;
+    let peer_map = get_peer_map();
+    let peer_address0 = get_dummy_address();
+    let peer_address1 = std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address0, get_dummy_peer(peer_address0));
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address1, get_dummy_peer(peer_address1));
+    let state = State {
+        peer_map,
+        databases: get_unit_test_database(Network::Main)?,
+    };
+
+    if let Err(_) = main_loop::answer_peer(
+        mock,
+        state,
+        get_dummy_address(),
+        from_main_rx_clone,
+        to_main_tx,
+        get_dummy_handshake_data(Network::Main),
+        2,
+    )
+    .await
+    {
+        Ok(())
+    } else {
+        bail!("Expected error from run")
+    }
 }
 
 pin_project! {

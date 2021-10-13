@@ -19,12 +19,5 @@ pub async fn main(args: neptune_core::config_models::cli_args::Args) -> Result<(
         .map_err(|_err| eprintln!("Unable to set global default subscriber"))
         .expect("Failed to set log subscriber");
 
-    neptune_core::initialize(
-        args.listen_addr,
-        args.port,
-        args.peers,
-        args.network,
-        args.mine,
-    )
-    .await
+    neptune_core::initialize(args).await
 }

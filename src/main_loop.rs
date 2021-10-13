@@ -1,5 +1,6 @@
+use crate::config_models::cli_args;
 use crate::models::database::{DatabaseUnit, Databases};
-use crate::models::peer::Peer;
+use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer};
 use crate::models::State;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
@@ -31,6 +32,7 @@ pub async fn answer_peer<S>(
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: HandshakeData,
+    max_peers: u16,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
@@ -63,6 +65,21 @@ where
                     own_handshake_data.network,
                 );
             }
+
+            // Check if connection is allowed
+            let connected_peers_count = state.peer_map.lock().unwrap().len();
+            let connection_status = if connected_peers_count >= max_peers as usize {
+                ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded)
+            } else {
+                ConnectionStatus::Accepted
+            };
+
+            peer.send(PeerMessage::ConnectionStatus(connection_status))
+                .await?;
+            if let ConnectionStatus::Refused(refused_reason) = connection_status {
+                bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
+            }
+
             debug!("Got correct magic value request!");
             hsd
         }
@@ -218,7 +235,7 @@ pub async fn main_loop(
     mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
     own_handshake_data: HandshakeData,
     mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
-    mine: bool,
+    cli_args: cli_args::Args,
     main_to_miner_tx: watch::Sender<MainToMiner>,
 ) -> Result<()> {
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
@@ -236,16 +253,26 @@ pub async fn main_loop(
                 let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = peer_thread_to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();
                 let own_handshake_data_clone = own_handshake_data.clone();
+                let max_peers = cli_args.max_peers;
                 tokio::spawn(async move {
-                    match answer_peer(stream, state, peer_address, main_to_peer_broadcast_rx_clone, peer_thread_to_main_tx_clone, own_handshake_data_clone).await {
+                    match answer_peer(
+                        stream,
+                        state,
+                        peer_address,
+                        main_to_peer_broadcast_rx_clone,
+                        peer_thread_to_main_tx_clone,
+                        own_handshake_data_clone,
+                        max_peers
+                    ).await {
                         Ok(()) => (),
                         Err(err) => error!("Got error: {:?}", err),
                     }
                 });
+
             }
             Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
-                handle_peer_thread_message(msg, mine, &main_to_miner_tx, &databases, &main_to_peer_broadcast_tx).await?
+                handle_peer_thread_message(msg, cli_args.mine, &main_to_miner_tx, &databases, &main_to_peer_broadcast_tx).await?
             }
             Some(main_message) = miner_to_main_rx.recv() => {
                 handle_miner_thread_message(main_message, &main_to_peer_broadcast_tx, &databases).await?

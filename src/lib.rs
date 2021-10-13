@@ -8,6 +8,7 @@ mod peer_loop;
 mod tests;
 
 use anyhow::{bail, Context, Result};
+use config_models::cli_args;
 use config_models::network::Network;
 use directories::ProjectDirs;
 use futures::sink::SinkExt;
@@ -22,7 +23,7 @@ use models::State;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::Unpin;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -35,7 +36,7 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
-use crate::models::peer::{HandshakeData, PeerMessage};
+use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage};
 use crate::models::shared::LatestBlockInfo;
 
 /// Magic string to ensure other program is Neptune Core
@@ -121,20 +122,14 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
 }
 
 #[instrument]
-pub async fn initialize(
-    listen_addr: IpAddr,
-    port: u16,
-    peers: Vec<SocketAddr>,
-    network: Network,
-    mine: bool,
-) -> Result<()> {
+pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Connect to database
     let path_buf = get_database_root_path()?;
     let root_path = path_buf.as_path();
     debug!("Database root path is {:?}", root_path);
 
     let databases: Arc<tokio::sync::Mutex<Databases>> = Arc::new(tokio::sync::Mutex::new(
-        initialize_databases(root_path, network),
+        initialize_databases(root_path, cli_args.network),
     ));
 
     // Get latest block height
@@ -157,9 +152,9 @@ pub async fn initialize(
     }
 
     // Bind socket to port on this machine
-    let listener = TcpListener::bind((listen_addr, port))
+    let listener = TcpListener::bind((cli_args.listen_addr, cli_args.port))
         .await
-        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", listen_addr, port))?;
+        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.port))?;
 
     let peer_map = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
@@ -172,16 +167,16 @@ pub async fn initialize(
         mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
 
     // Create handshake data
-    let listen_addr_socket = SocketAddr::new(listen_addr, port);
+    let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.port);
     let own_handshake_data = HandshakeData {
         latest_block_info,
         listen_address: Some(listen_addr_socket),
-        network,
+        network: cli_args.network,
         version: VERSION.to_string(),
     };
 
     // Connect to peers
-    for peer in peers {
+    for peer in cli_args.peers.clone() {
         let peer_map_thread = Arc::clone(&peer_map);
         let databases_thread = Arc::clone(&databases);
         let state = State {
@@ -208,7 +203,7 @@ pub async fn initialize(
     // Start handling of mining
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
-    if mine && network == Network::RegTest {
+    if cli_args.mine && cli_args.network == Network::RegTest {
         tokio::spawn(async move {
             mine_loop::mock_regtest_mine(main_to_miner_rx, miner_to_main_tx, latest_block_info)
                 .await
@@ -226,7 +221,7 @@ pub async fn initialize(
         peer_thread_to_main_rx,
         own_handshake_data,
         miner_to_main_rx,
-        mine,
+        cli_args,
         main_to_miner_tx,
     )
     .await
@@ -312,6 +307,16 @@ where
             bail!("Expected magic value, got {:?}", v);
         }
     };
+
+    match peer.try_next().await? {
+        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => (),
+        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(reason))) => {
+            bail!("Connection attempt refused. Reason: {:?}", reason);
+        }
+        _ => {
+            bail!("Got invalid connection status response");
+        }
+    }
 
     // Add peer to peer map if not already there
     let new_peer = Peer {

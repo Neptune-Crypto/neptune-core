@@ -40,6 +40,17 @@ impl From<Block> for PeerBlockNotification {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum ConnectionRefusedReason {
+    MaxPeerNumberExceeded,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum ConnectionStatus {
+    Refused(ConnectionRefusedReason),
+    Accepted,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum PeerMessage {
     Handshake((Vec<u8>, HandshakeData)),
@@ -53,6 +64,7 @@ pub enum PeerMessage {
     PeerListRequest,
     PeerListResponse(Vec<SocketAddr>),
     Bye,
+    ConnectionStatus(ConnectionStatus),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
