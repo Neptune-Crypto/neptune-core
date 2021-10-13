@@ -35,6 +35,7 @@ pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
     }
 }
 
+/// Handle peer messages and return Ok(true) iff connection should be closed.
 async fn handle_peer_message<S>(
     msg: PeerMessage,
     state: &State,
@@ -50,6 +51,8 @@ where
 {
     match msg {
         PeerMessage::Bye => {
+            // Note that the current peer is not removed from the state.peer_map here
+            // but that this is done by the caller.
             info!("Got bye. Closing connection to peer");
             Ok(true)
         }
@@ -301,8 +304,11 @@ where
             }
 
             // Handle messages from main thread
-            Ok(main_msg) = from_main_rx.recv() => {
-                handle_main_thread_message(main_msg, &mut peer, &mut peer_state_info).await?;
+            main_msg_res = from_main_rx.recv() => {
+                match main_msg_res {
+                    Ok(main_msg) => handle_main_thread_message(main_msg, &mut peer, &mut peer_state_info).await?,
+                    Err(e) => panic!("Failed to read from main loop: {}", e),
+                }
             }
         }
     }
