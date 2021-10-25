@@ -13,8 +13,5 @@
 		"rust.build_on_save": false,
 		"rust.show_hover_context": true,
 		"editor.formatOnSave": true,
-		"[rust]": {
-			"editor.defaultFormatter": "rust-lang.rust"
-		}
 	}
 }

@@ -1,4 +1,6 @@
-use crate::model::{Block, FromMinerToMain, ToMiner, Transaction, Utxo};
+use crate::model::{
+    Block, BlockHash, BlockHeight, FromMinerToMain, LatestBlockInfo, ToMiner, Transaction, Utxo,
+};
 use anyhow::{Context, Result};
 use std::time::SystemTime;
 use tokio::select;
@@ -6,8 +8,9 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::{sleep, Duration};
 use tracing::{info, instrument};
 
-const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 4;
+const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 8;
 
+/// Return a fake block with a random hash
 fn make_mock_block(height: u64) -> Block {
     let utxo_pol = [0u32; 2048];
     let utxo = Utxo {
@@ -21,12 +24,13 @@ fn make_mock_block(height: u64) -> Block {
         public_scripts: vec![],
         proof: vec![],
     };
+    let block_hash_raw: [u8; 32] = rand::random();
     Block {
         version_bits: [0u8; 4],
         timestamp: SystemTime::now(),
-        height,
+        height: BlockHeight::from(height),
         nonce: [0u8; 32],
-        predecessor: [0u8; 32],
+        predecessor: BlockHash::from([0u8; 32]),
         predecessor_proof: vec![],
         accumulated_pow_line: 0u128,
         accumulated_pow_family: 0u128,
@@ -38,7 +42,7 @@ fn make_mock_block(height: u64) -> Block {
         mix_proof: vec![],
         edge_mmra: utxo,
         edge_mmra_update: vec![],
-        hash: [0u8; 32],
+        hash: BlockHash::from(block_hash_raw),
     }
 }
 
@@ -46,10 +50,14 @@ fn make_mock_block(height: u64) -> Block {
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<ToMiner>,
     to_main: mpsc::Sender<FromMinerToMain>,
+    latest_block_info_res: Option<LatestBlockInfo>,
 ) -> Result<()> {
-    let mut block_height = 0u64;
+    let mut block_height: u64 = match latest_block_info_res {
+        None => 0u64,
+        Some(latest_block_info) => latest_block_info.height.into(),
+    };
     loop {
-        let rand_time: u64 = rand::random::<u64>() % 10;
+        let rand_time: u64 = rand::random::<u64>() % 15;
         select! {
             changed = from_main.changed() => {
                 if let e@Err(_) = changed {
@@ -59,10 +67,8 @@ pub async fn mock_regtest_mine(
                 let main_message: ToMiner = from_main.borrow_and_update().clone();
                 match main_message {
                     ToMiner::NewBlock(block) => {
-                        if block.height > block_height {
-                            block_height = block.height;
-                            info!("Miner thread received regtest block height {}", block_height);
-                        }
+                        block_height = block.height.into();
+                        info!("Miner thread received regtest block height {}", block_height);
                     }
                     ToMiner::Empty => ()
                 }
@@ -70,8 +76,9 @@ pub async fn mock_regtest_mine(
             _ = sleep(Duration::from_secs(MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS + rand_time)) => {
                 block_height += 1;
 
-                to_main.send(FromMinerToMain::NewBlock(Box::new(make_mock_block(block_height)))).await?;
-                info!("Found new regtest block with block height {}", block_height);
+                let new_fake_block = make_mock_block(block_height);
+                info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.height, new_fake_block.hash);
+                to_main.send(FromMinerToMain::NewBlock(Box::new(new_fake_block))).await?;
             }
         }
     }

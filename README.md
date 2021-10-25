@@ -8,6 +8,7 @@ Reference implementation for the Neptune protocol.
  - rustup -- `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` (installs rustup, cargo, rustc etc.)
  - gnuplot -- `apt install gnuplot`
  - build-essential (for `make`) -- `apt install build-essential`
+ - levelDB (the database used for this program) -- `apt-get install libleveldb-dev libsnappy-dev cmake`
 
 ## Dev-ops Cheatsheet
 

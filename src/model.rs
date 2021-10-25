@@ -1,12 +1,126 @@
 use super::config_models::network::Network;
+use db_key::Key;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::convert::{From, TryInto};
+use std::fmt::Display;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use crate::big_array::BigArray;
+use crate::database::model::Databases;
+use crate::peer::Peer;
 
-type BlockHeight = u64;
-type BlockHash = [u8; 32];
+#[derive(Clone, Copy, Debug)]
+pub struct DatabaseUnit();
+impl Key for DatabaseUnit {
+    fn from_u8(_key: &[u8]) -> Self {
+        DatabaseUnit()
+    }
+
+    fn as_slice<T, F: Fn(&[u8]) -> T>(&self, f: F) -> T {
+        f(&[])
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockHash([u8; 32]);
+
+pub const HASH_LENGTH: usize = 32;
+
+impl From<[u8; HASH_LENGTH]> for BlockHash {
+    fn from(item: [u8; HASH_LENGTH]) -> Self {
+        BlockHash(item)
+    }
+}
+
+impl Key for BlockHash {
+    fn from_u8(key: &[u8]) -> Self {
+        BlockHash(
+            key.try_into()
+                .expect("slice with incorrect length used as block hash"),
+        )
+    }
+
+    fn as_slice<T, F: Fn(&[u8]) -> T>(&self, f: F) -> T {
+        f(&self.0)
+    }
+}
+
+impl From<BlockHash> for [u8; HASH_LENGTH] {
+    fn from(item: BlockHash) -> Self {
+        item.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockHeight(u64);
+
+impl From<u64> for BlockHeight {
+    fn from(item: u64) -> Self {
+        BlockHeight(item)
+    }
+}
+
+impl From<BlockHeight> for u64 {
+    fn from(item: BlockHeight) -> u64 {
+        item.0
+    }
+}
+
+impl Key for BlockHeight {
+    fn from_u8(key: &[u8]) -> Self {
+        let val = u64::from_be_bytes(
+            key.to_owned()
+                .try_into()
+                .expect("slice with incorrect length used as block height"),
+        );
+        BlockHeight(val)
+    }
+
+    fn as_slice<T, F: Fn(&[u8]) -> T>(&self, f: F) -> T {
+        let val = u64::to_be_bytes(self.0);
+        f(&val)
+    }
+}
+
+impl Ord for BlockHeight {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.0).cmp(&(other.0))
+    }
+}
+
+impl PartialOrd for BlockHeight {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Display for BlockHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct LatestBlockInfo {
+    pub height: BlockHeight,
+    pub hash: BlockHash,
+}
+
+impl LatestBlockInfo {
+    pub fn new(hash: BlockHash, height: BlockHeight) -> Self {
+        LatestBlockInfo { hash, height }
+    }
+}
+
+#[derive(Debug)]
+pub struct State {
+    pub peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>>,
+    pub databases: Arc<tokio::sync::Mutex<Databases>>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HandshakeData {
@@ -86,7 +200,9 @@ pub enum PeerMessage {
     Block(Box<Block>),
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
+    BlockResponseByHeight(Option<Box<Block>>),
     BlockRequestByHash(BlockHash),
+    BlockResponseByHash(Option<Box<Block>>),
     NewTransaction(i32),
     PeerListRequest,
     PeerListResponse(Vec<SocketAddr>),
