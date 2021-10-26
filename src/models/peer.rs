@@ -6,7 +6,7 @@ use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::SystemTime};
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Peer {
     pub address: SocketAddr,
     pub banscore: u8,

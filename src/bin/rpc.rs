@@ -8,6 +8,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 #[derive(Debug, StructOpt)]
 enum Command {
     BlockHeight,
+    GetPeerInfo,
 }
 
 #[derive(Debug, StructOpt)]
@@ -42,6 +43,11 @@ async fn main(args: Config) -> Result<()> {
         Command::BlockHeight => {
             let block_height = client.block_height(context::current()).await?;
             tracing::info!("Block height: {}", block_height);
+        }
+        Command::GetPeerInfo => {
+            let peers = client.get_peer_info(context::current()).await?;
+            tracing::info!("{} connected peers", peers.len());
+            tracing::info!("{}", serde_json::to_string(&peers)?);
         }
     }
 

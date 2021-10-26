@@ -1,5 +1,6 @@
 use crate::models::blockchain::BlockHeight;
 use crate::models::database::DatabaseUnit;
+use crate::models::peer::Peer;
 use crate::models::shared::LatestBlockInfo;
 use crate::models::State;
 use futures::executor;
@@ -13,6 +14,7 @@ use tarpc::context;
 pub trait RPC {
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
+    async fn get_peer_info() -> Vec<Peer>;
 }
 
 #[derive(Clone)]
@@ -23,6 +25,7 @@ pub struct NeptuneRPCServer {
 
 impl RPC for NeptuneRPCServer {
     type BlockHeightFut = Ready<BlockHeight>;
+    type GetPeerInfoFut = Ready<Vec<Peer>>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         let databases = executor::block_on(self.state.databases.lock());
@@ -37,5 +40,18 @@ impl RPC for NeptuneRPCServer {
             Some(bh) => future::ready(bh.height),
             None => future::ready(0.into()),
         }
+    }
+
+    fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
+        let peer_map = self
+            .state
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
+
+        future::ready(peer_map)
     }
 }
