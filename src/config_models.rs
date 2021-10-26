@@ -1,2 +1,2 @@
-pub mod args;
+pub mod cli_args;
 pub mod network;

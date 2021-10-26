@@ -3,6 +3,9 @@ use serde::ser::{Serialize, SerializeTuple, Serializer};
 use std::fmt;
 use std::marker::PhantomData;
 
+// The purpose of this file is to allow serialization and deserialization
+// of arbitrarily-sized arrays. The size of an array is always known at
+// compile time.
 // Entire file is Shamelessly copied from
 // https://stackoverflow.com/a/48976823/2574407
 

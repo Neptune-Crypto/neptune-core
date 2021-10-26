@@ -1,11 +1,14 @@
 use super::*;
-
+use crate::models::blockchain::{Block, Transaction, Utxo};
+use crate::models::peer::ConnectionRefusedReason;
 use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
+use leveldb::options::WriteOptions;
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, Rng};
+use std::collections::hash_map::RandomState;
 use std::env;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -51,6 +54,7 @@ fn get_dummy_peer(address: SocketAddr) -> Peer {
         address,
         banscore: 0,
         inbound: false,
+        instance_id: rand::random(),
         last_seen: SystemTime::now(),
         version: get_dummy_version(),
     }
@@ -62,6 +66,8 @@ fn get_dummy_version() -> String {
 
 fn get_dummy_handshake_data(network: Network) -> HandshakeData {
     HandshakeData {
+        instance_id: rand::random(),
+        latest_block_info: None,
         listen_address: Some(get_dummy_address()),
         network,
         version: get_dummy_version(),
@@ -79,8 +85,39 @@ fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
+fn get_dummy_setup(
+    network: Network,
+) -> Result<(
+    broadcast::Sender<MainToPeerThread>,
+    broadcast::Receiver<MainToPeerThread>,
+    mpsc::Sender<PeerThreadToMain>,
+    mpsc::Receiver<PeerThreadToMain>,
+    State,
+    Arc<std::sync::Mutex<HashMap<SocketAddr, Peer, RandomState>>>,
+)> {
+    let (peer_broadcast_tx, mut _from_main_rx1) =
+        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
+    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+    let peer_map = get_peer_map();
+    let databases = get_unit_test_database(network)?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
+    Ok((
+        peer_broadcast_tx,
+        from_main_rx_clone,
+        to_main_tx,
+        _to_main_rx1,
+        state,
+        peer_map,
+    ))
+}
+
 #[tokio::test]
-async fn test_incoming_transaction_succeed() -> Result<()> {
+async fn test_incoming_connection_succeed() -> Result<()> {
     // This builds a mock object which expects to have a certain
     // sequence of methods called on it: First it expects to have
     // the `MAGIC_STRING_REQUEST` and then the `MAGIC_STRING_RESPONSE`
@@ -90,36 +127,32 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
     // object will panic, and the `await` operator will evaluate
     // to Error.
     let network = Network::Main;
+    let other_handshake = get_dummy_handshake_data(network);
+    let own_handshake = get_dummy_handshake_data(network);
     let mock = Builder::new()
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_REQUEST.to_vec(),
-            get_dummy_handshake_data(network),
+            other_handshake,
         )))?)
         .write(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_RESPONSE.to_vec(),
-            get_dummy_handshake_data(network),
+            own_handshake.clone(),
         )))?)
+        .write(&to_bytes(&PeerMessage::ConnectionStatus(
+            ConnectionStatus::Accepted,
+        ))?)
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
-
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(network)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
-    answer_peer(
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(network)?;
+    main_loop::answer_peer(
         mock,
         state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
-        get_dummy_handshake_data(Network::Main),
+        own_handshake,
+        8,
     )
     .await?;
 
@@ -133,34 +166,27 @@ async fn test_incoming_transaction_succeed() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
+async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
     let network = Network::Main;
+    let other_handshake = get_dummy_handshake_data(network);
+    let own_handshake = get_dummy_handshake_data(network);
     let mock = Builder::new()
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_RESPONSE.to_vec(),
-            get_dummy_handshake_data(network),
+            other_handshake,
         )))?)
         .build();
 
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(network)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
-
-    if let Err(_) = answer_peer(
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+        get_dummy_setup(network)?;
+    if let Err(_) = main_loop::answer_peer(
         mock,
         state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
-        get_dummy_handshake_data(Network::Main),
+        own_handshake,
+        8,
     )
     .await
     {
@@ -171,37 +197,30 @@ async fn test_incoming_transaction_fail_bad_magic_value() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
+async fn test_incoming_connection_fail_bad_network() -> Result<()> {
+    let other_handshake = get_dummy_handshake_data(Network::Testnet);
+    let own_handshake = get_dummy_handshake_data(Network::Main);
     let mock = Builder::new()
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_REQUEST.to_vec(),
-            get_dummy_handshake_data(Network::Testnet),
+            other_handshake,
         )))?)
         .write(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_RESPONSE.to_vec(),
-            get_dummy_handshake_data(Network::Main),
+            own_handshake.clone(),
         )))?)
         .build();
 
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(Network::Main)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
-
-    if let Err(_) = answer_peer(
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+        get_dummy_setup(Network::Main)?;
+    if let Err(_) = main_loop::answer_peer(
         mock,
         state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
-        get_dummy_handshake_data(Network::Main),
+        own_handshake,
+        8,
     )
     .await
     {
@@ -212,38 +231,34 @@ async fn test_incoming_transaction_fail_bad_network() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_outgoing_transaction_succeed() -> Result<()> {
+async fn test_outgoing_connection_succeed() -> Result<()> {
     let network = Network::Main;
+    let other_handshake = get_dummy_handshake_data(network);
+    let own_handshake = get_dummy_handshake_data(network);
     let mock = Builder::new()
         .write(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_REQUEST.to_vec(),
-            get_dummy_handshake_data(network),
+            own_handshake.clone(),
         )))?)
         .read(&to_bytes(&PeerMessage::Handshake((
             MAGIC_STRING_RESPONSE.to_vec(),
-            get_dummy_handshake_data(network),
+            other_handshake,
         )))?)
+        .read(&to_bytes(&PeerMessage::ConnectionStatus(
+            ConnectionStatus::Accepted,
+        ))?)
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
 
-    let (peer_broadcast_tx, mut _from_main_rx1) =
-        broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
-
-    let peer_map = get_peer_map();
-    let databases = get_unit_test_database(network)?;
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-    };
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(Network::Main)?;
     call_peer(
         mock,
         state,
         get_dummy_address(),
         from_main_rx_clone,
         to_main_tx,
-        &get_dummy_handshake_data(Network::Main),
+        &own_handshake,
     )
     .await?;
 
@@ -254,6 +269,57 @@ async fn test_outgoing_transaction_succeed() -> Result<()> {
     };
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
+    let network = Network::Main;
+    let other_handshake = get_dummy_handshake_data(network);
+    let own_handshake = get_dummy_handshake_data(network);
+    let mock = Builder::new()
+        .read(&to_bytes(&PeerMessage::Handshake((
+            MAGIC_STRING_REQUEST.to_vec(),
+            other_handshake,
+        )))?)
+        .write(&to_bytes(&PeerMessage::Handshake((
+            MAGIC_STRING_RESPONSE.to_vec(),
+            own_handshake.clone(),
+        )))?)
+        .build();
+
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _) =
+        get_dummy_setup(Network::Main)?;
+    let peer_map = get_peer_map();
+    let peer_address0 = get_dummy_address();
+    let peer_address1 = std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address0, get_dummy_peer(peer_address0));
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address1, get_dummy_peer(peer_address1));
+    let state = State {
+        peer_map,
+        databases: get_unit_test_database(Network::Main)?,
+    };
+
+    if let Err(_) = main_loop::answer_peer(
+        mock,
+        state,
+        get_dummy_address(),
+        from_main_rx_clone,
+        to_main_tx,
+        own_handshake,
+        2,
+    )
+    .await
+    {
+        Ok(())
+    } else {
+        bail!("Expected error from run")
+    }
 }
 
 pin_project! {
@@ -337,6 +403,42 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
+/// Return a fake block with a random hash
+fn make_mock_block(height: u64) -> Block {
+    let utxo_pol = [0u32; 2048];
+    let utxo = Utxo {
+        pol0: utxo_pol,
+        pol1: utxo_pol,
+    };
+
+    let tx = Transaction {
+        input: vec![utxo.clone()],
+        output: vec![utxo.clone()],
+        public_scripts: vec![],
+        proof: vec![],
+    };
+    let block_hash_raw: [u8; 32] = rand::random();
+    Block {
+        version_bits: [0u8; 4],
+        timestamp: SystemTime::now(),
+        height: BlockHeight::from(height),
+        nonce: [0u8; 32],
+        predecessor: BlockHash::from([0u8; 32]),
+        predecessor_proof: vec![],
+        accumulated_pow_line: 0u128,
+        accumulated_pow_family: 0u128,
+        uncles: vec![],
+        target_difficulty: 0u128,
+        retarget_proof: vec![],
+        transaction: tx,
+        mixed_edges: vec![],
+        mix_proof: vec![],
+        edge_mmra: utxo,
+        edge_mmra_update: vec![],
+        hash: BlockHash::from(block_hash_raw),
+    }
+}
+
 #[tokio::test]
 async fn test_peer_loop_bye() -> Result<()> {
     let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
@@ -356,7 +458,13 @@ async fn test_peer_loop_bye() -> Result<()> {
         databases,
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
-    peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -383,7 +491,159 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
+    let peer_map = get_peer_map();
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let databases = get_unit_test_database(Network::Main)?;
+
+    let block_14 = make_mock_block(14);
+    let latest_block_info_14 = LatestBlockInfo::new(block_14.hash, block_14.height);
+    let block_hash_raw: [u8; 32] = block_14.hash.into();
+    {
+        let dbs = databases.lock().await;
+        dbs.latest_block.put(
+            WriteOptions::new(),
+            DatabaseUnit(),
+            &bincode::serialize(&latest_block_info_14)?,
+        )?;
+        dbs.block_hash_to_block.put(
+            WriteOptions::new(),
+            block_14.hash,
+            &bincode::serialize(&block_14)?,
+        )?;
+        dbs.block_height_to_hash.put(
+            WriteOptions::new(),
+            block_14.height,
+            &bincode::serialize(&block_hash_raw)?,
+        )?;
+    }
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases: databases,
+    };
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_14))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
+    let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    // Verify that no message was sent to main loop
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(_block)) => {
+            bail!("Block notification must not be sent for old block")
+        }
+        Some(msg) => bail!(
+            "No message must be sent to main loop when receiving old block. Got {:?}",
+            msg
+        ),
+        None => (),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
+    let peer_map = get_peer_map();
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let databases = get_unit_test_database(Network::Main)?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(make_mock_block(0)))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
+    let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    // Verify that a message was sent to `main_loop`?
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(_block)) => (),
+        _ => bail!("Did not find msg sent to main thread"),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_get_connection_status() -> Result<()> {
+    let network = Network::Main;
+    let peer_map = get_peer_map();
+    let peer_address = get_dummy_address();
+    let peer = get_dummy_peer(peer_address);
+    let peer_id = peer.instance_id;
+    peer_map.lock().unwrap().insert(peer_address, peer);
+    let databases = get_unit_test_database(network)?;
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases,
+    };
+
+    let own_handshake = get_dummy_handshake_data(network);
+    let mut other_handshake = get_dummy_handshake_data(network);
+
+    let mut status = main_loop::get_connection_status(4, &state, &own_handshake, &other_handshake);
+    if status != ConnectionStatus::Accepted {
+        bail!("Must return ConnectionStatus::Accepted");
+    }
+
+    status = main_loop::get_connection_status(4, &state, &own_handshake, &own_handshake);
+    if status != ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
+        bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
+    }
+
+    status = main_loop::get_connection_status(1, &state, &own_handshake, &other_handshake);
+    if status != ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded) {
+        bail!(
+            "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
+        );
+    }
+
+    // Attempt to connect to already connected peer
+    other_handshake.instance_id = peer_id;
+    status = main_loop::get_connection_status(100, &state, &own_handshake, &other_handshake);
+    if status != ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
+        bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))");
+    }
 
     Ok(())
 }
