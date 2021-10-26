@@ -159,9 +159,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     }
 
     // Bind socket to port on this machine
-    let listener = TcpListener::bind((cli_args.listen_addr, cli_args.port))
+    let listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
         .await
-        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.port))?;
+        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
 
     let peer_map = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
@@ -174,7 +174,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
 
     // Create handshake data
-    let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.port);
+    let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.peer_port);
     let own_handshake_data = HandshakeData {
         latest_block_info,
         listen_address: Some(listen_addr_socket),

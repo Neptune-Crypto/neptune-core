@@ -17,9 +17,9 @@ pub struct Args {
     #[structopt(short, long)]
     pub mine: bool,
 
-    /// Port on which to listen for connections.
+    /// Port on which to listen for peer connections.
     #[structopt(long, default_value = "9798")]
-    pub port: u16,
+    pub peer_port: u16,
 
     /// IP on which to listen for peer connections.
     #[structopt(short, long, default_value = "127.0.0.1")]
