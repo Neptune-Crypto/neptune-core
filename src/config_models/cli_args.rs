@@ -21,6 +21,10 @@ pub struct Args {
     #[structopt(long, default_value = "9798")]
     pub peer_port: u16,
 
+    /// Port on which to listen for RPC connections.
+    #[structopt(long, default_value = "9799")]
+    pub rpc_port: u16,
+
     /// IP on which to listen for peer connections.
     #[structopt(short, long, default_value = "127.0.0.1")]
     pub listen_addr: IpAddr,
