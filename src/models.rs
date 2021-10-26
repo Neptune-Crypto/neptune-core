@@ -15,3 +15,14 @@ pub struct State {
     pub peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, peer::Peer>>>,
     pub databases: Arc<tokio::sync::Mutex<Databases>>,
 }
+
+impl Clone for State {
+    fn clone(&self) -> Self {
+        let peer_map = Arc::clone(&self.peer_map);
+        let databases = Arc::clone(&self.databases);
+        Self {
+            peer_map,
+            databases,
+        }
+    }
+}
