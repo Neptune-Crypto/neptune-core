@@ -24,7 +24,7 @@ pub struct Chunk {
 
 impl ToDigest<Vec<BFieldElement>> for Chunk {
     fn to_digest(&self) -> Vec<BFieldElement> {
-        let num_iterations = (CHUNK_SIZE / 63);
+        let num_iterations = CHUNK_SIZE / 63;
         let mut ret: Vec<BFieldElement> = vec![];
         let mut acc: u64;
         for i in 0..num_iterations {
@@ -103,7 +103,7 @@ where
      * but tailored to adding the item to the mutator set in its
      * current state.
      */
-    pub fn commit(self: &Self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
+    pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
         let hasher = H::new();
         let canonical_commitment = hasher.hash_pair(item, randomness);
 
@@ -162,7 +162,7 @@ where
     pub fn prove(&self, item: &H::Digest, randomness: &H::Digest) -> MembershipProof<H> {
         // compute commitment
         let hasher = H::new();
-        let item_commitment = hasher.hash_pair(&item, &randomness);
+        let item_commitment = hasher.hash_pair(item, randomness);
 
         // simulate adding to commitment list
         let item_index = self.aocl.count_leaves();
@@ -180,7 +180,7 @@ where
 
             // prepare swbf MMR authentication paths
             let timestamp: Vec<BFieldElement> = (item_index as u128).to_digest();
-            let rhs = hasher.hash_pair(&timestamp, &randomness);
+            let rhs = hasher.hash_pair(&timestamp, randomness);
             for i in 0..NUM_TRIALS {
                 let counter: Vec<BFieldElement> = (i as u128).to_digest();
                 let pseudorandomness = hasher.hash_pair(&counter, &rhs);
@@ -208,7 +208,7 @@ where
     pub fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool {
         // verify that a commitment to the item lives in the aocl mmr
         let hasher = H::new();
-        let leaf = hasher.hash_pair(&item, &membership_proof.randomness);
+        let leaf = hasher.hash_pair(item, &membership_proof.randomness);
         let (is_aocl_member, _) = membership_proof.auth_path_aocl.verify(
             &self.aocl.get_peaks(),
             &leaf,
@@ -249,7 +249,7 @@ where
                     entries_in_dictionary = false;
                     continue;
                 }
-                let (valid_auth_path, unnecessary_peak) = matching_entries[0].1.verify(
+                let (valid_auth_path, _) = matching_entries[0].1.verify(
                     &self.swbf_inactive.get_peaks(),
                     &matching_entries[0].2.hash(),
                     self.swbf_inactive.count_leaves(),
@@ -258,7 +258,7 @@ where
 
                 // verify that bit is possibly unset
                 let relative_index = index - matching_entries[0].1.data_index * CHUNK_SIZE as u128;
-                if matching_entries[0].2.bits[relative_index as usize] == false {
+                if !matching_entries[0].2.bits[relative_index as usize] {
                     has_unset_bits = true;
                 }
             }
@@ -266,7 +266,7 @@ where
             else {
                 let relative_index = index
                     - (1 + self.aocl.count_leaves()) / BATCH_SIZE as u128 * CHUNK_SIZE as u128;
-                if self.swbf_active[relative_index as usize] == false {
+                if !self.swbf_active[relative_index as usize] {
                     has_unset_bits = true;
                 }
             }
