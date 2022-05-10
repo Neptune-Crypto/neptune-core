@@ -9,7 +9,7 @@ use crate::{
 pub const WINDOW_SIZE: usize = 30000;
 pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 160;
+pub const NUM_TRIALS: usize = 2; //160;
 
 pub struct SetCommitment<H: simple_hasher::Hasher> {
     aocl: MmrAccumulator<H>,
@@ -22,8 +22,10 @@ pub struct Chunk {
     bits: [bool; CHUNK_SIZE],
 }
 
-impl ToDigest<Vec<BFieldElement>> for Chunk {
-    fn to_digest(&self) -> Vec<BFieldElement> {
+impl Chunk {
+    pub fn hash<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>>(
+        &self,
+    ) -> Vec<BFieldElement> {
         let num_iterations = CHUNK_SIZE / 63;
         let mut ret: Vec<BFieldElement> = vec![];
         let mut acc: u64;
@@ -43,15 +45,11 @@ impl ToDigest<Vec<BFieldElement>> for Chunk {
                     0
                 };
             }
+            ret.push(BFieldElement::new(acc));
         }
 
-        ret
-    }
-}
-
-impl Chunk {
-    pub fn hash(&self) -> Vec<BFieldElement> {
-        self.to_digest()
+        let hasher = H::new();
+        hasher.hash(&ret)
     }
 }
 
@@ -149,7 +147,7 @@ where
             // self.swbf_active =
             //     // self.swbf_active[CHUNK_SIZE..WINDOW_SIZE].concatenate([false; CHUNK_SIZE as usize]);
             //     self.swbf_active[]
-            let chunk_digest = chunk.hash();
+            let chunk_digest = chunk.hash::<H>();
             self.swbf_inactive.append(chunk_digest); // ignore auth path
         }
     }
@@ -171,11 +169,11 @@ where
 
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
         // if window slides, filter will be updated
-        if item_index % BATCH_SIZE as u128 == 0 {
+        if (1 + item_index) % BATCH_SIZE as u128 == 0 {
             let chunk: Chunk = Chunk {
                 bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
             };
-            let chunk_digest = chunk.hash();
+            let chunk_digest = chunk.hash::<H>();
             let new_chunk_path = self.swbf_inactive.clone().append(chunk_digest);
 
             // prepare swbf MMR authentication paths
@@ -184,15 +182,20 @@ where
             for i in 0..NUM_TRIALS {
                 let counter: Vec<BFieldElement> = (i as u128).to_digest();
                 let pseudorandomness = hasher.hash_pair(&counter, &rhs);
-                let index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
+                let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
                     as u128
                     + batch_index * CHUNK_SIZE as u128;
 
+                // compute the index of the boundary between inactive and active parts
+                let window_start: u128 = //.
+                    ((1 + item_index) / BATCH_SIZE as u128) // which batch
+                     * CHUNK_SIZE as u128; // # bits per bach
+
                 // if index lies in inactive part of filter, add an mmr auth path
-                if index < (1 + item_index) / BATCH_SIZE as u128 * CHUNK_SIZE as u128 {
+                if bit_index < window_start {
                     target_chunks
                         .dictionary
-                        .push((index, new_chunk_path.clone(), chunk));
+                        .push((bit_index, new_chunk_path.clone(), chunk));
                 }
             }
         }
@@ -206,6 +209,13 @@ where
     }
 
     pub fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool {
+        // if 0 elements were added, no proof can be valid
+        if self.aocl.count_leaves() == 0 {
+            return false;
+        }
+
+        println!("---");
+
         // verify that a commitment to the item lives in the aocl mmr
         let hasher = H::new();
         let leaf = hasher.hash_pair(item, &membership_proof.randomness);
@@ -219,21 +229,27 @@ where
         let mut has_unset_bits = false;
         let mut entries_in_dictionary = true;
         let mut all_auth_paths_are_valid = true;
+        let mut no_future_bits = true;
         let item_index = membership_proof.auth_path_aocl.data_index;
         let timestamp: Vec<BFieldElement> = (item_index).to_digest();
-        let batch_index = item_index / BATCH_SIZE as u128;
+        let item_batch_index = item_index / BATCH_SIZE as u128;
         let rhs = hasher.hash_pair(&timestamp, &membership_proof.randomness);
         for i in 0..NUM_TRIALS {
             // get index
             let counter: Vec<BFieldElement> = (i as u128).to_digest();
             let pseudorandomness = hasher.hash_pair(&counter, &rhs);
 
-            let index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
+            let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
                 as u128
-                + batch_index * CHUNK_SIZE as u128;
+                + item_batch_index * CHUNK_SIZE as u128;
 
-            // if index is in the inactive part of the filter,
-            if index < (1 + self.aocl.count_leaves()) / BATCH_SIZE as u128 * CHUNK_SIZE as u128 {
+            // locate the bit index relative to the current window
+            let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+            let window_start = current_batch_index * CHUNK_SIZE as u128;
+            let window_stop = window_start + WINDOW_SIZE as u128;
+            let relative_index = bit_index - window_start;
+            // if bit index is left of the window
+            if bit_index < window_start {
                 // verify mmr auth path
                 let matching_entries: Vec<&(
                     u128,
@@ -243,7 +259,7 @@ where
                     .target_chunks
                     .dictionary
                     .iter()
-                    .filter(|ch| ch.0 == index)
+                    .filter(|ch| ch.0 == bit_index)
                     .collect();
                 if matching_entries.len() != 1 {
                     entries_in_dictionary = false;
@@ -251,40 +267,51 @@ where
                 }
                 let (valid_auth_path, _) = matching_entries[0].1.verify(
                     &self.swbf_inactive.get_peaks(),
-                    &matching_entries[0].2.hash(),
+                    &matching_entries[0].2.hash::<H>(),
                     self.swbf_inactive.count_leaves(),
                 );
                 all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
                 // verify that bit is possibly unset
-                let relative_index = index - matching_entries[0].1.data_index * CHUNK_SIZE as u128;
                 if !matching_entries[0].2.bits[relative_index as usize] {
                     has_unset_bits = true;
                 }
+            } else if bit_index >= window_stop {
+                no_future_bits = false;
             }
             // if bit is in the active part of the filter
-            else {
-                let relative_index = index
-                    - (1 + self.aocl.count_leaves()) / BATCH_SIZE as u128 * CHUNK_SIZE as u128;
-                if !self.swbf_active[relative_index as usize] {
-                    has_unset_bits = true;
-                }
+            else if !self.swbf_active[relative_index as usize] {
+                has_unset_bits = true;
             }
         }
 
+        println!("is_aocl_member: {}", is_aocl_member);
+        println!("entries_in_dictionary: {}", entries_in_dictionary);
+        println!("all_auth_paths_are_valid: {}", all_auth_paths_are_valid);
+        println!("no_future_bits: {}", no_future_bits);
+        println!("has_unset_bits: {}", has_unset_bits);
+
         // return verdict
-        is_aocl_member && entries_in_dictionary && all_auth_paths_are_valid && has_unset_bits
+        is_aocl_member
+            && entries_in_dictionary
+            && all_auth_paths_are_valid
+            && no_future_bits
+            && has_unset_bits
     }
 }
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
+
     use crate::{
         shared_math::rescue_prime_xlix::{
             neptune_params, RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH,
         },
         util_types::simple_hasher::RescuePrimeProduction,
     };
+    use rand::prelude::*;
+    use rand_chacha::ChaCha20Rng;
+    use rand_core::{RngCore, SeedableRng};
 
     use super::*;
 
@@ -310,5 +337,50 @@ mod accumulation_scheme_tests {
         mutator_set.add(&addition_record);
 
         assert!(true == mutator_set.verify(&item, &membership_proof));
+    }
+
+    #[test]
+    fn test_multiple_adds() {
+        // set up rng
+        let mut rng = ChaCha20Rng::from_seed(
+            vec![vec![0, 1, 4, 33], vec![0; 28]]
+                .concat()
+                .try_into()
+                .unwrap(),
+        );
+
+        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
+
+        let num_additions = rng.gen_range(0..=1000);
+        println!(
+            "running multiple additions test for {} additions",
+            num_additions
+        );
+
+        for i in 0..num_additions {
+            println!("loop iteration {}", i);
+            let item: Vec<BFieldElement> = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+                RP_DEFAULT_OUTPUT_SIZE,
+            );
+            let randomness: Vec<BFieldElement> = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+                RP_DEFAULT_OUTPUT_SIZE,
+            );
+
+            let addition_record = mutator_set.commit(&item, &randomness);
+            let membership_proof = mutator_set.prove(&item, &randomness);
+
+            assert!(!mutator_set.verify(&item, &membership_proof));
+
+            mutator_set.add(&addition_record);
+
+            assert!(mutator_set.verify(&item, &membership_proof));
+        }
     }
 }
