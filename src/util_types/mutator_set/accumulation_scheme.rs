@@ -312,7 +312,7 @@ where
             let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
             let window_start = current_batch_index * CHUNK_SIZE as u128;
             let window_stop = window_start + WINDOW_SIZE as u128;
-            let relative_index = bit_index - window_start;
+            let relative_index: u128 = bit_index - window_start;
             // if bit index is left of the window
             if bit_index < window_start {
                 // verify mmr auth path
@@ -490,7 +490,10 @@ mod accumulation_scheme_tests {
         shared_math::rescue_prime_xlix::{
             neptune_params, RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH,
         },
-        util_types::simple_hasher::{Hasher, RescuePrimeProduction},
+        util_types::{
+            blake3_wrapper,
+            simple_hasher::{Hasher, RescuePrimeProduction},
+        },
     };
     use rand::prelude::*;
     use rand_chacha::ChaCha20Rng;
@@ -637,15 +640,17 @@ mod accumulation_scheme_tests {
         );
 
         type Hasher = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
         let hasher = Hasher::new();
         let mut mutator_set = SetCommitment::<Hasher>::default();
 
-        let num_additions = rng.gen_range(0..=1000);
+        let num_additions = rng.gen_range(0..=500usize);
         println!(
             "running multiple additions test for {} additions",
             num_additions
         );
 
+        let mut items_and_membership_proofs: Vec<(Digest, MembershipProof<Hasher>)> = vec![];
         for i in 0..num_additions {
             println!("loop iteration {}", i);
             let item = hasher.hash(
@@ -667,6 +672,22 @@ mod accumulation_scheme_tests {
             mutator_set.add(&addition_record);
 
             assert!(mutator_set.verify(&item, &membership_proof));
+            items_and_membership_proofs.push((item, membership_proof));
+        }
+
+        println!("Done with 1st loop");
+        for (item, mp) in items_and_membership_proofs.into_iter() {
+            println!("HIA");
+            assert!(mutator_set.verify(&item, &mp));
+            println!("HIB");
+            let removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
+            println!("HIC");
+            assert!(mutator_set.verify(&item, &mp));
+            println!("HID");
+            mutator_set.remove(&removal_record);
+            println!("HIE");
+            assert!(!mutator_set.verify(&item.into(), &mp));
+            println!("HIF");
         }
     }
 }
