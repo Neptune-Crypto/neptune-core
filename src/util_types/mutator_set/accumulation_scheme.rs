@@ -9,7 +9,7 @@ use crate::{
 pub const WINDOW_SIZE: usize = 30000;
 pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 2; //TODO: Change to 160 in production;
+pub const NUM_TRIALS: usize = 160;
 
 pub struct SetCommitment<H: simple_hasher::Hasher> {
     aocl: MmrAccumulator<H>,
@@ -23,9 +23,10 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn hash<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>>(
-        &self,
-    ) -> Vec<BFieldElement> {
+    pub fn hash<H: simple_hasher::Hasher>(&self) -> H::Digest
+    where
+        Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    {
         let num_iterations = CHUNK_SIZE / 63;
         let mut ret: Vec<BFieldElement> = vec![];
         let mut acc: u64;
@@ -80,6 +81,11 @@ where
     }
 }
 
+pub struct RemovalRecord<H: simple_hasher::Hasher> {
+    bit_indices: [u128; NUM_TRIALS],
+    target_chunks: ChunkDictionary<H>,
+}
+
 impl<H: simple_hasher::Hasher> SetCommitment<H>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
@@ -107,6 +113,55 @@ where
         AdditionRecord {
             commitment: canonical_commitment,
             aocl_snapshot: self.aocl.clone(),
+        }
+    }
+
+    /**
+     * get_indices
+     * Helper function. Computes the bloom filter bit indices of the
+     * item, randomness, index triple.
+     */
+    pub fn get_indices(
+        item: &H::Digest,
+        randomness: &H::Digest,
+        index: u128,
+    ) -> [u128; NUM_TRIALS] {
+        let hasher = H::new();
+        let batch_index = index / BATCH_SIZE as u128;
+        let timestamp: H::Digest = (index as u128).to_digest();
+        let mut rhs = hasher.hash_pair(&timestamp, randomness);
+        rhs = hasher.hash_pair(item, &rhs);
+        let mut indices = [0u128; NUM_TRIALS];
+        for (i, index) in indices.iter_mut().enumerate() {
+            let counter: H::Digest = (i as u128).to_digest();
+            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
+            let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
+                as u128
+                + batch_index * CHUNK_SIZE as u128;
+            *index = bit_index;
+        }
+
+        indices
+    }
+
+    /**
+     * drop
+     * Generates a removal record with which to update the set commitment.
+     */
+    pub fn drop(
+        &self,
+        item: &H::Digest,
+        membership_proof: &MembershipProof<H>,
+    ) -> RemovalRecord<H> {
+        let bit_indices = Self::get_indices(
+            item,
+            &membership_proof.randomness,
+            membership_proof.auth_path_aocl.data_index,
+        );
+
+        RemovalRecord {
+            bit_indices,
+            target_chunks: membership_proof.target_chunks.clone(),
         }
     }
 
@@ -152,6 +207,32 @@ where
     }
 
     /**
+     * remove
+     * Updates the mutator set so as to remove the item given its
+     * removal record.
+     */
+    pub fn remove(&mut self, removal_record: &RemovalRecord<H>) {
+        let batch_index = self.aocl.count_leaves() / BATCH_SIZE as u128;
+        let window_start = batch_index * CHUNK_SIZE as u128;
+        for bit_index in removal_record.bit_indices.iter() {
+            // if bit is in active part
+            if *bit_index >= window_start {
+                let relative_index = bit_index - window_start;
+                self.swbf_active[relative_index as usize] = true;
+                continue;
+            }
+            // bit is not in active part, so update mmr
+            let (_, path, chunk) = removal_record
+                .target_chunks
+                .dictionary
+                .iter()
+                .find(|(i, _, _)| i == bit_index)
+                .unwrap();
+            self.swbf_inactive.mutate_leaf(path, &chunk.hash::<H>());
+        }
+    }
+
+    /**
      * prove
      * Generates a membership proof that will the valid when the item
      * is added to the mutator set.
@@ -163,8 +244,10 @@ where
 
         // simulate adding to commitment list
         let item_index = self.aocl.count_leaves();
-        let batch_index = item_index / BATCH_SIZE as u128;
         let aocl_auth_path = self.aocl.clone().append(item_commitment);
+
+        // get indices of bits to be set when item is removed
+        let bit_indices = Self::get_indices(item, randomness, item_index);
 
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
         // if window slides, filter will be updated
@@ -176,15 +259,7 @@ where
             let new_chunk_path = self.swbf_inactive.clone().append(chunk_digest);
 
             // prepare swbf MMR authentication paths
-            let timestamp: H::Digest = (item_index as u128).to_digest();
-            let rhs = hasher.hash_pair(&timestamp, randomness);
-            for i in 0..NUM_TRIALS {
-                let counter: H::Digest = (i as u128).to_digest();
-                let pseudorandomness = hasher.hash_pair(&counter, &rhs);
-                let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
-                    as u128
-                    + batch_index * CHUNK_SIZE as u128;
-
+            for bit_index in bit_indices {
                 // compute the index of the boundary between inactive and active parts
                 let window_start: u128 = //.
                     ((1 + item_index) / BATCH_SIZE as u128) // which batch
@@ -230,18 +305,9 @@ where
         let mut all_auth_paths_are_valid = true;
         let mut no_future_bits = true;
         let item_index = membership_proof.auth_path_aocl.data_index;
-        let timestamp: H::Digest = (item_index).to_digest();
-        let item_batch_index = item_index / BATCH_SIZE as u128;
-        let rhs = hasher.hash_pair(&timestamp, &membership_proof.randomness);
-        for i in 0..NUM_TRIALS {
-            // get index
-            let counter: H::Digest = (i as u128).to_digest();
-            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
-
-            let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
-                as u128
-                + item_batch_index * CHUNK_SIZE as u128;
-
+        // get indices of bits to be set when item is removed
+        let bit_indices = Self::get_indices(item, &membership_proof.randomness, item_index);
+        for bit_index in bit_indices {
             // locate the bit index relative to the current window
             let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
             let window_start = current_batch_index * CHUNK_SIZE as u128;
@@ -317,6 +383,7 @@ where
      */
     pub fn update_from_addition(
         &mut self,
+        own_item: &H::Digest,
         mutator_set: &SetCommitment<H>,
         addition_record: &AdditionRecord<H>,
     ) {
@@ -337,18 +404,12 @@ where
         let batch_index = mutator_set.aocl.count_leaves() / BATCH_SIZE as u128;
         let old_window_start = batch_index * CHUNK_SIZE as u128;
         let new_window_start = (batch_index + 1) * CHUNK_SIZE as u128;
-        let hasher = H::new();
-        let timestamp: H::Digest = (self.auth_path_aocl.data_index).to_digest();
-        let rhs = hasher.hash_pair(&timestamp, &self.randomness);
-        for i in 0..NUM_TRIALS {
-            // get index
-            let counter: H::Digest = (i as u128).to_digest();
-            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
-
-            let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
-                as u128
-                + self.auth_path_aocl.data_index * CHUNK_SIZE as u128;
-
+        let bit_indices = SetCommitment::<H>::get_indices(
+            own_item,
+            &self.randomness,
+            self.auth_path_aocl.data_index,
+        );
+        for bit_index in bit_indices {
             let chunk = Chunk {
                 bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
             };
@@ -413,15 +474,15 @@ mod accumulation_scheme_tests {
     fn test_membership_proof_update_from_add() {
         let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
-        let item: Vec<BFieldElement> =
+        let own_item: Vec<BFieldElement> =
             hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
         let randomness: Vec<BFieldElement> =
             hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
 
         let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-            mutator_set.commit(&item, &randomness);
+            mutator_set.commit(&own_item, &randomness);
         let mut membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-            mutator_set.prove(&item, &randomness);
+            mutator_set.prove(&own_item, &randomness);
         mutator_set.add(&addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
@@ -433,17 +494,17 @@ mod accumulation_scheme_tests {
             mutator_set.commit(&new_item, &new_randomness);
         let original_membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             membership_proof.clone();
-        membership_proof.update_from_addition(&mutator_set, &new_addition_record);
+        membership_proof.update_from_addition(&own_item, &mutator_set, &new_addition_record);
         assert_ne!(
             original_membership_proof.auth_path_aocl,
             membership_proof.auth_path_aocl
         );
         assert!(
-            mutator_set.verify(&item, &original_membership_proof),
+            mutator_set.verify(&own_item, &original_membership_proof),
             "Original membership proof must verify prior to addition"
         );
         assert!(
-            !mutator_set.verify(&item, &membership_proof),
+            !mutator_set.verify(&own_item, &membership_proof),
             "New membership proof must fail to verify prior to addition"
         );
 
@@ -451,11 +512,11 @@ mod accumulation_scheme_tests {
         // that the original membership proof is invalid.
         mutator_set.add(&new_addition_record);
         assert!(
-            !mutator_set.verify(&item, &original_membership_proof),
+            !mutator_set.verify(&own_item, &original_membership_proof),
             "Original membership proof must fail to verify after addition"
         );
         assert!(
-            mutator_set.verify(&item, &membership_proof),
+            mutator_set.verify(&own_item, &membership_proof),
             "New membership proof must verify after addition"
         );
     }
@@ -498,7 +559,7 @@ mod accumulation_scheme_tests {
 
             // Update all membership proofs
             for mp in membership_proofs_and_items.iter_mut() {
-                mp.0.update_from_addition(&mutator_set, &addition_record);
+                mp.0.update_from_addition(&mp.1.into(), &mutator_set, &addition_record);
             }
 
             // Add the element
@@ -542,8 +603,9 @@ mod accumulation_scheme_tests {
                 .unwrap(),
         );
 
-        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
-        let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
+        type Hasher = blake3::Hasher;
+        let hasher = Hasher::new();
+        let mut mutator_set = SetCommitment::<Hasher>::default();
 
         let num_additions = rng.gen_range(0..=1000);
         println!(
@@ -553,17 +615,15 @@ mod accumulation_scheme_tests {
 
         for i in 0..num_additions {
             println!("loop iteration {}", i);
-            let item: Vec<BFieldElement> = hasher.hash(
+            let item = hasher.hash(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
                     .collect::<Vec<_>>(),
-                RP_DEFAULT_OUTPUT_SIZE,
             );
-            let randomness: Vec<BFieldElement> = hasher.hash(
+            let randomness = hasher.hash(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
                     .collect::<Vec<_>>(),
-                RP_DEFAULT_OUTPUT_SIZE,
             );
 
             let addition_record = mutator_set.commit(&item, &randomness);
