@@ -9,7 +9,7 @@ use crate::{
 pub const WINDOW_SIZE: usize = 30000;
 pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 2; //160;
+pub const NUM_TRIALS: usize = 2; //TODO: Change to 160 in production;
 
 pub struct SetCommitment<H: simple_hasher::Hasher> {
     aocl: MmrAccumulator<H>,
@@ -17,7 +17,7 @@ pub struct SetCommitment<H: simple_hasher::Hasher> {
     swbf_active: [bool; WINDOW_SIZE],
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Chunk {
     bits: [bool; CHUNK_SIZE],
 }
@@ -53,8 +53,9 @@ impl Chunk {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChunkDictionary<H: simple_hasher::Hasher> {
+    // (bloom filter bit index, membership proof for the whole chunk to which bit belongs, chunk value)
     dictionary: Vec<(u128, mmr::membership_proof::MembershipProof<H>, Chunk)>,
 }
 
@@ -62,12 +63,6 @@ impl<H: simple_hasher::Hasher> ChunkDictionary<H> {
     fn default() -> ChunkDictionary<H> {
         Self { dictionary: vec![] }
     }
-}
-
-pub struct MembershipProof<H: simple_hasher::Hasher> {
-    randomness: H::Digest,
-    auth_path_aocl: mmr::membership_proof::MembershipProof<H>,
-    target_chunks: ChunkDictionary<H>,
 }
 
 pub struct AdditionRecord<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>> {
@@ -141,12 +136,11 @@ where
             for i in CHUNK_SIZE..WINDOW_SIZE {
                 self.swbf_active[i - CHUNK_SIZE] = self.swbf_active[i];
             }
+
             for i in (WINDOW_SIZE - CHUNK_SIZE)..WINDOW_SIZE {
                 self.swbf_active[i] = false;
             }
-            // self.swbf_active =
-            //     // self.swbf_active[CHUNK_SIZE..WINDOW_SIZE].concatenate([false; CHUNK_SIZE as usize]);
-            //     self.swbf_active[]
+
             let chunk_digest = chunk.hash::<H>();
             self.swbf_inactive.append(chunk_digest); // ignore auth path
         }
@@ -300,6 +294,95 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MembershipProof<H: simple_hasher::Hasher> {
+    randomness: H::Digest,
+    auth_path_aocl: mmr::membership_proof::MembershipProof<H>,
+    target_chunks: ChunkDictionary<H>,
+}
+
+impl<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>> MembershipProof<H>
+where
+    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+{
+    /**
+     * update_from_addition
+     * Updates a membership proof in anticipation of an addition to the set.
+     */
+    pub fn update_from_addition(
+        &mut self,
+        mutator_set: &SetCommitment<H>,
+        addition_record: &AdditionRecord<H>,
+    ) {
+        // Update AOCL MMR membership proof
+        self.auth_path_aocl.update_from_append(
+            mutator_set.aocl.count_leaves(),
+            &addition_record.commitment,
+            &mutator_set.aocl.get_peaks(),
+        );
+
+        // Update chunks dictionary if window slides
+        // Check that window slides
+        if (mutator_set.aocl.count_leaves() + 1) % BATCH_SIZE as u128 != 0 {
+            return;
+        }
+
+        // Window slides
+        let batch_index = mutator_set.aocl.count_leaves() / BATCH_SIZE as u128;
+        let old_window_start = batch_index * CHUNK_SIZE as u128;
+        let new_window_start = (batch_index + 1) * CHUNK_SIZE as u128;
+        let hasher = H::new();
+        let timestamp: Vec<BFieldElement> = (self.auth_path_aocl.data_index).to_digest();
+        let rhs = hasher.hash_pair(&timestamp, &self.randomness);
+        for i in 0..NUM_TRIALS {
+            // get index
+            let counter: Vec<BFieldElement> = (i as u128).to_digest();
+            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
+
+            let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
+                as u128
+                + self.auth_path_aocl.data_index * CHUNK_SIZE as u128;
+
+            let chunk = Chunk {
+                bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
+            };
+
+            // if bit index is in dictionary, update auth path
+            if bit_index < old_window_start {
+                self.target_chunks
+                    .dictionary
+                    .iter_mut()
+                    .for_each(|(i, ap, _c)| {
+                        // TODO: This if condition will only be true for *one* i, so we can probably
+                        // find a way to short-circuit this iterator, or change the datatype of ChunkDictionary
+                        // to a hash map
+                        if *i == bit_index {
+                            ap.update_from_append(
+                                batch_index,
+                                &chunk.hash::<H>(),
+                                &mutator_set.swbf_inactive.get_peaks(),
+                            );
+                        }
+                    });
+                continue;
+            }
+
+            // if bit is in the part that is becoming inactive, add a dictionary entry
+            if old_window_start < bit_index && bit_index <= new_window_start {
+                let auth_path = mutator_set.swbf_inactive.clone().append(chunk.hash::<H>());
+                self.target_chunks
+                    .dictionary
+                    .push((bit_index, auth_path, chunk));
+                continue;
+            }
+
+            // if bit is still in active window, do nothing
+        }
+
+        // TODO: Consider if we want a return value indicating if membership proof has changed
+    }
+}
+
 #[cfg(test)]
 mod accumulation_scheme_tests {
 
@@ -318,6 +401,57 @@ mod accumulation_scheme_tests {
     #[test]
     fn init_test() {
         SetCommitment::<RescuePrimeProduction>::default();
+    }
+
+    #[test]
+    fn test_membership_proof_update_from_add() {
+        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
+        let item: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
+        let randomness: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
+
+        let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            mutator_set.commit(&item, &randomness);
+        let mut membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            mutator_set.prove(&item, &randomness);
+        mutator_set.add(&addition_record);
+
+        // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
+        let new_item: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1648)], RP_DEFAULT_OUTPUT_SIZE);
+        let new_randomness: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1807)], RP_DEFAULT_OUTPUT_SIZE);
+        let new_addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            mutator_set.commit(&new_item, &new_randomness);
+        let original_membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            membership_proof.clone();
+        membership_proof.update_from_addition(&mutator_set, &new_addition_record);
+        assert_ne!(
+            original_membership_proof.auth_path_aocl,
+            membership_proof.auth_path_aocl
+        );
+        assert!(
+            mutator_set.verify(&item, &original_membership_proof),
+            "Original membership proof must verify prior to addition"
+        );
+        assert!(
+            !mutator_set.verify(&item, &membership_proof),
+            "New membership proof must fail to verify prior to addition"
+        );
+
+        // Insert the new element into the mutator set, then verify that the membership proof works and
+        // that the original membership proof is invalid.
+        mutator_set.add(&new_addition_record);
+        assert!(
+            !mutator_set.verify(&item, &original_membership_proof),
+            "Original membership proof must fail to verify after addition"
+        );
+        assert!(
+            mutator_set.verify(&item, &membership_proof),
+            "New membership proof must verify after addition"
+        );
     }
 
     #[test]
