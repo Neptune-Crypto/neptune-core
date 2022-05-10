@@ -49,7 +49,7 @@ impl Chunk {
         }
 
         let hasher = H::new();
-        hasher.hash(&ret)
+        hasher.hash(&ret.to_digest())
     }
 }
 
@@ -65,21 +65,25 @@ impl<H: simple_hasher::Hasher> ChunkDictionary<H> {
     }
 }
 
-pub struct AdditionRecord<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>> {
+pub struct AdditionRecord<H: simple_hasher::Hasher> {
     commitment: H::Digest,
     aocl_snapshot: MmrAccumulator<H>,
 }
 
-impl<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>> AdditionRecord<H> {
+impl<H: simple_hasher::Hasher> AdditionRecord<H>
+where
+    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+{
     pub fn has_matching_aocl(&self, aocl_accumulator: &MmrAccumulator<H>) -> bool {
         self.aocl_snapshot.count_leaves() == aocl_accumulator.count_leaves()
             && self.aocl_snapshot.get_peaks() == aocl_accumulator.get_peaks()
     }
 }
 
-impl<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>> SetCommitment<H>
+impl<H: simple_hasher::Hasher> SetCommitment<H>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
     pub fn default() -> Self {
         Self {
@@ -141,7 +145,8 @@ where
                 self.swbf_active[i] = false;
             }
 
-            let chunk_digest = chunk.hash::<H>();
+            // let chunk_digest = chunk.hash::<H>();
+            let chunk_digest: H::Digest = chunk.hash::<H>();
             self.swbf_inactive.append(chunk_digest); // ignore auth path
         }
     }
@@ -171,10 +176,10 @@ where
             let new_chunk_path = self.swbf_inactive.clone().append(chunk_digest);
 
             // prepare swbf MMR authentication paths
-            let timestamp: Vec<BFieldElement> = (item_index as u128).to_digest();
+            let timestamp: H::Digest = (item_index as u128).to_digest();
             let rhs = hasher.hash_pair(&timestamp, randomness);
             for i in 0..NUM_TRIALS {
-                let counter: Vec<BFieldElement> = (i as u128).to_digest();
+                let counter: H::Digest = (i as u128).to_digest();
                 let pseudorandomness = hasher.hash_pair(&counter, &rhs);
                 let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
                     as u128
@@ -225,12 +230,12 @@ where
         let mut all_auth_paths_are_valid = true;
         let mut no_future_bits = true;
         let item_index = membership_proof.auth_path_aocl.data_index;
-        let timestamp: Vec<BFieldElement> = (item_index).to_digest();
+        let timestamp: H::Digest = (item_index).to_digest();
         let item_batch_index = item_index / BATCH_SIZE as u128;
         let rhs = hasher.hash_pair(&timestamp, &membership_proof.randomness);
         for i in 0..NUM_TRIALS {
             // get index
-            let counter: Vec<BFieldElement> = (i as u128).to_digest();
+            let counter: H::Digest = (i as u128).to_digest();
             let pseudorandomness = hasher.hash_pair(&counter, &rhs);
 
             let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
@@ -301,9 +306,10 @@ pub struct MembershipProof<H: simple_hasher::Hasher> {
     target_chunks: ChunkDictionary<H>,
 }
 
-impl<H: simple_hasher::Hasher<Digest = Vec<BFieldElement>>> MembershipProof<H>
+impl<H: simple_hasher::Hasher> MembershipProof<H>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
     /**
      * update_from_addition
@@ -332,11 +338,11 @@ where
         let old_window_start = batch_index * CHUNK_SIZE as u128;
         let new_window_start = (batch_index + 1) * CHUNK_SIZE as u128;
         let hasher = H::new();
-        let timestamp: Vec<BFieldElement> = (self.auth_path_aocl.data_index).to_digest();
+        let timestamp: H::Digest = (self.auth_path_aocl.data_index).to_digest();
         let rhs = hasher.hash_pair(&timestamp, &self.randomness);
         for i in 0..NUM_TRIALS {
             // get index
-            let counter: Vec<BFieldElement> = (i as u128).to_digest();
+            let counter: H::Digest = (i as u128).to_digest();
             let pseudorandomness = hasher.hash_pair(&counter, &rhs);
 
             let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
@@ -390,7 +396,7 @@ mod accumulation_scheme_tests {
         shared_math::rescue_prime_xlix::{
             neptune_params, RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH,
         },
-        util_types::simple_hasher::RescuePrimeProduction,
+        util_types::simple_hasher::{Hasher, RescuePrimeProduction},
     };
     use rand::prelude::*;
     use rand_chacha::ChaCha20Rng;
@@ -452,6 +458,59 @@ mod accumulation_scheme_tests {
             mutator_set.verify(&item, &membership_proof),
             "New membership proof must verify after addition"
         );
+    }
+
+    #[test]
+    fn membership_proof_updating_from_add_pbt() {
+        type Hasher = blake3::Hasher;
+        let mut rng = ChaCha20Rng::from_seed(
+            vec![vec![0, 1, 4, 33], vec![0; 28]]
+                .concat()
+                .try_into()
+                .unwrap(),
+        );
+
+        let mut mutator_set = SetCommitment::<Hasher>::default();
+        let hasher: Hasher = blake3::Hasher::new();
+
+        let num_additions = rng.gen_range(0..=500i32);
+        println!(
+            "running multiple additions test for {} additions",
+            num_additions
+        );
+
+        let mut membership_proofs_and_items: Vec<(MembershipProof<Hasher>, blake3::Hash)> = vec![];
+        for i in 0..num_additions {
+            println!("loop iteration {}", i);
+            let item = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
+            let randomness = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
+
+            let addition_record = mutator_set.commit(&item, &randomness);
+            let membership_proof = mutator_set.prove(&item, &randomness);
+
+            // Update all membership proofs
+            for mp in membership_proofs_and_items.iter_mut() {
+                mp.0.update_from_addition(&mutator_set, &addition_record);
+            }
+
+            // Add the element
+            mutator_set.add(&addition_record);
+            assert!(mutator_set.verify(&item, &membership_proof));
+
+            // Verify that all membership proofs work
+            assert!(membership_proofs_and_items
+                .clone()
+                .into_iter()
+                .all(|(mp, item)| mutator_set.verify(&item.into(), &mp)));
+        }
     }
 
     #[test]
