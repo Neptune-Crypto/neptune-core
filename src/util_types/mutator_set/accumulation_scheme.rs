@@ -167,11 +167,17 @@ where
         }
     }
 
+    pub fn window_slides(batch_index : u128) -> bool {
+        (1+batch_index) % CHUNK_SIZE as u128 == 0u128
+    }
+
     /**
      * add
      * Updates the set-commitment with an addition record. The new
      * commitment represents the set
+     * 
      *          S union {c} ,
+     * 
      * where S is the set represented by the old
      * commitment and c is the commitment to the new item AKA the
      * *addition record*.
@@ -182,12 +188,15 @@ where
             panic!("Addition record has aocl snapshot that does not match with the AOCL it is being added to.")
         }
 
+        println!("Adding item. Old AOCL leaf count was {}; new is {}.", self.aocl.count_leaves(), self.aocl.count_leaves()+1);
+
         // add to list
         let item_index = self.aocl.count_leaves();
+        let batch_index = item_index / BATCH_SIZE as u128;
         self.aocl.append(addition_record.commitment.to_owned()); // ignore auth path
 
         // if window slides, update filter
-        if item_index % BATCH_SIZE as u128 == 0 {
+        if Self::window_slides(batch_index) {
             let chunk: Chunk = Chunk {
                 bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
             };
@@ -247,6 +256,7 @@ where
 
         // simulate adding to commitment list
         let item_index = self.aocl.count_leaves();
+        let batch_index = item_index / BATCH_SIZE as u128;
         let aocl_auth_path = self.aocl.clone().append(item_commitment);
 
         // get indices of bits to be set when item is removed
@@ -254,7 +264,7 @@ where
 
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
         // if window slides, filter will be updated
-        if (1 + item_index) % BATCH_SIZE as u128 == 0 {
+        if Self::window_slides(batch_index) {
             let chunk: Chunk = Chunk {
                 bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
             };
@@ -398,6 +408,9 @@ where
         mutator_set: &SetCommitment<H>,
         addition_record: &AdditionRecord<H>,
     ) {
+        let item_index = mutator_set.aocl.count_leaves();
+        let batch_index = item_index / BATCH_SIZE as u128;
+
         // Update AOCL MMR membership proof
         self.auth_path_aocl.update_from_append(
             mutator_set.aocl.count_leaves(),
@@ -405,14 +418,12 @@ where
             &mutator_set.aocl.get_peaks(),
         );
 
-        // Update chunks dictionary if window slides
-        // Check that window slides
-        if (mutator_set.aocl.count_leaves() + 1) % BATCH_SIZE as u128 != 0 {
+        // if window does not slide, we are done
+        if !SetCommitment::<H>::window_slides(batch_index) {
             return;
         }
 
-        // Window slides
-        let batch_index = mutator_set.aocl.count_leaves() / BATCH_SIZE as u128;
+        // window does slide
         let old_window_start = batch_index * CHUNK_SIZE as u128;
         let new_window_start = (batch_index + 1) * CHUNK_SIZE as u128;
         let bit_indices = SetCommitment::<H>::get_indices(
@@ -420,10 +431,10 @@ where
             &self.randomness,
             self.auth_path_aocl.data_index,
         );
+        let new_chunk = Chunk {
+            bits : mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap()
+        };
         for bit_index in bit_indices {
-            let chunk = Chunk {
-                bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
-            };
 
             // if bit index is in dictionary, update auth path
             if bit_index < old_window_start {
@@ -470,7 +481,7 @@ where
                             );
                             ap.update_from_append(
                                 batch_index + 1,
-                                &chunk.hash::<H>(),
+                                &new_chunk.hash::<H>(),
                                 &mutator_set.swbf_inactive.get_peaks(),
                             );
                         }
@@ -480,10 +491,10 @@ where
 
             // if bit is in the part that is becoming inactive, add a dictionary entry
             if old_window_start < bit_index && bit_index <= new_window_start {
-                let auth_path = mutator_set.swbf_inactive.clone().append(chunk.hash::<H>());
+                let auth_path : mmr::membership_proof::MembershipProof<H> = mutator_set.swbf_inactive.clone().append(new_chunk.hash::<H>());
                 self.target_chunks
                     .dictionary
-                    .push((bit_index, auth_path, chunk));
+                    .push((bit_index, auth_path, new_chunk));
                 continue;
             }
 
@@ -529,9 +540,6 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
-
-    use std::borrow::BorrowMut;
-
     use crate::{
         shared_math::rescue_prime_xlix::{
             neptune_params, RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH,
@@ -719,6 +727,7 @@ mod accumulation_scheme_tests {
             let mut j = 0;
             for (item, mp) in items_and_membership_proofs.iter_mut() {
                 println!("j = {}", j);
+                assert!(mutator_set.verify(item, mp));
                 mp.update_from_addition(&item, &mutator_set, &addition_record);
                 j += 1;
             }
@@ -727,6 +736,12 @@ mod accumulation_scheme_tests {
             assert!(!mutator_set.verify(&item, &membership_proof));
             mutator_set.add(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
+
+            println!("done updating mutator set; verifying that updated membership proofs still validate ...");
+
+            for (item, mp) in items_and_membership_proofs.iter() {
+                assert!(mutator_set.verify(item, mp))
+            }
 
             items_and_membership_proofs.push((item, membership_proof));
         }
@@ -747,8 +762,7 @@ mod accumulation_scheme_tests {
         println!("Done with 1st loop");
         for i in 0..num_additions {
             let (item, mp) = items_and_membership_proofs[i].clone();
-            println!("HIB");
-            println!("HIC");
+            println!("preparing to remove item ... let's see if its membership proof is valid first ...");
             assert!(mutator_set.verify(&item, &mp));
             println!("HID");
             // generate removal record
