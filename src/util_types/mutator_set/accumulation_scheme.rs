@@ -66,6 +66,7 @@ impl<H: simple_hasher::Hasher> ChunkDictionary<H> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct AdditionRecord<H: simple_hasher::Hasher> {
     commitment: H::Digest,
     aocl_snapshot: MmrAccumulator<H>,
@@ -81,6 +82,7 @@ where
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct RemovalRecord<H: simple_hasher::Hasher> {
     bit_indices: [u128; NUM_TRIALS],
     target_chunks: ChunkDictionary<H>,
@@ -209,9 +211,9 @@ where
     /**
      * remove
      * Updates the mutator set so as to remove the item given its
-     * removal record.
+     * removal record, which is updated too.
      */
-    pub fn remove(&mut self, removal_record: &RemovalRecord<H>) {
+    pub fn remove(&mut self, removal_record: &mut RemovalRecord<H>) {
         let batch_index = self.aocl.count_leaves() / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
         for bit_index in removal_record.bit_indices.iter() {
@@ -225,9 +227,10 @@ where
             let (_, path, chunk) = removal_record
                 .target_chunks
                 .dictionary
-                .iter()
+                .iter_mut()
                 .find(|(i, _, _)| i == bit_index)
                 .unwrap();
+            chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
             self.swbf_inactive.mutate_leaf(path, &chunk.hash::<H>());
         }
     }
@@ -305,6 +308,7 @@ where
         let mut all_auth_paths_are_valid = true;
         let mut no_future_bits = true;
         let item_index = membership_proof.auth_path_aocl.data_index;
+
         // get indices of bits to be set when item is removed
         let bit_indices = Self::get_indices(item, &membership_proof.randomness, item_index);
         for bit_index in bit_indices {
@@ -312,7 +316,7 @@ where
             let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
             let window_start = current_batch_index * CHUNK_SIZE as u128;
             let window_stop = window_start + WINDOW_SIZE as u128;
-            let relative_index: u128 = bit_index - window_start;
+
             // if bit index is left of the window
             if bit_index < window_start {
                 // verify mmr auth path
@@ -338,15 +342,22 @@ where
                 all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
                 // verify that bit is possibly unset
-                if !matching_entries[0].2.bits[relative_index as usize] {
+                // let relative_index: u128 = bit_index - window_start;
+                let index_within_chunk = bit_index % CHUNK_SIZE as u128;
+                if !matching_entries[0].2.bits[index_within_chunk as usize] {
                     has_unset_bits = true;
                 }
-            } else if bit_index >= window_stop {
-                no_future_bits = false;
+                continue;
             }
-            // if bit is in the active part of the filter
-            else if !self.swbf_active[relative_index as usize] {
-                has_unset_bits = true;
+
+            // Check whether bitindex is a future index, or in the active window
+            if bit_index >= window_stop {
+                no_future_bits = false;
+            } else {
+                let relative_index = bit_index - window_start;
+                if !self.swbf_active[relative_index as usize] {
+                    has_unset_bits = true;
+                }
             }
         }
 
@@ -424,8 +435,41 @@ where
                         // find a way to short-circuit this iterator, or change the datatype of ChunkDictionary
                         // to a hash map
                         if *i == bit_index {
-                            ap.update_from_append(
+                            // Verify that leaf and authentication path are valid
+                            let (valid, _) = ap.verify(
+                                &mutator_set.swbf_inactive.get_peaks(),
+                                &_c.hash::<H>(),
                                 batch_index,
+                            );
+                            println!("valid = {}", valid);
+                            let (valid, _) = ap.verify(
+                                &mutator_set.swbf_inactive.get_peaks(),
+                                &_c.hash::<H>(),
+                                batch_index + 1,
+                            );
+                            println!("valid = {}", valid);
+                            let (valid, _) = ap.verify(
+                                &mutator_set.swbf_inactive.get_peaks(),
+                                &_c.hash::<H>(),
+                                batch_index - 1,
+                            );
+                            println!("valid = {}", valid);
+                            println!(
+                                "leaf count swbf_inactive: {}",
+                                mutator_set.swbf_inactive.count_leaves()
+                            );
+
+                            println!("i = {}", i);
+                            println!("bit_index = {}", bit_index);
+                            println!("batch_index = {}", batch_index);
+                            println!("old_window_start = {}", old_window_start);
+                            println!("new_window_start = {}", new_window_start);
+                            println!(
+                                "mutator_set.aocl.count_leaves() = {}",
+                                mutator_set.aocl.count_leaves()
+                            );
+                            ap.update_from_append(
+                                batch_index + 1,
                                 &chunk.hash::<H>(),
                                 &mutator_set.swbf_inactive.get_peaks(),
                             );
@@ -485,6 +529,8 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
+
+    use std::borrow::BorrowMut;
 
     use crate::{
         shared_math::rescue_prime_xlix::{
@@ -644,7 +690,7 @@ mod accumulation_scheme_tests {
         let hasher = Hasher::new();
         let mut mutator_set = SetCommitment::<Hasher>::default();
 
-        let num_additions = rng.gen_range(0..=500usize);
+        let num_additions = rng.gen_range(0..=100usize);
         println!(
             "running multiple additions test for {} additions",
             num_additions
@@ -652,7 +698,7 @@ mod accumulation_scheme_tests {
 
         let mut items_and_membership_proofs: Vec<(Digest, MembershipProof<Hasher>)> = vec![];
         for i in 0..num_additions {
-            println!("loop iteration {}", i);
+            println!("loop iteration {} / {}", i, num_additions);
             let item = hasher.hash(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
@@ -667,24 +713,53 @@ mod accumulation_scheme_tests {
             let addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness);
 
+            // Update *all* membership proofs with newly added item
+            // FIXME: MOVE THIS UP PRIOR TO ADDITION FFS!!!!!11one
+            println!("updating membership proofs");
+            let mut j = 0;
+            for (item, mp) in items_and_membership_proofs.iter_mut() {
+                println!("j = {}", j);
+                mp.update_from_addition(&item, &mutator_set, &addition_record);
+                j += 1;
+            }
+            println!("done updating membership proofs");
+
             assert!(!mutator_set.verify(&item, &membership_proof));
-
             mutator_set.add(&addition_record);
-
             assert!(mutator_set.verify(&item, &membership_proof));
+
             items_and_membership_proofs.push((item, membership_proof));
         }
 
+        // println!("Done with 1st loop");
+        // for (item, mp) in items_and_membership_proofs.into_iter() {
+        //     println!("HIB");
+        //     println!("HIC");
+        //     assert!(mutator_set.verify(&item, &mp));
+        //     println!("HID");
+        //     let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
+        //     mutator_set.remove(&mut removal_record);
+        //     println!("HIE");
+        //     assert!(!mutator_set.verify(&item.into(), &mp));
+        //     println!("HIF");
+        // }
+
         println!("Done with 1st loop");
-        for (item, mp) in items_and_membership_proofs.into_iter() {
-            println!("HIA");
-            assert!(mutator_set.verify(&item, &mp));
+        for i in 0..num_additions {
+            let (item, mp) = items_and_membership_proofs[i].clone();
             println!("HIB");
-            let removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
             println!("HIC");
             assert!(mutator_set.verify(&item, &mp));
             println!("HID");
-            mutator_set.remove(&removal_record);
+            // generate removal record
+            let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
+            // update membership proofs
+            for j in (i + 1)..num_additions {
+                items_and_membership_proofs[i]
+                    .1
+                    .update_from_remove(removal_record.clone());
+            }
+            mutator_set.remove(&mut removal_record);
             println!("HIE");
             assert!(!mutator_set.verify(&item.into(), &mp));
             println!("HIF");
