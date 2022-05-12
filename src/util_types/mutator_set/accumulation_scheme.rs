@@ -451,22 +451,10 @@ where
         own_item: &H::Digest,
         mutator_set: &SetCommitment<H>,
         addition_record: &AdditionRecord<H>,
-        index_of_iteration: u32,
     ) {
         assert!(self.auth_path_aocl.data_index < mutator_set.aocl.count_leaves());
         let new_item_index = mutator_set.aocl.count_leaves();
         let batch_index = new_item_index / BATCH_SIZE as u128;
-
-        if index_of_iteration == 0 {
-            println!("# Updating from Addition -- special case with index of iteration == 0");
-            println!("own item index: {}", self.auth_path_aocl.data_index);
-            println!("old leaf count: {}", mutator_set.aocl.count_leaves());
-            println!("batch_index: {}", batch_index);
-            println!(
-                "number of elements in target chunks dictionary: {}",
-                self.target_chunks.dictionary.len()
-            )
-        }
 
         // Update AOCL MMR membership proof
         self.auth_path_aocl.update_from_append(
@@ -494,17 +482,6 @@ where
         // window does slide
         else {
             assert!(SetCommitment::<H>::window_slides(new_item_index));
-            if index_of_iteration == 0 {
-                println!("Window does slide; doing stuff ..");
-                println!("Have duplicates? {}", self.target_chunks.has_duplicates());
-                println!("Current paths:");
-                for (_, path, _) in self.target_chunks.dictionary.iter() {
-                    for p in path.authentication_path.iter() {
-                        print!("{:?},", p);
-                    }
-                    println!("");
-                }
-            }
             let old_window_start = (batch_index - 1) * CHUNK_SIZE as u128;
             let new_window_start = batch_index * CHUNK_SIZE as u128;
             let bit_indices = SetCommitment::<H>::get_indices(
@@ -552,9 +529,6 @@ where
 
                 // if bit is in the part that is becoming inactive, add a dictionary entry
                 if old_window_start <= bit_index && bit_index < new_window_start {
-                    if index_of_iteration == 0 {
-                        println!("bit is in the part of the filter that is begcoming inactive ...");
-                    }
                     // generate dictionary entry
                     let entry = (
                         bit_index / BATCH_SIZE as u128,
@@ -608,78 +582,11 @@ where
                     }
 
                     // add dictionary entry
-                    if index_of_iteration == 0 {
-                        println!("Verifying that we got here: adding entry to dictionary.");
-                    }
                     self.target_chunks.dictionary.push(entry);
                     assert!(!self.target_chunks.has_duplicates());
                 }
 
                 // if bit is still in active window, do nothing
-            }
-
-            if index_of_iteration == 0 {
-                let batch_indices_in_dictionary: Vec<u128> = self
-                    .target_chunks
-                    .dictionary
-                    .iter()
-                    .map(|(i, _, _)| i.clone())
-                    .collect();
-                println!("bit indices in dictionary:");
-                for bi in batch_indices_in_dictionary {
-                    print!("{},", bi);
-                }
-                println!("");
-                let paths: Vec<_> = self
-                    .target_chunks
-                    .dictionary
-                    .iter()
-                    .map(|(_, p, _)| p)
-                    .collect();
-                println!("paths:");
-                for p in paths.iter() {
-                    for d in &p.authentication_path {
-                        print!("{:?},", d);
-                    }
-                    println!("\n");
-                }
-                println!(
-                    "new mmra leaf count: {} and peaks: {:?}",
-                    mmra_copy.count_leaves(),
-                    mmra_copy.get_peaks()
-                );
-                for (i, p) in paths.iter().enumerate() {
-                    println!(
-                        "path {}: leaf index {} and path {:?}",
-                        i, p.data_index, p.authentication_path
-                    );
-                    let path_is_valid = p
-                        .verify(
-                            &mmra_copy.get_peaks(),
-                            &new_chunk.hash::<H>(),
-                            mmra_copy.count_leaves(),
-                        )
-                        .0;
-                    println!("valid? {}", path_is_valid);
-                    assert!(path_is_valid);
-                }
-                println!(
-                    "paths are valid? {}",
-                    paths.iter().all(|p| p
-                        .verify(
-                            &mmra_copy.get_peaks(),
-                            &new_chunk.hash::<H>(),
-                            mmra_copy.count_leaves()
-                        )
-                        .0)
-                );
-                assert!(paths.iter().all(|p| p
-                    .verify(
-                        &mmra_copy.get_peaks(),
-                        &new_chunk.hash::<H>(),
-                        mmra_copy.count_leaves()
-                    )
-                    .0));
             }
         }
 
@@ -688,13 +595,21 @@ where
         // TODO: Consider if we want a return value indicating if membership proof has changed
     }
 
-    pub fn update_from_remove(&mut self, removal_record: RemovalRecord<H>) {
-        let batch_index = self.auth_path_aocl.data_index / BATCH_SIZE as u128;
-        let window_start = batch_index * CHUNK_SIZE as u128;
+    pub fn update_from_remove(
+        &mut self,
+        mutator_set: &SetCommitment<H>,
+        removal_record: &RemovalRecord<H>,
+    ) {
+        let own_batch_index = self.auth_path_aocl.data_index / BATCH_SIZE as u128;
+        let own_window_start = own_batch_index * CHUNK_SIZE as u128;
+
+        let current_batch_index = mutator_set.aocl.count_leaves();
+        let current_window_start = current_batch_index * CHUNK_SIZE as u128;
+
         // for all to-be-set bits
-        for bit_index in removal_record.bit_indices {
+        for &bit_index in &removal_record.bit_indices {
             // if the bit is in the inactive part of the filter,
-            if bit_index < window_start {
+            if bit_index < current_window_start {
                 // find the right entry in the removal record's dictionary
                 let (_, path, chunk) = removal_record
                     .target_chunks
@@ -702,7 +617,7 @@ where
                     .iter()
                     .find(|(i, _, _)| *i == bit_index / BATCH_SIZE as u128)
                     .unwrap();
-                let relative_index = bit_index - window_start;
+                let relative_index = bit_index - own_window_start;
                 let mut new_chunk_bits = chunk.bits.clone();
                 new_chunk_bits[relative_index as usize] = true;
                 // update own paths and (if necessary) chunk
@@ -910,29 +825,22 @@ mod accumulation_scheme_tests {
             assert!(!membership_proof.target_chunks.has_duplicates());
 
             // Update *all* membership proofs with newly added item
-            // FIXME: MOVE THIS UP PRIOR TO ADDITION FFS!!!!!11one
-            println!("updating membership proofs");
             let mut j = 0;
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
-                println!("updating item-memproof j = {}", j);
                 assert!(!mp.target_chunks.has_duplicates());
                 assert!(mutator_set.verify(updatee_item, mp));
-                mp.update_from_addition(&updatee_item, &mutator_set, &addition_record, j);
+                mp.update_from_addition(&updatee_item, &mutator_set, &addition_record);
                 assert!(!mp.target_chunks.has_duplicates());
                 j += 1;
             }
-            println!("\ndone updating membership proofs");
 
             //assert!(!mutator_set.verify(&item, &membership_proof));
             mutator_set.add(&addition_record);
             assert!(mutator_set.verify(&new_item, &membership_proof));
 
-            println!("\ndone updating mutator set; verifying that updated membership proofs still validate ...");
-
             for j in 0..items_and_membership_proofs.len() {
                 let (old_item, mp) = &items_and_membership_proofs[j];
                 // for (item, mp) in items_and_membership_proofs.iter() {
-                println!("\n\nverifying item-memproof {}", j);
                 assert!(!mp.target_chunks.has_duplicates());
                 assert!(mutator_set.verify(&old_item, &mp))
             }
@@ -941,26 +849,27 @@ mod accumulation_scheme_tests {
             items_and_membership_proofs.push((new_item, membership_proof));
         }
 
-        println!("Done with 1st loop");
-        // for i in 0..num_additions {
-        //     let (item, mp) = items_and_membership_proofs[i].clone();
-        //     println!(
-        //         "preparing to remove item ... let's see if its membership proof is valid first ..."
-        //     );
-        //     assert!(mutator_set.verify(&item, &mp));
-        //     println!("HID");
-        //     // generate removal record
-        //     let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
-        //     // update membership proofs
-        //     for j in (i + 1)..num_additions {
-        //         items_and_membership_proofs[i]
-        //             .1
-        //             .update_from_remove(removal_record.clone());
-        //     }
-        //     mutator_set.remove(&mut removal_record);
-        //     println!("HIE");
-        //     //assert!(!mutator_set.verify(&item.into(), &mp));
-        //     println!("HIF");
-        // }
+        println!("\nDone with 1st loop\n");
+        for i in 0..num_additions {
+            let (item, mp) = items_and_membership_proofs[i].clone();
+            println!(
+                "preparing to remove item ... let's see if its membership proof is valid first ..."
+            );
+            assert!(mutator_set.verify(&item, &mp));
+
+            // generate removal record
+            let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
+
+            // update membership proofs
+            for j in (i + 1)..num_additions {
+                items_and_membership_proofs[i]
+                    .1
+                    .update_from_remove(&mutator_set, &removal_record.clone());
+            }
+
+            // remove item from set
+            mutator_set.remove(&mut removal_record);
+            //assert!(!mutator_set.verify(&item.into(), &mp));
+        }
     }
 }
