@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use itertools::Itertools;
 
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+        mmr::{self, membership_proof, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
         simple_hasher::{self, ToDigest},
     },
 };
@@ -11,7 +13,7 @@ use crate::{
 pub const WINDOW_SIZE: usize = 30000;
 pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 160;
+pub const NUM_TRIALS: usize = 4;
 
 pub struct SetCommitment<H: simple_hasher::Hasher> {
     aocl: MmrAccumulator<H>,
@@ -148,7 +150,6 @@ where
                 + batch_index * CHUNK_SIZE as u128;
             indices.push(bit_index);
         }
-        indices.dedup();
 
         indices
     }
@@ -251,6 +252,25 @@ where
     pub fn remove(&mut self, removal_record: &mut RemovalRecord<H>) {
         let batch_index = self.aocl.count_leaves() / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
+        let mut new_mps: Vec<mmr::membership_proof::MembershipProof<H>> = removal_record
+            .target_chunks
+            .dictionary
+            .iter()
+            .map(|x| x.1.clone())
+            .collect();
+        let chunk_indices: Vec<u128> = removal_record
+            .target_chunks
+            .dictionary
+            .iter()
+            .map(|x| x.0)
+            .collect();
+        let mut chunk_2_entry: HashMap<u128, usize> = HashMap::new();
+        println!("Length of chunk_indices = {}", chunk_indices.len());
+        for (entry, chunk) in chunk_indices.into_iter().enumerate() {
+            chunk_2_entry.insert(chunk, entry);
+            println!("chunk => entry: {} => {}", chunk, entry);
+        }
+        println!("Length of new_mps = {}", new_mps.len());
         for bit_index in removal_record.bit_indices.iter() {
             // if bit is in active part
             if *bit_index >= window_start {
@@ -259,14 +279,35 @@ where
                 continue;
             }
             // bit is not in active part, so update mmr
+
+            let chunk_index = bit_index / CHUNK_SIZE as u128;
             let (_, path, chunk) = removal_record
                 .target_chunks
                 .dictionary
                 .iter_mut()
-                .find(|(i, _, _)| *i == bit_index / BATCH_SIZE as u128)
+                .find(|(i, _, _)| *i == chunk_index)
                 .unwrap();
             chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
-            self.swbf_inactive.mutate_leaf(path, &chunk.hash::<H>());
+            let leaf_mutation_membership_proof = new_mps[chunk_2_entry[&chunk_index]].clone();
+            let new_leaf = chunk.hash::<H>();
+            self.swbf_inactive
+                .mutate_leaf(&leaf_mutation_membership_proof, &chunk.hash::<H>());
+            mmr::membership_proof::MembershipProof::batch_update_from_leaf_mutation(
+                &mut new_mps,
+                &leaf_mutation_membership_proof,
+                &new_leaf,
+            );
+
+            assert!(
+                leaf_mutation_membership_proof
+                    .verify(
+                        &self.swbf_inactive.get_peaks(),
+                        &new_leaf,
+                        self.swbf_inactive.count_leaves(),
+                    )
+                    .0,
+                "Membership proofs must validate after remove manipulation"
+            );
         }
     }
 
@@ -305,9 +346,11 @@ where
 
                 // if index lies in inactive part of filter, add an mmr auth path
                 if bit_index < window_start {
-                    target_chunks
-                        .dictionary
-                        .push((bit_index, new_chunk_path.clone(), chunk));
+                    target_chunks.dictionary.push((
+                        bit_index / CHUNK_SIZE as u128,
+                        new_chunk_path.clone(),
+                        chunk,
+                    ));
                 }
             }
         }
@@ -327,12 +370,9 @@ where
             "own item index: {}",
             membership_proof.auth_path_aocl.data_index
         );
-        if self.aocl.count_leaves() == membership_proof.auth_path_aocl.data_index {
-            panic!("Cannot verify membership proof of item that was not added yet!");
-            // TODO: Remove me; it pays to test that invalid proofs don't verify
-        }
-        // if 0 elements were added, no proof can be valid
-        if self.aocl.count_leaves() == 0 {
+
+        // If data index does not exist in AOCL, return false
+        if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.data_index {
             return false;
         }
 
@@ -374,7 +414,7 @@ where
                     .target_chunks
                     .dictionary
                     .iter()
-                    .filter(|ch| ch.0 == bit_index / BATCH_SIZE as u128)
+                    .filter(|ch| ch.0 == bit_index / CHUNK_SIZE as u128)
                     .collect();
                 if matching_entries.len() != 1 {
                     entries_in_dictionary = false;
@@ -516,7 +556,7 @@ where
                 if bit_index < old_window_start {
                     self.target_chunks.dictionary.iter_mut().for_each(
                         |(dict_index, dict_path, _)| {
-                            if *dict_index == bit_index / BATCH_SIZE as u128 {
+                            if *dict_index == bit_index / CHUNK_SIZE as u128 {
                                 dict_path.update_from_append(
                                     mutator_set.swbf_inactive.count_leaves(),
                                     &new_chunk.hash::<H>(),
@@ -531,7 +571,7 @@ where
                 if old_window_start <= bit_index && bit_index < new_window_start {
                     // generate dictionary entry
                     let entry = (
-                        bit_index / BATCH_SIZE as u128,
+                        bit_index / CHUNK_SIZE as u128,
                         new_auth_path.clone(),
                         new_chunk,
                     );
@@ -548,7 +588,7 @@ where
                         .iter()
                         .map(|(i, _, _)| *i)
                         .collect();
-                    if batch_indices_in_dictionary.contains(&(bit_index / BATCH_SIZE as u128)) {
+                    if batch_indices_in_dictionary.contains(&(bit_index / CHUNK_SIZE as u128)) {
                         println!(
                             "Unexpected duplicate bit index found in target chunks dictionary: {}",
                             bit_index
@@ -564,7 +604,7 @@ where
                                     .target_chunks
                                     .dictionary
                                     .iter()
-                                    .find(|(i, _, _)| *i == bit_index / BATCH_SIZE as u128)
+                                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
                                     .unwrap()
                                     .2
                         );
@@ -575,7 +615,7 @@ where
                                     .target_chunks
                                     .dictionary
                                     .iter()
-                                    .find(|(i, _, _)| *i == bit_index / BATCH_SIZE as u128)
+                                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
                                     .unwrap()
                                     .1
                         );
@@ -606,32 +646,49 @@ where
         let current_batch_index = mutator_set.aocl.count_leaves();
         let current_window_start = current_batch_index * CHUNK_SIZE as u128;
 
-        // set bits in own chunks
+        // set bits in own chunks, and
         // for all chunks in the chunk dictionary
-        for (own_index, own_path, own_chunk) in self.target_chunks.dictionary.iter_mut() {
+        let mut new_mps: Vec<mmr::membership_proof::MembershipProof<H>> = self
+            .target_chunks
+            .dictionary
+            .iter()
+            .map(|x| x.1.clone())
+            .collect::<Vec<_>>();
+        for (dictionary_index, (own_chunk_index, own_path, own_chunk)) in
+            self.target_chunks.dictionary.iter_mut().enumerate()
+        {
             // for all bit indices in removal record
             for bit_index in removal_record.bit_indices.iter() {
-                // if batch indices match, set bit
-                if bit_index / BATCH_SIZE as u128 == *own_index {
+                // if chunk indices match, set bit
+                if bit_index / CHUNK_SIZE as u128 == *own_chunk_index {
                     own_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
                 }
             }
+
+            let mutation_mp = new_mps[dictionary_index].clone();
+            mmr::membership_proof::MembershipProof::batch_update_from_leaf_mutation(
+                &mut new_mps,
+                &mutation_mp,
+                &own_chunk.hash::<H>(),
+            );
         }
 
-        // update own auth paths with quadratic algorithm
-        // for all chunks in the chunk dictionary
-        // batch_update_from_leaf_mutation
-        let dict_len = self.target_chunks.dictionary.len();
-        for i in 0..dict_len {
-            let (own_index, own_path, own_chunk) = &mut self.target_chunks.dictionary[i];
-            for j in 0..dict_len {
-                if i == j {
-                    continue;
-                }
-                let (other_index, other_path, other_chunk) =
-                    &self.target_chunks.dictionary[j].clone();
-                own_path.update_from_leaf_mutation(&other_path, &other_chunk.hash::<H>());
-            }
+        for (old, new) in self
+            .target_chunks
+            .dictionary
+            .iter_mut()
+            .zip(new_mps.into_iter())
+        {
+            assert!(
+                new.verify(
+                    &mutator_set.swbf_inactive.get_peaks(),
+                    &old.2.hash::<H>(),
+                    mutator_set.swbf_inactive.count_leaves(),
+                )
+                .0,
+                "Update membership proofs must be valid"
+            );
+            old.1 = new;
         }
 
         // bits in the active part of the filter
@@ -662,128 +719,133 @@ mod accumulation_scheme_tests {
         SetCommitment::<RescuePrimeProduction>::default();
     }
 
-    // #[test]
-    // fn test_membership_proof_update_from_add() {
-    //     let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
-    //     let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
-    //     let own_item: Vec<BFieldElement> =
-    //         hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
-    //     let randomness: Vec<BFieldElement> =
-    //         hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
+    #[test]
+    fn test_membership_proof_update_from_add() {
+        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
+        let own_item: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
+        let randomness: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
 
-    //     let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-    //         mutator_set.commit(&own_item, &randomness);
-    //     let mut membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-    //         mutator_set.prove(&own_item, &randomness);
-    //     mutator_set.add(&addition_record);
+        let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            mutator_set.commit(&own_item, &randomness);
+        let mut membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            mutator_set.prove(&own_item, &randomness);
+        mutator_set.add(&addition_record);
 
-    //     // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
-    //     let new_item: Vec<BFieldElement> =
-    //         hasher.hash(&vec![BFieldElement::new(1648)], RP_DEFAULT_OUTPUT_SIZE);
-    //     let new_randomness: Vec<BFieldElement> =
-    //         hasher.hash(&vec![BFieldElement::new(1807)], RP_DEFAULT_OUTPUT_SIZE);
-    //     let new_addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-    //         mutator_set.commit(&new_item, &new_randomness);
-    //     let original_membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-    //         membership_proof.clone();
-    //     membership_proof.update_from_addition(&own_item, &mutator_set, &new_addition_record, 0);
-    //     assert_ne!(
-    //         original_membership_proof.auth_path_aocl,
-    //         membership_proof.auth_path_aocl
-    //     );
-    //     assert!(
-    //         mutator_set.verify(&own_item, &original_membership_proof),
-    //         "Original membership proof must verify prior to addition"
-    //     );
-    //     assert!(
-    //         !mutator_set.verify(&own_item, &membership_proof),
-    //         "New membership proof must fail to verify prior to addition"
-    //     );
+        // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
+        let new_item: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1648)], RP_DEFAULT_OUTPUT_SIZE);
+        let new_randomness: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1807)], RP_DEFAULT_OUTPUT_SIZE);
+        let new_addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            mutator_set.commit(&new_item, &new_randomness);
+        let original_membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            membership_proof.clone();
+        membership_proof.update_from_addition(&own_item, &mutator_set, &new_addition_record);
+        assert_ne!(
+            original_membership_proof.auth_path_aocl,
+            membership_proof.auth_path_aocl
+        );
+        assert!(
+            mutator_set.verify(&own_item, &original_membership_proof),
+            "Original membership proof must verify prior to addition"
+        );
+        assert!(
+            !mutator_set.verify(&own_item, &membership_proof),
+            "New membership proof must fail to verify prior to addition"
+        );
 
-    //     // Insert the new element into the mutator set, then verify that the membership proof works and
-    //     // that the original membership proof is invalid.
-    //     mutator_set.add(&new_addition_record);
-    //     assert!(
-    //         !mutator_set.verify(&own_item, &original_membership_proof),
-    //         "Original membership proof must fail to verify after addition"
-    //     );
-    //     assert!(
-    //         mutator_set.verify(&own_item, &membership_proof),
-    //         "New membership proof must verify after addition"
-    //     );
-    // }
+        // Insert the new element into the mutator set, then verify that the membership proof works and
+        // that the original membership proof is invalid.
+        mutator_set.add(&new_addition_record);
+        assert!(
+            !mutator_set.verify(&own_item, &original_membership_proof),
+            "Original membership proof must fail to verify after addition"
+        );
+        assert!(
+            mutator_set.verify(&own_item, &membership_proof),
+            "New membership proof must verify after addition"
+        );
+    }
 
-    // #[test]
-    // fn membership_proof_updating_from_add_pbt() {
-    //     type Hasher = blake3::Hasher;
-    //     let mut rng = ChaCha20Rng::from_seed(
-    //         vec![vec![0, 1, 4, 33], vec![0; 28]]
-    //             .concat()
-    //             .try_into()
-    //             .unwrap(),
-    //     );
+    #[test]
+    fn membership_proof_updating_from_add_pbt() {
+        type Hasher = blake3::Hasher;
+        let mut rng = ChaCha20Rng::from_seed(
+            vec![vec![0, 1, 4, 33], vec![0; 28]]
+                .concat()
+                .try_into()
+                .unwrap(),
+        );
 
-    //     let mut mutator_set = SetCommitment::<Hasher>::default();
-    //     let hasher: Hasher = blake3::Hasher::new();
+        let mut mutator_set = SetCommitment::<Hasher>::default();
+        let hasher: Hasher = blake3::Hasher::new();
 
-    //     let num_additions = rng.gen_range(0..=500i32);
-    //     println!(
-    //         "running multiple additions test for {} additions",
-    //         num_additions
-    //     );
+        let num_additions = rng.gen_range(0..=100i32);
+        println!(
+            "running multiple additions test for {} additions",
+            num_additions
+        );
 
-    //     let mut membership_proofs_and_items: Vec<(MembershipProof<Hasher>, blake3::Hash)> = vec![];
-    //     for i in 0..num_additions {
-    //         println!("loop iteration {}", i);
-    //         let item = hasher.hash(
-    //             &(0..3)
-    //                 .map(|_| BFieldElement::new(rng.next_u64()))
-    //                 .collect::<Vec<_>>(),
-    //         );
-    //         let randomness = hasher.hash(
-    //             &(0..3)
-    //                 .map(|_| BFieldElement::new(rng.next_u64()))
-    //                 .collect::<Vec<_>>(),
-    //         );
+        let mut membership_proofs_and_items: Vec<(
+            MembershipProof<Hasher>,
+            blake3_wrapper::Blake3Hash,
+        )> = vec![];
+        for i in 0..num_additions {
+            println!("loop iteration {}", i);
+            let item: blake3_wrapper::Blake3Hash = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
+            let randomness = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
 
-    //         let addition_record = mutator_set.commit(&item, &randomness);
-    //         let membership_proof = mutator_set.prove(&item, &randomness);
+            let addition_record = mutator_set.commit(&item, &randomness);
+            let membership_proof = mutator_set.prove(&item, &randomness);
 
-    //         // Update all membership proofs
-    //         for mp in membership_proofs_and_items.iter_mut() {
-    //             mp.0.update_from_addition(&mp.1.into(), &mutator_set, &addition_record, 0);
-    //         }
+            // Update all membership proofs
+            for mp in membership_proofs_and_items.iter_mut() {
+                mp.0.update_from_addition(&mp.1.into(), &mutator_set, &addition_record);
+            }
 
-    //         // Add the element
-    //         mutator_set.add(&addition_record);
-    //         assert!(mutator_set.verify(&item, &membership_proof));
+            // Add the element
+            assert!(!mutator_set.verify(&item, &membership_proof));
+            mutator_set.add(&addition_record);
+            assert!(mutator_set.verify(&item, &membership_proof));
+            membership_proofs_and_items.push((membership_proof, item));
 
-    //         // Verify that all membership proofs work
-    //         assert!(membership_proofs_and_items
-    //             .clone()
-    //             .into_iter()
-    //             .all(|(mp, item)| mutator_set.verify(&item.into(), &mp)));
-    //     }
-    // }
+            // Verify that all membership proofs work
+            assert!(membership_proofs_and_items
+                .clone()
+                .into_iter()
+                .all(|(mp, item)| mutator_set.verify(&item.into(), &mp)));
+        }
+    }
 
-    // #[test]
-    // fn test_add() {
-    //     let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
-    //     let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
-    //     let item: Vec<BFieldElement> =
-    //         hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
-    //     let randomness: Vec<BFieldElement> =
-    //         hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
+    #[test]
+    fn test_add() {
+        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
+        let item: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
+        let randomness: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
 
-    //     let addition_record = mutator_set.commit(&item, &randomness);
-    //     let membership_proof = mutator_set.prove(&item, &randomness);
+        let addition_record = mutator_set.commit(&item, &randomness);
+        let membership_proof = mutator_set.prove(&item, &randomness);
 
-    //     assert!(false == mutator_set.verify(&item, &membership_proof));
+        assert!(false == mutator_set.verify(&item, &membership_proof));
 
-    //     mutator_set.add(&addition_record);
+        mutator_set.add(&addition_record);
 
-    //     assert!(true == mutator_set.verify(&item, &membership_proof));
-    // }
+        assert!(true == mutator_set.verify(&item, &membership_proof));
+    }
 
     #[test]
     fn test_multiple_adds() {
@@ -800,7 +862,8 @@ mod accumulation_scheme_tests {
         let hasher = Hasher::new();
         let mut mutator_set = SetCommitment::<Hasher>::default();
 
-        let num_additions = rng.gen_range(0..=100usize);
+        // let num_additions = rng.gen_range(0..=100usize);
+        let num_additions = 32;
         println!(
             "running multiple additions test for {} additions",
             num_additions
@@ -854,6 +917,7 @@ mod accumulation_scheme_tests {
 
         println!("\nDone with 1st loop\n");
         for i in 0..num_additions {
+            println!("*************************************************** In 2nd loop in test: i = {} ***************************************************", i);
             let (item, mp) = items_and_membership_proofs[i].clone();
             println!(
                 "preparing to remove item ... let's see if its membership proof is valid first ..."
@@ -865,14 +929,19 @@ mod accumulation_scheme_tests {
 
             // update membership proofs
             for j in (i + 1)..num_additions {
-                items_and_membership_proofs[i]
+                println!(
+                    "************************************************ update from remove {} ",
+                    j
+                );
+                items_and_membership_proofs[j]
                     .1
                     .update_from_remove(&mutator_set, &removal_record.clone());
             }
 
             // remove item from set
+            println!("\n\n\n Calling remove *************************");
             mutator_set.remove(&mut removal_record);
-            //assert!(!mutator_set.verify(&item.into(), &mp));
+            assert!(!mutator_set.verify(&item.into(), &mp));
         }
     }
 }
