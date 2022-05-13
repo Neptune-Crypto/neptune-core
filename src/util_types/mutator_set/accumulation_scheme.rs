@@ -606,34 +606,37 @@ where
         let current_batch_index = mutator_set.aocl.count_leaves();
         let current_window_start = current_batch_index * CHUNK_SIZE as u128;
 
-        // for all to-be-set bits
-        for &bit_index in &removal_record.bit_indices {
-            // if the bit is in the inactive part of the filter,
-            if bit_index < current_window_start {
-                // find the right entry in the removal record's dictionary
-                let (_, path, chunk) = removal_record
-                    .target_chunks
-                    .dictionary
-                    .iter()
-                    .find(|(i, _, _)| *i == bit_index / BATCH_SIZE as u128)
-                    .unwrap();
-                let relative_index = bit_index - own_window_start;
-                let mut new_chunk_bits = chunk.bits.clone();
-                new_chunk_bits[relative_index as usize] = true;
-                // update own paths and (if necessary) chunk
-                for (own_index, own_path, own_chunk) in self.target_chunks.dictionary.iter_mut() {
-                    own_path.update_from_leaf_mutation(path, &chunk.hash::<H>());
-                    if *own_index == bit_index / BATCH_SIZE as u128 {
-                        *own_chunk = Chunk {
-                            bits: new_chunk_bits,
-                        };
-                    }
+        // set bits in own chunks
+        // for all chunks in the chunk dictionary
+        for (own_index, own_path, own_chunk) in self.target_chunks.dictionary.iter_mut() {
+            // for all bit indices in removal record
+            for bit_index in removal_record.bit_indices.iter() {
+                // if batch indices match, set bit
+                if bit_index / BATCH_SIZE as u128 == *own_index {
+                    own_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
                 }
             }
-            // bit is in the active part of the filter
-            // bit will be set when change is applied to mutator set
-            // no need to anticipate here
         }
+
+        // update own auth paths with quadratic algorithm
+        // for all chunks in the chunk dictionary
+        // batch_update_from_leaf_mutation
+        let dict_len = self.target_chunks.dictionary.len();
+        for i in 0..dict_len {
+            let (own_index, own_path, own_chunk) = &mut self.target_chunks.dictionary[i];
+            for j in 0..dict_len {
+                if i == j {
+                    continue;
+                }
+                let (other_index, other_path, other_chunk) =
+                    &self.target_chunks.dictionary[j].clone();
+                own_path.update_from_leaf_mutation(&other_path, &other_chunk.hash::<H>());
+            }
+        }
+
+        // bits in the active part of the filter
+        // will be set when change is applied to mutator set
+        // no need to anticipate here
     }
 }
 
