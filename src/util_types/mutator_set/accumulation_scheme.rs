@@ -781,13 +781,16 @@ where
             .iter()
             .map(|(_, p, _)| p.clone())
             .collect();
-        let modified_leaf_proofs = own_membership_proofs_copy.clone();
-        let modified_leafs: Vec<_> = self
+        let mut modified_leaf_proofs = own_membership_proofs_copy.clone();
+        let mut modified_leafs: Vec<_> = self
             .target_chunks
             .dictionary
             .iter()
             .map(|(_, _, c)| c.hash::<H>())
             .collect();
+
+        // Find path update data that is not contained in the membership proof
+        // but only in the removal record
         for bit_index in removal_record.bit_indices.iter() {
             if !self_updated_chunk_indices.contains(&(bit_index / CHUNK_SIZE as u128))
                 && removal_record
@@ -797,9 +800,43 @@ where
                     .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
                     .is_some()
             {
+                // Algorithms are like sausages. It is best not to see them being made.
                 println!("target found for bit_index = {} !!", bit_index);
+                let mut target_leaf = removal_record
+                    .target_chunks
+                    .dictionary
+                    .iter()
+                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .unwrap()
+                    .2
+                    .clone();
+                let target_chunk_index = removal_record
+                    .target_chunks
+                    .dictionary
+                    .iter()
+                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .unwrap()
+                    .0;
+                for bit_index in removal_record
+                    .bit_indices
+                    .iter()
+                    .filter(|i| target_chunk_index == **i / CHUNK_SIZE as u128)
+                {
+                    target_leaf.bits[*bit_index as usize % CHUNK_SIZE] = true;
+                }
+                let target_ap = removal_record
+                    .target_chunks
+                    .dictionary
+                    .iter()
+                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .unwrap()
+                    .1
+                    .clone();
+                modified_leaf_proofs.push(target_ap);
+                modified_leafs.push(target_leaf.hash::<H>());
+                println!("target_leaf = {:?}", target_leaf);
 
-                // What do we do here, append to `modified_leaf_proofs`/`modified_leafs`?
+                self_updated_chunk_indices.insert(bit_index / CHUNK_SIZE as u128);
             }
         }
 
