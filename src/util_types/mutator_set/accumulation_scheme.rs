@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 
@@ -520,15 +520,17 @@ where
                     &matching_entries[0].2.hash::<H>(),
                     self.swbf_inactive.count_leaves(),
                 );
-                all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
-                if !all_auth_paths_are_valid {
+                if !valid_auth_path {
                     println!(
-                        "In verify, some auth paths are not valid. Index: {}; Number of elements: {}; Peaks: {:?}",
+                        "In verify, auth path for bit_index {} is not valid. Index: {}; Number of elements: {}; Peaks: {:?}",
+                        bit_index,
                         matching_entries[0].1.data_index,
                         self.swbf_inactive.count_leaves(),
                         self.swbf_inactive.get_peaks()
                     );
                 }
+
+                all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
                 // verify that bit is possibly unset
                 // let relative_index: u128 = bit_index - window_start;
@@ -760,12 +762,14 @@ where
 
         // set bits in own chunks
         // for all chunks in the chunk dictionary
+        let mut self_updated_chunk_indices: HashSet<u128> = HashSet::new();
         for (own_chunk_index, _, own_chunk) in self.target_chunks.dictionary.iter_mut() {
             // for all bit indices in removal record
             for bit_index in removal_record.bit_indices.iter() {
                 // if chunk indices match, set bit
                 if bit_index / CHUNK_SIZE as u128 == *own_chunk_index {
                     own_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+                    self_updated_chunk_indices.insert(*own_chunk_index);
                 }
             }
         }
@@ -784,6 +788,21 @@ where
             .iter()
             .map(|(_, _, c)| c.hash::<H>())
             .collect();
+        for bit_index in removal_record.bit_indices.iter() {
+            if !self_updated_chunk_indices.contains(&(bit_index / CHUNK_SIZE as u128))
+                && removal_record
+                    .target_chunks
+                    .dictionary
+                    .iter()
+                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .is_some()
+            {
+                println!("target found for bit_index = {} !!", bit_index);
+
+                // What do we do here, append to `modified_leaf_proofs`/`modified_leafs`?
+            }
+        }
+
         println!(
             "own_membership_proofs_copy.len() = {}",
             own_membership_proofs_copy.len()
