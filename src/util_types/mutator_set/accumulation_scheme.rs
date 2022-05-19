@@ -101,7 +101,7 @@ where
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
     pub fn validate(&self, mutator_set: &SetCommitment<H>) -> bool {
-        self.target_chunks.dictionary.iter().all(|(i, (p, c))| {
+        self.target_chunks.dictionary.iter().all(|(_i, (p, c))| {
             p.verify(
                 &mutator_set.swbf_inactive.get_peaks(),
                 &c.hash::<H>(),
@@ -561,28 +561,13 @@ where
                 && removal_record
                     .target_chunks
                     .dictionary
-                    .iter()
-                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
-                    .is_some()
+                    .contains_key(&(bit_index / CHUNK_SIZE as u128))
             {
                 // Algorithms are like sausages. It is best not to see them being made.
                 println!("target found for bit_index = {} !!", bit_index);
-                let mut target_leaf = removal_record
-                    .target_chunks
-                    .dictionary
-                    .iter()
-                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
-                    .unwrap()
-                    .1
-                     .1
-                    .clone();
-                let target_chunk_index = *removal_record
-                    .target_chunks
-                    .dictionary
-                    .iter()
-                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
-                    .unwrap()
-                    .0;
+                let target_chunk_index = bit_index / CHUNK_SIZE as u128;
+                let mut target_leaf: Chunk =
+                    removal_record.target_chunks.dictionary[&target_chunk_index].1;
                 for bit_index in removal_record
                     .bit_indices
                     .iter()
@@ -590,14 +575,8 @@ where
                 {
                     target_leaf.bits[*bit_index as usize % CHUNK_SIZE] = true;
                 }
-                let target_ap = removal_record
-                    .target_chunks
-                    .dictionary
-                    .iter()
-                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
-                    .unwrap()
-                    .1
-                     .0
+                let target_ap = removal_record.target_chunks.dictionary[&target_chunk_index]
+                    .0
                     .clone();
                 modified_leaf_proofs.push(target_ap);
                 modified_leafs.push(target_leaf.hash::<H>());
@@ -611,8 +590,7 @@ where
             &modified_leaf_proofs,
             &modified_leafs,
         );
-        for i in 0..own_membership_proofs_copy.len() {
-            let mp = own_membership_proofs_copy[i].clone();
+        for mp in own_membership_proofs_copy {
             let mut target = self
                 .target_chunks
                 .dictionary
@@ -795,7 +773,7 @@ mod accumulation_scheme_tests {
         let num_additions = 65;
 
         let mut items_and_membership_proofs: Vec<(Digest, MembershipProof<Hasher>)> = vec![];
-        for i in 0..num_additions {
+        for _ in 0..num_additions {
             let new_item = hasher.hash(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
@@ -811,11 +789,9 @@ mod accumulation_scheme_tests {
             let membership_proof = mutator_set.prove(&new_item, &randomness);
 
             // Update *all* membership proofs with newly added item
-            let mut j = 0;
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
                 assert!(mutator_set.verify(updatee_item, mp));
                 mp.update_from_addition(&updatee_item, &mutator_set, &addition_record);
-                j += 1;
             }
 
             mutator_set.add(&addition_record);
