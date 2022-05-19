@@ -232,11 +232,9 @@ where
         }
     }
 
-    ///
     /// remove
     /// Updates the mutator set so as to remove the item determined by
     /// its removal record, which is updated also
-    ///
     pub fn remove(&mut self, removal_record: &RemovalRecord<H>) {
         let batch_index = self.aocl.count_leaves() / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
@@ -346,13 +344,6 @@ where
     }
 
     pub fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool {
-        println!("# Verifying item membership proof.");
-        println!("aocl leaf count: {}", self.aocl.count_leaves());
-        println!(
-            "own item index: {}",
-            membership_proof.auth_path_aocl.data_index
-        );
-
         // If data index does not exist in AOCL, return false
         if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.data_index {
             return false;
@@ -402,15 +393,6 @@ where
                     &chunk.hash::<H>(),
                     self.swbf_inactive.count_leaves(),
                 );
-                if !valid_auth_path {
-                    println!(
-                        "In verify, auth path for bit_index {} is not valid. Index: {}; Number of elements: {}; Peaks: {:?}",
-                        bit_index,
-                        mp.data_index,
-                        self.swbf_inactive.count_leaves(),
-                        self.swbf_inactive.get_peaks()
-                    );
-                }
 
                 all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
@@ -432,12 +414,6 @@ where
                 }
             }
         }
-
-        println!("is_aocl_member: {}", is_aocl_member);
-        println!("entries_in_dictionary: {}", entries_in_dictionary);
-        println!("all_auth_paths_are_valid: {}", all_auth_paths_are_valid);
-        println!("no_future_bits: {}", no_future_bits);
-        println!("has_unset_bits: {}", has_unset_bits);
 
         // return verdict
         is_aocl_member
@@ -817,17 +793,9 @@ mod accumulation_scheme_tests {
         let mut mutator_set = SetCommitment::<Hasher>::default();
 
         let num_additions = 65;
-        println!(
-            "running multiple additions test for {} additions",
-            num_additions
-        );
 
         let mut items_and_membership_proofs: Vec<(Digest, MembershipProof<Hasher>)> = vec![];
         for i in 0..num_additions {
-            println!(
-                "\n\n\n**********************loop iteration {} / {} **********************",
-                i, num_additions
-            );
             let new_item = hasher.hash(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
@@ -861,8 +829,6 @@ mod accumulation_scheme_tests {
             items_and_membership_proofs.push((new_item, membership_proof));
         }
 
-        println!("\nDone with 1st loop\n");
-
         for k in 0..items_and_membership_proofs.len() {
             assert!(mutator_set.verify(
                 &items_and_membership_proofs[k].0,
@@ -877,13 +843,9 @@ mod accumulation_scheme_tests {
                     &items_and_membership_proofs[k].1,
                 ));
             }
-            println!("*************************************************** In 2nd loop in test: i = {} ***************************************************", i);
             let (item, mp) = items_and_membership_proofs[i].clone();
-            println!(
-                "preparing to remove item ... let's see if its membership proof is valid first ..."
-            );
+
             assert!(mutator_set.verify(&item, &mp));
-            println!("PASSING 1ST ASSERT!!!1one");
 
             // generate removal record
             let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
@@ -897,10 +859,6 @@ mod accumulation_scheme_tests {
 
             // update membership proofs
             for j in (i + 1)..num_additions {
-                println!(
-                    "************************************************ update from remove {} ",
-                    j
-                );
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[j].0,
                     &items_and_membership_proofs[j].1
@@ -913,20 +871,15 @@ mod accumulation_scheme_tests {
             }
 
             // remove item from set
-            println!("\n\n\n Calling remove *************************");
             mutator_set.remove(&mut removal_record);
-            println!("Done remove");
             assert!(!mutator_set.verify(&item.into(), &mp));
 
             for k in (i + 1)..items_and_membership_proofs.len() {
-                println!("k = {}", k);
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[k].0,
                     &items_and_membership_proofs[k].1,
                 ));
             }
-
-            println!("Done 2nd loop iteration");
         }
     }
 }
