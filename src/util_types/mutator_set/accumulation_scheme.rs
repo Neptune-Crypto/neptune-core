@@ -116,6 +116,7 @@ pub struct SetCommitment<H: simple_hasher::Hasher> {
     aocl: MmrAccumulator<H>,
     swbf_inactive: MmrAccumulator<H>,
     swbf_active: [bool; WINDOW_SIZE],
+    hasher: H,
 }
 
 impl<H: simple_hasher::Hasher> RemovalRecord<H>
@@ -124,9 +125,10 @@ where
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
     pub fn validate(&self, mutator_set: &SetCommitment<H>) -> bool {
+        let peaks = mutator_set.swbf_inactive.get_peaks();
         self.target_chunks.dictionary.iter().all(|(_i, (p, c))| {
             p.verify(
-                &mutator_set.swbf_inactive.get_peaks(),
+                &peaks,
                 &c.hash::<H>(),
                 mutator_set.swbf_inactive.count_leaves(),
             )
@@ -145,6 +147,7 @@ where
             aocl: MmrAccumulator::new(vec![]),
             swbf_inactive: MmrAccumulator::new(vec![]),
             swbf_active: [false; WINDOW_SIZE as usize],
+            hasher: H::new(),
         }
     }
 
@@ -153,8 +156,7 @@ where
     /// but tailored to adding the item to the mutator set in its
     /// current state.
     pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
-        let hasher = H::new();
-        let canonical_commitment = hasher.hash_pair(item, randomness);
+        let canonical_commitment = self.hasher.hash_pair(item, randomness);
 
         AdditionRecord {
             commitment: canonical_commitment,
@@ -164,17 +166,18 @@ where
 
     /// Helper function. Computes the bloom filter bit indices of the
     /// item, randomness, index triple.
-    pub fn get_indices(item: &H::Digest, randomness: &H::Digest, index: u128) -> Vec<u128> {
-        let hasher = H::new();
+    pub fn get_indices(&self, item: &H::Digest, randomness: &H::Digest, index: u128) -> Vec<u128> {
         let batch_index = index / BATCH_SIZE as u128;
         let timestamp: H::Digest = (index as u128).to_digest();
-        let mut rhs = hasher.hash_pair(&timestamp, randomness);
-        rhs = hasher.hash_pair(item, &rhs);
+        let mut rhs = self.hasher.hash_pair(&timestamp, randomness);
+        rhs = self.hasher.hash_pair(item, &rhs);
         let mut indices: Vec<u128> = vec![];
         for i in 0..NUM_TRIALS {
             let counter: H::Digest = (i as u128).to_digest();
-            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
-            let bit_index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
+            let pseudorandomness = self.hasher.hash_pair(&counter, &rhs);
+            let bit_index = self
+                .hasher
+                .sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
                 as u128
                 + batch_index * CHUNK_SIZE as u128;
             indices.push(bit_index);
@@ -192,7 +195,7 @@ where
         item: &H::Digest,
         membership_proof: &MembershipProof<H>,
     ) -> RemovalRecord<H> {
-        let bit_indices = Self::get_indices(
+        let bit_indices = self.get_indices(
             item,
             &membership_proof.randomness,
             membership_proof.auth_path_aocl.data_index,
@@ -322,15 +325,14 @@ where
      */
     pub fn prove(&self, item: &H::Digest, randomness: &H::Digest) -> MembershipProof<H> {
         // compute commitment
-        let hasher = H::new();
-        let item_commitment = hasher.hash_pair(item, randomness);
+        let item_commitment = self.hasher.hash_pair(item, randomness);
 
         // simulate adding to commitment list
         let new_item_index = self.aocl.count_leaves();
         let aocl_auth_path = self.aocl.clone().append(item_commitment);
 
         // get indices of bits to be set when item is removed
-        let bit_indices = Self::get_indices(item, randomness, new_item_index);
+        let bit_indices = self.get_indices(item, randomness, new_item_index);
 
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
         // if window slides, filter will be updated
@@ -373,8 +375,7 @@ where
         }
 
         // verify that a commitment to the item lives in the aocl mmr
-        let hasher = H::new();
-        let leaf = hasher.hash_pair(item, &membership_proof.randomness);
+        let leaf = self.hasher.hash_pair(item, &membership_proof.randomness);
         let (is_aocl_member, _) = membership_proof.auth_path_aocl.verify(
             &self.aocl.get_peaks(),
             &leaf,
@@ -392,7 +393,7 @@ where
         let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let window_start = current_batch_index * CHUNK_SIZE as u128;
         let window_stop = window_start + WINDOW_SIZE as u128;
-        let bit_indices = Self::get_indices(item, &membership_proof.randomness, item_index);
+        let bit_indices = self.get_indices(item, &membership_proof.randomness, item_index);
 
         // get indices of bits to be set when item is removed
         for bit_index in bit_indices {
@@ -489,11 +490,8 @@ where
         assert!(SetCommitment::<H>::window_slides(new_item_index));
         let old_window_start = (batch_index - 1) * CHUNK_SIZE as u128;
         let new_window_start = batch_index * CHUNK_SIZE as u128;
-        let bit_indices = SetCommitment::<H>::get_indices(
-            own_item,
-            &self.randomness,
-            self.auth_path_aocl.data_index,
-        );
+        let bit_indices =
+            mutator_set.get_indices(own_item, &self.randomness, self.auth_path_aocl.data_index);
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
         };
