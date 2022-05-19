@@ -206,17 +206,12 @@ where
         //  - index == n * BATCH_SIZE generates a slide for any n
     }
 
-    /**
-     * add
-     * Updates the set-commitment with an addition record. The new
-     * commitment represents the set
-     *
-     *          S union {c} ,
-     *
-     * where S is the set represented by the old
-     * commitment and c is the commitment to the new item AKA the
-     * *addition record*.
-     */
+    ///   add
+    ///   Updates the set-commitment with an addition record. The new
+    ///   commitment represents the set $S union {c}$ ,
+    ///   where S is the set represented by the old
+    ///   commitment and c is the commitment to the new item AKA the
+    ///   *addition record*.
     pub fn add(&mut self, addition_record: &AdditionRecord<H>) {
         // verify aocl snapshot
         if !addition_record.has_matching_aocl(&self.aocl) {
