@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
     shared_math::b_field_element::BFieldElement,
@@ -70,6 +71,7 @@ impl Chunk {
     {
         let preimage = self.hash_preimage();
 
+        // TODO: Is this allocation of a hasher object something to be worried about?
         let hasher = H::new();
         hasher.hash(&preimage.to_digest())
     }
@@ -171,17 +173,20 @@ where
         let timestamp: H::Digest = (index as u128).to_digest();
         let mut rhs = self.hasher.hash_pair(&timestamp, randomness);
         rhs = self.hasher.hash_pair(item, &rhs);
-        let mut indices: Vec<u128> = vec![];
-        for i in 0..NUM_TRIALS {
-            let counter: H::Digest = (i as u128).to_digest();
-            let pseudorandomness = self.hasher.hash_pair(&counter, &rhs);
-            let bit_index = self
-                .hasher
-                .sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
-                as u128
-                + batch_index * CHUNK_SIZE as u128;
-            indices.push(bit_index);
-        }
+        let mut indices: Vec<u128> = Vec::with_capacity(NUM_TRIALS);
+
+        // Collect all indices in parallel, using counter-mode
+        (0..NUM_TRIALS)
+            .into_par_iter()
+            .map(|i| {
+                let counter: H::Digest = (i as u128).to_digest();
+                let pseudorandomness = self.hasher.hash_pair(&counter, &rhs);
+                self.hasher
+                    .sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
+                    as u128
+                    + batch_index * CHUNK_SIZE as u128
+            })
+            .collect_into_vec(&mut indices);
 
         indices
     }
