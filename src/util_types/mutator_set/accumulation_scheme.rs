@@ -5,7 +5,7 @@ use itertools::Itertools;
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr::{self, membership_proof, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+        mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
         simple_hasher::{self, ToDigest},
     },
 };
@@ -13,13 +13,7 @@ use crate::{
 pub const WINDOW_SIZE: usize = 30000;
 pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 160;
-
-pub struct SetCommitment<H: simple_hasher::Hasher> {
-    aocl: MmrAccumulator<H>,
-    swbf_inactive: MmrAccumulator<H>,
-    swbf_active: [bool; WINDOW_SIZE],
-}
+pub const NUM_TRIALS: usize = 5; // TODO: Change to 160 in production
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Chunk {
@@ -29,7 +23,7 @@ pub struct Chunk {
 impl Chunk {
     pub fn hash<H: simple_hasher::Hasher>(&self) -> H::Digest
     where
-        Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+        Vec<BFieldElement>: ToDigest<H::Digest>,
     {
         let num_iterations = CHUNK_SIZE / 63;
         let mut ret: Vec<BFieldElement> = vec![];
@@ -60,21 +54,15 @@ impl Chunk {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChunkDictionary<H: simple_hasher::Hasher> {
-    // (*batch* index, membership proof for the whole chunk to which bit belongs, chunk value)
-    dictionary: Vec<(u128, mmr::membership_proof::MembershipProof<H>, Chunk)>,
+    // {chunk index => (membership proof for the whole chunk to which bit belongs, chunk value)}
+    dictionary: HashMap<u128, (mmr::membership_proof::MembershipProof<H>, Chunk)>,
 }
 
 impl<H: simple_hasher::Hasher> ChunkDictionary<H> {
     fn default() -> ChunkDictionary<H> {
-        Self { dictionary: vec![] }
-    }
-
-    pub fn has_duplicates(&self) -> bool {
-        let batch_indices: Vec<_> = self.dictionary.iter().map(|(i, _, _)| *i).collect();
-        let list_length = batch_indices.len();
-        let batch_indices_set: Vec<_> = batch_indices.iter().unique().collect();
-        let set_size = batch_indices_set.len();
-        set_size != list_length
+        Self {
+            dictionary: HashMap::new(),
+        }
     }
 }
 
@@ -100,13 +88,20 @@ pub struct RemovalRecord<H: simple_hasher::Hasher> {
     target_chunks: ChunkDictionary<H>,
 }
 
+#[derive(Clone, Debug)]
+pub struct SetCommitment<H: simple_hasher::Hasher> {
+    aocl: MmrAccumulator<H>,
+    swbf_inactive: MmrAccumulator<H>,
+    swbf_active: [bool; WINDOW_SIZE],
+}
+
 impl<H: simple_hasher::Hasher> RemovalRecord<H>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
     pub fn validate(&self, mutator_set: &SetCommitment<H>) -> bool {
-        self.target_chunks.dictionary.iter().all(|(i, p, c)| {
+        self.target_chunks.dictionary.iter().all(|(i, (p, c))| {
             p.verify(
                 &mutator_set.swbf_inactive.get_peaks(),
                 &c.hash::<H>(),
@@ -130,13 +125,10 @@ where
         }
     }
 
-    /**
-     * commit
-     * Generates an addition record from an item and explicit random-
-     * ness. The addition record is itself a commitment to the item,
-     * but tailored to adding the item to the mutator set in its
-     * current state.
-     */
+    /// Generates an addition record from an item and explicit random-
+    /// ness. The addition record is itself a commitment to the item,
+    /// but tailored to adding the item to the mutator set in its
+    /// current state.
     pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
         let hasher = H::new();
         let canonical_commitment = hasher.hash_pair(item, randomness);
@@ -147,11 +139,8 @@ where
         }
     }
 
-    /**
-     * get_indices
-     * Helper function. Computes the bloom filter bit indices of the
-     * item, randomness, index triple.
-     */
+    /// Helper function. Computes the bloom filter bit indices of the
+    /// item, randomness, index triple.
     pub fn get_indices(item: &H::Digest, randomness: &H::Digest, index: u128) -> Vec<u128> {
         let hasher = H::new();
         let batch_index = index / BATCH_SIZE as u128;
@@ -198,7 +187,7 @@ where
      * given the index of the to-be-added item.
      */
     pub fn window_slides(index: u128) -> bool {
-        index % BATCH_SIZE as u128 == 0
+        index != 0 && index % BATCH_SIZE as u128 == 0
 
         // example cases:
         //  - index == 0 we don't care about
@@ -218,15 +207,8 @@ where
             panic!("Addition record has aocl snapshot that does not match with the AOCL it is being added to.")
         }
 
-        println!(
-            "Adding item. Old AOCL leaf count was {}; new is {}.",
-            self.aocl.count_leaves(),
-            self.aocl.count_leaves() + 1
-        );
-
         // add to list
         let item_index = self.aocl.count_leaves();
-        let batch_index = item_index / BATCH_SIZE as u128;
         self.aocl.append(addition_record.commitment.to_owned()); // ignore auth path
 
         // if window slides, update filter
@@ -245,14 +227,8 @@ where
                 self.swbf_active[i] = false;
             }
 
-            // let chunk_digest = chunk.hash::<H>();
             let chunk_digest: H::Digest = chunk.hash::<H>();
             self.swbf_inactive.append(chunk_digest); // ignore auth path
-
-            println!(
-                "\n*****====\nJust added new item with window slide; new peaks: {:?}",
-                self.swbf_inactive.get_peaks()
-            );
         }
     }
 
@@ -278,43 +254,27 @@ where
             // bit is not in active part, so set bits in relevant chunk
             let mut relevant_chunk = new_target_chunks
                 .dictionary
-                .iter_mut()
-                .find(|(i, p, c)| bit_index / CHUNK_SIZE as u128 == *i)
+                .get_mut(&(bit_index / CHUNK_SIZE as u128))
                 .unwrap();
-            relevant_chunk.2.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+            relevant_chunk.1.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
         }
 
         // update mmr
         // to do this, we need to keep track of all membership proofs
         let mut all_membership_proofs: Vec<_> = new_target_chunks
             .dictionary
-            .iter()
-            .map(|(i, p, c)| p.clone())
+            .values()
+            .map(|(p, _c)| p.to_owned())
             .collect();
         let all_leafs: Vec<_> = new_target_chunks
             .dictionary
-            .iter()
-            .map(|(i, p, c)| c.hash::<H>())
+            .values()
+            .map(|(_p, c)| c.hash::<H>())
             .collect();
-        let old_leafs: Vec<_> = removal_record
-            .target_chunks
-            .dictionary
-            .iter()
-            .map(|(i, p, c)| c.hash::<H>())
-            .collect();
-        // self.swbf_inactive.update_from_batch_leaf_mutation(all_membership_proofs, all_leafs);
         for i in 0..all_membership_proofs.len() {
             let local_membership_proof = all_membership_proofs[i].clone();
             let local_leaf = all_leafs[i].clone();
-            assert!(
-                local_membership_proof
-                    .verify(
-                        &self.swbf_inactive.get_peaks(),
-                        &old_leafs[i],
-                        self.swbf_inactive.count_leaves(),
-                    )
-                    .0
-            );
+
             self.swbf_inactive
                 .mutate_leaf(&local_membership_proof, &local_leaf);
             mmr::membership_proof::MembershipProof::batch_update_from_leaf_mutation(
@@ -332,67 +292,6 @@ where
                     .0
             );
         }
-
-        // let mut new_membership_proofs: Vec<mmr::membership_proof::MembershipProof<H>> =
-        //     removal_record
-        //         .target_chunks
-        //         .dictionary
-        //         .iter()
-        //         .map(|x| x.1.clone())
-        //         .collect();
-        // let chunk_indices: Vec<u128> = removal_record
-        //     .target_chunks
-        //     .dictionary
-        //     .iter()
-        //     .map(|x| x.0)
-        //     .collect();
-        // let mut chunk_2_entry: HashMap<u128, usize> = HashMap::new();
-        // println!("Length of chunk_indices = {}", chunk_indices.len());
-        // for (entry, chunk) in chunk_indices.into_iter().enumerate() {
-        //     chunk_2_entry.insert(chunk, entry);
-        //     println!("chunk => entry: {} => {}", chunk, entry);
-        // }
-        // println!(
-        //     "Length of new_membership_proofs = {}",
-        //     new_membership_proofs.len()
-        // );
-        // for bit_index in removal_record.bit_indices.iter() {
-        //     // if bit is in active part
-        //     if *bit_index >= window_start {
-        //         let relative_index = bit_index - window_start;
-        //         self.swbf_active[relative_index as usize] = true;
-        //         continue;
-        //     }
-
-        //     // bit is not in active part, so update mmr
-        //     let chunk_index = bit_index / CHUNK_SIZE as u128;
-        //     let (_, _, chunk) = removal_record
-        //         .target_chunks
-        //         .dictionary
-        //         .iter_mut()
-        //         .find(|(i, _, _)| *i == chunk_index)
-        //         .unwrap();
-        //     path = new_membership_proofs[i];
-        //     chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
-        //     // let leaf_mutation_membership_proof = new_mps[chunk_2_entry[&chunk_index]].clone();
-        //     let new_leaf = chunk.hash::<H>();
-        //     self.swbf_inactive.mutate_leaf(&path, &chunk.hash::<H>());
-        //     mmr::membership_proof::MembershipProof::batch_update_from_leaf_mutation(
-        //         &mut new_membership_proofs,
-        //         &path,
-        //         &new_leaf,
-        //     );
-
-        //     assert!(
-        //         path.verify(
-        //             &self.swbf_inactive.get_peaks(),
-        //             &new_leaf,
-        //             self.swbf_inactive.count_leaves(),
-        //         )
-        //         .0,
-        //         "Membership proofs must validate after remove manipulation"
-        //     );
-        // }
     }
 
     /**
@@ -414,7 +313,7 @@ where
 
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
         // if window slides, filter will be updated
-        if Self::window_slides(new_item_index) && new_item_index > 0 {
+        if Self::window_slides(new_item_index) {
             let chunk: Chunk = Chunk {
                 bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
             };
@@ -430,11 +329,10 @@ where
 
                 // if index lies in inactive part of filter, add an mmr auth path
                 if bit_index < window_start {
-                    target_chunks.dictionary.push((
+                    target_chunks.dictionary.insert(
                         bit_index / CHUNK_SIZE as u128,
-                        new_chunk_path.clone(),
-                        chunk,
-                    ));
+                        (new_chunk_path.clone(), chunk),
+                    );
                 }
             }
         }
@@ -460,8 +358,6 @@ where
             return false;
         }
 
-        println!("---");
-
         // verify that a commitment to the item lives in the aocl mmr
         let hasher = H::new();
         let leaf = hasher.hash_pair(item, &membership_proof.randomness);
@@ -480,7 +376,6 @@ where
 
         // prepare parameters of inactive part
         let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
-        println!("current batch index: {}", current_batch_index);
         let window_start = current_batch_index * CHUNK_SIZE as u128;
         let window_stop = window_start + WINDOW_SIZE as u128;
         let bit_indices = Self::get_indices(item, &membership_proof.randomness, item_index);
@@ -490,36 +385,28 @@ where
             // if bit index is left of the window
             if bit_index < window_start {
                 // verify mmr auth path
-                let matching_entries: Vec<&(
-                    u128,
-                    mmr::membership_proof::MembershipProof<H>,
-                    Chunk,
-                )> = membership_proof
+                if !membership_proof
                     .target_chunks
                     .dictionary
-                    .iter()
-                    .filter(|ch| ch.0 == bit_index / CHUNK_SIZE as u128)
-                    .collect();
-                assert!(
-                    matching_entries.len() < 2,
-                    "Found duplicated mathing entries. Got matching_entries.len() = {}",
-                    matching_entries.len()
-                );
-
-                if matching_entries.len() != 1 {
+                    .contains_key(&(bit_index / CHUNK_SIZE as u128))
+                {
                     entries_in_dictionary = false;
                     continue;
                 }
-                let (valid_auth_path, _) = matching_entries[0].1.verify(
+
+                let (mp, chunk): (mmr::membership_proof::MembershipProof<H>, Chunk) =
+                    membership_proof.target_chunks.dictionary[&(bit_index / CHUNK_SIZE as u128)]
+                        .clone();
+                let (valid_auth_path, _) = mp.verify(
                     &self.swbf_inactive.get_peaks(),
-                    &matching_entries[0].2.hash::<H>(),
+                    &chunk.hash::<H>(),
                     self.swbf_inactive.count_leaves(),
                 );
                 if !valid_auth_path {
                     println!(
                         "In verify, auth path for bit_index {} is not valid. Index: {}; Number of elements: {}; Peaks: {:?}",
                         bit_index,
-                        matching_entries[0].1.data_index,
+                        mp.data_index,
                         self.swbf_inactive.count_leaves(),
                         self.swbf_inactive.get_peaks()
                     );
@@ -528,9 +415,8 @@ where
                 all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
                 // verify that bit is possibly unset
-                // let relative_index: u128 = bit_index - window_start;
                 let index_within_chunk = bit_index % CHUNK_SIZE as u128;
-                if !matching_entries[0].2.bits[index_within_chunk as usize] {
+                if !chunk.bits[index_within_chunk as usize] {
                     has_unset_bits = true;
                 }
                 continue;
@@ -597,168 +483,76 @@ where
 
         // if window does not slide, we are done
         if !SetCommitment::<H>::window_slides(new_item_index) {
-            println!("Window does not slide; nothing left to to\n");
-            let batch_indices_in_dictionary: Vec<_> = self
-                .target_chunks
-                .dictionary
-                .iter()
-                .map(|(i, _, _)| *i)
-                .collect();
-            println!("batch indices in dictionary:");
-            for bi in batch_indices_in_dictionary {
-                print!("{},", bi);
-            }
-            println!("");
-            println!("has duplicates? {}", self.target_chunks.has_duplicates());
+            return;
         }
+
         // window does slide
-        else {
-            assert!(SetCommitment::<H>::window_slides(new_item_index));
-            let old_window_start = (batch_index - 1) * CHUNK_SIZE as u128;
-            let new_window_start = batch_index * CHUNK_SIZE as u128;
-            let bit_indices = SetCommitment::<H>::get_indices(
-                own_item,
-                &self.randomness,
-                self.auth_path_aocl.data_index,
-            );
-            let new_chunk = Chunk {
-                bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
-            };
-            let mut mmra_copy = mutator_set.swbf_inactive.clone();
-            let new_auth_path: mmr::membership_proof::MembershipProof<H> =
-                mmra_copy.append(new_chunk.hash::<H>());
-            println!(
-                "immediately after appending, new leaf count is {} and new peaks are: {:?}",
-                mmra_copy.count_leaves(),
-                mmra_copy.get_peaks()
-            );
-            println!("path: {:?}", new_auth_path.authentication_path);
-            println!(
-                "path is valid? {}",
-                new_auth_path
-                    .verify(
-                        &mmra_copy.get_peaks(),
-                        &new_chunk.hash::<H>(),
-                        mmra_copy.count_leaves()
-                    )
-                    .0
-            );
-            for bit_index in bit_indices {
-                // if bit index is in dictionary, update auth path
-                if bit_index < old_window_start {
-                    self.target_chunks.dictionary.iter_mut().for_each(
-                        |(dict_index, dict_path, _)| {
-                            if *dict_index == bit_index / CHUNK_SIZE as u128 {
-                                dict_path.update_from_append(
-                                    mutator_set.swbf_inactive.count_leaves(),
-                                    &new_chunk.hash::<H>(),
-                                    &mutator_set.swbf_inactive.get_peaks(),
-                                );
-                            }
-                        },
-                    )
-                }
+        assert!(SetCommitment::<H>::window_slides(new_item_index));
+        let old_window_start = (batch_index - 1) * CHUNK_SIZE as u128;
+        let new_window_start = batch_index * CHUNK_SIZE as u128;
+        let bit_indices = SetCommitment::<H>::get_indices(
+            own_item,
+            &self.randomness,
+            self.auth_path_aocl.data_index,
+        );
+        let new_chunk = Chunk {
+            bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
+        };
+        let new_chunk_digest: H::Digest = new_chunk.hash::<H>();
+        let mut mmra_copy = mutator_set.swbf_inactive.clone();
+        let new_auth_path: mmr::membership_proof::MembershipProof<H> =
+            mmra_copy.append(new_chunk_digest.clone());
 
-                // if bit is in the part that is becoming inactive, add a dictionary entry
-                if old_window_start <= bit_index && bit_index < new_window_start {
-                    // generate dictionary entry
-                    let entry = (
-                        bit_index / CHUNK_SIZE as u128,
-                        new_auth_path.clone(),
-                        new_chunk,
-                    );
-
-                    // assert that dictionary entry does not exist already
-                    // because if it does then there's nothing left to do
-                    if self.target_chunks.dictionary.contains(&entry) {
-                        continue;
-                    }
-
-                    let batch_indices_in_dictionary: Vec<u128> = self
-                        .target_chunks
-                        .dictionary
-                        .iter()
-                        .map(|(i, _, _)| *i)
-                        .collect();
-                    if batch_indices_in_dictionary.contains(&(bit_index / CHUNK_SIZE as u128)) {
-                        println!(
-                            "Unexpected duplicate bit index found in target chunks dictionary: {}",
-                            bit_index
-                        );
-                        println!(
-                            "old window start = {} <= {} < {} = new_window_start",
-                            old_window_start, bit_index, new_window_start
-                        );
-                        println!(
-                            "chunks identical? {}",
-                            new_chunk
-                                == self
-                                    .target_chunks
-                                    .dictionary
-                                    .iter()
-                                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
-                                    .unwrap()
-                                    .2
-                        );
-                        println!(
-                            "paths identical? {}",
-                            new_auth_path
-                                == self
-                                    .target_chunks
-                                    .dictionary
-                                    .iter()
-                                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
-                                    .unwrap()
-                                    .1
-                        );
-                    }
-
-                    // add dictionary entry
-                    self.target_chunks.dictionary.push(entry);
-                    assert!(!self.target_chunks.has_duplicates());
-                }
-
-                // if bit is still in active window, do nothing
+        for bit_index in bit_indices {
+            // if bit index is in dictionary, update auth path
+            if bit_index < old_window_start {
+                let chunk_index = bit_index / CHUNK_SIZE as u128;
+                let mp = match self.target_chunks.dictionary.get_mut(&chunk_index) {
+                    None => continue,
+                    Some((m, _chnk)) => m,
+                };
+                mp.update_from_append(
+                    mutator_set.swbf_inactive.count_leaves(),
+                    &new_chunk_digest,
+                    &mutator_set.swbf_inactive.get_peaks(),
+                );
             }
-        }
 
-        println!("Done with Updating from Addition.\n");
+            // if bit is in the part that is becoming inactive, add a dictionary entry
+            if old_window_start <= bit_index && bit_index < new_window_start {
+                // generate dictionary entry
+                let chunk_index = bit_index / CHUNK_SIZE as u128;
+
+                // assert that dictionary entry does not exist already
+                // because if it does then there's nothing left to do
+                if self.target_chunks.dictionary.contains_key(&chunk_index) {
+                    continue;
+                }
+
+                let mut batch_indices_in_dictionary = self.target_chunks.dictionary.keys();
+                assert!(
+                    !batch_indices_in_dictionary.contains(&(bit_index / CHUNK_SIZE as u128)),
+                    "Unexpected duplicate bit index found in target chunks dictionary: {}",
+                    bit_index
+                );
+
+                // add dictionary entry
+                self.target_chunks
+                    .dictionary
+                    .insert(chunk_index, (new_auth_path.clone(), new_chunk));
+            }
+
+            // if bit is still in active window, do nothing
+        }
 
         // TODO: Consider if we want a return value indicating if membership proof has changed
     }
 
-    pub fn update_from_remove(
-        &mut self,
-        mutator_set: &SetCommitment<H>,
-        removal_record: &RemovalRecord<H>,
-    ) {
-        // test
-        // self.target_chunks.dictionary.iter().all(|(i, p, c)| {
-        //     p.verify(
-        //         &mutator_set.swbf_inactive.get_peaks(),
-        //         &c.hash::<H>(),
-        //         mutator_set.swbf_inactive.count_leaves(),
-        //     )
-        //     .0
-        // })
-        assert!(removal_record.validate(&mutator_set));
-        for (_, authentication_path, chunk) in self.target_chunks.dictionary.iter() {
-            assert!(
-                authentication_path
-                    .verify(
-                        &mutator_set.swbf_inactive.get_peaks(), // old peaks
-                        &chunk.hash::<H>(),
-                        mutator_set.swbf_inactive.count_leaves(),
-                    )
-                    .0,
-                "Updated membership proofs must be valid"
-            );
-        }
-
+    pub fn update_from_remove(&mut self, removal_record: &RemovalRecord<H>) {
         // set bits in own chunks
         // for all chunks in the chunk dictionary
         let mut self_updated_chunk_indices: HashSet<u128> = HashSet::new();
-        for (own_chunk_index, _, own_chunk) in self.target_chunks.dictionary.iter_mut() {
+        for (own_chunk_index, (_, own_chunk)) in self.target_chunks.dictionary.iter_mut() {
             // for all bit indices in removal record
             for bit_index in removal_record.bit_indices.iter() {
                 // if chunk indices match, set bit
@@ -774,14 +568,14 @@ where
             .target_chunks
             .dictionary
             .iter()
-            .map(|(_, p, _)| p.clone())
+            .map(|(_, (p, _))| p.clone())
             .collect();
         let mut modified_leaf_proofs = own_membership_proofs_copy.clone();
         let mut modified_leafs: Vec<_> = self
             .target_chunks
             .dictionary
             .iter()
-            .map(|(_, _, c)| c.hash::<H>())
+            .map(|(_, (_, c))| c.hash::<H>())
             .collect();
 
         // Find path update data that is not contained in the membership proof
@@ -792,7 +586,7 @@ where
                     .target_chunks
                     .dictionary
                     .iter()
-                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
                     .is_some()
             {
                 // Algorithms are like sausages. It is best not to see them being made.
@@ -801,21 +595,22 @@ where
                     .target_chunks
                     .dictionary
                     .iter()
-                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
                     .unwrap()
-                    .2
+                    .1
+                     .1
                     .clone();
-                let target_chunk_index = removal_record
+                let target_chunk_index = *removal_record
                     .target_chunks
                     .dictionary
                     .iter()
-                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
                     .unwrap()
                     .0;
                 for bit_index in removal_record
                     .bit_indices
                     .iter()
-                    .filter(|i| target_chunk_index == **i / CHUNK_SIZE as u128)
+                    .filter(|i| target_chunk_index == *i / CHUNK_SIZE as u128)
                 {
                     target_leaf.bits[*bit_index as usize % CHUNK_SIZE] = true;
                 }
@@ -823,66 +618,31 @@ where
                     .target_chunks
                     .dictionary
                     .iter()
-                    .find(|(i, _, _)| *i == bit_index / CHUNK_SIZE as u128)
+                    .find(|(i, _)| **i == bit_index / CHUNK_SIZE as u128)
                     .unwrap()
                     .1
+                     .0
                     .clone();
                 modified_leaf_proofs.push(target_ap);
                 modified_leafs.push(target_leaf.hash::<H>());
-                println!("target_leaf = {:?}", target_leaf);
 
                 self_updated_chunk_indices.insert(bit_index / CHUNK_SIZE as u128);
             }
         }
 
-        println!(
-            "own_membership_proofs_copy.len() = {}",
-            own_membership_proofs_copy.len()
-        );
         mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
             &mut own_membership_proofs_copy,
             &modified_leaf_proofs,
             &modified_leafs,
         );
         for i in 0..own_membership_proofs_copy.len() {
-            self.target_chunks.dictionary[i].1 = own_membership_proofs_copy[i].clone();
-        }
-
-        // TODO: REMOVE THIS DEBUG STUFF
-        let mut swbf_inactive_clone: MmrAccumulator<H> = mutator_set.swbf_inactive.clone();
-        let mut modified_leaf_proofs_copy = modified_leaf_proofs.clone();
-        for i in 0..modified_leaf_proofs_copy.len() {
-            let current_leaf = modified_leafs[i].clone();
-            let current_path = modified_leaf_proofs_copy[i].clone();
-            swbf_inactive_clone.mutate_leaf(&current_path, &current_leaf);
-            mmr::membership_proof::MembershipProof::batch_update_from_leaf_mutation(
-                &mut modified_leaf_proofs_copy,
-                &current_path,
-                &current_leaf,
-            );
-            assert!(
-                current_path
-                    .verify(
-                        &swbf_inactive_clone.get_peaks(),
-                        &current_leaf,
-                        swbf_inactive_clone.count_leaves(),
-                    )
-                    .0
-            );
-        }
-
-        // test
-        for (_, authentication_path, chunk) in self.target_chunks.dictionary.iter_mut() {
-            assert!(
-                authentication_path
-                    .verify(
-                        &swbf_inactive_clone.get_peaks(), // old peaks
-                        &chunk.hash::<H>(),
-                        swbf_inactive_clone.count_leaves(),
-                    )
-                    .0,
-                "Updated membership proofs must be valid"
-            );
+            let mp = own_membership_proofs_copy[i].clone();
+            let mut target = self
+                .target_chunks
+                .dictionary
+                .get_mut(&mp.data_index)
+                .unwrap();
+            target.0 = mp;
         }
 
         // bits in the active part of the filter
@@ -1056,8 +816,7 @@ mod accumulation_scheme_tests {
         let hasher = Hasher::new();
         let mut mutator_set = SetCommitment::<Hasher>::default();
 
-        // let num_additions = rng.gen_range(0..=100usize);
-        let num_additions = 32;
+        let num_additions = 65;
         println!(
             "running multiple additions test for {} additions",
             num_additions
@@ -1082,30 +841,23 @@ mod accumulation_scheme_tests {
 
             let addition_record = mutator_set.commit(&new_item, &randomness);
             let membership_proof = mutator_set.prove(&new_item, &randomness);
-            assert!(!membership_proof.target_chunks.has_duplicates());
 
             // Update *all* membership proofs with newly added item
             let mut j = 0;
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
-                assert!(!mp.target_chunks.has_duplicates());
                 assert!(mutator_set.verify(updatee_item, mp));
                 mp.update_from_addition(&updatee_item, &mutator_set, &addition_record);
-                assert!(!mp.target_chunks.has_duplicates());
                 j += 1;
             }
 
-            //assert!(!mutator_set.verify(&item, &membership_proof));
             mutator_set.add(&addition_record);
             assert!(mutator_set.verify(&new_item, &membership_proof));
 
             for j in 0..items_and_membership_proofs.len() {
                 let (old_item, mp) = &items_and_membership_proofs[j];
-                // for (item, mp) in items_and_membership_proofs.iter() {
-                assert!(!mp.target_chunks.has_duplicates());
                 assert!(mutator_set.verify(&old_item, &mp))
             }
 
-            assert!(!membership_proof.target_chunks.has_duplicates());
             items_and_membership_proofs.push((new_item, membership_proof));
         }
 
@@ -1156,7 +908,7 @@ mod accumulation_scheme_tests {
                 assert!(removal_record.validate(&mutator_set));
                 items_and_membership_proofs[j]
                     .1
-                    .update_from_remove(&mutator_set, &removal_record.clone());
+                    .update_from_remove(&removal_record.clone());
                 assert!(removal_record.validate(&mutator_set));
             }
 
