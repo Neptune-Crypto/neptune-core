@@ -263,7 +263,8 @@ where
 
     /// remove
     /// Updates the mutator set so as to remove the item determined by
-    /// its removal record, which is updated also
+    /// its removal record.
+    // TODO: Do we also want the provided removal record to be updated?
     pub fn remove(&mut self, removal_record: &RemovalRecord<H>) {
         let batch_index = self.aocl.count_leaves() / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
@@ -293,14 +294,16 @@ where
             .values()
             .map(|(p, _c)| p.to_owned())
             .collect();
-        let all_leafs: Vec<_> = new_target_chunks
+        let mut all_leafs: Vec<_> = new_target_chunks
             .dictionary
             .values()
             .map(|(_p, c)| c.hash::<H>(&self.hasher))
             .collect();
-        for i in 0..all_membership_proofs.len() {
-            let local_membership_proof = all_membership_proofs[i].clone();
-            let local_leaf = all_leafs[i].clone();
+
+        // TODO: With an MMR function that can batch-mutate leafs, this loop should be avoidable.
+        for _ in 0..all_membership_proofs.len() {
+            let local_membership_proof = all_membership_proofs.pop().unwrap();
+            let local_leaf = all_leafs.pop().unwrap();
 
             self.swbf_inactive
                 .mutate_leaf(&local_membership_proof, &local_leaf);
@@ -308,15 +311,6 @@ where
                 &mut all_membership_proofs,
                 &local_membership_proof,
                 &local_leaf,
-            );
-            assert!(
-                local_membership_proof
-                    .verify(
-                        &self.swbf_inactive.get_peaks(),
-                        &local_leaf,
-                        self.swbf_inactive.count_leaves(),
-                    )
-                    .0
             );
         }
     }
