@@ -231,6 +231,10 @@ where
     ///   commitment and c is the commitment to the new item AKA the
     ///   *addition record*.
     pub fn add(&mut self, addition_record: &AdditionRecord<H>) {
+        // Notice that `add` cannot return a membership proof since `add` cannot know the
+        // randomness that was used to create the commitment. This randomness can only be know
+        // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
+        // track of the mutator set.
         // verify aocl snapshot
         if !addition_record.has_matching_aocl(&self.aocl) {
             panic!("Addition record has aocl snapshot that does not match with the AOCL it is being added to.")
@@ -242,12 +246,15 @@ where
 
         // if window slides, update filter
         if Self::window_slides(item_index) {
+            // First update the inactive part of the SWBF, the SWBF MMR
             let chunk: Chunk = Chunk {
                 bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
             };
+            let chunk_digest: H::Digest = chunk.hash::<H>(&self.hasher);
+            self.swbf_inactive.append(chunk_digest); // ignore auth path
 
-            // Move window to the right, equivalent to moving values inside window
-            // to the left.
+            // Then move window to the right, equivalent to moving values
+            // inside window to the left.
             for i in CHUNK_SIZE..WINDOW_SIZE {
                 self.swbf_active[i - CHUNK_SIZE] = self.swbf_active[i];
             }
@@ -255,9 +262,6 @@ where
             for i in (WINDOW_SIZE - CHUNK_SIZE)..WINDOW_SIZE {
                 self.swbf_active[i] = false;
             }
-
-            let chunk_digest: H::Digest = chunk.hash::<H>(&self.hasher);
-            self.swbf_inactive.append(chunk_digest); // ignore auth path
         }
     }
 
