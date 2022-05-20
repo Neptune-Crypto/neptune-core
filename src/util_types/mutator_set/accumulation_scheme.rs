@@ -332,7 +332,7 @@ where
 
         // simulate adding to commitment list
         let new_item_index = self.aocl.count_leaves();
-        let aocl_auth_path = self.aocl.clone().append(item_commitment);
+        let auth_path_aocl = self.aocl.clone().append(item_commitment);
 
         // get indices of bits to be set when item is removed
         let bit_indices = self.get_indices(item, randomness, new_item_index);
@@ -351,7 +351,7 @@ where
                 // compute the index of the boundary between inactive and active parts
                 let window_start: u128 = //.
                     (new_item_index / BATCH_SIZE as u128) // which batch
-                     * CHUNK_SIZE as u128; // # bits per bach
+                     * CHUNK_SIZE as u128; // # bits per batch
 
                 // if index lies in inactive part of filter, add an mmr auth path
                 if bit_index < window_start {
@@ -366,7 +366,7 @@ where
         // return membership proof
         MembershipProof {
             randomness: randomness.to_owned(),
-            auth_path_aocl: aocl_auth_path,
+            auth_path_aocl,
             target_chunks,
         }
     }
@@ -681,8 +681,11 @@ mod chunk_tests {
 #[cfg(test)]
 mod accumulation_scheme_tests {
     use crate::{
-        shared_math::rescue_prime_xlix::{
-            neptune_params, RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH,
+        shared_math::{
+            rescue_prime_xlix::{
+                neptune_params, RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH,
+            },
+            traits::GetRandomElements,
         },
         util_types::{
             blake3_wrapper,
@@ -813,19 +816,51 @@ mod accumulation_scheme_tests {
     fn test_add() {
         let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
-        let item: Vec<BFieldElement> =
+        let item0: Vec<BFieldElement> =
             hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
-        let randomness: Vec<BFieldElement> =
+        let randomness0: Vec<BFieldElement> =
             hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
 
-        let addition_record = mutator_set.commit(&item, &randomness);
-        let membership_proof = mutator_set.prove(&item, &randomness);
+        let addition_record = mutator_set.commit(&item0, &randomness0);
+        let membership_proof = mutator_set.prove(&item0, &randomness0);
 
-        assert!(false == mutator_set.verify(&item, &membership_proof));
+        assert!(!mutator_set.verify(&item0, &membership_proof));
 
         mutator_set.add(&addition_record);
 
-        assert!(true == mutator_set.verify(&item, &membership_proof));
+        assert!(mutator_set.verify(&item0, &membership_proof));
+
+        // Insert a new item and verify that this still works
+        let item1: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(1846)], RP_DEFAULT_OUTPUT_SIZE);
+        let randomness1: Vec<BFieldElement> =
+            hasher.hash(&vec![BFieldElement::new(2009)], RP_DEFAULT_OUTPUT_SIZE);
+        let addition_record = mutator_set.commit(&item1, &randomness1);
+        let membership_proof = mutator_set.prove(&item1, &randomness1);
+        assert!(!mutator_set.verify(&item1, &membership_proof));
+        mutator_set.add(&addition_record);
+        assert!(mutator_set.verify(&item1, &membership_proof));
+
+        // Insert ~2*BATCH_SIZE  more elements and
+        // verify that it works throughout. The reason we insert this many
+        // is that we want to make sure that the window slides into a new
+        // position.
+        let mut prng = thread_rng();
+        for _ in 0..2 * BATCH_SIZE + 4 {
+            let item: Vec<BFieldElement> = hasher.hash(
+                &BFieldElement::random_elements(2, &mut prng),
+                RP_DEFAULT_OUTPUT_SIZE,
+            );
+            let randomness: Vec<BFieldElement> = hasher.hash(
+                &BFieldElement::random_elements(2, &mut prng),
+                RP_DEFAULT_OUTPUT_SIZE,
+            );
+            let addition_record = mutator_set.commit(&item, &randomness);
+            let membership_proof = mutator_set.prove(&item, &randomness);
+            assert!(!mutator_set.verify(&item, &membership_proof));
+            mutator_set.add(&addition_record);
+            assert!(mutator_set.verify(&item, &membership_proof));
+        }
     }
 
     #[test]
