@@ -65,14 +65,12 @@ impl Chunk {
         ret
     }
 
-    pub fn hash<H: simple_hasher::Hasher>(&self) -> H::Digest
+    pub fn hash<H: simple_hasher::Hasher>(&self, hasher: &H) -> H::Digest
     where
         Vec<BFieldElement>: ToDigest<H::Digest>,
     {
         let preimage = self.hash_preimage();
 
-        // TODO: Is this allocation of a hasher object something to be worried about?
-        let hasher = H::new();
         hasher.hash(&preimage.to_digest())
     }
 }
@@ -131,7 +129,7 @@ where
         self.target_chunks.dictionary.iter().all(|(_i, (p, c))| {
             p.verify(
                 &peaks,
-                &c.hash::<H>(),
+                &c.hash::<H>(&mutator_set.hasher),
                 mutator_set.swbf_inactive.count_leaves(),
             )
             .0
@@ -258,7 +256,7 @@ where
                 self.swbf_active[i] = false;
             }
 
-            let chunk_digest: H::Digest = chunk.hash::<H>();
+            let chunk_digest: H::Digest = chunk.hash::<H>(&self.hasher);
             self.swbf_inactive.append(chunk_digest); // ignore auth path
         }
     }
@@ -298,7 +296,7 @@ where
         let all_leafs: Vec<_> = new_target_chunks
             .dictionary
             .values()
-            .map(|(_p, c)| c.hash::<H>())
+            .map(|(_p, c)| c.hash::<H>(&self.hasher))
             .collect();
         for i in 0..all_membership_proofs.len() {
             let local_membership_proof = all_membership_proofs[i].clone();
@@ -345,7 +343,7 @@ where
             let chunk: Chunk = Chunk {
                 bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
             };
-            let chunk_digest = chunk.hash::<H>();
+            let chunk_digest = chunk.hash::<H>(&self.hasher);
             let new_chunk_path = self.swbf_inactive.clone().append(chunk_digest);
 
             // prepare swbf MMR authentication paths
@@ -419,7 +417,7 @@ where
                         .clone();
                 let (valid_auth_path, _) = mp.verify(
                     &self.swbf_inactive.get_peaks(),
-                    &chunk.hash::<H>(),
+                    &chunk.hash::<H>(&self.hasher),
                     self.swbf_inactive.count_leaves(),
                 );
 
@@ -500,7 +498,8 @@ where
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
         };
-        let new_chunk_digest: H::Digest = new_chunk.hash::<H>();
+
+        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&mutator_set.hasher);
         let mut mmra_copy = mutator_set.swbf_inactive.clone();
         let new_auth_path: mmr::membership_proof::MembershipProof<H> =
             mmra_copy.append(new_chunk_digest.clone());
@@ -573,11 +572,13 @@ where
             .map(|(_, (p, _))| p.clone())
             .collect();
         let mut modified_leaf_proofs = own_membership_proofs_copy.clone();
+
+        let hasher = H::new();
         let mut modified_leafs: Vec<_> = self
             .target_chunks
             .dictionary
             .iter()
-            .map(|(_, (_, c))| c.hash::<H>())
+            .map(|(_, (_, c))| c.hash::<H>(&hasher))
             .collect();
 
         // Find path update data that is not contained in the membership proof
@@ -605,7 +606,7 @@ where
                     .0
                     .clone();
                 modified_leaf_proofs.push(target_ap);
-                modified_leafs.push(target_leaf.hash::<H>());
+                modified_leafs.push(target_leaf.hash::<H>(&hasher));
 
                 self_updated_chunk_indices.insert(bit_index / CHUNK_SIZE as u128);
             }
