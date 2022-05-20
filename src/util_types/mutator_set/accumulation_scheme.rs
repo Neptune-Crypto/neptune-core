@@ -325,37 +325,8 @@ where
         let item_commitment = self.hasher.hash_pair(item, randomness);
 
         // simulate adding to commitment list
-        let new_item_index = self.aocl.count_leaves();
         let auth_path_aocl = self.aocl.clone().append(item_commitment);
-
-        // get indices of bits to be set when item is removed
-        let bit_indices = self.get_indices(item, randomness, new_item_index);
-
-        let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
-        // if window slides, filter will be updated
-        if Self::window_slides(new_item_index) {
-            let chunk: Chunk = Chunk {
-                bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
-            };
-            let chunk_digest = chunk.hash::<H>(&self.hasher);
-            let new_chunk_path = self.swbf_inactive.clone().append(chunk_digest);
-
-            // prepare swbf MMR authentication paths
-            for bit_index in bit_indices {
-                // compute the index of the boundary between inactive and active parts
-                let window_start: u128 = //.
-                    (new_item_index / BATCH_SIZE as u128) // which batch
-                     * CHUNK_SIZE as u128; // # bits per batch
-
-                // if index lies in inactive part of filter, add an mmr auth path
-                if bit_index < window_start {
-                    target_chunks.dictionary.insert(
-                        bit_index / CHUNK_SIZE as u128,
-                        (new_chunk_path.clone(), chunk),
-                    );
-                }
-            }
-        }
+        let target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
 
         // return membership proof
         MembershipProof {
@@ -807,7 +778,7 @@ mod accumulation_scheme_tests {
     }
 
     #[test]
-    fn test_add() {
+    fn test_add_and_prove() {
         let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
         let item0: Vec<BFieldElement> =
