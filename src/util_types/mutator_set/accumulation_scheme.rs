@@ -579,8 +579,7 @@ where
         // TODO: Make this function return boolean indicating if it was changed or not
 
         let hasher = H::new();
-        let mut new_leaf_digests: Vec<H::Digest> = vec![];
-        let mut original_mps_for_leaf_mutations: Vec<mmr::membership_proof::MembershipProof<H>> =
+        let mut mutation_argument: Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> =
             vec![];
         let mut rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
         removal_record
@@ -601,8 +600,8 @@ where
                     for bit_index in bit_indices.iter() {
                         chnk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
                     }
-                    new_leaf_digests.push(chnk.hash::<H>(&hasher));
-                    original_mps_for_leaf_mutations.push(mp.to_owned());
+
+                    mutation_argument.push((mp.to_owned(), chnk.hash::<H>(&hasher)));
                 }
 
                 // Leaf does not exists in own membership proof, so we get it from the removal record
@@ -618,8 +617,9 @@ where
                             for bit_index in bit_indices.iter() {
                                 target_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
                             }
-                            new_leaf_digests.push(target_chunk.hash::<H>(&hasher));
-                            original_mps_for_leaf_mutations.push(mp.to_owned());
+
+                            mutation_argument
+                                .push((mp.to_owned(), target_chunk.hash::<H>(&hasher)));
                         }
                     };
                 }
@@ -642,8 +642,7 @@ where
 
         mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
             &mut own_membership_proofs_copy,
-            &original_mps_for_leaf_mutations,
-            &new_leaf_digests,
+            mutation_argument,
         );
 
         // Copy back all updated membership proofs
