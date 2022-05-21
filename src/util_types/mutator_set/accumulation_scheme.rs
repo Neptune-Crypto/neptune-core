@@ -454,7 +454,8 @@ impl fmt::Display for MembershipProofError {
 #[derive(PartialEq, Eq, Debug)]
 pub enum MembershipProofError {
     AlreadyExistingChunk(u128),
-    MissingChunk(u128),
+    MissingChunkOnUpdateFromAdd(u128),
+    MissingChunkOnUpdateFromRemove(u128),
 }
 
 #[derive(Debug, Clone)]
@@ -528,7 +529,11 @@ where
                 let mp = match self.target_chunks.dictionary.get_mut(&chunk_index) {
                     // If this record is not found, the MembershipProof is in a broken
                     // state.
-                    None => return Err(Box::new(MembershipProofError::MissingChunk(chunk_index))),
+                    None => {
+                        return Err(Box::new(MembershipProofError::MissingChunkOnUpdateFromAdd(
+                            chunk_index,
+                        )))
+                    }
                     Some((m, _chnk)) => m,
                 };
                 let swbf_chunk_dict_updated_local: bool = mp.update_from_append(
@@ -567,74 +572,81 @@ where
         Ok(swbf_chunk_dictionary_updated || aocl_mp_updated)
     }
 
-    pub fn update_from_remove(&mut self, removal_record: &RemovalRecord<H>) {
-        // set bits in own chunks
-        // for all chunks in the chunk dictionary
-        let mut self_updated_chunk_indices: HashSet<u128> = HashSet::new();
-        for (own_chunk_index, (_, own_chunk)) in self.target_chunks.dictionary.iter_mut() {
-            // for all bit indices in removal record
-            for bit_index in removal_record.bit_indices.iter() {
-                // if chunk indices match, set bit
-                if bit_index / CHUNK_SIZE as u128 == *own_chunk_index {
-                    own_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
-                    self_updated_chunk_indices.insert(*own_chunk_index);
+    pub fn update_from_remove(
+        &mut self,
+        removal_record: &RemovalRecord<H>,
+    ) -> Result<(), Box<dyn Error>> {
+        // TODO: Make this function return boolean indicating if it was changed or not
+
+        let hasher = H::new();
+        let mut new_leaf_digests: Vec<H::Digest> = vec![];
+        let mut original_mps_for_leaf_mutations: Vec<mmr::membership_proof::MembershipProof<H>> =
+            vec![];
+        let mut rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
+        removal_record
+            .bit_indices
+            .iter()
+            .map(|bi| (bi / CHUNK_SIZE as u128, bi))
+            .for_each(|(k, v)| {
+                rem_record_chunk_idx_to_bit_indices
+                    .entry(k)
+                    .or_insert_with(Vec::new)
+                    .push(*v);
+            });
+
+        for (chunk_index, bit_indices) in rem_record_chunk_idx_to_bit_indices.iter() {
+            match self.target_chunks.dictionary.get_mut(chunk_index) {
+                // Leaf exists in own membership proof
+                Some((mp, chnk)) => {
+                    for bit_index in bit_indices.iter() {
+                        chnk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+                    }
+                    new_leaf_digests.push(chnk.hash::<H>(&hasher));
+                    original_mps_for_leaf_mutations.push(mp.to_owned());
                 }
-            }
+
+                // Leaf does not exists in own membership proof, so we get it from the removal record
+                None => {
+                    match removal_record.target_chunks.dictionary.get(chunk_index) {
+                        None => {
+                            // This should mean that bit index is in the active part of the
+                            // SWBF. But we have no way of checking that AFAIK. So we just continue.
+                            continue;
+                        }
+                        Some((mp, chnk)) => {
+                            let mut target_chunk = chnk.to_owned();
+                            for bit_index in bit_indices.iter() {
+                                target_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+                            }
+                            new_leaf_digests.push(target_chunk.hash::<H>(&hasher));
+                            original_mps_for_leaf_mutations.push(mp.to_owned());
+                        }
+                    };
+                }
+            };
         }
 
         // update membership proofs
+        // Note that *all* membership proofs must be updated. It's not sufficient to update
+        // those whose leaf has changed, since an authentication path changes if *any* leaf
+        // in the same Merkle tree (under the same MMR peak) changes.
+        // It would be sufficient to only update the membership proofs that live in the Merkle
+        // trees that have been updated, but it probably will not give a measureable speedup
+        // since this change would not reduce the amount of hashing needed
         let mut own_membership_proofs_copy: Vec<mmr::membership_proof::MembershipProof<H>> = self
             .target_chunks
             .dictionary
             .iter()
             .map(|(_, (p, _))| p.clone())
             .collect();
-        let mut modified_leaf_proofs = own_membership_proofs_copy.clone();
-
-        let hasher = H::new();
-        let mut modified_leafs: Vec<_> = self
-            .target_chunks
-            .dictionary
-            .iter()
-            .map(|(_, (_, c))| c.hash::<H>(&hasher))
-            .collect();
-
-        // Find path update data that is not contained in the membership proof
-        // but only in the removal record
-        for bit_index in removal_record.bit_indices.iter() {
-            if !self_updated_chunk_indices.contains(&(bit_index / CHUNK_SIZE as u128))
-                && removal_record
-                    .target_chunks
-                    .dictionary
-                    .contains_key(&(bit_index / CHUNK_SIZE as u128))
-            {
-                // Algorithms are like sausages. It is best not to see them being made.
-                println!("target found for bit_index = {} !!", bit_index);
-                let target_chunk_index = bit_index / CHUNK_SIZE as u128;
-                let mut target_leaf: Chunk =
-                    removal_record.target_chunks.dictionary[&target_chunk_index].1;
-                for bit_index in removal_record
-                    .bit_indices
-                    .iter()
-                    .filter(|i| target_chunk_index == *i / CHUNK_SIZE as u128)
-                {
-                    target_leaf.bits[*bit_index as usize % CHUNK_SIZE] = true;
-                }
-                let target_ap = removal_record.target_chunks.dictionary[&target_chunk_index]
-                    .0
-                    .clone();
-                modified_leaf_proofs.push(target_ap);
-                modified_leafs.push(target_leaf.hash::<H>(&hasher));
-
-                self_updated_chunk_indices.insert(bit_index / CHUNK_SIZE as u128);
-            }
-        }
 
         mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
             &mut own_membership_proofs_copy,
-            &modified_leaf_proofs,
-            &modified_leafs,
+            &original_mps_for_leaf_mutations,
+            &new_leaf_digests,
         );
+
+        // Copy back all updated membership proofs
         for mp in own_membership_proofs_copy {
             let mut target = self
                 .target_chunks
@@ -644,9 +656,7 @@ where
             target.0 = mp;
         }
 
-        // bits in the active part of the filter
-        // will be set when change is applied to mutator set
-        // no need to anticipate here
+        Ok(())
     }
 }
 
@@ -945,6 +955,7 @@ mod accumulation_scheme_tests {
         let num_additions = 65;
 
         let mut items_and_membership_proofs: Vec<(Digest, MembershipProof<Hasher>)> = vec![];
+
         for _ in 0..num_additions {
             let new_item = hasher.hash(
                 &(0..3)
@@ -983,6 +994,7 @@ mod accumulation_scheme_tests {
             items_and_membership_proofs.push((new_item, membership_proof));
         }
 
+        // Verify all membership proofs
         for k in 0..items_and_membership_proofs.len() {
             assert!(mutator_set.verify(
                 &items_and_membership_proofs[k].0,
@@ -990,6 +1002,7 @@ mod accumulation_scheme_tests {
             ));
         }
 
+        // Remove items from MS, and verify correct updating of membership proof
         for i in 0..num_additions {
             for k in i..items_and_membership_proofs.len() {
                 assert!(mutator_set.verify(
@@ -1018,9 +1031,10 @@ mod accumulation_scheme_tests {
                     &items_and_membership_proofs[j].1
                 ));
                 assert!(removal_record.validate(&mutator_set));
-                items_and_membership_proofs[j]
+                let update_res = items_and_membership_proofs[j]
                     .1
                     .update_from_remove(&removal_record.clone());
+                assert!(update_res.is_ok());
                 assert!(removal_record.validate(&mutator_set));
             }
 
