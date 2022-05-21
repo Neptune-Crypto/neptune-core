@@ -307,25 +307,19 @@ where
             .values()
             .map(|(p, _c)| p.to_owned())
             .collect();
-        let mut all_leafs: Vec<_> = new_target_chunks
+        let all_leafs = new_target_chunks
             .dictionary
             .values()
-            .map(|(_p, c)| c.hash::<H>(&self.hasher))
-            .collect();
+            .map(|(_p, c)| c.hash::<H>(&self.hasher));
+        let mutation_data: Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> =
+            all_membership_proofs
+                .clone()
+                .into_iter()
+                .zip(all_leafs)
+                .collect();
 
-        // TODO: With an MMR function that can batch-mutate leafs, this loop should be avoidable.
-        for _ in 0..all_membership_proofs.len() {
-            let local_membership_proof = all_membership_proofs.pop().unwrap();
-            let local_leaf = all_leafs.pop().unwrap();
-
-            self.swbf_inactive
-                .mutate_leaf(&local_membership_proof, &local_leaf);
-            mmr::membership_proof::MembershipProof::batch_update_from_leaf_mutation(
-                &mut all_membership_proofs,
-                &local_membership_proof,
-                &local_leaf,
-            );
-        }
+        self.swbf_inactive
+            .batch_mutate_leaf_and_update_mps(&mut all_membership_proofs, mutation_data);
     }
 
     /**
