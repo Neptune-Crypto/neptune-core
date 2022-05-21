@@ -342,6 +342,9 @@ where
 
     pub fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool {
         // If data index does not exist in AOCL, return false
+        // This also ensures that no "future" bit indices will be
+        // returned from `get_indices`, so we don't have to check for
+        // future indices in a separate check.
         if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.data_index {
             return false;
         }
@@ -353,70 +356,81 @@ where
             &leaf,
             self.aocl.count_leaves(),
         );
+        if !is_aocl_member {
+            return false;
+        }
 
         // verify that some indicated bits in the swbf are unset
         let mut has_unset_bits = false;
         let mut entries_in_dictionary = true;
         let mut all_auth_paths_are_valid = true;
-        let mut no_future_bits = true;
-        let item_index = membership_proof.auth_path_aocl.data_index;
 
         // prepare parameters of inactive part
         let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let window_start = current_batch_index * CHUNK_SIZE as u128;
-        let window_stop = window_start + WINDOW_SIZE as u128;
-        let bit_indices = self.get_indices(item, &membership_proof.randomness, item_index);
+        let all_bit_indices = self.get_indices(
+            item,
+            &membership_proof.randomness,
+            membership_proof.auth_path_aocl.data_index,
+        );
+        let mut chunk_index_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
+        all_bit_indices
+            .iter()
+            .map(|bi| (bi / CHUNK_SIZE as u128, bi))
+            .for_each(|(k, v)| {
+                chunk_index_to_bit_indices
+                    .entry(k)
+                    .or_insert_with(Vec::new)
+                    .push(*v);
+            });
 
-        // get indices of bits to be set when item is removed
-        for bit_index in bit_indices {
-            // if bit index is left of the window
-            if bit_index < window_start {
+        'outer: for (chunk_index, bit_indices) in chunk_index_to_bit_indices.into_iter() {
+            if chunk_index < current_batch_index {
                 // verify mmr auth path
                 if !membership_proof
                     .target_chunks
                     .dictionary
-                    .contains_key(&(bit_index / CHUNK_SIZE as u128))
+                    .contains_key(&chunk_index)
                 {
                     entries_in_dictionary = false;
-                    continue;
+                    break 'outer;
                 }
 
-                let (mp, chunk): (mmr::membership_proof::MembershipProof<H>, Chunk) =
-                    membership_proof.target_chunks.dictionary[&(bit_index / CHUNK_SIZE as u128)]
-                        .clone();
-                let (valid_auth_path, _) = mp.verify(
+                let mp_and_chunk: &(mmr::membership_proof::MembershipProof<H>, Chunk) =
+                    membership_proof
+                        .target_chunks
+                        .dictionary
+                        .get(&chunk_index)
+                        .unwrap();
+                let (valid_auth_path, _) = mp_and_chunk.0.verify(
                     &self.swbf_inactive.get_peaks(),
-                    &chunk.hash::<H>(&self.hasher),
+                    &mp_and_chunk.1.hash::<H>(&self.hasher),
                     self.swbf_inactive.count_leaves(),
                 );
 
                 all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
-                // verify that bit is possibly unset
-                let index_within_chunk = bit_index % CHUNK_SIZE as u128;
-                if !chunk.bits[index_within_chunk as usize] {
-                    has_unset_bits = true;
+                'inner_inactive: for bit_index in bit_indices {
+                    let index_within_chunk = bit_index % CHUNK_SIZE as u128;
+                    if !mp_and_chunk.1.bits[index_within_chunk as usize] {
+                        has_unset_bits = true;
+                        break 'inner_inactive;
+                    }
                 }
-                continue;
-            }
-
-            // Check whether bitindex is a future index, or in the active window
-            if bit_index >= window_stop {
-                no_future_bits = false;
             } else {
-                let relative_index = bit_index - window_start;
-                if !self.swbf_active[relative_index as usize] {
-                    has_unset_bits = true;
+                // bits are in active window
+                'inner_active: for bit_index in bit_indices {
+                    let relative_index = bit_index - window_start;
+                    if !self.swbf_active[relative_index as usize] {
+                        has_unset_bits = true;
+                        break 'inner_active;
+                    }
                 }
             }
         }
 
         // return verdict
-        is_aocl_member
-            && entries_in_dictionary
-            && all_auth_paths_are_valid
-            && no_future_bits
-            && has_unset_bits
+        is_aocl_member && entries_in_dictionary && all_auth_paths_are_valid && has_unset_bits
     }
 }
 
@@ -670,6 +684,36 @@ mod accumulation_scheme_tests {
     #[test]
     fn init_test() {
         SetCommitment::<RescuePrimeProduction>::default();
+    }
+
+    #[test]
+    fn verify_future_bits_test() {
+        // Ensure that `verify` does not crash when given a membership proof
+        // that represents a future addition to the AOCL.
+        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let empty_mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
+        let mut prng = thread_rng();
+        for _ in 0..2 * BATCH_SIZE + 2 {
+            let item: Vec<BFieldElement> = hasher.hash(
+                &BFieldElement::random_elements(3, &mut prng),
+                RP_DEFAULT_OUTPUT_SIZE,
+            );
+            let randomness: Vec<BFieldElement> = hasher.hash(
+                &BFieldElement::random_elements(3, &mut prng),
+                RP_DEFAULT_OUTPUT_SIZE,
+            );
+
+            let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+                mutator_set.commit(&item, &randomness);
+            let membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+                mutator_set.prove(&item, &randomness);
+            mutator_set.add(&addition_record);
+            assert!(mutator_set.verify(&item, &membership_proof));
+
+            // Verify that a future membership proof returns false and does not crash
+            assert!(!empty_mutator_set.verify(&item, &membership_proof));
+        }
     }
 
     #[test]
