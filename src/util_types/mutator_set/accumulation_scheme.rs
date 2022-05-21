@@ -1,6 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fmt,
+};
 
-use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
@@ -75,10 +78,16 @@ impl Chunk {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ChunkDictionary<H: simple_hasher::Hasher> {
     // {chunk index => (membership proof for the whole chunk to which bit belongs, chunk value)}
     dictionary: HashMap<u128, (mmr::membership_proof::MembershipProof<H>, Chunk)>,
+}
+
+impl<H: simple_hasher::Hasher> PartialEq for ChunkDictionary<H> {
+    fn eq(&self, other: &Self) -> bool {
+        self.dictionary == other.dictionary
+    }
 }
 
 impl<H: simple_hasher::Hasher> ChunkDictionary<H> {
@@ -434,11 +443,33 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl Error for MembershipProofError {}
+
+impl fmt::Display for MembershipProofError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum MembershipProofError {
+    AlreadyExistingChunk(u128),
+    MissingChunk(u128),
+}
+
+#[derive(Debug, Clone)]
 pub struct MembershipProof<H: simple_hasher::Hasher> {
     randomness: H::Digest,
     auth_path_aocl: mmr::membership_proof::MembershipProof<H>,
     target_chunks: ChunkDictionary<H>,
+}
+
+impl<H: simple_hasher::Hasher> PartialEq for MembershipProof<H> {
+    fn eq(&self, other: &Self) -> bool {
+        self.randomness == other.randomness
+            && self.auth_path_aocl == other.auth_path_aocl
+            && self.target_chunks == other.target_chunks
+    }
 }
 
 impl<H: simple_hasher::Hasher> MembershipProof<H>
@@ -455,13 +486,13 @@ where
         own_item: &H::Digest,
         mutator_set: &SetCommitment<H>,
         addition_record: &AdditionRecord<H>,
-    ) {
+    ) -> Result<bool, Box<dyn Error>> {
         assert!(self.auth_path_aocl.data_index < mutator_set.aocl.count_leaves());
         let new_item_index = mutator_set.aocl.count_leaves();
         let batch_index = new_item_index / BATCH_SIZE as u128;
 
         // Update AOCL MMR membership proof
-        self.auth_path_aocl.update_from_append(
+        let aocl_mp_updated = self.auth_path_aocl.update_from_append(
             mutator_set.aocl.count_leaves(),
             &addition_record.commitment,
             &mutator_set.aocl.get_peaks(),
@@ -469,67 +500,71 @@ where
 
         // if window does not slide, we are done
         if !SetCommitment::<H>::window_slides(new_item_index) {
-            return;
+            return Ok(aocl_mp_updated);
         }
 
         // window does slide
-        assert!(SetCommitment::<H>::window_slides(new_item_index));
-        let old_window_start = (batch_index - 1) * CHUNK_SIZE as u128;
-        let new_window_start = batch_index * CHUNK_SIZE as u128;
-        let bit_indices =
-            mutator_set.get_indices(own_item, &self.randomness, self.auth_path_aocl.data_index);
+        let old_window_start_batch_index = batch_index - 1;
+        let new_window_start_batch_index = batch_index;
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
         };
 
         let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&mutator_set.hasher);
+        let all_bit_indices =
+            mutator_set.get_indices(own_item, &self.randomness, self.auth_path_aocl.data_index);
+        let chunk_indices_set: HashSet<u128> = all_bit_indices
+            .into_iter()
+            .map(|bi| bi / CHUNK_SIZE as u128)
+            .collect::<HashSet<u128>>();
+
         let mut mmra_copy = mutator_set.swbf_inactive.clone();
         let new_auth_path: mmr::membership_proof::MembershipProof<H> =
             mmra_copy.append(new_chunk_digest.clone());
 
-        for bit_index in bit_indices {
-            // if bit index is in dictionary, update auth path
-            if bit_index < old_window_start {
-                let chunk_index = bit_index / CHUNK_SIZE as u128;
+        let mut swbf_chunk_dictionary_updated = false;
+        'outer: for chunk_index in chunk_indices_set.into_iter() {
+            if chunk_index < old_window_start_batch_index {
                 let mp = match self.target_chunks.dictionary.get_mut(&chunk_index) {
-                    None => continue,
+                    // If this record is not found, the MembershipProof is in a broken
+                    // state.
+                    None => return Err(Box::new(MembershipProofError::MissingChunk(chunk_index))),
                     Some((m, _chnk)) => m,
                 };
-                mp.update_from_append(
+                let swbf_chunk_dict_updated_local: bool = mp.update_from_append(
                     mutator_set.swbf_inactive.count_leaves(),
                     &new_chunk_digest,
                     &mutator_set.swbf_inactive.get_peaks(),
                 );
+                swbf_chunk_dictionary_updated =
+                    swbf_chunk_dictionary_updated || swbf_chunk_dict_updated_local;
+
+                continue 'outer;
             }
 
             // if bit is in the part that is becoming inactive, add a dictionary entry
-            if old_window_start <= bit_index && bit_index < new_window_start {
-                // generate dictionary entry
-                let chunk_index = bit_index / CHUNK_SIZE as u128;
-
-                // assert that dictionary entry does not exist already
-                // because if it does then there's nothing left to do
+            if old_window_start_batch_index <= chunk_index
+                && chunk_index < new_window_start_batch_index
+            {
                 if self.target_chunks.dictionary.contains_key(&chunk_index) {
-                    continue;
+                    return Err(Box::new(MembershipProofError::AlreadyExistingChunk(
+                        chunk_index,
+                    )));
                 }
-
-                let mut batch_indices_in_dictionary = self.target_chunks.dictionary.keys();
-                assert!(
-                    !batch_indices_in_dictionary.contains(&(bit_index / CHUNK_SIZE as u128)),
-                    "Unexpected duplicate bit index found in target chunks dictionary: {}",
-                    bit_index
-                );
 
                 // add dictionary entry
                 self.target_chunks
                     .dictionary
                     .insert(chunk_index, (new_auth_path.clone(), new_chunk));
+                swbf_chunk_dictionary_updated = true;
+
+                continue 'outer;
             }
 
-            // if bit is still in active window, do nothing
+            // If `chunk_index` refers to bits that are still in the active window, do nothing.
         }
 
-        // TODO: Consider if we want a return value indicating if membership proof has changed
+        Ok(swbf_chunk_dictionary_updated || aocl_mp_updated)
     }
 
     pub fn update_from_remove(&mut self, removal_record: &RemovalRecord<H>) {
@@ -740,7 +775,18 @@ mod accumulation_scheme_tests {
             mutator_set.commit(&new_item, &new_randomness);
         let original_membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             membership_proof.clone();
-        membership_proof.update_from_addition(&own_item, &mutator_set, &new_addition_record);
+        let changed_mp = match membership_proof.update_from_addition(
+            &own_item,
+            &mutator_set,
+            &new_addition_record,
+        ) {
+            Ok(changed) => changed,
+            Err(err) => panic!("{}", err),
+        };
+        assert!(
+            changed_mp,
+            "Update must indicate that membership proof has changed"
+        );
         assert_ne!(
             original_membership_proof.auth_path_aocl,
             membership_proof.auth_path_aocl
@@ -807,8 +853,13 @@ mod accumulation_scheme_tests {
             let membership_proof = mutator_set.prove(&item, &randomness);
 
             // Update all membership proofs
-            for mp in membership_proofs_and_items.iter_mut() {
-                mp.0.update_from_addition(&mp.1.into(), &mutator_set, &addition_record);
+            for (mp, item) in membership_proofs_and_items.iter_mut() {
+                let original_mp = mp.clone();
+                let changed_res = mp.update_from_addition(item, &mutator_set, &addition_record);
+                assert!(changed_res.is_ok());
+
+                // verify that the boolean returned value from the updater method is set correctly
+                assert_eq!(changed_res.unwrap(), original_mp != *mp);
             }
 
             // Add the element
@@ -911,8 +962,14 @@ mod accumulation_scheme_tests {
 
             // Update *all* membership proofs with newly added item
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
+                let original_mp = mp.clone();
                 assert!(mutator_set.verify(updatee_item, mp));
-                mp.update_from_addition(&updatee_item, &mutator_set, &addition_record);
+                let changed_res =
+                    mp.update_from_addition(&updatee_item, &mutator_set, &addition_record);
+                assert!(changed_res.is_ok());
+
+                // verify that the boolean returned value from the updater method is set correctly
+                assert_eq!(changed_res.unwrap(), original_mp != *mp);
             }
 
             mutator_set.add(&addition_record);
