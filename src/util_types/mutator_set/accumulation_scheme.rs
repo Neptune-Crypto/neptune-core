@@ -289,7 +289,7 @@ where
     /// its removal record.
     // TODO: Do we also want the provided removal record to be updated?
     pub fn remove(&mut self, removal_record: &RemovalRecord<H>) {
-        let batch_index = self.aocl.count_leaves() / BATCH_SIZE as u128;
+        let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
 
         // set all bits
