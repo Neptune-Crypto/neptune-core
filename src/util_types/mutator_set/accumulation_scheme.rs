@@ -5,6 +5,7 @@ use std::{
     ops::IndexMut,
 };
 
+use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
@@ -18,7 +19,7 @@ use crate::{
 pub const WINDOW_SIZE: usize = 30000;
 pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 5; // TODO: Change to 160 in production
+pub const NUM_TRIALS: usize = 160; // TODO: Change to 160 in production
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Chunk {
@@ -829,6 +830,43 @@ where
         Ok(swbf_chunk_dictionary_updated || aocl_mp_updated)
     }
 
+    pub fn batch_update_from_remove(
+        membership_proofs: &mut [&mut Self],
+        removal_record: &RemovalRecord<H>,
+    ) -> Result<(), Box<dyn Error>> {
+        // TODO: Fix the return type to return indices of membership proofs that have
+        // been mutated.
+        // Set all chunk values to the new values and calculate the mutation argument
+        // for the batch updating of the MMR membership proofs.
+        let mut chunk_dictionaries: Vec<&mut ChunkDictionary<H>> = membership_proofs
+            .iter_mut()
+            .map(|mp| &mut mp.target_chunks)
+            .collect();
+        let mutation_argument = Self::get_batch_mutation_argument_for_removal_record(
+            removal_record,
+            &mut chunk_dictionaries,
+        );
+
+        let mut own_mmr_membership_proofs: Vec<&mut mmr::membership_proof::MembershipProof<H>> =
+            membership_proofs
+                .iter_mut()
+                .map(|mp| {
+                    mp.target_chunks
+                        .dictionary
+                        .iter_mut()
+                        .map(|entry| &mut entry.1 .0)
+                        .collect::<Vec<_>>()
+                })
+                .concat();
+
+        mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
+            &mut own_mmr_membership_proofs,
+            mutation_argument,
+        );
+
+        Ok(())
+    }
+
     pub fn update_from_remove(
         &mut self,
         removal_record: &RemovalRecord<H>,
@@ -857,8 +895,9 @@ where
             .map(|(_, (p, _))| p.clone())
             .collect();
 
+        // TODO: Remove the copying of the objects here
         mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
-            &mut own_membership_proofs_copy,
+            &mut own_membership_proofs_copy.iter_mut().collect::<Vec<_>>(),
             mutation_argument,
         );
 
@@ -1206,6 +1245,34 @@ mod accumulation_scheme_tests {
 
             membership_proofs.push(membership_proof);
             items.push(new_item);
+        }
+
+        // Remove items from MS, and verify correct updating of membership proofs
+        for i in 0..num_additions {
+            println!("i = {}", i);
+            let item = items.pop().unwrap();
+            let mp = membership_proofs.pop().unwrap();
+            assert!(mutator_set.verify(&item, &mp));
+
+            // generate removal record
+            let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
+            assert!(removal_record.validate(&mutator_set));
+
+            // update membership proofs
+            let res = MembershipProof::batch_update_from_remove(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &removal_record,
+            );
+            assert!(res.is_ok());
+
+            // remove item from set
+            println!("removal_record = {:?}", removal_record);
+            mutator_set.remove(&mut removal_record);
+            assert!(!mutator_set.verify(&item.into(), &mp));
+
+            for (item, mp) in items.iter().zip(membership_proofs.iter()) {
+                assert!(mutator_set.verify(item, mp));
+            }
         }
     }
 
