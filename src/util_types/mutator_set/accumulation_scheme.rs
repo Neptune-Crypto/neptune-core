@@ -504,6 +504,82 @@ where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
+    /// Get an argument to the MMR `batch_update_from_batch_leaf_mutation`,
+    /// and mutate the chunk dictionary chunk values.
+    /// This function is factored out because it is shared by `update_from_remove`
+    /// and `batch_update_from_remove`.
+    fn get_batch_mutation_argument_for_removal_record(
+        removal_record: &RemovalRecord<H>,
+        chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
+    ) -> Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> {
+        let hasher = H::new();
+        let mut mutation_argument_hash_map: HashMap<
+            u128,
+            (mmr::membership_proof::MembershipProof<H>, H::Digest),
+        > = HashMap::new();
+        // let mut mutation_argument: Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> =
+        //     vec![];
+        let mut rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
+        removal_record
+            .bit_indices
+            .iter()
+            .map(|bi| (bi / CHUNK_SIZE as u128, bi))
+            .for_each(|(k, v)| {
+                rem_record_chunk_idx_to_bit_indices
+                    .entry(k)
+                    .or_insert_with(Vec::new)
+                    .push(*v);
+            });
+
+        for (chunk_index, bit_indices) in rem_record_chunk_idx_to_bit_indices.iter() {
+            for chunk_dictionary in chunk_dictionaries.iter_mut() {
+                match chunk_dictionary.dictionary.get_mut(chunk_index) {
+                    // Leaf exists in own membership proof
+                    Some((mp, chnk)) => {
+                        for bit_index in bit_indices.iter() {
+                            chnk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+                        }
+
+                        // If this leaf/membership proof pair has not already been collected,
+                        // then store it as a mutation argument. This assumes that all membership
+                        // proofs in all chunk dictionaries are valid.
+                        if !mutation_argument_hash_map.contains_key(chunk_index) {
+                            mutation_argument_hash_map
+                                .insert(*chunk_index, (mp.to_owned(), chnk.hash::<H>(&hasher)));
+                        }
+                    }
+
+                    // Leaf does not exists in own membership proof, so we get it from the removal record
+                    None => {
+                        match removal_record.target_chunks.dictionary.get(chunk_index) {
+                            None => {
+                                // This should mean that bit index is in the active part of the
+                                // SWBF. But we have no way of checking that AFAIK. So we just continue.
+                                continue;
+                            }
+                            Some((mp, chnk)) => {
+                                let mut target_chunk = chnk.to_owned();
+                                for bit_index in bit_indices.iter() {
+                                    target_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] =
+                                        true;
+                                }
+
+                                if !mutation_argument_hash_map.contains_key(chunk_index) {
+                                    mutation_argument_hash_map.insert(
+                                        *chunk_index,
+                                        (mp.to_owned(), target_chunk.hash::<H>(&hasher)),
+                                    );
+                                }
+                            }
+                        };
+                    }
+                };
+            }
+        }
+
+        mutation_argument_hash_map.into_values().collect()
+    }
+
     pub fn batch_update_from_addition(
         membership_proofs: &mut [&mut Self],
         own_items: &[H::Digest],
@@ -617,6 +693,10 @@ where
         // This is a bit ugly and a bit slower than it could be. To prevent this
         // for-loop, you probably could collect the `Vec<&mut mp>` in the code above,
         // instead of just collecting the indices into the membership proof vector.
+        // It is, however, quite acceptable that many of the MMR membership proofs are
+        // repeated since the MMR `batch_update_from_append` handles this optimally.
+        // So relegating that bookkeeping to this function instead would not be more
+        // efficient.
         let mut mmr_membership_proofs_for_append: Vec<
             &mut mmr::membership_proof::MembershipProof<H>,
         > = vec![];
@@ -636,6 +716,8 @@ where
                 &mutator_set.swbf_inactive.get_peaks(),
             );
 
+        // Gather the indices the are returned. These indices indicate which membership
+        // proofs that have been mutated.
         let mut all_mutated_mp_indices: Vec<usize> =
             vec![indices_for_mutated_values, indices_for_updated_mps].concat();
         all_mutated_mp_indices.sort_unstable();
@@ -753,53 +835,13 @@ where
     ) -> Result<(), Box<dyn Error>> {
         // TODO: Make this function return boolean indicating if it was changed or not
 
-        let hasher = H::new();
-        let mut mutation_argument: Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> =
-            vec![];
-        let mut rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
-        removal_record
-            .bit_indices
-            .iter()
-            .map(|bi| (bi / CHUNK_SIZE as u128, bi))
-            .for_each(|(k, v)| {
-                rem_record_chunk_idx_to_bit_indices
-                    .entry(k)
-                    .or_insert_with(Vec::new)
-                    .push(*v);
-            });
-
-        for (chunk_index, bit_indices) in rem_record_chunk_idx_to_bit_indices.iter() {
-            match self.target_chunks.dictionary.get_mut(chunk_index) {
-                // Leaf exists in own membership proof
-                Some((mp, chnk)) => {
-                    for bit_index in bit_indices.iter() {
-                        chnk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
-                    }
-
-                    mutation_argument.push((mp.to_owned(), chnk.hash::<H>(&hasher)));
-                }
-
-                // Leaf does not exists in own membership proof, so we get it from the removal record
-                None => {
-                    match removal_record.target_chunks.dictionary.get(chunk_index) {
-                        None => {
-                            // This should mean that bit index is in the active part of the
-                            // SWBF. But we have no way of checking that AFAIK. So we just continue.
-                            continue;
-                        }
-                        Some((mp, chnk)) => {
-                            let mut target_chunk = chnk.to_owned();
-                            for bit_index in bit_indices.iter() {
-                                target_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
-                            }
-
-                            mutation_argument
-                                .push((mp.to_owned(), target_chunk.hash::<H>(&hasher)));
-                        }
-                    };
-                }
-            };
-        }
+        // Set all chunk values to the new values and calculate the mutation argument
+        // for the batch updating of the MMR membership proofs.
+        let mut chunk_dictionaries = vec![&mut self.target_chunks];
+        let mutation_argument = Self::get_batch_mutation_argument_for_removal_record(
+            removal_record,
+            &mut chunk_dictionaries,
+        );
 
         // update membership proofs
         // Note that *all* membership proofs must be updated. It's not sufficient to update
