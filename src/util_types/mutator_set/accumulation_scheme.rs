@@ -116,7 +116,7 @@ where
 
 #[derive(Clone, Debug)]
 pub struct RemovalRecord<H: simple_hasher::Hasher> {
-    bit_indices: Vec<u128>,
+    bit_indices: [u128; NUM_TRIALS],
     target_chunks: ChunkDictionary<H>,
 }
 
@@ -175,7 +175,12 @@ where
 
     /// Helper function. Computes the bloom filter bit indices of the
     /// item, randomness, index triple.
-    pub fn get_indices(&self, item: &H::Digest, randomness: &H::Digest, index: u128) -> Vec<u128> {
+    pub fn get_indices(
+        &self,
+        item: &H::Digest,
+        randomness: &H::Digest,
+        index: u128,
+    ) -> [u128; NUM_TRIALS] {
         let batch_index = index / BATCH_SIZE as u128;
         let timestamp: H::Digest = (index as u128).to_digest();
         let mut rhs = self.hasher.hash_pair(&timestamp, randomness);
@@ -195,7 +200,7 @@ where
             })
             .collect_into_vec(&mut indices);
 
-        indices
+        indices.try_into().unwrap()
     }
 
     /**
@@ -207,11 +212,14 @@ where
         item: &H::Digest,
         membership_proof: &MembershipProof<H>,
     ) -> RemovalRecord<H> {
-        let bit_indices = self.get_indices(
-            item,
-            &membership_proof.randomness,
-            membership_proof.auth_path_aocl.data_index,
-        );
+        let bit_indices = match membership_proof.cached_bits {
+            Some(bits) => bits,
+            None => self.get_indices(
+                item,
+                &membership_proof.randomness,
+                membership_proof.auth_path_aocl.data_index,
+            ),
+        };
 
         RemovalRecord {
             bit_indices,
@@ -327,7 +335,12 @@ where
      * Generates a membership proof that will the valid when the item
      * is added to the mutator set.
      */
-    pub fn prove(&self, item: &H::Digest, randomness: &H::Digest) -> MembershipProof<H> {
+    pub fn prove(
+        &self,
+        item: &H::Digest,
+        randomness: &H::Digest,
+        store_bits: bool,
+    ) -> MembershipProof<H> {
         // compute commitment
         let item_commitment = self.hasher.hash_pair(item, randomness);
 
@@ -335,11 +348,20 @@ where
         let auth_path_aocl = self.aocl.clone().append(item_commitment);
         let target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
 
+        // Store the bit indices for later use, as they are expensive to calculate
+        let cached_bits: Option<[u128; NUM_TRIALS]> = if store_bits {
+            Some(self.get_indices(item, randomness, self.aocl.count_leaves()))
+                .map(|vec| vec.try_into().unwrap())
+        } else {
+            None
+        };
+
         // return membership proof
         MembershipProof {
             randomness: randomness.to_owned(),
             auth_path_aocl,
             target_chunks,
+            cached_bits,
         }
     }
 
@@ -879,7 +901,7 @@ mod accumulation_scheme_tests {
             let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
                 mutator_set.commit(&item, &randomness);
             let membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-                mutator_set.prove(&item, &randomness);
+                mutator_set.prove(&item, &randomness, false);
             mutator_set.add(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
 
@@ -900,7 +922,7 @@ mod accumulation_scheme_tests {
         let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             mutator_set.commit(&own_item, &randomness);
         let mut membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-            mutator_set.prove(&own_item, &randomness);
+            mutator_set.prove(&own_item, &randomness, false);
         mutator_set.add(&addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
@@ -987,7 +1009,7 @@ mod accumulation_scheme_tests {
             );
 
             let addition_record = mutator_set.commit(&item, &randomness);
-            let membership_proof = mutator_set.prove(&item, &randomness);
+            let membership_proof = mutator_set.prove(&item, &randomness, false);
 
             // Update all membership proofs
             for (mp, item) in membership_proofs_and_items.iter_mut() {
@@ -1023,7 +1045,7 @@ mod accumulation_scheme_tests {
             hasher.hash(&vec![BFieldElement::new(1776)], RP_DEFAULT_OUTPUT_SIZE);
 
         let addition_record = mutator_set.commit(&item0, &randomness0);
-        let membership_proof = mutator_set.prove(&item0, &randomness0);
+        let membership_proof = mutator_set.prove(&item0, &randomness0, false);
 
         assert!(!mutator_set.verify(&item0, &membership_proof));
 
@@ -1037,7 +1059,7 @@ mod accumulation_scheme_tests {
         let randomness1: Vec<BFieldElement> =
             hasher.hash(&vec![BFieldElement::new(2009)], RP_DEFAULT_OUTPUT_SIZE);
         let addition_record = mutator_set.commit(&item1, &randomness1);
-        let membership_proof = mutator_set.prove(&item1, &randomness1);
+        let membership_proof = mutator_set.prove(&item1, &randomness1, false);
         assert!(!mutator_set.verify(&item1, &membership_proof));
         mutator_set.add(&addition_record);
         assert!(mutator_set.verify(&item1, &membership_proof));
@@ -1057,7 +1079,7 @@ mod accumulation_scheme_tests {
                 RP_DEFAULT_OUTPUT_SIZE,
             );
             let addition_record = mutator_set.commit(&item, &randomness);
-            let membership_proof = mutator_set.prove(&item, &randomness);
+            let membership_proof = mutator_set.prove(&item, &randomness, false);
             assert!(!mutator_set.verify(&item, &membership_proof));
             mutator_set.add(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
@@ -1098,7 +1120,7 @@ mod accumulation_scheme_tests {
             );
 
             let addition_record = mutator_set.commit(&new_item, &randomness);
-            let membership_proof = mutator_set.prove(&new_item, &randomness);
+            let membership_proof = mutator_set.prove(&new_item, &randomness, false);
 
             // Update *all* membership proofs with newly added item
             let batch_update_res = MembershipProof::<Hasher>::batch_update_from_addition(
@@ -1153,7 +1175,7 @@ mod accumulation_scheme_tests {
             );
 
             let addition_record = mutator_set.commit(&new_item, &randomness);
-            let membership_proof = mutator_set.prove(&new_item, &randomness);
+            let membership_proof = mutator_set.prove(&new_item, &randomness, false);
 
             // Update *all* membership proofs with newly added item
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
