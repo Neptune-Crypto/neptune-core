@@ -17,7 +17,7 @@ use crate::{
 pub const WINDOW_SIZE: usize = 30000;
 pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 5; // TODO: Change to 160 in production
+pub const NUM_TRIALS: usize = 160; // TODO: Change to 160 in production
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Chunk {
@@ -454,6 +454,8 @@ pub enum MembershipProofError {
 
 #[derive(Debug, Clone)]
 pub struct MembershipProof<H: simple_hasher::Hasher> {
+    // TODO: I think membership proofs could benefit from having their
+    // bit indices cached, since it's expensive to recalculate them.
     randomness: H::Digest,
     auth_path_aocl: mmr::membership_proof::MembershipProof<H>,
     target_chunks: ChunkDictionary<H>,
@@ -472,6 +474,132 @@ where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
+    pub fn batch_update_from_addition(
+        membership_proofs: &mut [Self],
+        own_items: &[H::Digest],
+        mutator_set: &SetCommitment<H>,
+        addition_record: &AdditionRecord<H>,
+    ) -> Result<Vec<usize>, Box<dyn Error>> {
+        assert!(
+            membership_proofs
+                .iter()
+                .all(|mp| mp.auth_path_aocl.data_index < mutator_set.aocl.count_leaves()),
+            "No AOCL data index can point outside of provided mutator set"
+        );
+        assert_eq!(
+            membership_proofs.len(),
+            own_items.len(),
+            "Function must be called with same number of membership proofs and items"
+        );
+
+        let mps_to_be_updated_count = membership_proofs.len();
+
+        let new_item_index = mutator_set.aocl.count_leaves();
+
+        // Update AOCL MMR membership proofs
+        let mut mmr_membership_proofs: Vec<mmr::membership_proof::MembershipProof<H>> = vec![];
+        for mp in membership_proofs.iter() {
+            mmr_membership_proofs.push(mp.auth_path_aocl.to_owned());
+        }
+
+        let indices_for_updated_mps =
+            mmr::membership_proof::MembershipProof::batch_update_from_append(
+                &mut mmr_membership_proofs,
+                new_item_index,
+                &addition_record.commitment,
+                &mutator_set.aocl.get_peaks(),
+            );
+
+        for i in indices_for_updated_mps.iter() {
+            // TODO: I think the `clone` here can be avoided somehow
+            membership_proofs[*i].auth_path_aocl = mmr_membership_proofs[*i].clone();
+        }
+
+        // if window does not slide, we are done
+        if !SetCommitment::<H>::window_slides(new_item_index) {
+            return Ok(indices_for_updated_mps);
+        }
+
+        let batch_index = new_item_index / BATCH_SIZE as u128;
+        // window does slide
+        let old_window_start_batch_index = batch_index - 1;
+        let new_window_start_batch_index = batch_index;
+        let new_chunk = Chunk {
+            bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
+        };
+        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&mutator_set.hasher);
+
+        // Insert the new chunk digest into the cloned SWBF MMR to get
+        // its authentication path.
+        let mut mmra_copy = mutator_set.swbf_inactive.clone();
+        let new_swbf_auth_path: mmr::membership_proof::MembershipProof<H> =
+            mmra_copy.append(new_chunk_digest.clone());
+
+        // Collect all chunk MMR-membership proofs, so a batch update can be performed
+        // on them. Note that these need to be copied back to the `membership_proofs`
+        // that we are updating.
+        let mut relevant_target_chunk_mmr_mps: HashMap<
+            u128,
+            mmr::membership_proof::MembershipProof<H>,
+        > = HashMap::new();
+        let mut mps_with_updated_chunk_membership_proofs = vec![];
+        let mut mps_needing_a_new_chunk_hash_map_entry = vec![];
+        for (i, mp) in membership_proofs.iter().enumerate() {
+            let existing_target_chunk_indices: Vec<u128> =
+                mp.target_chunks.dictionary.keys().map(|k| *k).collect();
+            for chunk_index in existing_target_chunk_indices {
+                if chunk_index < old_window_start_batch_index {
+                    // We can save an allocation here by only inserting if the
+                    // entry doesn't already exist in `relevant_target_chunk_mmr_mps`
+                    let mmr_mp = &mp.target_chunks.dictionary[&chunk_index].0;
+                    relevant_target_chunk_mmr_mps.insert(chunk_index, mmr_mp.to_owned());
+                    mps_with_updated_chunk_membership_proofs.push(i);
+
+                    // Some assertions could be made here as a sanity check. E.g.:
+                    // - verify that `mmr_mp.data_index == chunk_index`
+                    // - Verify that if `insert` returns `Some(k)`, `k == mmr_mp`
+                }
+
+                // Handle the chunk that is moving from the active to the inactive part of
+                // the SWBF. This is done for each membership proof.
+                if old_window_start_batch_index <= chunk_index
+                    && chunk_index < new_window_start_batch_index
+                {
+                    mps_needing_a_new_chunk_hash_map_entry.push(i);
+                }
+            }
+        }
+
+        // Remove copies from index book keeping list:
+        mps_with_updated_chunk_membership_proofs.dedup();
+        mps_needing_a_new_chunk_hash_map_entry.dedup();
+
+        // TODO: I have a feeling that membership proofs could benefit from having
+        // their bit indices cached. This seems like an expensive operation.
+        // let all_bit_indicess: Vec<Vec<u128>> = membership_proofs
+        //     .iter()
+        //     .zip(own_items.iter())
+        //     .map(|(mp, it)| {
+        //         mutator_set.get_indices(it, &mp.randomness, mp.auth_path_aocl.data_index)
+        //     })
+        //     .collect();
+        // let mut chunk_indices_sets: Vec<HashSet<u128>> =
+        //     vec![HashSet::new(); mps_to_be_updated_count];
+        // for (all_bit_indices, chunk_index_set) in all_bit_indicess
+        //     .into_iter()
+        //     .zip(chunk_indices_sets.iter_mut())
+        // {
+        //     *chunk_index_set = all_bit_indices
+        //         .into_iter()
+        //         .map(|bi| bi / CHUNK_SIZE as u128)
+        //         .collect::<HashSet<u128>>();
+        // }
+
+        // Collect all me
+
+        return Ok(vec![]); // FIXME: REMOVE
+    }
+
     /**
      * update_from_addition
      * Updates a membership proof in anticipation of an addition to the set.
@@ -506,6 +634,10 @@ where
         };
 
         let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&mutator_set.hasher);
+
+        // TODO: We don't need to recalculate indices, as they are already present in the
+        // chunk dictionary. Except for the ones that are in the active part of the SWBF.
+        // We need a solution for that somehow.
         let all_bit_indices =
             mutator_set.get_indices(own_item, &self.randomness, self.auth_path_aocl.data_index);
         let chunk_indices_set: HashSet<u128> = all_bit_indices
@@ -519,6 +651,8 @@ where
 
         let mut swbf_chunk_dictionary_updated = false;
         'outer: for chunk_index in chunk_indices_set.into_iter() {
+            // Update for bit values that are in the inactive part of the SWBF.
+            // Here the MMR membership proofs of the chunks must be updated.
             if chunk_index < old_window_start_batch_index {
                 let mp = match self.target_chunks.dictionary.get_mut(&chunk_index) {
                     // If this record is not found, the MembershipProof is in a broken
@@ -927,6 +1061,63 @@ mod accumulation_scheme_tests {
             assert!(!mutator_set.verify(&item, &membership_proof));
             mutator_set.add(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
+        }
+    }
+
+    #[test]
+    fn batch_update_from_addition_test() {
+        // set up rng
+        let mut rng = ChaCha20Rng::from_seed(
+            vec![vec![0, 1, 4, 33], vec![0; 28]]
+                .concat()
+                .try_into()
+                .unwrap(),
+        );
+
+        type Hasher = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
+        let hasher = Hasher::new();
+        let mut mutator_set = SetCommitment::<Hasher>::default();
+
+        let num_additions = 65;
+
+        let mut membership_proofs: Vec<MembershipProof<Hasher>> = vec![];
+        let mut items: Vec<Digest> = vec![];
+
+        for i in 0..num_additions {
+            println!("i = {}", i);
+            let new_item = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
+            let randomness = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
+
+            let addition_record = mutator_set.commit(&new_item, &randomness);
+            let membership_proof = mutator_set.prove(&new_item, &randomness);
+
+            // Update *all* membership proofs with newly added item
+            let batch_update_res = MembershipProof::<Hasher>::batch_update_from_addition(
+                &mut membership_proofs,
+                &items,
+                &mutator_set,
+                &addition_record,
+            );
+            assert!(batch_update_res.is_ok());
+
+            mutator_set.add(&addition_record);
+            assert!(mutator_set.verify(&new_item, &membership_proof));
+
+            for (mp, item) in membership_proofs.iter().zip(items.iter()) {
+                assert!(mutator_set.verify(&item, &mp));
+            }
+
+            membership_proofs.push(membership_proof);
+            items.push(new_item);
         }
     }
 
