@@ -10,7 +10,7 @@ use itertools::Itertools;
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr::{self, mmr_trait::Mmr},
+        mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
         mutator_set::{chunk::Chunk, set_commitment::BATCH_SIZE},
         simple_hasher::{self, ToDigest},
     },
@@ -57,10 +57,11 @@ impl<H: simple_hasher::Hasher> PartialEq for MembershipProof<H> {
     }
 }
 
-impl<H: simple_hasher::Hasher> MembershipProof<H>
+impl<H> MembershipProof<H>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    H: simple_hasher::Hasher,
 {
     /// Get an argument to the MMR `batch_update_from_batch_leaf_mutation`,
     /// and mutate the chunk dictionary chunk values.
@@ -138,10 +139,10 @@ where
         mutation_argument_hash_map.into_values().collect()
     }
 
-    pub fn batch_update_from_addition(
+    pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
         own_items: &[H::Digest],
-        mutator_set: &SetCommitment<H>,
+        mutator_set: &SetCommitment<H, MMR>,
         addition_record: &AdditionRecord<H>,
     ) -> Result<Vec<usize>, Box<dyn Error>> {
         assert!(
@@ -171,7 +172,7 @@ where
             );
 
         // if window does not slide, we are done
-        if !SetCommitment::<H>::window_slides(new_item_index) {
+        if !SetCommitment::<H, MMR>::window_slides(new_item_index) {
             return Ok(indices_for_updated_mps);
         }
 
@@ -183,11 +184,15 @@ where
         };
         let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&mutator_set.hasher);
 
-        // Insert the new chunk digest into the cloned SWBF MMR to get
-        // its authentication path.
-        let mut mmra_copy = mutator_set.swbf_inactive.clone();
+        // Insert the new chunk digest into the accumulator-version of the
+        // SWBF MMR to get its authentication path. It's important to convert the MMR
+        // to an MMR Accumulator here, since we don't want to drag around or clone
+        // a whole archival MMR for this operation, as the archival MMR can be in the
+        // size of gigabytes, whereas the MMR accumulator should be in the size of
+        // kilobytes.
+        let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
         let new_swbf_auth_path: mmr::membership_proof::MembershipProof<H> =
-            mmra_copy.append(new_chunk_digest.clone());
+            mmra.append(new_chunk_digest.clone());
 
         // Collect all bit indices for all membership proofs that are being updated
         // Notice that this is a *very* expensive operation if the bit indices are
@@ -288,10 +293,10 @@ where
      * update_from_addition
      * Updates a membership proof in anticipation of an addition to the set.
      */
-    pub fn update_from_addition(
+    pub fn update_from_addition<MMR: Mmr<H>>(
         &mut self,
         own_item: &H::Digest,
-        mutator_set: &SetCommitment<H>,
+        mutator_set: &SetCommitment<H, MMR>,
         addition_record: &AdditionRecord<H>,
     ) -> Result<bool, Box<dyn Error>> {
         assert!(self.auth_path_aocl.data_index < mutator_set.aocl.count_leaves());
@@ -306,7 +311,7 @@ where
         );
 
         // if window does not slide, we are done
-        if !SetCommitment::<H>::window_slides(new_item_index) {
+        if !SetCommitment::<H, MMR>::window_slides(new_item_index) {
             return Ok(aocl_mp_updated);
         }
 
@@ -332,9 +337,16 @@ where
             .map(|bi| bi / CHUNK_SIZE as u128)
             .collect::<HashSet<u128>>();
 
-        let mut mmra_copy = mutator_set.swbf_inactive.clone();
+        // Get an accumulator-version of the MMR and insert the new SWBF leaf to get its
+        // authentication path.
+        // It's important to convert the MMR
+        // to an MMR Accumulator here, since we don't want to drag around or clone
+        // a whole archival MMR for this operation, as the archival MMR can be in the
+        // size of gigabytes, whereas the MMR accumulator should be in the size of
+        // kilobytes.
+        let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
         let new_auth_path: mmr::membership_proof::MembershipProof<H> =
-            mmra_copy.append(new_chunk_digest.clone());
+            mmra.append(new_chunk_digest.clone());
 
         let mut swbf_chunk_dictionary_updated = false;
         'outer: for chunk_index in chunk_indices_set.into_iter() {
