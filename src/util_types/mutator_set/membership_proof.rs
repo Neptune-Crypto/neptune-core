@@ -78,19 +78,8 @@ where
             u128,
             (mmr::membership_proof::MembershipProof<H>, H::Digest),
         > = HashMap::new();
-        // let mut mutation_argument: Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> =
-        //     vec![];
-        let mut rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
-        removal_record
-            .bit_indices
-            .iter()
-            .map(|bi| (bi / CHUNK_SIZE as u128, bi))
-            .for_each(|(k, v)| {
-                rem_record_chunk_idx_to_bit_indices
-                    .entry(k)
-                    .or_insert_with(Vec::new)
-                    .push(*v);
-            });
+        let rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> =
+            removal_record.get_chunk_index_to_bit_indices();
 
         for (chunk_index, bit_indices) in rem_record_chunk_idx_to_bit_indices.iter() {
             for chunk_dictionary in chunk_dictionaries.iter_mut() {
