@@ -1193,7 +1193,7 @@ mod accumulation_scheme_tests {
     }
 
     #[test]
-    fn batch_update_from_addition_test() {
+    fn batch_update_from_addition_and_removal_test() {
         // set up rng
         let mut rng = ChaCha20Rng::from_seed(
             vec![vec![0, 1, 4, 33], vec![0; 28]]
@@ -1207,71 +1207,82 @@ mod accumulation_scheme_tests {
         let hasher = Hasher::new();
         let mut mutator_set = SetCommitment::<Hasher>::default();
 
-        let num_additions = 100;
+        // It's important to test number of additions around the shifting of the window,
+        // i.e. around batch size.
+        let num_additions_list = vec![
+            1,
+            2,
+            BATCH_SIZE - 1,
+            BATCH_SIZE,
+            BATCH_SIZE + 1,
+            6 * BATCH_SIZE - 1,
+            6 * BATCH_SIZE,
+            6 * BATCH_SIZE + 1,
+        ];
 
         let mut membership_proofs: Vec<MembershipProof<Hasher>> = vec![];
         let mut items: Vec<Digest> = vec![];
 
-        for _ in 0..num_additions {
-            let new_item = hasher.hash(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
-            );
-            let randomness = hasher.hash(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
-            );
+        for num_additions in num_additions_list {
+            for _ in 0..num_additions {
+                let new_item = hasher.hash(
+                    &(0..3)
+                        .map(|_| BFieldElement::new(rng.next_u64()))
+                        .collect::<Vec<_>>(),
+                );
+                let randomness = hasher.hash(
+                    &(0..3)
+                        .map(|_| BFieldElement::new(rng.next_u64()))
+                        .collect::<Vec<_>>(),
+                );
 
-            let addition_record = mutator_set.commit(&new_item, &randomness);
-            let membership_proof = mutator_set.prove(&new_item, &randomness, true);
+                let addition_record = mutator_set.commit(&new_item, &randomness);
+                let membership_proof = mutator_set.prove(&new_item, &randomness, true);
 
-            // Update *all* membership proofs with newly added item
-            let batch_update_res = MembershipProof::<Hasher>::batch_update_from_addition(
-                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
-                &items,
-                &mutator_set,
-                &addition_record,
-            );
-            assert!(batch_update_res.is_ok());
+                // Update *all* membership proofs with newly added item
+                let batch_update_res = MembershipProof::<Hasher>::batch_update_from_addition(
+                    &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                    &items,
+                    &mutator_set,
+                    &addition_record,
+                );
+                assert!(batch_update_res.is_ok());
 
-            mutator_set.add(&addition_record);
-            assert!(mutator_set.verify(&new_item, &membership_proof));
+                mutator_set.add(&addition_record);
+                assert!(mutator_set.verify(&new_item, &membership_proof));
 
-            for (_, (mp, item)) in membership_proofs.iter().zip(items.iter()).enumerate() {
-                assert!(mutator_set.verify(&item, &mp));
+                for (_, (mp, item)) in membership_proofs.iter().zip(items.iter()).enumerate() {
+                    assert!(mutator_set.verify(&item, &mp));
+                }
+
+                membership_proofs.push(membership_proof);
+                items.push(new_item);
             }
 
-            membership_proofs.push(membership_proof);
-            items.push(new_item);
-        }
+            // Remove items from MS, and verify correct updating of membership proofs
+            for _ in 0..num_additions {
+                let item = items.pop().unwrap();
+                let mp = membership_proofs.pop().unwrap();
+                assert!(mutator_set.verify(&item, &mp));
 
-        // Remove items from MS, and verify correct updating of membership proofs
-        for i in 0..num_additions {
-            println!("i = {}", i);
-            let item = items.pop().unwrap();
-            let mp = membership_proofs.pop().unwrap();
-            assert!(mutator_set.verify(&item, &mp));
+                // generate removal record
+                let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
+                assert!(removal_record.validate(&mutator_set));
 
-            // generate removal record
-            let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
-            assert!(removal_record.validate(&mutator_set));
+                // update membership proofs
+                let res = MembershipProof::batch_update_from_remove(
+                    &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                    &removal_record,
+                );
+                assert!(res.is_ok());
 
-            // update membership proofs
-            let res = MembershipProof::batch_update_from_remove(
-                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
-                &removal_record,
-            );
-            assert!(res.is_ok());
+                // remove item from set
+                mutator_set.remove(&mut removal_record);
+                assert!(!mutator_set.verify(&item.into(), &mp));
 
-            // remove item from set
-            println!("removal_record = {:?}", removal_record);
-            mutator_set.remove(&mut removal_record);
-            assert!(!mutator_set.verify(&item.into(), &mp));
-
-            for (item, mp) in items.iter().zip(membership_proofs.iter()) {
-                assert!(mutator_set.verify(item, mp));
+                for (item, mp) in items.iter().zip(membership_proofs.iter()) {
+                    assert!(mutator_set.verify(item, mp));
+                }
             }
         }
     }
