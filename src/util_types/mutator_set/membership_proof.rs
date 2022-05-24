@@ -50,6 +50,8 @@ pub struct MembershipProof<H: simple_hasher::Hasher> {
 }
 
 impl<H: simple_hasher::Hasher> PartialEq for MembershipProof<H> {
+    // Equality for a membership proof does not look at cached bits, as they are just cached data
+    // Whether they are set or not, does not change the membership proof.
     fn eq(&self, other: &Self) -> bool {
         self.randomness == other.randomness
             && self.auth_path_aocl == other.auth_path_aocl
@@ -481,5 +483,89 @@ where
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod ms_proof_tests {
+    use std::marker::PhantomData;
+
+    use crate::util_types::{mmr, simple_hasher::Hasher};
+    use rand_chacha::ChaCha20Rng;
+    use rand_core::{RngCore, SeedableRng};
+
+    use super::*;
+
+    #[test]
+    fn mp_equality_test() {
+        type Hasher = blake3::Hasher;
+        let hasher: Hasher = blake3::Hasher::new();
+        let mut rng = ChaCha20Rng::from_seed(
+            vec![vec![0, 1, 4, 33], vec![0; 28]]
+                .concat()
+                .try_into()
+                .unwrap(),
+        );
+        let randomness = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(rng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+        let other_randomness = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(rng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+        let mp_with_cached_bits = MembershipProof::<Hasher> {
+            randomness: randomness,
+            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+                data_index: 0,
+                _hasher: PhantomData,
+                authentication_path: vec![],
+            },
+            target_chunks: ChunkDictionary::default(),
+            cached_bits: Some([1u128; NUM_TRIALS]),
+        };
+        let mp_without_cached_bits = MembershipProof::<Hasher> {
+            randomness: randomness,
+            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+                data_index: 0,
+                _hasher: PhantomData,
+                authentication_path: vec![],
+            },
+            target_chunks: ChunkDictionary::default(),
+            cached_bits: None,
+        };
+        let mp_with_different_data_index = MembershipProof::<Hasher> {
+            randomness: randomness,
+            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+                data_index: 100073,
+                _hasher: PhantomData,
+                authentication_path: vec![],
+            },
+            target_chunks: ChunkDictionary::default(),
+            cached_bits: None,
+        };
+        let mp_with_different_randomness = MembershipProof::<Hasher> {
+            randomness: other_randomness,
+            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+                data_index: 0,
+                _hasher: PhantomData,
+                authentication_path: vec![],
+            },
+            target_chunks: ChunkDictionary::default(),
+            cached_bits: None,
+        };
+
+        // Verify that the caching of bits does not change the equality value of a membership proof
+        assert_eq!(mp_with_cached_bits, mp_without_cached_bits);
+
+        // Verify that a different data index (a different auth path) is a different MP
+        assert_ne!(mp_with_different_data_index, mp_with_cached_bits);
+
+        // Verify that different randomness is a different MP
+        assert_ne!(mp_with_different_randomness, mp_with_cached_bits);
+
+        // TODO: Test that a different chunk dictionary results in a different MP
     }
 }
