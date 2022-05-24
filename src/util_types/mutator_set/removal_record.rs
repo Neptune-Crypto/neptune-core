@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use super::{
     chunk_dictionary::ChunkDictionary,
-    set_commitment::{SetCommitment, NUM_TRIALS},
+    set_commitment::{SetCommitment, CHUNK_SIZE, NUM_TRIALS},
 };
 use crate::{
     shared_math::b_field_element::BFieldElement,
@@ -35,5 +37,20 @@ where
             )
             .0
         })
+    }
+
+    pub fn get_chunk_index_to_bit_indices(&self) -> HashMap<u128, Vec<u128>> {
+        let mut rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
+        self.bit_indices
+            .iter()
+            .map(|bi| (bi / CHUNK_SIZE as u128, bi))
+            .for_each(|(k, v)| {
+                rem_record_chunk_idx_to_bit_indices
+                    .entry(k)
+                    .or_insert_with(Vec::new)
+                    .push(*v);
+            });
+
+        rem_record_chunk_idx_to_bit_indices
     }
 }
