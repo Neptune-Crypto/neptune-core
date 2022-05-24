@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fmt,
+};
 
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -9,9 +13,9 @@ use super::{
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr::{self, mmr_trait::Mmr},
+        mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
         mutator_set::chunk::Chunk,
-        simple_hasher::{self, ToDigest},
+        simple_hasher::{Hasher, ToDigest},
     },
 };
 
@@ -20,8 +24,24 @@ pub const CHUNK_SIZE: usize = 1500;
 pub const BATCH_SIZE: usize = 10;
 pub const NUM_TRIALS: usize = 160; // TODO: Change to 160 in production
 
+impl Error for SetCommitmentError {}
+
+impl fmt::Display for SetCommitmentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum SetCommitmentError {
+    RequestedAoclAuthPathOutOfBounds((u128, u128)),
+    RequestedSwbfAuthPathOutOfBounds((u128, u128)),
+    MutatorSetIsEmpty,
+    RestoreMembershipProofDidNotFindChunkForChunkIndex,
+}
+
 #[derive(Clone, Debug)]
-pub struct SetCommitment<H: simple_hasher::Hasher, MMR: Mmr<H>> {
+pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
     pub swbf_active: [bool; WINDOW_SIZE],
@@ -30,10 +50,10 @@ pub struct SetCommitment<H: simple_hasher::Hasher, MMR: Mmr<H>> {
 
 impl<H, M> SetCommitment<H, M>
 where
-    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    u128: ToDigest<<H as Hasher>::Digest>,
+    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
     M: Mmr<H>,
-    H: simple_hasher::Hasher,
+    H: Hasher,
 {
     pub fn default() -> Self {
         Self {
@@ -121,13 +141,9 @@ where
         //  - index == n * BATCH_SIZE generates a slide for any n
     }
 
-    ///   add
-    ///   Updates the set-commitment with an addition record. The new
-    ///   commitment represents the set $S union {c}$ ,
-    ///   where S is the set represented by the old
-    ///   commitment and c is the commitment to the new item AKA the
-    ///   *addition record*.
-    pub fn add(&mut self, addition_record: &AdditionRecord<H>) {
+    /// Helper function. Like `add` but also returns the chunk that was added to the inactive SWBF
+    /// since this is needed by the archival version of the mutator set.
+    fn add_helper(&mut self, addition_record: &AdditionRecord<H>) -> Option<(u128, Chunk)> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
@@ -141,51 +157,77 @@ where
         let item_index = self.aocl.count_leaves();
         self.aocl.append(addition_record.commitment.to_owned()); // ignore auth path
 
-        // if window slides, update filter
-        if Self::window_slides(item_index) {
-            // First update the inactive part of the SWBF, the SWBF MMR
-            let chunk: Chunk = Chunk {
-                bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
-            };
-            let chunk_digest: H::Digest = chunk.hash::<H>(&self.hasher);
-            self.swbf_inactive.append(chunk_digest); // ignore auth path
-
-            // Then move window to the right, equivalent to moving values
-            // inside window to the left.
-            for i in CHUNK_SIZE..WINDOW_SIZE {
-                self.swbf_active[i - CHUNK_SIZE] = self.swbf_active[i];
-            }
-
-            for i in (WINDOW_SIZE - CHUNK_SIZE)..WINDOW_SIZE {
-                self.swbf_active[i] = false;
-            }
+        if !Self::window_slides(item_index) {
+            return None;
         }
+
+        // if window slides, update filter
+        // First update the inactive part of the SWBF, the SWBF MMR
+        let chunk: Chunk = Chunk {
+            bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
+        };
+        let chunk_digest: H::Digest = chunk.hash::<H>(&self.hasher);
+        self.swbf_inactive.append(chunk_digest); // ignore auth path
+
+        // Then move window to the right, equivalent to moving values
+        // inside window to the left.
+        for i in CHUNK_SIZE..WINDOW_SIZE {
+            self.swbf_active[i - CHUNK_SIZE] = self.swbf_active[i];
+        }
+        for i in (WINDOW_SIZE - CHUNK_SIZE)..WINDOW_SIZE {
+            self.swbf_active[i] = false;
+        }
+
+        let chunk_index_for_inserted_chunk = self.swbf_inactive.count_leaves() - 1;
+
+        // Return the chunk that was added to the inactive part of the SWBF.
+        // This chunk is needed by the Archival mutator set. The Regular
+        // mutator set can ignore it.
+        Some((chunk_index_for_inserted_chunk, chunk))
+    }
+
+    ///   add
+    ///   Updates the set-commitment with an addition record. The new
+    ///   commitment represents the set $S union {c}$ ,
+    ///   where S is the set represented by the old
+    ///   commitment and c is the commitment to the new item AKA the
+    ///   *addition record*.
+    pub fn add(&mut self, addition_record: &AdditionRecord<H>) {
+        self.add_helper(addition_record);
     }
 
     /// remove
     /// Updates the mutator set so as to remove the item determined by
-    /// its removal record.
+    /// its removal record. Returns a hashmap from chunk index to chunk.
     // TODO: Do we also want the provided removal record to be updated?
     pub fn remove(&mut self, removal_record: &RemovalRecord<H>) {
+        self.remove_helper(removal_record);
+    }
+
+    fn remove_helper(&mut self, removal_record: &RemovalRecord<H>) -> HashMap<u128, Chunk> {
         let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
 
         // set all bits
-        let mut new_target_chunks = removal_record.target_chunks.clone();
-        for bit_index in removal_record.bit_indices.iter() {
-            // if bit is in active part
-            if *bit_index >= window_start {
-                let relative_index = bit_index - window_start;
-                self.swbf_active[relative_index as usize] = true;
+        let mut new_target_chunks: ChunkDictionary<H> = removal_record.target_chunks.clone();
+        let chunk_indices_to_bit_indices: HashMap<u128, Vec<u128>> =
+            removal_record.get_chunk_index_to_bit_indices();
+
+        for (chunk_index, bit_indices) in chunk_indices_to_bit_indices {
+            if chunk_index >= batch_index {
+                for bit_index in bit_indices {
+                    let relative_index = bit_index - window_start;
+                    self.swbf_active[relative_index as usize] = true;
+                }
+
                 continue;
             }
 
-            // bit is not in active part, so set bits in relevant chunk
-            let mut relevant_chunk = new_target_chunks
-                .dictionary
-                .get_mut(&(bit_index / CHUNK_SIZE as u128))
-                .unwrap();
-            relevant_chunk.1.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+            // If chunk index is not in the active part, set the bits in the relevant chunk
+            let mut relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
+            for bit_index in bit_indices {
+                relevant_chunk.1.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+            }
         }
 
         // update mmr
@@ -208,6 +250,12 @@ where
 
         self.swbf_inactive
             .batch_mutate_leaf_and_update_mps(&mut all_membership_proofs, mutation_data);
+
+        new_target_chunks
+            .dictionary
+            .into_iter()
+            .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
+            .collect()
     }
 
     /**
@@ -341,6 +389,176 @@ where
 
         // return verdict
         is_aocl_member && entries_in_dictionary && all_auth_paths_are_valid && has_unset_bits
+    }
+}
+
+pub struct ArchivalSetCommitment<H>
+where
+    u128: ToDigest<<H as Hasher>::Digest>,
+    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
+    H: Hasher,
+{
+    set_commitment: SetCommitment<H, ArchivalMmr<H>>,
+    chunks: HashMap<u128, Chunk>,
+}
+
+/// Methods that only work when implementing using archival MMRs as the underlying two MMRs
+impl<H> ArchivalSetCommitment<H>
+where
+    u128: ToDigest<<H as Hasher>::Digest>,
+    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
+    H: Hasher,
+{
+    pub fn default() -> Self {
+        Self {
+            set_commitment: SetCommitment::default(),
+            chunks: HashMap::new(),
+        }
+    }
+
+    pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
+        self.set_commitment.commit(item, randomness)
+    }
+
+    pub fn drop(
+        &self,
+        item: &H::Digest,
+        membership_proof: &MembershipProof<H>,
+    ) -> RemovalRecord<H> {
+        self.set_commitment.drop(item, membership_proof)
+    }
+
+    pub fn prove(
+        &self,
+        item: &H::Digest,
+        randomness: &H::Digest,
+        store_bits: bool,
+    ) -> MembershipProof<H> {
+        self.set_commitment.prove(item, randomness, store_bits)
+    }
+
+    pub fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool {
+        self.set_commitment.verify(item, membership_proof)
+    }
+
+    pub fn add(&mut self, addition_record: &AdditionRecord<H>) {
+        let new_chunk: Option<(u128, Chunk)> = self.set_commitment.add_helper(addition_record);
+        match new_chunk {
+            None => (),
+            Some((chunk_index, chunk)) => {
+                self.chunks.insert(chunk_index, chunk);
+            }
+        }
+    }
+
+    pub fn remove(&mut self, removal_record: &RemovalRecord<H>) {
+        let new_chunks: HashMap<u128, Chunk> = self.set_commitment.remove_helper(removal_record);
+        for (chunk_index, chunk) in new_chunks {
+            self.chunks.insert(chunk_index, chunk);
+        }
+    }
+
+    /// Returns an authentication path for an element in the append-only commitment list
+    pub fn get_aocl_authentication_path(
+        &self,
+        index: u128,
+    ) -> Result<mmr::membership_proof::MembershipProof<H>, Box<dyn Error>> {
+        if self.set_commitment.aocl.count_leaves() <= index {
+            return Err(Box::new(
+                SetCommitmentError::RequestedAoclAuthPathOutOfBounds((
+                    index,
+                    self.set_commitment.aocl.count_leaves(),
+                )),
+            ));
+        }
+
+        Ok(self.set_commitment.aocl.prove_membership(index).0)
+    }
+
+    /// Returns an authentication path for a chunk in the sliding window Bloom filter
+    pub fn get_chunk_and_auth_path(
+        &self,
+        chunk_index: u128,
+    ) -> Result<(mmr::membership_proof::MembershipProof<H>, Chunk), Box<dyn Error>> {
+        if self.set_commitment.swbf_inactive.count_leaves() <= chunk_index {
+            return Err(Box::new(
+                SetCommitmentError::RequestedSwbfAuthPathOutOfBounds((
+                    chunk_index,
+                    self.set_commitment.swbf_inactive.count_leaves(),
+                )),
+            ));
+        }
+
+        let chunk_auth_path: mmr::membership_proof::MembershipProof<H> = self
+            .set_commitment
+            .swbf_inactive
+            .prove_membership(chunk_index)
+            .0;
+        let chunk: Chunk = match self.chunks.get(&chunk_index) {
+            Some(chnk) => *chnk,
+            None => {
+                // This should never happen. It would mean that chunks are missing but that the
+                // archival MMR has the membership proof for the chunk. That would be a programming
+                // error.
+                return Err(Box::new(
+                    SetCommitmentError::RestoreMembershipProofDidNotFindChunkForChunkIndex,
+                ));
+            }
+        };
+
+        Ok((chunk_auth_path, chunk))
+    }
+
+    /// Restore membership_proof. If called on someone else's UTXO, this leaks privacy. In this case,
+    /// caller is better off using `get_aocl_authentication_path` and `get_chunk_and_auth_path` for the
+    /// relevant indices.
+    pub fn restore_membership_proof(
+        &self,
+        item: &H::Digest,
+        randomness: &H::Digest,
+        index: u128,
+    ) -> Result<MembershipProof<H>, Box<dyn Error>> {
+        if self.set_commitment.aocl.is_empty() {
+            return Err(Box::new(SetCommitmentError::MutatorSetIsEmpty));
+        }
+
+        let auth_path_aocl = self.get_aocl_authentication_path(index)?;
+        let bits = self.set_commitment.get_indices(item, randomness, index);
+
+        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let window_start = batch_index * CHUNK_SIZE as u128;
+
+        let chunk_indices: HashSet<u128> = bits
+            .iter()
+            .filter(|bi| **bi < window_start)
+            .map(|bi| *bi / CHUNK_SIZE as u128)
+            .collect();
+        let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
+        for chunk_index in chunk_indices {
+            let chunk: &Chunk = match self.chunks.get(&chunk_index) {
+                Some(chnk) => chnk,
+                None => {
+                    return Err(Box::new(
+                        SetCommitmentError::RestoreMembershipProofDidNotFindChunkForChunkIndex,
+                    ))
+                }
+            };
+            let chunk_membership_proof: mmr::membership_proof::MembershipProof<H> = self
+                .set_commitment
+                .swbf_inactive
+                .prove_membership(chunk_index)
+                .0;
+            target_chunks
+                .dictionary
+                .insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
+        }
+
+        Ok(MembershipProof {
+            auth_path_aocl,
+            randomness: randomness.to_owned(),
+            target_chunks,
+            cached_bits: None,
+        })
     }
 }
 
@@ -802,6 +1020,71 @@ mod accumulation_scheme_tests {
                     &items_and_membership_proofs[k].1,
                 ));
             }
+        }
+    }
+
+    #[test]
+    fn archival_set_commitment_test() {
+        type Hasher = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
+        let hasher = Hasher::new();
+        let mut archival_mutator_set = ArchivalSetCommitment::<Hasher>::default();
+
+        let num_additions = 65;
+
+        let mut membership_proofs: Vec<MembershipProof<Hasher>> = vec![];
+        let mut items: Vec<Digest> = vec![];
+        let mut rng = thread_rng();
+
+        for i in 0..num_additions {
+            let item = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
+            let randomness = hasher.hash(
+                &(0..3)
+                    .map(|_| BFieldElement::new(rng.next_u64()))
+                    .collect::<Vec<_>>(),
+            );
+
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
+            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+
+            let res = MembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &archival_mutator_set.set_commitment,
+                &addition_record,
+            );
+            assert!(res.is_ok());
+
+            archival_mutator_set.add(&addition_record);
+            assert!(archival_mutator_set.verify(&item, &membership_proof));
+
+            // Verify that we can just read out the same membership proofs from the
+            // archival MMR as those we get through the membership proof book keeping.
+            let archival_membership_proof =
+                match archival_mutator_set.restore_membership_proof(&item, &randomness, i) {
+                    Err(err) => panic!(
+                        "Failed to get membership proof from archival mutator set: {}",
+                        err
+                    ),
+                    Ok(mp) => mp,
+                };
+            assert_eq!(
+                archival_membership_proof, membership_proof,
+                "Membership proof from archive and accumulator must agree"
+            );
+
+            // For good measure (because I don't trust MP's equality operator sufficiently) I test that the target chunks also agree
+            assert_eq!(
+                archival_membership_proof.target_chunks,
+                membership_proof.target_chunks
+            );
+
+            membership_proofs.push(membership_proof);
+            items.push(item);
         }
     }
 }
