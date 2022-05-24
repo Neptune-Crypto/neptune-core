@@ -9,7 +9,7 @@ use super::{
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+        mmr::{self, mmr_trait::Mmr},
         mutator_set::chunk::Chunk,
         simple_hasher::{self, ToDigest},
     },
@@ -21,22 +21,24 @@ pub const BATCH_SIZE: usize = 10;
 pub const NUM_TRIALS: usize = 160; // TODO: Change to 160 in production
 
 #[derive(Clone, Debug)]
-pub struct SetCommitment<H: simple_hasher::Hasher> {
-    pub aocl: MmrAccumulator<H>,
-    pub swbf_inactive: MmrAccumulator<H>,
+pub struct SetCommitment<H: simple_hasher::Hasher, MMR: Mmr<H>> {
+    pub aocl: MMR,
+    pub swbf_inactive: MMR,
     pub swbf_active: [bool; WINDOW_SIZE],
     pub hasher: H,
 }
 
-impl<H: simple_hasher::Hasher> SetCommitment<H>
+impl<H, M> SetCommitment<H, M>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    M: Mmr<H>,
+    H: simple_hasher::Hasher,
 {
     pub fn default() -> Self {
         Self {
-            aocl: MmrAccumulator::new(vec![]),
-            swbf_inactive: MmrAccumulator::new(vec![]),
+            aocl: M::new(vec![]),
+            swbf_inactive: M::new(vec![]),
             swbf_active: [false; WINDOW_SIZE as usize],
             hasher: H::new(),
         }
@@ -49,7 +51,7 @@ where
     pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
         let canonical_commitment = self.hasher.hash_pair(item, randomness);
 
-        AdditionRecord::new(canonical_commitment, self.aocl.clone())
+        AdditionRecord::new(canonical_commitment, self.aocl.to_accumulator())
     }
 
     /// Helper function. Computes the bloom filter bit indices of the
@@ -65,16 +67,15 @@ where
         let mut rhs = self.hasher.hash_pair(&timestamp, randomness);
         rhs = self.hasher.hash_pair(item, &rhs);
         let mut indices: Vec<u128> = Vec::with_capacity(NUM_TRIALS);
+        let hasher = &self.hasher;
 
         // Collect all indices in parallel, using counter-mode
         (0..NUM_TRIALS)
             .into_par_iter()
             .map(|i| {
                 let counter: H::Digest = (i as u128).to_digest();
-                let pseudorandomness = self.hasher.hash_pair(&counter, &rhs);
-                self.hasher
-                    .sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
-                    as u128
+                let pseudorandomness = hasher.hash_pair(&counter, &rhs);
+                hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE) as u128
                     + batch_index * CHUNK_SIZE as u128
             })
             .collect_into_vec(&mut indices);
@@ -132,7 +133,7 @@ where
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
         // track of the mutator set.
         // verify aocl snapshot
-        if !addition_record.has_matching_aocl(&self.aocl) {
+        if !addition_record.has_matching_aocl(&self.aocl.to_accumulator()) {
             panic!("Addition record has aocl snapshot that does not match with the AOCL it is being added to.")
         }
 
@@ -224,7 +225,7 @@ where
         let item_commitment = self.hasher.hash_pair(item, randomness);
 
         // simulate adding to commitment list
-        let auth_path_aocl = self.aocl.clone().append(item_commitment);
+        let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
         let target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
 
         // Store the bit indices for later use, as they are expensive to calculate
@@ -354,7 +355,8 @@ mod accumulation_scheme_tests {
         },
         util_types::{
             blake3_wrapper,
-            simple_hasher::{Hasher, RescuePrimeProduction},
+            mmr::{archival_mmr::ArchivalMmr, mmr_accumulator::MmrAccumulator},
+            simple_hasher::Hasher,
         },
     };
     use rand::prelude::*;
@@ -365,15 +367,28 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn init_test() {
-        SetCommitment::<RescuePrimeProduction>::default();
+        SetCommitment::<
+            RescuePrimeXlix<RP_DEFAULT_WIDTH>,
+            MmrAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
+        >::default();
+        SetCommitment::<
+            RescuePrimeXlix<RP_DEFAULT_WIDTH>,
+            ArchivalMmr<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
+        >::default();
     }
 
     #[test]
     fn verify_future_bits_test() {
         // Ensure that `verify` does not crash when given a membership proof
         // that represents a future addition to the AOCL.
-        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
-        let empty_mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let mut mutator_set = SetCommitment::<
+            RescuePrimeXlix<RP_DEFAULT_WIDTH>,
+            MmrAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
+        >::default();
+        let empty_mutator_set = SetCommitment::<
+            RescuePrimeXlix<RP_DEFAULT_WIDTH>,
+            MmrAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
+        >::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
         let mut prng = thread_rng();
         for _ in 0..2 * BATCH_SIZE + 2 {
@@ -400,7 +415,10 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_membership_proof_update_from_add() {
-        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let mut mutator_set = SetCommitment::<
+            RescuePrimeXlix<RP_DEFAULT_WIDTH>,
+            MmrAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
+        >::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
         let own_item: Vec<BFieldElement> =
             hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
@@ -470,7 +488,7 @@ mod accumulation_scheme_tests {
                 .unwrap(),
         );
 
-        let mut mutator_set = SetCommitment::<Hasher>::default();
+        let mut mutator_set = SetCommitment::<Hasher, MmrAccumulator<Hasher>>::default();
         let hasher: Hasher = blake3::Hasher::new();
 
         let num_additions = rng.gen_range(0..=100i32);
@@ -525,7 +543,9 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_add_and_prove() {
-        let mut mutator_set = SetCommitment::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
+        type Mmr = MmrAccumulator<Hasher>;
+        let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
         let item0: Vec<BFieldElement> =
             hasher.hash(&vec![BFieldElement::new(1215)], RP_DEFAULT_OUTPUT_SIZE);
@@ -586,8 +606,9 @@ mod accumulation_scheme_tests {
 
         type Hasher = blake3::Hasher;
         type Digest = blake3_wrapper::Blake3Hash;
+        type Mmr = MmrAccumulator<Hasher>;
         let hasher = Hasher::new();
-        let mut mutator_set = SetCommitment::<Hasher>::default();
+        let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
 
         // It's important to test number of additions around the shifting of the window,
         // i.e. around batch size.
@@ -681,8 +702,9 @@ mod accumulation_scheme_tests {
 
         type Hasher = blake3::Hasher;
         type Digest = blake3_wrapper::Blake3Hash;
+        type Mmr = MmrAccumulator<Hasher>;
         let hasher = Hasher::new();
-        let mut mutator_set = SetCommitment::<Hasher>::default();
+        let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
 
         let num_additions = 65;
 

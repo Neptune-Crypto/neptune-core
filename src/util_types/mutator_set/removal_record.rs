@@ -16,12 +16,16 @@ pub struct RemovalRecord<H: simple_hasher::Hasher> {
     pub target_chunks: ChunkDictionary<H>,
 }
 
-impl<H: simple_hasher::Hasher> RemovalRecord<H>
+impl<H> RemovalRecord<H>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    H: simple_hasher::Hasher,
 {
-    pub fn validate(&self, mutator_set: &SetCommitment<H>) -> bool {
+    pub fn validate<M>(&self, mutator_set: &SetCommitment<H, M>) -> bool
+    where
+        M: Mmr<H>,
+    {
         let peaks = mutator_set.swbf_inactive.get_peaks();
         self.target_chunks.dictionary.iter().all(|(_i, (p, c))| {
             p.verify(
