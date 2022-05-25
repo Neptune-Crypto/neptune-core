@@ -1,4 +1,5 @@
 pub mod addition_record;
+pub mod archival_mutator_set;
 pub mod chunk;
 pub mod chunk_dictionary;
 pub mod membership_proof;
