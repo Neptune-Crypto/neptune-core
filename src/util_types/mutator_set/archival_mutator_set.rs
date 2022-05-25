@@ -21,7 +21,7 @@ use super::{
     set_commitment::{SetCommitment, SetCommitmentError, BATCH_SIZE, CHUNK_SIZE},
 };
 
-pub struct ArchivalSetCommitment<H>
+pub struct ArchivalMutatorSet<H>
 where
     u128: ToDigest<<H as Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
@@ -31,7 +31,7 @@ where
     chunks: HashMap<u128, Chunk>,
 }
 
-impl<H> MutatorSet<H> for ArchivalSetCommitment<H>
+impl<H> MutatorSet<H> for ArchivalMutatorSet<H>
 where
     u128: ToDigest<<H as Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
@@ -92,7 +92,7 @@ where
 }
 
 /// Methods that only work when implementing using archival MMRs as the underlying two MMRs
-impl<H> ArchivalSetCommitment<H>
+impl<H> ArchivalMutatorSet<H>
 where
     u128: ToDigest<<H as Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
@@ -215,7 +215,7 @@ mod archival_mutator_set_tests {
         type Hasher = blake3::Hasher;
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = Hasher::new();
-        let mut archival_mutator_set = ArchivalSetCommitment::<Hasher>::default();
+        let mut archival_mutator_set = ArchivalMutatorSet::<Hasher>::default();
 
         let num_additions = 65;
 
