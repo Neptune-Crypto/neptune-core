@@ -108,4 +108,22 @@ mod chunk_tests {
             assert!(two_ones_preimage[i].is_zero());
         }
     }
+
+    #[test]
+    fn chunk_hashpreimage_big_test() {
+        let mut chunk = Chunk {
+            bits: [false; CHUNK_SIZE],
+        };
+
+        // Verify that the hash preimage is producted according to expectations.
+        // This test sets the highest B field element (rightmost in the array)
+        // where all the 63 bits are accessible. It would usually mean the 2nd
+        // to last B field element in the returned vector.
+        let offset = CHUNK_SIZE % Chunk::BIT_CAPACITY_PER_BFIELD_ELEMENT;
+        chunk.bits[CHUNK_SIZE - 1 - offset] = true;
+        let hashpreimage = chunk.hash_preimage();
+        let mut expected = [BFieldElement::ring_zero(); Chunk::get_hashpreimage_length()];
+        expected[Chunk::get_hashpreimage_length() - 2] = BFieldElement::new(1u64 << 62);
+        assert_eq!(expected.to_vec(), hashpreimage);
+    }
 }
