@@ -55,7 +55,10 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
-    use crate::util_types::{blake3_wrapper, simple_hasher::Hasher};
+    use crate::util_types::{
+        blake3_wrapper, mutator_set::archival_mutator_set::ArchivalMutatorSet,
+        simple_hasher::Hasher,
+    };
     use rand::prelude::*;
     use rand_core::RngCore;
 
@@ -63,15 +66,25 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn mutator_set_accumulator_pbt() {
+        // This tests verifies that items can be added and removed from the mutator set
+        // without assuming anything about the order of the adding and removal. It also
+        // verifies that the membership proofs handled through an mutator set accumulator
+        // are the same as those that are produced from an archival mutator set.
+
+        // This function mixes both archival and accumulator testing.
+        // It *may* be considered bad style to do it this way, but there is a
+        // lot of code duplication that is avoided by doing that.
         type Hasher = blake3::Hasher;
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = Hasher::new();
-        let mut ms: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let mut archival: ArchivalMutatorSet<Hasher> = ArchivalMutatorSet::default();
         let number_of_interactions = 50;
         let mut prng = thread_rng();
 
         let mut membership_proofs: Vec<MembershipProof<Hasher>> = vec![];
         let mut items: Vec<Digest> = vec![];
+        let mut rands: Vec<Digest> = vec![];
 
         // The outer loop runs two times:
         // 1. insert `number_of_interactions / 2` items, then randomly insert and remove `number_of_interactions / 2` times
@@ -82,21 +95,25 @@ mod accumulation_scheme_tests {
                     // Add a new item to the mutator set and update all membership proofs
                     let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
                     let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-                    let addition_record: AdditionRecord<Hasher> = ms.commit(&item, &randomness);
-                    let membership_proof = ms.prove(&item, &randomness, true);
+                    let addition_record: AdditionRecord<Hasher> =
+                        accumulator.commit(&item, &randomness);
+                    let membership_proof_acc = accumulator.prove(&item, &randomness, true);
+
+                    // Update all membership proofs
                     let update_result = MembershipProof::batch_update_from_addition(
                         &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                         &items,
-                        &ms,
+                        &accumulator,
                         &addition_record,
                     );
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
-                    ms.add(&addition_record);
+                    accumulator.add(&addition_record);
+                    archival.add(&addition_record);
 
-                    membership_proofs.push(membership_proof);
+                    membership_proofs.push(membership_proof_acc);
                     items.push(item);
+                    rands.push(randomness);
 
-                    // Update all membership proofs
                     println!("{}: Inserted", i);
                 } else {
                     // Remove an item from the mutator set and update all membership proofs
@@ -107,11 +124,12 @@ mod accumulation_scheme_tests {
                     let item_index = prng.gen_range(0..membership_proofs.len());
                     let removal_item = items.remove(item_index);
                     let removal_mp = membership_proofs.remove(item_index);
+                    let _removal_rand = rands.remove(item_index);
 
                     // generate removal record
                     let mut removal_record: RemovalRecord<Hasher> =
-                        ms.drop(&removal_item.into(), &removal_mp);
-                    assert!(removal_record.validate(&ms));
+                        accumulator.drop(&removal_item.into(), &removal_mp);
+                    assert!(removal_record.validate(&accumulator));
 
                     // update membership proofs
                     let res = MembershipProof::batch_update_from_remove(
@@ -121,17 +139,33 @@ mod accumulation_scheme_tests {
                     assert!(res.is_ok());
 
                     // remove item from set
-                    assert!(ms.verify(&removal_item.into(), &removal_mp));
-                    ms.remove(&mut removal_record);
-                    assert!(!ms.verify(&removal_item.into(), &removal_mp));
+                    assert!(accumulator.verify(&removal_item.into(), &removal_mp));
+                    accumulator.remove(&mut removal_record);
+                    archival.remove(&mut removal_record);
+                    assert!(!accumulator.verify(&removal_item.into(), &removal_mp));
 
                     println!("{}: Removed", i);
                 }
 
                 // Verify that all membership proofs are valid after these additions and removals
                 // TODO: This for-loop is pretty slow. Can we make a batch verifier for MS membership proofs?
-                for (_, (mp, item)) in membership_proofs.iter().zip(items.iter()).enumerate() {
-                    assert!(ms.verify(&item, &mp));
+                for (_, ((mp, item), rand)) in membership_proofs
+                    .iter()
+                    .zip(items.iter())
+                    .zip(rands.iter())
+                    .enumerate()
+                {
+                    assert!(accumulator.verify(item, mp));
+
+                    // Verify that the membership proof can be restored from an archival instance
+                    let arch_mp = archival
+                        .restore_membership_proof(item, rand, mp.auth_path_aocl.data_index)
+                        .unwrap();
+                    assert_eq!(arch_mp, *mp);
+
+                    // Also verify that cached bits are set for both proofs and that they agree
+                    assert!(arch_mp.cached_bits.is_some());
+                    assert_eq!(arch_mp.cached_bits, mp.cached_bits);
                 }
             }
         }
