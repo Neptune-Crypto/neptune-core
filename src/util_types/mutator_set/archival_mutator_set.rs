@@ -197,7 +197,7 @@ where
             auth_path_aocl,
             randomness: randomness.to_owned(),
             target_chunks,
-            cached_bits: None,
+            cached_bits: Some(bits),
         })
     }
 }
