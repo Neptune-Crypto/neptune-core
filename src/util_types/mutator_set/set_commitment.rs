@@ -238,6 +238,11 @@ where
             .collect()
     }
 
+    /**
+     * prove
+     * Generates a membership proof that will the valid when the item
+     * is added to the mutator set.
+     */
     pub fn prove(
         &self,
         item: &H::Digest,
