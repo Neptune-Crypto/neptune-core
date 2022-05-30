@@ -67,6 +67,8 @@ where
     pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
         let canonical_commitment = self.hasher.hash_pair(item, randomness);
 
+        // It's important to *not* use clone here as that could imply copying a whole
+        // archival MMR. Instead we ensure that
         AdditionRecord::new(canonical_commitment, self.aocl.to_accumulator())
     }
 
