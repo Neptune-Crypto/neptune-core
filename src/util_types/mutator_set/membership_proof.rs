@@ -479,7 +479,7 @@ where
 mod ms_proof_tests {
     use std::marker::PhantomData;
 
-    use crate::util_types::{mmr, simple_hasher::Hasher};
+    use crate::util_types::{blake3_wrapper::Blake3Hash, mmr, simple_hasher::Hasher};
     use rand_chacha::ChaCha20Rng;
     use rand_core::{RngCore, SeedableRng};
 
@@ -488,6 +488,7 @@ mod ms_proof_tests {
     #[test]
     fn mp_equality_test() {
         type Hasher = blake3::Hasher;
+        type Digest = Blake3Hash;
         let hasher: Hasher = blake3::Hasher::new();
         let mut rng = ChaCha20Rng::from_seed(
             vec![vec![0, 1, 4, 33], vec![0; 28]]
@@ -555,6 +556,30 @@ mod ms_proof_tests {
         // Verify that different randomness is a different MP
         assert_ne!(mp_with_different_randomness, mp_with_cached_bits);
 
-        // TODO: Test that a different chunk dictionary results in a different MP
+        // Test that a different chunk dictionary results in a different MP
+        // For this test to be performed, we first need an MMR membership proof and a chunk.
+
+        // Construct an MMR with 7 leafs
+        let mmr_digests: Vec<Digest> = (10u128..17).map(|i| i.into()).collect::<Vec<_>>();
+        let mut mmra: MmrAccumulator<Hasher> = MmrAccumulator::new(mmr_digests);
+
+        // Get an MMR membership proof by adding the 8th leaf
+        let zero_chunk = Chunk {
+            bits: [false; CHUNK_SIZE],
+        };
+        let mmr_mp = mmra.append(zero_chunk.hash(&hasher));
+
+        // Verify that the MMR membership proof has the expected length of 3 (sanity check)
+        assert_eq!(3, mmr_mp.authentication_path.len());
+
+        // Create a new mutator set membership proof with a non-empty chunk dictionary
+        // and verify that it is considered a different membership proof
+        let mut mp_mutated: MembershipProof<Hasher> = mp_with_cached_bits.clone();
+        mp_mutated
+            .target_chunks
+            .dictionary
+            .insert(0, (mmr_mp, zero_chunk));
+        assert_ne!(mp_mutated, mp_with_cached_bits);
+        assert_ne!(mp_mutated, mp_without_cached_bits);
     }
 }
