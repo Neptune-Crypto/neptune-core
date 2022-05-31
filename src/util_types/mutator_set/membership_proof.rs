@@ -49,6 +49,8 @@ pub struct MembershipProof<H: simple_hasher::Hasher> {
 
     // Cached bits are optional to store, but will prevent a lot of hashing in
     // later bookkeeping, such as updating the membership proof.
+    // Warning: These bits should not be trusted and should only be calculated
+    // locally. If they are trusted the soundness of the mutator set is compromised.
     pub cached_bits: Option<[u128; NUM_TRIALS]>,
 }
 
@@ -131,6 +133,19 @@ where
         }
 
         mutation_argument_hash_map.into_values().collect()
+    }
+
+    /// Helper function to cache the bits so they don't have to be recalculated multiple times
+    pub fn cache_indices(&mut self, item: &H::Digest) {
+        let hasher = H::new();
+        let bits = get_swbf_indices(
+            &hasher,
+            item,
+            &self.randomness,
+            self.auth_path_aocl.data_index,
+        );
+
+        self.cached_bits = Some(bits);
     }
 
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
@@ -488,11 +503,39 @@ where
 mod ms_proof_tests {
     use std::marker::PhantomData;
 
-    use crate::util_types::{blake3_wrapper::Blake3Hash, mmr, simple_hasher::Hasher};
+    use crate::util_types::{
+        blake3_wrapper::{self, Blake3Hash},
+        mmr,
+        mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
+        simple_hasher::Hasher,
+    };
+    use rand::thread_rng;
     use rand_chacha::ChaCha20Rng;
     use rand_core::{RngCore, SeedableRng};
 
     use super::*;
+
+    #[test]
+    fn mp_cache_bits_test() {
+        type H = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
+        let hasher = H::new();
+        let mut prng = thread_rng();
+        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let mut mp = accumulator.prove(&item, &randomness, false);
+
+        // Verify that bits are not cached, then cache them with the helper function
+        assert!(mp.cached_bits.is_none());
+        mp.cache_indices(&item);
+        assert!(mp.cached_bits.is_some());
+
+        // Verify that cached bits are the same as those generated from a new membership proof
+        // made with the `cache_bits` argument set to true.
+        let mp_generated_with_cached_bits = accumulator.prove(&item, &randomness, true);
+        assert_eq!(mp_generated_with_cached_bits.cached_bits, mp.cached_bits);
+    }
 
     #[test]
     fn mp_equality_test() {
