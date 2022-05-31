@@ -82,14 +82,14 @@ mod accumulation_scheme_tests {
         let number_of_interactions = 50;
         let mut prng = thread_rng();
 
-        let mut membership_proofs: Vec<MembershipProof<Hasher>> = vec![];
-        let mut items: Vec<Digest> = vec![];
-        let mut rands: Vec<Digest> = vec![];
-
         // The outer loop runs two times:
         // 1. insert `number_of_interactions / 2` items, then randomly insert and remove `number_of_interactions / 2` times
         // 2. Randomly insert and remove `number_of_interactions` times
         for start_fill in [true, false] {
+            let mut membership_proofs_batch: Vec<MembershipProof<Hasher>> = vec![];
+            let mut membership_proofs_sequential: Vec<MembershipProof<Hasher>> = vec![];
+            let mut items: Vec<Digest> = vec![];
+            let mut rands: Vec<Digest> = vec![];
             for i in 0..number_of_interactions {
                 if prng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
@@ -100,30 +100,42 @@ mod accumulation_scheme_tests {
                     let membership_proof_acc = accumulator.prove(&item, &randomness, true);
 
                     // Update all membership proofs
+                    // Uppdate membership proofs in batch
                     let update_result = MembershipProof::batch_update_from_addition(
-                        &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                        &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
                         &accumulator,
                         &addition_record,
                     );
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
+
+                    // Update membership proofs sequentially
+                    for (mp, own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
+                    {
+                        let update_res_seq =
+                            mp.update_from_addition(own_item, &accumulator, &addition_record);
+                        assert!(update_res_seq.is_ok());
+                    }
+
                     accumulator.add(&addition_record);
                     archival.add(&addition_record);
 
-                    membership_proofs.push(membership_proof_acc);
+                    membership_proofs_batch.push(membership_proof_acc.clone());
+                    membership_proofs_sequential.push(membership_proof_acc);
                     items.push(item);
                     rands.push(randomness);
 
                     println!("{}: Inserted", i);
                 } else {
                     // Remove an item from the mutator set and update all membership proofs
-                    if membership_proofs.is_empty() {
+                    if membership_proofs_batch.is_empty() {
                         continue;
                     }
 
-                    let item_index = prng.gen_range(0..membership_proofs.len());
+                    let item_index = prng.gen_range(0..membership_proofs_batch.len());
                     let removal_item = items.remove(item_index);
-                    let removal_mp = membership_proofs.remove(item_index);
+                    let removal_mp = membership_proofs_batch.remove(item_index);
+                    let _removal_mp_seq = membership_proofs_sequential.remove(item_index);
                     let _removal_rand = rands.remove(item_index);
 
                     // generate removal record
@@ -132,11 +144,18 @@ mod accumulation_scheme_tests {
                     assert!(removal_record.validate(&accumulator));
 
                     // update membership proofs
+                    // Uppdate membership proofs in batch
                     let res = MembershipProof::batch_update_from_remove(
-                        &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                        &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &removal_record,
                     );
                     assert!(res.is_ok());
+
+                    // Update membership proofs sequentially
+                    for mp in membership_proofs_sequential.iter_mut() {
+                        let update_res_seq = mp.update_from_remove(&removal_record);
+                        assert!(update_res_seq.is_ok());
+                    }
 
                     // remove item from set
                     assert!(accumulator.verify(&removal_item.into(), &removal_mp));
@@ -148,24 +167,27 @@ mod accumulation_scheme_tests {
                 }
 
                 // Verify that all membership proofs are valid after these additions and removals
-                // TODO: This for-loop is pretty slow. Can we make a batch verifier for MS membership proofs?
-                for (_, ((mp, item), rand)) in membership_proofs
+                // Also verify that batch-update and sequential update of membership proofs agree.
+                for (((mp_batch, mp_seq), item), rand) in membership_proofs_batch
                     .iter()
+                    .zip(membership_proofs_sequential.iter())
                     .zip(items.iter())
                     .zip(rands.iter())
-                    .enumerate()
                 {
-                    assert!(accumulator.verify(item, mp));
+                    assert!(accumulator.verify(item, mp_batch));
 
                     // Verify that the membership proof can be restored from an archival instance
                     let arch_mp = archival
-                        .restore_membership_proof(item, rand, mp.auth_path_aocl.data_index)
+                        .restore_membership_proof(item, rand, mp_batch.auth_path_aocl.data_index)
                         .unwrap();
-                    assert_eq!(arch_mp, *mp);
+                    assert_eq!(arch_mp, *mp_batch);
 
                     // Also verify that cached bits are set for both proofs and that they agree
                     assert!(arch_mp.cached_bits.is_some());
-                    assert_eq!(arch_mp.cached_bits, mp.cached_bits);
+                    assert_eq!(arch_mp.cached_bits, mp_batch.cached_bits);
+
+                    // Verify that sequential and batch update produces the same membership proofs
+                    assert_eq!(mp_batch, mp_seq);
                 }
             }
         }
