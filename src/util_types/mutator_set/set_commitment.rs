@@ -51,14 +51,14 @@ pub fn get_swbf_indices<H: Hasher>(
     hasher: &H,
     item: &H::Digest,
     randomness: &H::Digest,
-    index: u128,
+    aocl_leaf_index: u128,
 ) -> [u128; NUM_TRIALS]
 where
     u128: ToDigest<<H as Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
 {
-    let batch_index = index / BATCH_SIZE as u128;
-    let timestamp: H::Digest = (index as u128).to_digest();
+    let batch_index = aocl_leaf_index / BATCH_SIZE as u128;
+    let timestamp: H::Digest = (aocl_leaf_index as u128).to_digest();
     let mut rhs = hasher.hash_pair(&timestamp, randomness);
     rhs = hasher.hash_pair(item, &rhs);
     let mut indices: Vec<u128> = Vec::with_capacity(NUM_TRIALS);
