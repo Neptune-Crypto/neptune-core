@@ -47,6 +47,6 @@ where
 
     /// remove
     /// Updates the mutator set so as to remove the item determined by
-    /// its removal record. Returns a hashmap from chunk index to chunk.
+    /// its removal record.
     fn remove(&mut self, removal_record: &RemovalRecord<H>);
 }
