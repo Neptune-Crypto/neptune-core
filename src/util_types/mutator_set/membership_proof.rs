@@ -265,6 +265,9 @@ where
                 );
         }
 
+        // Collect those MMR membership proofs for chunks whose authentication
+        // path might need to be updated due to the insertion of a new leaf in the
+        // SWBF MMR.
         // This is a bit ugly and a bit slower than it could be. To prevent this
         // for-loop, you probably could collect the `Vec<&mut mp>` in the code above,
         // instead of just collecting the indices into the membership proof vector.

@@ -40,6 +40,7 @@ where
         })
     }
 
+    /// Returns a hashmap from chunk index to chunk.
     pub fn get_chunk_index_to_bit_indices(&self) -> HashMap<u128, Vec<u128>> {
         bit_indices_to_hash_map(&self.bit_indices)
     }
