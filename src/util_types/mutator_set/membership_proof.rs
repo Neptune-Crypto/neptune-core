@@ -11,7 +11,10 @@ use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        mutator_set::{chunk::Chunk, set_commitment::BATCH_SIZE},
+        mutator_set::{
+            chunk::Chunk,
+            set_commitment::{get_swbf_indices, BATCH_SIZE},
+        },
         simple_hasher::{self, ToDigest},
     },
 };
@@ -196,9 +199,12 @@ where
             .for_each(|(i, (mp, item))| {
                 let bits = match mp.cached_bits {
                     Some(bs) => bs,
-                    None => {
-                        mutator_set.get_indices(item, &mp.randomness, mp.auth_path_aocl.data_index)
-                    }
+                    None => get_swbf_indices(
+                        &mutator_set.hasher,
+                        item,
+                        &mp.randomness,
+                        mp.auth_path_aocl.data_index,
+                    ),
                 };
                 let chunks_set: HashSet<u128> =
                     bits.iter().map(|x| x / CHUNK_SIZE as u128).collect();
@@ -319,9 +325,12 @@ where
         // that the latter is an expensive operation.
         let all_bit_indices = match self.cached_bits {
             Some(bits) => bits,
-            None => {
-                mutator_set.get_indices(own_item, &self.randomness, self.auth_path_aocl.data_index)
-            }
+            None => get_swbf_indices(
+                &mutator_set.hasher,
+                own_item,
+                &self.randomness,
+                self.auth_path_aocl.data_index,
+            ),
         };
         let chunk_indices_set: HashSet<u128> = all_bit_indices
             .into_iter()

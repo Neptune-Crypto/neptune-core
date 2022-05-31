@@ -18,7 +18,7 @@ use super::{
     membership_proof::MembershipProof,
     mutator_set_trait::MutatorSet,
     removal_record::RemovalRecord,
-    set_commitment::{SetCommitment, SetCommitmentError, BATCH_SIZE, CHUNK_SIZE},
+    set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError, BATCH_SIZE, CHUNK_SIZE},
 };
 
 pub struct ArchivalMutatorSet<H>
@@ -163,7 +163,7 @@ where
         }
 
         let auth_path_aocl = self.get_aocl_authentication_path(index)?;
-        let bits = self.set_commitment.get_indices(item, randomness, index);
+        let bits = get_swbf_indices(&self.set_commitment.hasher, item, randomness, index);
 
         let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;

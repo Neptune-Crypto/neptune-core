@@ -5,6 +5,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use super::{
     addition_record::AdditionRecord, chunk_dictionary::ChunkDictionary,
     membership_proof::MembershipProof, removal_record::RemovalRecord,
+    shared::bit_indices_to_hash_map,
 };
 use crate::{
     shared_math::b_field_element::BFieldElement,
@@ -44,6 +45,53 @@ pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub hasher: H,
 }
 
+/// Helper function. Computes the bloom filter bit indices of the
+/// item, randomness, index triple.
+pub fn get_swbf_indices<H: Hasher>(
+    hasher: &H,
+    item: &H::Digest,
+    randomness: &H::Digest,
+    index: u128,
+) -> [u128; NUM_TRIALS]
+where
+    u128: ToDigest<<H as Hasher>::Digest>,
+    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
+{
+    let batch_index = index / BATCH_SIZE as u128;
+    let timestamp: H::Digest = (index as u128).to_digest();
+    let mut rhs = hasher.hash_pair(&timestamp, randomness);
+    rhs = hasher.hash_pair(item, &rhs);
+    let mut indices: Vec<u128> = Vec::with_capacity(NUM_TRIALS);
+
+    // Collect all indices in parallel, using counter-mode
+    (0..NUM_TRIALS)
+        .into_par_iter()
+        .map(|i| {
+            let counter: H::Digest = (i as u128).to_digest();
+            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
+            hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE) as u128
+                + batch_index * CHUNK_SIZE as u128
+        })
+        .collect_into_vec(&mut indices);
+
+    // We disallow duplicates, so we have to find N more
+    indices.sort_unstable();
+    indices.dedup();
+    let mut j = NUM_TRIALS;
+    while indices.len() < NUM_TRIALS {
+        let counter: H::Digest = (j as u128).to_digest();
+        let pseudorandomness = hasher.hash_pair(&counter, &rhs);
+        let index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE) as u128
+            + batch_index * CHUNK_SIZE as u128;
+        indices.push(index);
+        indices.sort_unstable();
+        indices.dedup();
+        j += 1;
+    }
+
+    indices.try_into().unwrap()
+}
+
 impl<H, M> SetCommitment<H, M>
 where
     u128: ToDigest<<H as Hasher>::Digest>,
@@ -72,51 +120,6 @@ where
         AdditionRecord::new(canonical_commitment, self.aocl.to_accumulator())
     }
 
-    /// Helper function. Computes the bloom filter bit indices of the
-    /// item, randomness, index triple.
-    pub fn get_indices(
-        &self,
-        item: &H::Digest,
-        randomness: &H::Digest,
-        index: u128,
-    ) -> [u128; NUM_TRIALS] {
-        let batch_index = index / BATCH_SIZE as u128;
-        let timestamp: H::Digest = (index as u128).to_digest();
-        let mut rhs = self.hasher.hash_pair(&timestamp, randomness);
-        rhs = self.hasher.hash_pair(item, &rhs);
-        let mut indices: Vec<u128> = Vec::with_capacity(NUM_TRIALS);
-        let hasher = &self.hasher;
-
-        // Collect all indices in parallel, using counter-mode
-        (0..NUM_TRIALS)
-            .into_par_iter()
-            .map(|i| {
-                let counter: H::Digest = (i as u128).to_digest();
-                let pseudorandomness = hasher.hash_pair(&counter, &rhs);
-                hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE) as u128
-                    + batch_index * CHUNK_SIZE as u128
-            })
-            .collect_into_vec(&mut indices);
-
-        // We disallow duplicates, so we have to find N more
-        indices.sort_unstable();
-        indices.dedup();
-        let mut j = NUM_TRIALS;
-        while indices.len() < NUM_TRIALS {
-            let counter: H::Digest = (j as u128).to_digest();
-            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
-            let index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
-                as u128
-                + batch_index * CHUNK_SIZE as u128;
-            indices.push(index);
-            indices.sort_unstable();
-            indices.dedup();
-            j += 1;
-        }
-
-        indices.try_into().unwrap()
-    }
-
     /**
      * drop
      * Generates a removal record with which to update the set commitment.
@@ -128,7 +131,8 @@ where
     ) -> RemovalRecord<H> {
         let bit_indices = match membership_proof.cached_bits {
             Some(bits) => bits,
-            None => self.get_indices(
+            None => get_swbf_indices(
+                &self.hasher,
                 item,
                 &membership_proof.randomness,
                 membership_proof.auth_path_aocl.data_index,
@@ -274,7 +278,12 @@ where
 
         // Store the bit indices for later use, as they are expensive to calculate
         let cached_bits: Option<[u128; NUM_TRIALS]> = if store_bits {
-            Some(self.get_indices(item, randomness, self.aocl.count_leaves()))
+            Some(get_swbf_indices(
+                &self.hasher,
+                item,
+                randomness,
+                self.aocl.count_leaves(),
+            ))
         } else {
             None
         };
@@ -320,24 +329,15 @@ where
         // We use the cached bits if we have them, otherwise they are recalculated
         let all_bit_indices = match membership_proof.cached_bits {
             Some(bits) => bits,
-            None => self.get_indices(
+            None => get_swbf_indices(
+                &self.hasher,
                 item,
                 &membership_proof.randomness,
                 membership_proof.auth_path_aocl.data_index,
             ),
         };
 
-        let mut chunk_index_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
-        all_bit_indices
-            .iter()
-            .map(|bi| (bi / CHUNK_SIZE as u128, bi))
-            .for_each(|(k, v)| {
-                chunk_index_to_bit_indices
-                    .entry(k)
-                    .or_insert_with(Vec::new)
-                    .push(*v);
-            });
-
+        let chunk_index_to_bit_indices = bit_indices_to_hash_map(&all_bit_indices);
         'outer: for (chunk_index, bit_indices) in chunk_index_to_bit_indices.into_iter() {
             if chunk_index < current_batch_index {
                 // verify mmr auth path
@@ -414,10 +414,6 @@ mod accumulation_scheme_tests {
     fn ms_get_indices_test() {
         // Test that `get_indices` behaves as expected. I.e. that it does not return any
         // duplicates, and always returns something of length `NUM_TRIALS`.
-        let acc = SetCommitment::<
-            RescuePrimeXlix<RP_DEFAULT_WIDTH>,
-            MmrAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
-        >::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
         let mut prng = thread_rng();
         let item: Vec<BFieldElement> = hasher.hash(
@@ -428,7 +424,7 @@ mod accumulation_scheme_tests {
             &BFieldElement::random_elements(3, &mut prng),
             RP_DEFAULT_OUTPUT_SIZE,
         );
-        let ret: [u128; NUM_TRIALS] = acc.get_indices(&item, &randomness, 0);
+        let ret: [u128; NUM_TRIALS] = get_swbf_indices(&hasher, &item, &randomness, 0);
         assert_eq!(NUM_TRIALS, ret.len());
         assert!(has_unique_elements(ret));
         assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
