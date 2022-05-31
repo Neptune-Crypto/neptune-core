@@ -101,6 +101,7 @@ mod accumulation_scheme_tests {
 
                     // Update all membership proofs
                     // Uppdate membership proofs in batch
+                    let previous_mps = membership_proofs_batch.clone();
                     let update_result = MembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
@@ -120,12 +121,34 @@ mod accumulation_scheme_tests {
                     accumulator.add(&addition_record);
                     archival.add(&addition_record);
 
+                    let updated_mp_indices = update_result.unwrap();
+                    println!("{}: Inserted", i);
+                    for j in 0..items.len() {
+                        if updated_mp_indices.contains(&j) {
+                            assert!(
+                                !accumulator.verify(&items[j], &previous_mps[j]),
+                                "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
+                                j,
+                                previous_mps[j].auth_path_aocl.data_index,
+                                previous_mps[j],
+                                membership_proofs_batch[j]
+                            );
+                        } else {
+                            assert!(
+                                accumulator.verify(&items[j], &previous_mps[j]),
+                                "Verify must succeed for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
+                                j,
+                                previous_mps[j].auth_path_aocl.data_index,
+                                previous_mps[j],
+                                membership_proofs_batch[j]
+                            );
+                        }
+                    }
+
                     membership_proofs_batch.push(membership_proof_acc.clone());
                     membership_proofs_sequential.push(membership_proof_acc);
                     items.push(item);
                     rands.push(randomness);
-
-                    println!("{}: Inserted", i);
                 } else {
                     // Remove an item from the mutator set and update all membership proofs
                     if membership_proofs_batch.is_empty() {
