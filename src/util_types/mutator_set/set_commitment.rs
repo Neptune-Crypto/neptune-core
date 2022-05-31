@@ -98,6 +98,22 @@ where
             })
             .collect_into_vec(&mut indices);
 
+        // We disallow duplicates, so we have to find N more
+        indices.sort_unstable();
+        indices.dedup();
+        let mut j = NUM_TRIALS;
+        while indices.len() < NUM_TRIALS {
+            let counter: H::Digest = (j as u128).to_digest();
+            let pseudorandomness = hasher.hash_pair(&counter, &rhs);
+            let index = hasher.sample_index_not_power_of_two(&pseudorandomness, WINDOW_SIZE)
+                as u128
+                + batch_index * CHUNK_SIZE as u128;
+            indices.push(index);
+            indices.sort_unstable();
+            indices.dedup();
+            j += 1;
+        }
+
         indices.try_into().unwrap()
     }
 
@@ -386,12 +402,37 @@ mod accumulation_scheme_tests {
             mmr::{archival_mmr::ArchivalMmr, mmr_accumulator::MmrAccumulator},
             simple_hasher::Hasher,
         },
+        utils::has_unique_elements,
     };
     use rand::prelude::*;
     use rand_chacha::ChaCha20Rng;
     use rand_core::{RngCore, SeedableRng};
 
     use super::*;
+
+    #[test]
+    fn ms_get_indices_test() {
+        // Test that `get_indices` behaves as expected. I.e. that it does not return any
+        // duplicates, and always returns something of length `NUM_TRIALS`.
+        let acc = SetCommitment::<
+            RescuePrimeXlix<RP_DEFAULT_WIDTH>,
+            MmrAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
+        >::default();
+        let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
+        let mut prng = thread_rng();
+        let item: Vec<BFieldElement> = hasher.hash(
+            &BFieldElement::random_elements(3, &mut prng),
+            RP_DEFAULT_OUTPUT_SIZE,
+        );
+        let randomness: Vec<BFieldElement> = hasher.hash(
+            &BFieldElement::random_elements(3, &mut prng),
+            RP_DEFAULT_OUTPUT_SIZE,
+        );
+        let ret: [u128; NUM_TRIALS] = acc.get_indices(&item, &randomness, 0);
+        assert_eq!(NUM_TRIALS, ret.len());
+        assert!(has_unique_elements(ret));
+        assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
+    }
 
     #[test]
     fn init_test() {
