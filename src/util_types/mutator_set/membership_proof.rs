@@ -254,7 +254,7 @@ where
 
         // First insert the new entry into the chunk dictionary for the membership
         // proofs that need it.
-        for i in mps_for_new_chunk_dictionary_entry {
+        for i in mps_for_new_chunk_dictionary_entry.clone() {
             membership_proofs
                 .index_mut(i)
                 .target_chunks
@@ -278,10 +278,17 @@ where
         let mut mmr_membership_proofs_for_append: Vec<
             &mut mmr::membership_proof::MembershipProof<H>,
         > = vec![];
+
+        // The `mmr_membership_proof_index_to_membership_proof_index` variable is to remember
+        // which parts of the MMR membership proofs that map to MS membership proofs. This is
+        // required to return the indices of the MS membership proofs that have been updated
+        // by this function call.
+        let mut mmr_membership_proof_index_to_membership_proof_index: Vec<usize> = vec![];
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
             if mps_for_batch_append.contains(&i) {
                 for (_, (mmr_mp, _chnk)) in mp.target_chunks.dictionary.iter_mut() {
                     mmr_membership_proofs_for_append.push(mmr_mp);
+                    mmr_membership_proof_index_to_membership_proof_index.push(i);
                 }
             }
         }
@@ -293,11 +300,19 @@ where
                 &new_chunk_digest,
                 &mutator_set.swbf_inactive.get_peaks(),
             );
+        let mut swbf_mutated_indices: Vec<usize> = vec![];
+        for j in indices_for_mutated_values {
+            swbf_mutated_indices.push(mmr_membership_proof_index_to_membership_proof_index[j]);
+        }
 
         // Gather the indices the are returned. These indices indicate which membership
         // proofs that have been mutated.
-        let mut all_mutated_mp_indices: Vec<usize> =
-            vec![indices_for_mutated_values, indices_for_updated_mps].concat();
+        let mut all_mutated_mp_indices: Vec<usize> = vec![
+            swbf_mutated_indices,
+            indices_for_updated_mps,
+            mps_for_new_chunk_dictionary_entry,
+        ]
+        .concat();
         all_mutated_mp_indices.sort_unstable();
         all_mutated_mp_indices.dedup();
 
