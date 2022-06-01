@@ -1,7 +1,7 @@
 use crate::util_types::simple_hasher::Hasher;
 
 use super::{
-    addition_record::AdditionRecord, membership_proof::MembershipProof,
+    addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
     removal_record::RemovalRecord,
 };
 
@@ -22,8 +22,8 @@ where
         item: &H::Digest,
         randomness: &H::Digest,
         store_bits: bool,
-    ) -> MembershipProof<H>;
-    fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool;
+    ) -> MsMembershipProof<H>;
+    fn verify(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool;
 
     /// Generates an addition record from an item and explicit random-
     /// ness. The addition record is itself a commitment to the item,
@@ -35,7 +35,7 @@ where
      * drop
      * Generates a removal record with which to update the set commitment.
      */
-    fn drop(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> RemovalRecord<H>;
+    fn drop(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
 
     ///   add
     ///   Updates the set-commitment with an addition record. The new

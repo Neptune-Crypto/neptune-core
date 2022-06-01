@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    addition_record::AdditionRecord, membership_proof::MembershipProof,
+    addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
     mutator_set_trait::MutatorSet, removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
 
@@ -28,11 +28,11 @@ where
         item: &H::Digest,
         randomness: &H::Digest,
         store_bits: bool,
-    ) -> MembershipProof<H> {
+    ) -> MsMembershipProof<H> {
         self.prove(item, randomness, store_bits)
     }
 
-    fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool {
+    fn verify(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.verify(item, membership_proof)
     }
 
@@ -40,7 +40,7 @@ where
         self.commit(item, randomness)
     }
 
-    fn drop(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> RemovalRecord<H> {
+    fn drop(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         self.drop(item, membership_proof)
     }
 
@@ -87,8 +87,8 @@ mod accumulation_scheme_tests {
         // 2. Randomly insert and remove `number_of_interactions` times
         // This should test both inserting/removing in an empty MS and in a non-empty MS
         for start_fill in [false, true] {
-            let mut membership_proofs_batch: Vec<MembershipProof<Hasher>> = vec![];
-            let mut membership_proofs_sequential: Vec<MembershipProof<Hasher>> = vec![];
+            let mut membership_proofs_batch: Vec<MsMembershipProof<Hasher>> = vec![];
+            let mut membership_proofs_sequential: Vec<MsMembershipProof<Hasher>> = vec![];
             let mut items: Vec<Digest> = vec![];
             let mut rands: Vec<Digest> = vec![];
             for i in 0..number_of_interactions {
@@ -103,7 +103,7 @@ mod accumulation_scheme_tests {
                     // Update all membership proofs
                     // Uppdate membership proofs in batch
                     let previous_mps = membership_proofs_batch.clone();
-                    let update_result = MembershipProof::batch_update_from_addition(
+                    let update_result = MsMembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
                         &accumulator,
@@ -170,7 +170,7 @@ mod accumulation_scheme_tests {
                     // update membership proofs
                     // Uppdate membership proofs in batch
                     let original_membership_proofs_batch = membership_proofs_batch.clone();
-                    let batch_update_ret = MembershipProof::batch_update_from_remove(
+                    let batch_update_ret = MsMembershipProof::batch_update_from_remove(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &removal_record,
                     );

@@ -15,7 +15,7 @@ use super::{
     addition_record::AdditionRecord,
     chunk::Chunk,
     chunk_dictionary::ChunkDictionary,
-    membership_proof::MembershipProof,
+    ms_membership_proof::MsMembershipProof,
     mutator_set_trait::MutatorSet,
     removal_record::RemovalRecord,
     set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError, BATCH_SIZE, CHUNK_SIZE},
@@ -49,11 +49,15 @@ where
         item: &<H as Hasher>::Digest,
         randomness: &<H as Hasher>::Digest,
         store_bits: bool,
-    ) -> MembershipProof<H> {
+    ) -> MsMembershipProof<H> {
         self.set_commitment.prove(item, randomness, store_bits)
     }
 
-    fn verify(&self, item: &<H as Hasher>::Digest, membership_proof: &MembershipProof<H>) -> bool {
+    fn verify(
+        &self,
+        item: &<H as Hasher>::Digest,
+        membership_proof: &MsMembershipProof<H>,
+    ) -> bool {
         self.set_commitment.verify(item, membership_proof)
     }
 
@@ -68,7 +72,7 @@ where
     fn drop(
         &self,
         item: &<H as Hasher>::Digest,
-        membership_proof: &MembershipProof<H>,
+        membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
         self.set_commitment.drop(item, membership_proof)
     }
@@ -102,7 +106,7 @@ where
     pub fn get_aocl_authentication_path(
         &self,
         index: u128,
-    ) -> Result<mmr::membership_proof::MembershipProof<H>, Box<dyn Error>> {
+    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<H>, Box<dyn Error>> {
         if self.set_commitment.aocl.count_leaves() <= index {
             return Err(Box::new(
                 SetCommitmentError::RequestedAoclAuthPathOutOfBounds((
@@ -119,7 +123,7 @@ where
     pub fn get_chunk_and_auth_path(
         &self,
         chunk_index: u128,
-    ) -> Result<(mmr::membership_proof::MembershipProof<H>, Chunk), Box<dyn Error>> {
+    ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<H>, Chunk), Box<dyn Error>> {
         if self.set_commitment.swbf_inactive.count_leaves() <= chunk_index {
             return Err(Box::new(
                 SetCommitmentError::RequestedSwbfAuthPathOutOfBounds((
@@ -129,7 +133,7 @@ where
             ));
         }
 
-        let chunk_auth_path: mmr::membership_proof::MembershipProof<H> = self
+        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> = self
             .set_commitment
             .swbf_inactive
             .prove_membership(chunk_index)
@@ -157,7 +161,7 @@ where
         item: &H::Digest,
         randomness: &H::Digest,
         index: u128,
-    ) -> Result<MembershipProof<H>, Box<dyn Error>> {
+    ) -> Result<MsMembershipProof<H>, Box<dyn Error>> {
         if self.set_commitment.aocl.is_empty() {
             return Err(Box::new(SetCommitmentError::MutatorSetIsEmpty));
         }
@@ -183,7 +187,7 @@ where
                     ))
                 }
             };
-            let chunk_membership_proof: mmr::membership_proof::MembershipProof<H> = self
+            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<H> = self
                 .set_commitment
                 .swbf_inactive
                 .prove_membership(chunk_index)
@@ -193,7 +197,7 @@ where
                 .insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
         }
 
-        Ok(MembershipProof {
+        Ok(MsMembershipProof {
             auth_path_aocl,
             randomness: randomness.to_owned(),
             target_chunks,
@@ -219,7 +223,7 @@ mod archival_mutator_set_tests {
 
         let num_additions = 65;
 
-        let mut membership_proofs: Vec<MembershipProof<Hasher>> = vec![];
+        let mut membership_proofs: Vec<MsMembershipProof<Hasher>> = vec![];
         let mut items: Vec<Digest> = vec![];
         let mut rng = thread_rng();
 
@@ -238,7 +242,7 @@ mod archival_mutator_set_tests {
             let addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
-            let res = MembershipProof::batch_update_from_addition(
+            let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
                 &archival_mutator_set.set_commitment,
