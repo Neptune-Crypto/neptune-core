@@ -79,14 +79,14 @@ mod accumulation_scheme_tests {
         let hasher = Hasher::new();
         let mut accumulator: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
         let mut archival: ArchivalMutatorSet<Hasher> = ArchivalMutatorSet::default();
-        let number_of_interactions = 50;
+        let number_of_interactions = 100;
         let mut prng = thread_rng();
 
         // The outer loop runs two times:
         // 1. insert `number_of_interactions / 2` items, then randomly insert and remove `number_of_interactions / 2` times
         // 2. Randomly insert and remove `number_of_interactions` times
         // This should test both inserting/removing in an empty MS and in a non-empty MS
-        for start_fill in [true, false] {
+        for start_fill in [false, true] {
             let mut membership_proofs_batch: Vec<MembershipProof<Hasher>> = vec![];
             let mut membership_proofs_sequential: Vec<MembershipProof<Hasher>> = vec![];
             let mut items: Vec<Digest> = vec![];
@@ -169,17 +169,19 @@ mod accumulation_scheme_tests {
 
                     // update membership proofs
                     // Uppdate membership proofs in batch
-                    let res = MembershipProof::batch_update_from_remove(
+                    let original_membership_proofs_batch = membership_proofs_batch.clone();
+                    let batch_update_ret = MembershipProof::batch_update_from_remove(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &removal_record,
                     );
-                    assert!(res.is_ok());
+                    assert!(batch_update_ret.is_ok());
 
                     // Update membership proofs sequentially
                     let original_membership_proofs_sequential =
                         membership_proofs_sequential.clone();
                     let mut update_by_remove_return_values: Vec<bool> = vec![];
-                    for mp in membership_proofs_sequential.iter_mut() {
+                    for (i, mp) in membership_proofs_sequential.iter_mut().enumerate() {
+                        println!("i = {}", i);
                         let update_res_seq = mp.update_from_remove(&removal_record);
                         assert!(update_res_seq.is_ok());
                         update_by_remove_return_values.push(update_res_seq.unwrap());
@@ -194,13 +196,40 @@ mod accumulation_scheme_tests {
                     // Verify that the sequential `update_from_remove` return value is correct
                     // The return value from `update_from_remove` shows if the membership proof
                     // was updated or not.
-                    for ((updated, original_mp), item) in update_by_remove_return_values
+                    for (i, ((updated, original_mp), item)) in update_by_remove_return_values
                         .into_iter()
                         .zip(original_membership_proofs_sequential.iter())
                         .zip(items.iter())
+                        .enumerate()
                     {
-                        println!("updated = {}", updated);
                         if updated {
+                            assert!(
+                                !accumulator.verify(item, original_mp),
+                                "i = {}, \n\nOriginal mp:\n{:?}\n\nNew mp:\n{:?}",
+                                i,
+                                original_mp,
+                                membership_proofs_sequential[i]
+                            );
+                        } else {
+                            assert!(
+                                accumulator.verify(item, original_mp),
+                                "i = {}, \n\nOriginal mp:\n{:?}\n\nNew mp:\n{:?}",
+                                i,
+                                original_mp,
+                                membership_proofs_sequential[i]
+                            );
+                        }
+                    }
+
+                    // Verify that `batch_update_from_remove` return value is correct
+                    // The return value indicates which membership proofs
+                    let updated_indices: Vec<usize> = batch_update_ret.unwrap();
+                    for (i, (original_mp, item)) in original_membership_proofs_batch
+                        .iter()
+                        .zip(items.iter())
+                        .enumerate()
+                    {
+                        if updated_indices.contains(&i) {
                             assert!(!accumulator.verify(item, original_mp));
                         } else {
                             assert!(accumulator.verify(item, original_mp));
