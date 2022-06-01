@@ -180,8 +180,7 @@ mod accumulation_scheme_tests {
                     let original_membership_proofs_sequential =
                         membership_proofs_sequential.clone();
                     let mut update_by_remove_return_values: Vec<bool> = vec![];
-                    for (i, mp) in membership_proofs_sequential.iter_mut().enumerate() {
-                        println!("i = {}", i);
+                    for (_i, mp) in membership_proofs_sequential.iter_mut().enumerate() {
                         let update_res_seq = mp.update_from_remove(&removal_record);
                         assert!(update_res_seq.is_ok());
                         update_by_remove_return_values.push(update_res_seq.unwrap());
