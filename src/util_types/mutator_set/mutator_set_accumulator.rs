@@ -85,6 +85,7 @@ mod accumulation_scheme_tests {
         // The outer loop runs two times:
         // 1. insert `number_of_interactions / 2` items, then randomly insert and remove `number_of_interactions / 2` times
         // 2. Randomly insert and remove `number_of_interactions` times
+        // This should test both inserting/removing in an empty MS and in a non-empty MS
         for start_fill in [true, false] {
             let mut membership_proofs_batch: Vec<MembershipProof<Hasher>> = vec![];
             let mut membership_proofs_sequential: Vec<MembershipProof<Hasher>> = vec![];
@@ -175,9 +176,13 @@ mod accumulation_scheme_tests {
                     assert!(res.is_ok());
 
                     // Update membership proofs sequentially
+                    let original_membership_proofs_sequential =
+                        membership_proofs_sequential.clone();
+                    let mut update_by_remove_return_values: Vec<bool> = vec![];
                     for mp in membership_proofs_sequential.iter_mut() {
                         let update_res_seq = mp.update_from_remove(&removal_record);
                         assert!(update_res_seq.is_ok());
+                        update_by_remove_return_values.push(update_res_seq.unwrap());
                     }
 
                     // remove item from set
@@ -185,6 +190,22 @@ mod accumulation_scheme_tests {
                     accumulator.remove(&mut removal_record);
                     archival.remove(&mut removal_record);
                     assert!(!accumulator.verify(&removal_item.into(), &removal_mp));
+
+                    // Verify that the sequential `update_from_remove` return value is correct
+                    // The return value from `update_from_remove` shows if the membership proof
+                    // was updated or not.
+                    for ((updated, original_mp), item) in update_by_remove_return_values
+                        .into_iter()
+                        .zip(original_membership_proofs_sequential.iter())
+                        .zip(items.iter())
+                    {
+                        println!("updated = {}", updated);
+                        if updated {
+                            assert!(!accumulator.verify(item, original_mp));
+                        } else {
+                            assert!(accumulator.verify(item, original_mp));
+                        }
+                    }
 
                     println!("{}: Removed", i);
                 }

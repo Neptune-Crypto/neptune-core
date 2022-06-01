@@ -77,7 +77,10 @@ where
     fn get_batch_mutation_argument_for_removal_record(
         removal_record: &RemovalRecord<H>,
         chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
-    ) -> Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> {
+    ) -> (
+        Vec<usize>,
+        Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)>,
+    ) {
         let hasher = H::new();
         let mut mutation_argument_hash_map: HashMap<
             u128,
@@ -86,11 +89,13 @@ where
         let rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> =
             removal_record.get_chunk_index_to_bit_indices();
 
+        let mut mutated_chunks_by_input_indices = vec![];
         for (chunk_index, bit_indices) in rem_record_chunk_idx_to_bit_indices.iter() {
-            for chunk_dictionary in chunk_dictionaries.iter_mut() {
+            for (i, chunk_dictionary) in chunk_dictionaries.iter_mut().enumerate() {
                 match chunk_dictionary.dictionary.get_mut(chunk_index) {
                     // Leaf exists in own membership proof
                     Some((mp, chnk)) => {
+                        mutated_chunks_by_input_indices.push(i);
                         for bit_index in bit_indices.iter() {
                             chnk.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
                         }
@@ -132,7 +137,10 @@ where
             }
         }
 
-        mutation_argument_hash_map.into_values().collect()
+        (
+            mutated_chunks_by_input_indices,
+            mutation_argument_hash_map.into_values().collect(),
+        )
     }
 
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
@@ -444,7 +452,7 @@ where
             .iter_mut()
             .map(|mp| &mut mp.target_chunks)
             .collect();
-        let mutation_argument = Self::get_batch_mutation_argument_for_removal_record(
+        let (_, mutation_argument) = Self::get_batch_mutation_argument_for_removal_record(
             removal_record,
             &mut chunk_dictionaries,
         );
@@ -472,16 +480,15 @@ where
     pub fn update_from_remove(
         &mut self,
         removal_record: &RemovalRecord<H>,
-    ) -> Result<(), Box<dyn Error>> {
-        // TODO: Make this function return boolean indicating if it was changed or not
-
+    ) -> Result<bool, Box<dyn Error>> {
         // Set all chunk values to the new values and calculate the mutation argument
         // for the batch updating of the MMR membership proofs.
         let mut chunk_dictionaries = vec![&mut self.target_chunks];
-        let mutation_argument = Self::get_batch_mutation_argument_for_removal_record(
-            removal_record,
-            &mut chunk_dictionaries,
-        );
+        let (mutated_chunks_by_input_index, mutation_argument) =
+            Self::get_batch_mutation_argument_for_removal_record(
+                removal_record,
+                &mut chunk_dictionaries,
+            );
 
         // update membership proofs
         // Note that *all* membership proofs must be updated. It's not sufficient to update
@@ -490,30 +497,20 @@ where
         // It would be sufficient to only update the membership proofs that live in the Merkle
         // trees that have been updated, but it probably will not give a measureable speedup
         // since this change would not reduce the amount of hashing needed
-        let mut own_membership_proofs_copy: Vec<mmr::membership_proof::MembershipProof<H>> = self
+        let mut chunk_mmr_mps: Vec<&mut mmr::membership_proof::MembershipProof<H>> = self
             .target_chunks
             .dictionary
-            .iter()
-            .map(|(_, (p, _))| p.clone())
+            .iter_mut()
+            .map(|(_, (mmr_mp, _))| mmr_mp)
             .collect();
 
-        // TODO: Remove the copying of the objects here
-        mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
-            &mut own_membership_proofs_copy.iter_mut().collect::<Vec<_>>(),
-            mutation_argument,
-        );
+        let mutated_mmr_mp_indices: Vec<usize> =
+            mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
+                &mut chunk_mmr_mps,
+                mutation_argument,
+            );
 
-        // Copy back all updated membership proofs
-        for mp in own_membership_proofs_copy {
-            let mut target = self
-                .target_chunks
-                .dictionary
-                .get_mut(&mp.data_index)
-                .unwrap();
-            target.0 = mp;
-        }
-
-        Ok(())
+        Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunks_by_input_index.is_empty())
     }
 }
 
