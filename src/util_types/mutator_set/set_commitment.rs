@@ -4,7 +4,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 
 use super::{
     addition_record::AdditionRecord, chunk_dictionary::ChunkDictionary,
-    membership_proof::MembershipProof, removal_record::RemovalRecord,
+    ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
     shared::bit_indices_to_hash_map,
 };
 use crate::{
@@ -127,7 +127,7 @@ where
     pub fn drop(
         &self,
         item: &H::Digest,
-        membership_proof: &MembershipProof<H>,
+        membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
         let bit_indices = match membership_proof.cached_bits {
             Some(bits) => bits,
@@ -241,7 +241,7 @@ where
             .dictionary
             .values()
             .map(|(_p, c)| c.hash::<H>(&self.hasher));
-        let mutation_data: Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)> =
+        let mutation_data: Vec<(mmr::mmr_membership_proof::MmrMembershipProof<H>, H::Digest)> =
             all_membership_proofs
                 .clone()
                 .into_iter()
@@ -268,7 +268,7 @@ where
         item: &H::Digest,
         randomness: &H::Digest,
         store_bits: bool,
-    ) -> MembershipProof<H> {
+    ) -> MsMembershipProof<H> {
         // compute commitment
         let item_commitment = self.hasher.hash_pair(item, randomness);
 
@@ -289,7 +289,7 @@ where
         };
 
         // return membership proof
-        MembershipProof {
+        MsMembershipProof {
             randomness: randomness.to_owned(),
             auth_path_aocl,
             target_chunks,
@@ -297,7 +297,7 @@ where
         }
     }
 
-    pub fn verify(&self, item: &H::Digest, membership_proof: &MembershipProof<H>) -> bool {
+    pub fn verify(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         // If data index does not exist in AOCL, return false
         // This also ensures that no "future" bit indices will be
         // returned from `get_indices`, so we don't have to check for
@@ -350,7 +350,7 @@ where
                     break 'outer;
                 }
 
-                let mp_and_chunk: &(mmr::membership_proof::MembershipProof<H>, Chunk) =
+                let mp_and_chunk: &(mmr::mmr_membership_proof::MmrMembershipProof<H>, Chunk) =
                     membership_proof
                         .target_chunks
                         .dictionary
@@ -468,7 +468,7 @@ mod accumulation_scheme_tests {
 
             let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
                 mutator_set.commit(&item, &randomness);
-            let membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+            let membership_proof: MsMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
                 mutator_set.prove(&item, &randomness, false);
             mutator_set.add_helper(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
@@ -492,7 +492,7 @@ mod accumulation_scheme_tests {
 
         let addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             mutator_set.commit(&own_item, &randomness);
-        let mut membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+        let mut membership_proof: MsMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             mutator_set.prove(&own_item, &randomness, false);
         mutator_set.add_helper(&addition_record);
 
@@ -503,7 +503,7 @@ mod accumulation_scheme_tests {
             hasher.hash(&vec![BFieldElement::new(1807)], RP_DEFAULT_OUTPUT_SIZE);
         let new_addition_record: AdditionRecord<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             mutator_set.commit(&new_item, &new_randomness);
-        let original_membership_proof: MembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
+        let original_membership_proof: MsMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
             &own_item,
@@ -563,7 +563,7 @@ mod accumulation_scheme_tests {
         );
 
         let mut membership_proofs_and_items: Vec<(
-            MembershipProof<Hasher>,
+            MsMembershipProof<Hasher>,
             blake3_wrapper::Blake3Hash,
         )> = vec![];
         for i in 0..num_additions {
@@ -688,7 +688,7 @@ mod accumulation_scheme_tests {
             6 * BATCH_SIZE + 1,
         ];
 
-        let mut membership_proofs: Vec<MembershipProof<Hasher>> = vec![];
+        let mut membership_proofs: Vec<MsMembershipProof<Hasher>> = vec![];
         let mut items: Vec<Digest> = vec![];
 
         for num_additions in num_additions_list {
@@ -708,7 +708,7 @@ mod accumulation_scheme_tests {
                 let membership_proof = mutator_set.prove(&new_item, &randomness, true);
 
                 // Update *all* membership proofs with newly added item
-                let batch_update_res = MembershipProof::<Hasher>::batch_update_from_addition(
+                let batch_update_res = MsMembershipProof::<Hasher>::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
                     &mutator_set,
@@ -738,7 +738,7 @@ mod accumulation_scheme_tests {
                 assert!(removal_record.validate(&mutator_set));
 
                 // update membership proofs
-                let res = MembershipProof::batch_update_from_remove(
+                let res = MsMembershipProof::batch_update_from_remove(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &removal_record,
                 );
@@ -773,7 +773,7 @@ mod accumulation_scheme_tests {
 
         let num_additions = 65;
 
-        let mut items_and_membership_proofs: Vec<(Digest, MembershipProof<Hasher>)> = vec![];
+        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<Hasher>)> = vec![];
 
         for _ in 0..num_additions {
             let new_item = hasher.hash(

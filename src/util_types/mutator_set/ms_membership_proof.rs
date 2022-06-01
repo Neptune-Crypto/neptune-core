@@ -40,9 +40,9 @@ pub enum MembershipProofError {
 }
 
 #[derive(Debug, Clone)]
-pub struct MembershipProof<H: simple_hasher::Hasher> {
+pub struct MsMembershipProof<H: simple_hasher::Hasher> {
     pub randomness: H::Digest,
-    pub auth_path_aocl: mmr::membership_proof::MembershipProof<H>,
+    pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
 
     // Cached bits are optional to store, but will prevent a lot of hashing in
@@ -52,7 +52,7 @@ pub struct MembershipProof<H: simple_hasher::Hasher> {
     pub cached_bits: Option<[u128; NUM_TRIALS]>,
 }
 
-impl<H: simple_hasher::Hasher> PartialEq for MembershipProof<H> {
+impl<H: simple_hasher::Hasher> PartialEq for MsMembershipProof<H> {
     // Equality for a membership proof does not look at cached bits, as they are just cached data
     // Whether they are set or not, does not change the membership proof.
     fn eq(&self, other: &Self) -> bool {
@@ -62,7 +62,7 @@ impl<H: simple_hasher::Hasher> PartialEq for MembershipProof<H> {
     }
 }
 
-impl<H> MembershipProof<H>
+impl<H> MsMembershipProof<H>
 where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
@@ -78,12 +78,12 @@ where
         chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
     ) -> (
         HashSet<usize>,
-        Vec<(mmr::membership_proof::MembershipProof<H>, H::Digest)>,
+        Vec<(mmr::mmr_membership_proof::MmrMembershipProof<H>, H::Digest)>,
     ) {
         let hasher = H::new();
         let mut mutation_argument_hash_map: HashMap<
             u128,
-            (mmr::membership_proof::MembershipProof<H>, H::Digest),
+            (mmr::mmr_membership_proof::MmrMembershipProof<H>, H::Digest),
         > = HashMap::new();
         let rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> =
             removal_record.get_chunk_index_to_bit_indices();
@@ -180,7 +180,7 @@ where
 
         // Update AOCL MMR membership proofs
         let indices_for_updated_mps =
-            mmr::membership_proof::MembershipProof::batch_update_from_append(
+            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_append(
                 &mut membership_proofs
                     .iter_mut()
                     .map(|x| &mut x.auth_path_aocl)
@@ -210,7 +210,7 @@ where
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
         let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: mmr::membership_proof::MembershipProof<H> =
+        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
             mmra.append(new_chunk_digest.clone());
 
         // Collect all bit indices for all membership proofs that are being updated
@@ -286,7 +286,7 @@ where
         // So relegating that bookkeeping to this function instead would not be more
         // efficient.
         let mut mmr_membership_proofs_for_append: Vec<
-            &mut mmr::membership_proof::MembershipProof<H>,
+            &mut mmr::mmr_membership_proof::MmrMembershipProof<H>,
         > = vec![];
 
         // The `mmr_membership_proof_index_to_membership_proof_index` variable is to remember
@@ -304,7 +304,7 @@ where
         }
 
         let indices_for_mutated_values =
-            mmr::membership_proof::MembershipProof::<H>::batch_update_from_append(
+            mmr::mmr_membership_proof::MmrMembershipProof::<H>::batch_update_from_append(
                 &mut mmr_membership_proofs_for_append,
                 mutator_set.swbf_inactive.count_leaves(),
                 &new_chunk_digest,
@@ -388,7 +388,7 @@ where
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
         let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
-        let new_auth_path: mmr::membership_proof::MembershipProof<H> =
+        let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
             mmra.append(new_chunk_digest.clone());
 
         let mut swbf_chunk_dictionary_updated = false;
@@ -464,7 +464,7 @@ where
         // Also keep track of which MS membership proof they came from, so the
         // function can report back which MS membership proofs that have been
         // mutated
-        let mut own_mmr_mps: Vec<&mut mmr::membership_proof::MembershipProof<H>> = vec![];
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<H>> = vec![];
         let mut mmr_mp_index_to_input_index: Vec<usize> = vec![];
         for (i, chunk_dict) in chunk_dictionaries.iter_mut().enumerate() {
             for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
@@ -475,7 +475,7 @@ where
 
         // Perform the batch mutation of the MMR membership proofs
         let mutated_mmr_mps =
-            mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
+            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut own_mmr_mps,
                 mutation_argument,
             );
@@ -511,7 +511,7 @@ where
         // It would be sufficient to only update the membership proofs that live in the Merkle
         // trees that have been updated, but it probably will not give a measureable speedup
         // since this change would not reduce the amount of hashing needed
-        let mut chunk_mmr_mps: Vec<&mut mmr::membership_proof::MembershipProof<H>> = self
+        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<H>> = self
             .target_chunks
             .dictionary
             .iter_mut()
@@ -519,7 +519,7 @@ where
             .collect();
 
         let mutated_mmr_mp_indices: Vec<usize> =
-            mmr::membership_proof::MembershipProof::batch_update_from_batch_leaf_mutation(
+            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut chunk_mmr_mps,
                 mutation_argument,
             );
@@ -587,9 +587,9 @@ mod ms_proof_tests {
                 .map(|_| BFieldElement::new(rng.next_u64()))
                 .collect::<Vec<_>>(),
         );
-        let mp_with_cached_bits = MembershipProof::<Hasher> {
+        let mp_with_cached_bits = MsMembershipProof::<Hasher> {
             randomness: randomness,
-            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 0,
                 _hasher: PhantomData,
                 authentication_path: vec![],
@@ -597,9 +597,9 @@ mod ms_proof_tests {
             target_chunks: ChunkDictionary::default(),
             cached_bits: Some([1u128; NUM_TRIALS]),
         };
-        let mp_without_cached_bits = MembershipProof::<Hasher> {
+        let mp_without_cached_bits = MsMembershipProof::<Hasher> {
             randomness: randomness,
-            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 0,
                 _hasher: PhantomData,
                 authentication_path: vec![],
@@ -607,9 +607,9 @@ mod ms_proof_tests {
             target_chunks: ChunkDictionary::default(),
             cached_bits: None,
         };
-        let mp_with_different_data_index = MembershipProof::<Hasher> {
+        let mp_with_different_data_index = MsMembershipProof::<Hasher> {
             randomness: randomness,
-            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 100073,
                 _hasher: PhantomData,
                 authentication_path: vec![],
@@ -617,9 +617,9 @@ mod ms_proof_tests {
             target_chunks: ChunkDictionary::default(),
             cached_bits: None,
         };
-        let mp_with_different_randomness = MembershipProof::<Hasher> {
+        let mp_with_different_randomness = MsMembershipProof::<Hasher> {
             randomness: other_randomness,
-            auth_path_aocl: mmr::membership_proof::MembershipProof::<Hasher> {
+            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 0,
                 _hasher: PhantomData,
                 authentication_path: vec![],
@@ -655,7 +655,7 @@ mod ms_proof_tests {
 
         // Create a new mutator set membership proof with a non-empty chunk dictionary
         // and verify that it is considered a different membership proof
-        let mut mp_mutated: MembershipProof<Hasher> = mp_with_cached_bits.clone();
+        let mut mp_mutated: MsMembershipProof<Hasher> = mp_with_cached_bits.clone();
         mp_mutated
             .target_chunks
             .dictionary
