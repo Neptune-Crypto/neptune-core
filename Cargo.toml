@@ -1,6 +1,6 @@
 [package]
 authors = ["sword-smith <thv@neptune.cash>", "Alan Szepieniec <as@neptune.cash>", "Philip Munksgaard <philip@munksgaard.me>"]
-edition = "2018"
+edition = "2021"
 name = "neptune-core"
 version = "0.1.0"
 default-run = "neptune-core"
