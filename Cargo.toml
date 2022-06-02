@@ -11,6 +11,7 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", tag = "with-mutator-sets" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"
