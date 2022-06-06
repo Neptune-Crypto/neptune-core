@@ -1,5 +1,5 @@
 [package]
-authors = ["sword-smith <thv@neptune.cash>", "Alan Szepieniec <as@neptune.cash>", "Philip Munksgaard <philip@munksgaard.me>"]
+authors = ["sword-smith <thor@neptune.cash>", "Alan Szepieniec <alan@neptune.cash>", "Philip Munksgaard <philip@munksgaard.me>"]
 edition = "2021"
 name = "neptune-core"
 version = "0.1.0"
@@ -11,7 +11,7 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", tag = "with-mutator-sets" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "25879ca2c9dae3db75e2936e187b94ae5a5fd242" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"

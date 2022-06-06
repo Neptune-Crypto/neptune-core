@@ -1,18 +1,19 @@
-use super::big_array::BigArray;
-use std::{cmp::Ordering, convert::TryInto, fmt::Display, time::SystemTime};
-
 use db_key::Key;
 use serde::{Deserialize, Serialize};
+use std::{cmp::Ordering, convert::TryInto, fmt::Display, time::SystemTime};
+use twenty_first::amount::u32s::U32s;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockHash([u8; 32]);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Utxo {
-    #[serde(with = "BigArray")]
-    pub pol0: [u32; 2048],
-    #[serde(with = "BigArray")]
-    pub pol1: [u32; 2048],
+    amount: U32s<4>,
+    public_key: String,
+    // #[serde(with = "BigArray")]
+    // pub pol0: [u32; 2048],
+    // #[serde(with = "BigArray")]
+    // pub pol1: [u32; 2048],
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
