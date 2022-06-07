@@ -1,74 +1,112 @@
 use db_key::Key;
+use secp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, convert::TryInto, fmt::Display, time::SystemTime};
-use twenty_first::amount::u32s::U32s;
+use twenty_first::{
+    amount::u32s::U32s,
+    shared_math::{
+        b_field_element::BFieldElement,
+        rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH},
+        traits::FromVecu8,
+    },
+    util_types::{
+        mmr::mmr_membership_proof::MmrMembershipProof,
+        mutator_set::{
+            ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
+            removal_record::RemovalRecord,
+        },
+    },
+};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlockHash([u8; 32]);
+pub const AMOUNT_SIZE_FOR_U32: usize = 4;
+pub const RESCUE_PRIME_OUTPUT_SIZE_IN_BFES: usize = 6;
+pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize = RESCUE_PRIME_OUTPUT_SIZE_IN_BFES * 8;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RescuePrimeDigest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+pub type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Utxo {
-    amount: U32s<4>,
-    public_key: String,
-    // #[serde(with = "BigArray")]
-    // pub pol0: [u32; 2048],
-    // #[serde(with = "BigArray")]
-    // pub pol1: [u32; 2048],
+    amount: U32s<AMOUNT_SIZE_FOR_U32>,
+    public_key_hex: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Transaction {
-    pub input: Vec<Utxo>,
-    pub output: Vec<Utxo>,
+    pub inputs: Vec<(Utxo, MsMembershipProof<Hasher>, RemovalRecord<Hasher>)>,
+    pub outputs: Vec<Utxo>,
     pub public_scripts: Vec<Vec<u8>>,
-    pub proof: Vec<u8>,
+    pub fee: U32s<AMOUNT_SIZE_FOR_U32>,
+    pub timestamp: BFieldElement,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MutatorSetUpdate {
+    appended_leafs: Vec<RescuePrimeDigest>,
+    leaf_mutations: Vec<(RescuePrimeDigest, MmrMembershipProof<Hasher>)>,
+}
+
+pub struct BlockHeader {
+    pub version: BFieldElement,
+    pub nonce: (BFieldElement, BFieldElement, BFieldElement),
+    pub height: BFieldElement,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Block {
-    pub version_bits: [u8; 4],
-    pub timestamp: SystemTime,
-    pub height: BlockHeight,
-    pub nonce: [u8; 32],
-    pub predecessor: BlockHash,
-    pub predecessor_proof: Vec<u8>,
-    pub accumulated_pow_line: u128,
-    pub accumulated_pow_family: u128,
-    pub uncles: Vec<BlockHash>,
-    pub target_difficulty: u128,
-    pub retarget_proof: Vec<u8>,
-    pub transaction: Transaction,
-    pub mixed_edges: Vec<Utxo>,
-    pub mix_proof: Vec<u8>,
-    pub edge_mmra: Utxo,
-    pub edge_mmra_update: Vec<u8>,
-    pub hash: BlockHash,
+    pub version_bits: BFieldElement,
+    pub timestamp: BFieldElement,
+    pub height: BFieldElement,
+    pub predecessor: RescuePrimeDigest,
+    pub uncles: Vec<RescuePrimeDigest>,
+    pub accumulated_pow_line: BFieldElement,
+    pub accumulated_pow_family: BFieldElement,
+    pub target_difficulty: BFieldElement,
+    pub max_size: BFieldElement,
+    pub transactions: Vec<Transaction>,
+    pub ms_commitment: RescuePrimeDigest,
+    pub ms_accumulator: MutatorSetAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
+    pub ms_update: MutatorSetUpdate,
 }
 
-pub const HASH_LENGTH: usize = 32;
+impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for RescuePrimeDigest {
+    fn from(item: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]) -> Self {
+        let bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
+            [BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+        for i in 0..RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
+            let start_index = i * RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
+            let end_index = (i + 1) * RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
+            bfes[i] = BFieldElement::ring_zero().from_vecu8(item[start_index..end_index].to_vec())
+        }
 
-impl From<[u8; HASH_LENGTH]> for BlockHash {
-    fn from(item: [u8; HASH_LENGTH]) -> Self {
-        BlockHash(item)
+        Self(bfes)
     }
 }
 
-impl Key for BlockHash {
+impl Key for RescuePrimeDigest {
     fn from_u8(key: &[u8]) -> Self {
-        BlockHash(
-            key.try_into()
-                .expect("slice with incorrect length used as block hash"),
-        )
+        let converted_key: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = key
+            .to_owned()
+            .try_into()
+            .expect("slice with incorrect length used as block hash");
+        converted_key.into()
     }
 
     fn as_slice<T, F: Fn(&[u8]) -> T>(&self, f: F) -> T {
-        f(&self.0)
+        let u8s: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = self.to_owned().into();
+        f(&u8s)
     }
 }
 
-impl From<BlockHash> for [u8; HASH_LENGTH] {
-    fn from(item: BlockHash) -> Self {
-        item.0
+impl From<RescuePrimeDigest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
+    fn from(item: RescuePrimeDigest) -> Self {
+        let u64s = item.0.iter().map(|x| x.value());
+        u64s.map(|x| x.to_ne_bytes())
+            .collect::<Vec<_>>()
+            .concat()
+            .try_into()
+            .unwrap()
     }
 }
 

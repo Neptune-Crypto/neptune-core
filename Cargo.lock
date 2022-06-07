@@ -777,6 +777,7 @@ dependencies = [
  "paw",
  "pin-project-lite",
  "rand",
+ "secp256k1",
  "serde",
  "serde_derive",
  "serde_json",
@@ -1277,6 +1278,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
+name = "secp256k1"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26947345339603ae8395f68e2f3d85a6b0a8ddfe6315818e80b8504415099db0"
+dependencies = [
+ "secp256k1-sys",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "152e20a0fd0519390fc43ab404663af8a0b794273d2a91d60ad4a39f13ffe110"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1754,7 +1773,7 @@ dependencies = [
 [[package]]
 name = "twenty-first"
 version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=25879ca2c9dae3db75e2936e187b94ae5a5fd242#25879ca2c9dae3db75e2936e187b94ae5a5fd242"
+source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?branch=dev-for-neptune-core#6b83e716c11e32f5bb325b03f0c57e6261d46afe"
 dependencies = [
  "anyhow",
  "bincode",

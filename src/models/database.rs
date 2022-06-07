@@ -1,12 +1,12 @@
 use std::fmt;
 
-use crate::models::blockchain::{BlockHash, BlockHeight};
+use crate::models::blockchain::{BlockHeight, RescuePrimeDigest};
 use db_key::Key;
 use leveldb::database::Database;
 
 pub struct Databases {
     pub block_height_to_hash: Database<BlockHeight>,
-    pub block_hash_to_block: Database<BlockHash>,
+    pub block_hash_to_block: Database<RescuePrimeDigest>,
     pub latest_block: Database<DatabaseUnit>,
 }
 
