@@ -1,3 +1,6 @@
+use serde_big_array;
+use serde_big_array::BigArray;
+use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{
@@ -13,8 +16,9 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RemovalRecord<H: simple_hasher::Hasher> {
+    #[serde(with = "BigArray")]
     pub bit_indices: [u128; NUM_TRIALS],
     pub target_chunks: ChunkDictionary<H>,
 }
@@ -52,6 +56,11 @@ mod removal_record_tests {
     use rand::{thread_rng, RngCore};
 
     use crate::{
+        shared_math::{
+            b_field_element::BFieldElement,
+            rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH},
+            traits::GetRandomElements,
+        },
         util_types::{
             blake3_wrapper,
             mutator_set::{
@@ -94,5 +103,30 @@ mod removal_record_tests {
                 assert!((value - key * CHUNK_SIZE as u128) < CHUNK_SIZE as u128);
             }
         }
+    }
+
+    #[test]
+    fn serialization_test() {
+        // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
+        // an imported library. I included it here, though, because the setup seems a bit clumsy
+        // to me so far.
+        type H = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
+        let hasher = H::new();
+        let mut prng = thread_rng();
+        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let item = hasher.hash(
+            &BFieldElement::random_elements(3, &mut prng),
+            RP_DEFAULT_OUTPUT_SIZE,
+        );
+        let randomness = hasher.hash(
+            &BFieldElement::random_elements(3, &mut prng),
+            RP_DEFAULT_OUTPUT_SIZE,
+        );
+        let mp = accumulator.prove(&item, &randomness, true);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+
+        let json: String = serde_json::to_string(&removal_record).unwrap();
+        let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
+        // assert_eq!(s_back, removal_record);
     }
 }

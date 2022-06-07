@@ -1,3 +1,7 @@
+use serde_big_array;
+use serde_big_array::BigArray;
+use serde_derive::{Deserialize, Serialize};
+
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::simple_hasher::{self, ToDigest},
@@ -5,8 +9,9 @@ use crate::{
 
 use super::set_commitment::CHUNK_SIZE;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Chunk {
+    #[serde(with = "BigArray")]
     pub bits: [bool; CHUNK_SIZE],
 }
 
@@ -125,5 +130,18 @@ mod chunk_tests {
         let mut expected = [BFieldElement::ring_zero(); Chunk::get_hashpreimage_length()];
         expected[Chunk::get_hashpreimage_length() - 2] = BFieldElement::new(1u64 << 62);
         assert_eq!(expected.to_vec(), hashpreimage);
+    }
+
+    #[test]
+    fn serialization_test() {
+        // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
+        // an imported library. I included it here, though, because the setup seems a bit clumsy
+        // to me so far.
+        let chunk = Chunk {
+            bits: [false; CHUNK_SIZE],
+        };
+        let json = serde_json::to_string(&chunk).unwrap();
+        let s_back = serde_json::from_str::<Chunk>(&json).unwrap();
+        assert!(s_back.bits.iter().all(|x| !x));
     }
 }
