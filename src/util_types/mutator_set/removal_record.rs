@@ -33,7 +33,7 @@ where
         self.target_chunks.dictionary.iter().all(|(_i, (p, c))| {
             p.verify(
                 &peaks,
-                &c.hash::<H>(&mutator_set.hasher),
+                &c.hash::<H>(&H::new()),
                 mutator_set.swbf_inactive.count_leaves(),
             )
             .0

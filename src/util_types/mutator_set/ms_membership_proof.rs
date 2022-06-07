@@ -201,7 +201,8 @@ where
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
         };
-        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&mutator_set.hasher);
+        let hasher = H::new();
+        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&hasher);
 
         // Insert the new chunk digest into the accumulator-version of the
         // SWBF MMR to get its authentication path. It's important to convert the MMR
@@ -225,7 +226,7 @@ where
                 let bits = match mp.cached_bits {
                     Some(bs) => bs,
                     None => get_swbf_indices(
-                        &mutator_set.hasher,
+                        &hasher,
                         item,
                         &mp.randomness,
                         mp.auth_path_aocl.data_index,
@@ -362,14 +363,15 @@ where
             bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
         };
 
-        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&mutator_set.hasher);
+        let hasher = H::new();
+        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&hasher);
 
         // Get bit indices from either the cached bits, or by recalculating them. Notice
         // that the latter is an expensive operation.
         let all_bit_indices = match self.cached_bits {
             Some(bits) => bits,
             None => get_swbf_indices(
-                &mutator_set.hasher,
+                &hasher,
                 own_item,
                 &self.randomness,
                 self.auth_path_aocl.data_index,

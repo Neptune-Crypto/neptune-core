@@ -1,6 +1,8 @@
-use std::{collections::HashMap, error::Error, fmt};
-
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use serde_big_array;
+use serde_big_array::BigArray;
+use serde_derive::{Deserialize, Serialize};
+use std::{collections::HashMap, error::Error, fmt, marker::PhantomData};
 
 use super::{
     addition_record::AdditionRecord, chunk_dictionary::ChunkDictionary,
@@ -37,12 +39,13 @@ pub enum SetCommitmentError {
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
+    #[serde(with = "BigArray")]
     pub swbf_active: [bool; WINDOW_SIZE],
-    pub hasher: H,
+    _hasher: PhantomData<H>,
 }
 
 /// Helper function. Computes the bloom filter bit indices of the
@@ -104,7 +107,7 @@ where
             aocl: M::new(vec![]),
             swbf_inactive: M::new(vec![]),
             swbf_active: [false; WINDOW_SIZE as usize],
-            hasher: H::new(),
+            _hasher: PhantomData,
         }
     }
 
@@ -113,7 +116,8 @@ where
     /// but tailored to adding the item to the mutator set in its
     /// current state.
     pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
-        let canonical_commitment = self.hasher.hash_pair(item, randomness);
+        let hasher = H::new();
+        let canonical_commitment = hasher.hash_pair(item, randomness);
 
         // It's important to *not* use clone here as that could imply copying a whole
         // archival MMR. Instead we ensure that
@@ -131,12 +135,15 @@ where
     ) -> RemovalRecord<H> {
         let bit_indices = match membership_proof.cached_bits {
             Some(bits) => bits,
-            None => get_swbf_indices(
-                &self.hasher,
-                item,
-                &membership_proof.randomness,
-                membership_proof.auth_path_aocl.data_index,
-            ),
+            None => {
+                let hasher = H::new();
+                get_swbf_indices(
+                    &hasher,
+                    item,
+                    &membership_proof.randomness,
+                    membership_proof.auth_path_aocl.data_index,
+                )
+            }
         };
 
         RemovalRecord {
@@ -184,7 +191,8 @@ where
         let chunk: Chunk = Chunk {
             bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
         };
-        let chunk_digest: H::Digest = chunk.hash::<H>(&self.hasher);
+        let hasher = H::new();
+        let chunk_digest: H::Digest = chunk.hash::<H>(&hasher);
         self.swbf_inactive.append(chunk_digest); // ignore auth path
 
         // Then move window to the right, equivalent to moving values
@@ -232,6 +240,7 @@ where
 
         // update mmr
         // to do this, we need to keep track of all membership proofs
+        let hasher = H::new();
         let mut all_membership_proofs: Vec<_> = new_target_chunks
             .dictionary
             .values()
@@ -240,7 +249,7 @@ where
         let all_leafs = new_target_chunks
             .dictionary
             .values()
-            .map(|(_p, c)| c.hash::<H>(&self.hasher));
+            .map(|(_p, c)| c.hash::<H>(&hasher));
         let mutation_data: Vec<(mmr::mmr_membership_proof::MmrMembershipProof<H>, H::Digest)> =
             all_membership_proofs
                 .clone()
@@ -270,7 +279,8 @@ where
         store_bits: bool,
     ) -> MsMembershipProof<H> {
         // compute commitment
-        let item_commitment = self.hasher.hash_pair(item, randomness);
+        let hasher = H::new();
+        let item_commitment = hasher.hash_pair(item, randomness);
 
         // simulate adding to commitment list
         let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
@@ -279,7 +289,7 @@ where
         // Store the bit indices for later use, as they are expensive to calculate
         let cached_bits: Option<[u128; NUM_TRIALS]> = if store_bits {
             Some(get_swbf_indices(
-                &self.hasher,
+                &hasher,
                 item,
                 randomness,
                 self.aocl.count_leaves(),
@@ -307,7 +317,8 @@ where
         }
 
         // verify that a commitment to the item lives in the aocl mmr
-        let leaf = self.hasher.hash_pair(item, &membership_proof.randomness);
+        let hasher = H::new();
+        let leaf = hasher.hash_pair(item, &membership_proof.randomness);
         let (is_aocl_member, _) = membership_proof.auth_path_aocl.verify(
             &self.aocl.get_peaks(),
             &leaf,
@@ -330,7 +341,7 @@ where
         let all_bit_indices = match membership_proof.cached_bits {
             Some(bits) => bits,
             None => get_swbf_indices(
-                &self.hasher,
+                &hasher,
                 item,
                 &membership_proof.randomness,
                 membership_proof.auth_path_aocl.data_index,
@@ -358,7 +369,7 @@ where
                         .unwrap();
                 let (valid_auth_path, _) = mp_and_chunk.0.verify(
                     &self.swbf_inactive.get_peaks(),
-                    &mp_and_chunk.1.hash::<H>(&self.hasher),
+                    &mp_and_chunk.1.hash::<H>(&hasher),
                     self.swbf_inactive.count_leaves(),
                 );
 
@@ -868,5 +879,96 @@ mod accumulation_scheme_tests {
                 ));
             }
         }
+    }
+
+    #[test]
+    fn ms_serialization_test() {
+        // You could argue that this test doesn't belong here, as it tests the behavior of
+        // an imported library. I included it here, though, because the setup seems a bit flimsy
+        // to me so far.
+        type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
+        type Mmr = MmrAccumulator<Hasher>;
+        type Ms = SetCommitment<Hasher, Mmr>;
+        let mut mutator_set = Ms::default();
+
+        let json_empty = serde_json::to_string(&mutator_set).unwrap();
+        println!("json = \n{}", json_empty);
+        let s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
+        assert!(s_back.aocl.is_empty());
+        assert!(s_back.swbf_inactive.is_empty());
+        assert!(s_back.swbf_active.iter().all(|b| !b));
+
+        // Add an item, verify correct serialization
+        let (mp, item) = insert_item(&mut mutator_set);
+        let json_one_add = serde_json::to_string(&mutator_set).unwrap();
+        println!("json_one_add = \n{}", json_one_add);
+        let s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
+        assert_eq!(1, s_back_one_add.aocl.count_leaves());
+        assert!(s_back_one_add.swbf_inactive.is_empty());
+        assert!(s_back_one_add.swbf_active.iter().all(|b| !b));
+        assert!(s_back_one_add.verify(&item, &mp));
+
+        // Remove an item, verify correct serialization
+        remove_item(&mut mutator_set, &item, &mp);
+        let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
+        println!("json_one_add = \n{}", json_one_add_one_remove);
+        let s_back_one_add_one_remove =
+            serde_json::from_str::<Ms>(&json_one_add_one_remove).unwrap();
+        assert_eq!(
+            1,
+            s_back_one_add_one_remove.aocl.count_leaves(),
+            "AOCL must still have exactly one leaf"
+        );
+        assert!(
+            s_back_one_add_one_remove.swbf_inactive.is_empty(),
+            "Window should not have moved"
+        );
+        assert!(
+            !s_back_one_add_one_remove.swbf_active.iter().all(|b| !b),
+            "Some of the bits in the active window must now be set"
+        );
+        assert!(
+            !s_back_one_add_one_remove.verify(&item, &mp),
+            "Membership proof must fail after removal"
+        );
+    }
+
+    fn insert_item<H: Hasher, M: Mmr<H>>(
+        mutator_set: &mut SetCommitment<H, M>,
+    ) -> (MsMembershipProof<H>, H::Digest)
+    where
+        u128: ToDigest<H::Digest>,
+        Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
+    {
+        let mut prng = thread_rng();
+        let hasher = H::new();
+        let new_item = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(prng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+        let randomness = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(prng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+
+        let addition_record = mutator_set.commit(&new_item, &randomness);
+        let membership_proof = mutator_set.prove(&new_item, &randomness, true);
+        mutator_set.add_helper(&addition_record);
+
+        (membership_proof, new_item)
+    }
+
+    fn remove_item<H: Hasher, M: Mmr<H>>(
+        mutator_set: &mut SetCommitment<H, M>,
+        item: &H::Digest,
+        mp: &MsMembershipProof<H>,
+    ) where
+        u128: ToDigest<H::Digest>,
+        Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
+    {
+        let mut removal_record: RemovalRecord<H> = mutator_set.drop(item.into(), mp);
+        mutator_set.remove_helper(&mut removal_record);
     }
 }

@@ -167,7 +167,7 @@ where
         }
 
         let auth_path_aocl = self.get_aocl_authentication_path(index)?;
-        let bits = get_swbf_indices(&self.set_commitment.hasher, item, randomness, index);
+        let bits = get_swbf_indices(&H::new(), item, randomness, index);
 
         let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
