@@ -8,3 +8,4 @@ pub mod mutator_set_trait;
 pub mod removal_record;
 pub mod set_commitment;
 pub mod shared;
+pub mod transfer_ms_membership_proof;

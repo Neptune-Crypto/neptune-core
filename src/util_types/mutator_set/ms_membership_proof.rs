@@ -22,6 +22,7 @@ use super::{
     chunk_dictionary::ChunkDictionary,
     removal_record::RemovalRecord,
     set_commitment::{SetCommitment, CHUNK_SIZE, NUM_TRIALS},
+    transfer_ms_membership_proof::TransferMsMembershipProof,
 };
 
 impl Error for MembershipProofError {}
@@ -39,6 +40,8 @@ pub enum MembershipProofError {
     MissingChunkOnUpdateFromRemove(u128),
 }
 
+// This struct should not be serializable, as it, due to the `cached_bits` field
+// should not be shared between peers.
 #[derive(Debug, Clone)]
 pub struct MsMembershipProof<H: simple_hasher::Hasher> {
     pub randomness: H::Digest,
@@ -50,6 +53,31 @@ pub struct MsMembershipProof<H: simple_hasher::Hasher> {
     // Warning: These bits should not be trusted and should only be calculated
     // locally. If they are trusted the soundness of the mutator set is compromised.
     pub cached_bits: Option<[u128; NUM_TRIALS]>,
+}
+
+/// Convert a transfer version of the membership proof to one for internal use.
+/// The important thing here is that `cached_bits` is not shared between peers.
+impl<H: simple_hasher::Hasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
+    fn from(transfer: TransferMsMembershipProof<H>) -> Self {
+        Self {
+            randomness: transfer.randomness,
+            auth_path_aocl: transfer.auth_path_aocl,
+            target_chunks: transfer.target_chunks,
+            cached_bits: None,
+        }
+    }
+}
+
+// This conversion is kept here to avoid circular dependencies -- not sure if we have
+// to avoid that, though.
+impl<H: simple_hasher::Hasher> From<MsMembershipProof<H>> for TransferMsMembershipProof<H> {
+    fn from(mp: MsMembershipProof<H>) -> Self {
+        Self {
+            randomness: mp.randomness,
+            auth_path_aocl: mp.auth_path_aocl,
+            target_chunks: mp.target_chunks,
+        }
+    }
 }
 
 impl<H: simple_hasher::Hasher> PartialEq for MsMembershipProof<H> {

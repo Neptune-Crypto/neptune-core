@@ -127,6 +127,7 @@ mod removal_record_tests {
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
-        // assert_eq!(s_back, removal_record);
+        assert_eq!(s_back.bit_indices, removal_record.bit_indices);
+        assert_eq!(s_back.target_chunks, removal_record.target_chunks);
     }
 }
