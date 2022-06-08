@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use super::blockchain::{BlockHash, BlockHeight};
+use super::blockchain::{block::BlockHeight, digest::RescuePrimeDigest};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LatestBlockInfo {
     pub height: BlockHeight,
-    pub hash: BlockHash,
+    pub hash: RescuePrimeDigest,
 }
 
 impl LatestBlockInfo {
-    pub fn new(hash: BlockHash, height: BlockHeight) -> Self {
+    pub fn new(hash: RescuePrimeDigest, height: BlockHeight) -> Self {
         LatestBlockInfo { hash, height }
     }
 }

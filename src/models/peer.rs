@@ -1,5 +1,8 @@
 use super::{
-    blockchain::{Block, BlockHash, BlockHeight},
+    blockchain::{
+        block::{Block, BlockBody, BlockHeader, BlockHeight},
+        digest::RescuePrimeDigest,
+    },
     shared::LatestBlockInfo,
 };
 use crate::config_models::network::Network;
@@ -29,7 +32,7 @@ pub struct HandshakeData {
 /// send the entire block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PeerBlockNotification {
-    pub hash: BlockHash,
+    pub hash: RescuePrimeDigest,
     pub height: BlockHeight,
 }
 
@@ -37,7 +40,7 @@ impl From<Block> for PeerBlockNotification {
     fn from(block: Block) -> Self {
         PeerBlockNotification {
             hash: block.hash,
-            height: block.height,
+            height: block.header.height,
         }
     }
 }
@@ -55,15 +58,16 @@ pub enum ConnectionStatus {
     Accepted,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+// #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PeerMessage {
     Handshake((Vec<u8>, HandshakeData)),
-    Block(Box<Block>),
+    Block(Box<(BlockHeader, BlockBody)>),
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
-    BlockResponseByHeight(Option<Box<Block>>),
-    BlockRequestByHash(BlockHash),
-    BlockResponseByHash(Option<Box<Block>>),
+    BlockResponseByHeight(Option<Box<(BlockHeader, BlockBody)>>),
+    BlockRequestByHash(RescuePrimeDigest),
+    BlockResponseByHash(Option<Box<(BlockHeader, BlockBody)>>),
     NewTransaction(i32),
     PeerListRequest,
     PeerListResponse(Vec<SocketAddr>),

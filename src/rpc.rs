@@ -1,4 +1,4 @@
-use crate::models::blockchain::BlockHeight;
+use crate::models::blockchain::block::BlockHeight;
 use crate::models::database::DatabaseUnit;
 use crate::models::peer::Peer;
 use crate::models::shared::LatestBlockInfo;

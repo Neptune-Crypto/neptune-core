@@ -20,7 +20,8 @@ use futures::StreamExt;
 use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions};
-use models::blockchain::{BlockHash, BlockHeight};
+use models::blockchain::block::BlockHeight;
+use models::blockchain::digest::RescuePrimeDigest;
 use models::database::{DatabaseUnit, Databases};
 use models::peer::Peer;
 use models::State;
@@ -87,7 +88,7 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
 
     let mut hash_options = Options::new();
     hash_options.create_if_missing = true;
-    let block_hash_to_block: Database<BlockHash> =
+    let block_hash_to_block: Database<RescuePrimeDigest> =
         match Database::open(block_hash_to_block_path.as_path(), hash_options) {
             Ok(db) => db,
             Err(e) => {

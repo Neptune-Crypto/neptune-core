@@ -11,7 +11,7 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", branch = "dev-for-neptune-core" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "dfe647853b2bb6bf445e766db95d43ef74e5fa22" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"

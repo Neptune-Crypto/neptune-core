@@ -1,4 +1,4 @@
-use super::blockchain::Block;
+use super::blockchain::block::Block;
 
 #[derive(Clone, Debug)]
 pub enum MainToMiner {
