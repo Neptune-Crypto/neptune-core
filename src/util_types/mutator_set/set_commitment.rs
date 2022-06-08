@@ -408,6 +408,7 @@ mod accumulation_scheme_tests {
             },
             traits::GetRandomElements,
         },
+        test_shared::mutator_set::{insert_item, remove_item},
         util_types::{
             blake3_wrapper,
             mmr::{archival_mmr::ArchivalMmr, mmr_accumulator::MmrAccumulator},
@@ -931,44 +932,5 @@ mod accumulation_scheme_tests {
             !s_back_one_add_one_remove.verify(&item, &mp),
             "Membership proof must fail after removal"
         );
-    }
-
-    fn insert_item<H: Hasher, M: Mmr<H>>(
-        mutator_set: &mut SetCommitment<H, M>,
-    ) -> (MsMembershipProof<H>, H::Digest)
-    where
-        u128: ToDigest<H::Digest>,
-        Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
-    {
-        let mut prng = thread_rng();
-        let hasher = H::new();
-        let new_item = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(prng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
-        let randomness = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(prng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
-
-        let addition_record = mutator_set.commit(&new_item, &randomness);
-        let membership_proof = mutator_set.prove(&new_item, &randomness, true);
-        mutator_set.add_helper(&addition_record);
-
-        (membership_proof, new_item)
-    }
-
-    fn remove_item<H: Hasher, M: Mmr<H>>(
-        mutator_set: &mut SetCommitment<H, M>,
-        item: &H::Digest,
-        mp: &MsMembershipProof<H>,
-    ) where
-        u128: ToDigest<H::Digest>,
-        Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
-    {
-        let mut removal_record: RemovalRecord<H> = mutator_set.drop(item.into(), mp);
-        mutator_set.remove_helper(&mut removal_record);
     }
 }
