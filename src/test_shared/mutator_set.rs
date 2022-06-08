@@ -47,6 +47,6 @@ pub fn remove_item<H: simple_hasher::Hasher, M: Mmr<H>>(
     u128: ToDigest<H::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
-    let mut removal_record: RemovalRecord<H> = mutator_set.drop(item.into(), mp);
-    mutator_set.remove_helper(&mut removal_record);
+    let removal_record: RemovalRecord<H> = mutator_set.drop(item, mp);
+    mutator_set.remove_helper(&removal_record);
 }

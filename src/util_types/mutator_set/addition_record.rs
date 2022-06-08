@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
+
 use crate::util_types::{
     mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
     simple_hasher::{self, ToDigest},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AdditionRecord<H: simple_hasher::Hasher> {
     pub commitment: H::Digest,
 
@@ -33,8 +35,11 @@ where
 
 #[cfg(test)]
 mod addition_record_tests {
-    use crate::util_types::mutator_set::{
-        mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+    use crate::{
+        shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH},
+        util_types::mutator_set::{
+            mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+        },
     };
 
     use super::*;
@@ -84,5 +89,17 @@ mod addition_record_tests {
 
         assert!(new_addition_record_0.has_matching_aocl(&new_addition_record_0.aocl_snapshot));
         assert!(!new_addition_record_0.has_matching_aocl(&new_addition_record_1.aocl_snapshot));
+    }
+
+    #[test]
+    fn serialization_test() {
+        type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
+        let msa: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let addition_record: AdditionRecord<Hasher> =
+            msa.commit(&1492u128.to_digest(), &1522u128.to_digest());
+        let json = serde_json::to_string(&addition_record).unwrap();
+        let s_back = serde_json::from_str::<AdditionRecord<Hasher>>(&json).unwrap();
+        assert_eq!(addition_record.commitment, s_back.commitment);
+        assert!(addition_record.has_matching_aocl(&s_back.aocl_snapshot));
     }
 }
