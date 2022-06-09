@@ -4,6 +4,9 @@ use super::blockchain::block::Block;
 pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
+    // StopMining,
+    // StartMining,
+    // SetCoinbasePubkey,
 }
 
 #[derive(Clone, Debug)]

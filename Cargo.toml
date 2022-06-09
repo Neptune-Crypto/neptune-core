@@ -11,7 +11,7 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "dfe647853b2bb6bf445e766db95d43ef74e5fa22" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "8fb6552afade81d31efee4fc1ca8b5774e37c558" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"
@@ -20,9 +20,10 @@ db-key = "0.0.5" # Should match the one used by `leveldb`
 directories = "4"
 futures = "0.3"
 leveldb = "0.8"
+num-traits = "0.2"
 paw = "1" # Command-line argument parsing
 rand = "0.8"
-secp256k1 = "0"
+secp256k1 = { version = "0", features = ["rand-std", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"

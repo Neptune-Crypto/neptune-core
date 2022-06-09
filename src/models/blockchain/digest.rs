@@ -34,6 +34,12 @@ impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for RescuePrimeDigest {
     }
 }
 
+impl From<RescuePrimeDigest> for Vec<BFieldElement> {
+    fn from(val: RescuePrimeDigest) -> Self {
+        val.0.to_vec()
+    }
+}
+
 impl Key for RescuePrimeDigest {
     fn from_u8(key: &[u8]) -> Self {
         let converted_key: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = key

@@ -77,12 +77,12 @@ impl BlockHeader {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockBody {
-    pub transaction: Vec<Transaction>,
+    pub transactions: Vec<Transaction>,
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
     pub mutator_set_update: MutatorSetUpdate,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Block {
     pub hash: RescuePrimeDigest,
     pub header: BlockHeader,
@@ -95,6 +95,31 @@ impl Block {
             body,
             header,
             hash: header.hash(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransferBlock {
+    pub header: BlockHeader,
+    pub body: BlockBody,
+}
+
+impl From<TransferBlock> for Block {
+    fn from(t_block: TransferBlock) -> Self {
+        Self {
+            hash: t_block.header.hash(),
+            header: t_block.header,
+            body: t_block.body,
+        }
+    }
+}
+
+impl From<Block> for TransferBlock {
+    fn from(block: Block) -> Self {
+        Self {
+            header: block.header,
+            body: block.body,
         }
     }
 }

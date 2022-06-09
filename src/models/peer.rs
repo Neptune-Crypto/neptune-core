@@ -1,6 +1,6 @@
 use super::{
     blockchain::{
-        block::{Block, BlockBody, BlockHeader, BlockHeight},
+        block::{Block, BlockBody, BlockHeader, BlockHeight, TransferBlock},
         digest::RescuePrimeDigest,
     },
     shared::LatestBlockInfo,
@@ -28,7 +28,7 @@ pub struct HandshakeData {
     pub version: String,
 }
 
-/// Used to tell peers that a new block has been found without having to
+/// Used to tell peers that a new block has been found without having toPeerMessage
 /// send the entire block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PeerBlockNotification {
@@ -62,12 +62,12 @@ pub enum ConnectionStatus {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PeerMessage {
     Handshake((Vec<u8>, HandshakeData)),
-    Block(Box<(BlockHeader, BlockBody)>),
+    Block(Box<TransferBlock>),
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
-    BlockResponseByHeight(Option<Box<(BlockHeader, BlockBody)>>),
+    BlockResponseByHeight(Option<Box<TransferBlock>>),
     BlockRequestByHash(RescuePrimeDigest),
-    BlockResponseByHash(Option<Box<(BlockHeader, BlockBody)>>),
+    BlockResponseByHash(Option<Box<TransferBlock>>),
     NewTransaction(i32),
     PeerListRequest,
     PeerListResponse(Vec<SocketAddr>),

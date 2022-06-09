@@ -174,7 +174,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (peer_thread_to_main_tx, peer_thread_to_main_rx) =
         mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
 
-    // Create handshake data
+    // Create handshake data which is used when connecting to peers
     let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.peer_port);
     let own_handshake_data = HandshakeData {
         latest_block_info,
@@ -209,7 +209,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         });
     }
 
-    // Start handling of mining
+    // Start handling of mining. So far we can only mine on the `RegTest` network.
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     if cli_args.mine && cli_args.network == Network::RegTest {
@@ -220,7 +220,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         });
     }
 
-    // Start RPC server
+    // Start RPC server for CLI request and more
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
         format!("127.0.0.1:{}", cli_args.rpc_port),
         Json::default,
