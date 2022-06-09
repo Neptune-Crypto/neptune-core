@@ -40,11 +40,29 @@ pub enum SetCommitmentError {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActiveWindow<H: Hasher> {
+    #[serde(with = "BigArray")]
+    pub bits: [bool; WINDOW_SIZE],
+    _hasher: PhantomData<H>,
+}
+
+impl<H: Hasher> ActiveWindow<H> {
+    fn default() -> Self {
+        Self {
+            bits: [false; WINDOW_SIZE as usize],
+        }
+    }
+
+    fn hash(&self) -> H::Digest {
+        let hasher = H::new();
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
-    #[serde(with = "BigArray")]
-    pub swbf_active: [bool; WINDOW_SIZE],
+    pub swbf_active: ActiveWindow<H>,
     _hasher: PhantomData<H>,
 }
 
@@ -106,7 +124,7 @@ where
         Self {
             aocl: M::new(vec![]),
             swbf_inactive: M::new(vec![]),
-            swbf_active: [false; WINDOW_SIZE as usize],
+            swbf_active: ActiveWindow::default(),
             _hasher: PhantomData,
         }
     }
@@ -189,7 +207,7 @@ where
         // if window slides, update filter
         // First update the inactive part of the SWBF, the SWBF MMR
         let chunk: Chunk = Chunk {
-            bits: self.swbf_active[..CHUNK_SIZE].try_into().unwrap(),
+            bits: self.swbf_active.bits[..CHUNK_SIZE].try_into().unwrap(),
         };
         let hasher = H::new();
         let chunk_digest: H::Digest = chunk.hash::<H>(&hasher);
@@ -198,10 +216,10 @@ where
         // Then move window to the right, equivalent to moving values
         // inside window to the left.
         for i in CHUNK_SIZE..WINDOW_SIZE {
-            self.swbf_active[i - CHUNK_SIZE] = self.swbf_active[i];
+            self.swbf_active.bits[i - CHUNK_SIZE] = self.swbf_active.bits[i];
         }
         for i in (WINDOW_SIZE - CHUNK_SIZE)..WINDOW_SIZE {
-            self.swbf_active[i] = false;
+            self.swbf_active.bits[i] = false;
         }
 
         let chunk_index_for_inserted_chunk = self.swbf_inactive.count_leaves() - 1;
@@ -225,7 +243,7 @@ where
             if chunk_index >= batch_index {
                 for bit_index in bit_indices {
                     let relative_index = bit_index - window_start;
-                    self.swbf_active[relative_index as usize] = true;
+                    self.swbf_active.bits[relative_index as usize] = true;
                 }
 
                 continue;
@@ -386,7 +404,7 @@ where
                 // bits are in active window
                 'inner_active: for bit_index in bit_indices {
                     let relative_index = bit_index - window_start;
-                    if !self.swbf_active[relative_index as usize] {
+                    if !self.swbf_active.bits[relative_index as usize] {
                         has_unset_bits = true;
                         break 'inner_active;
                     }
@@ -897,7 +915,7 @@ mod accumulation_scheme_tests {
         let s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
         assert!(s_back.aocl.is_empty());
         assert!(s_back.swbf_inactive.is_empty());
-        assert!(s_back.swbf_active.iter().all(|b| !b));
+        assert!(s_back.swbf_active.bits.iter().all(|b| !b));
 
         // Add an item, verify correct serialization
         let (mp, item) = insert_item(&mut mutator_set);
@@ -906,7 +924,7 @@ mod accumulation_scheme_tests {
         let s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
         assert_eq!(1, s_back_one_add.aocl.count_leaves());
         assert!(s_back_one_add.swbf_inactive.is_empty());
-        assert!(s_back_one_add.swbf_active.iter().all(|b| !b));
+        assert!(s_back_one_add.swbf_active.bits.iter().all(|b| !b));
         assert!(s_back_one_add.verify(&item, &mp));
 
         // Remove an item, verify correct serialization
@@ -925,7 +943,11 @@ mod accumulation_scheme_tests {
             "Window should not have moved"
         );
         assert!(
-            !s_back_one_add_one_remove.swbf_active.iter().all(|b| !b),
+            !s_back_one_add_one_remove
+                .swbf_active
+                .bits
+                .iter()
+                .all(|b| !b),
             "Some of the bits in the active window must now be set"
         );
         assert!(

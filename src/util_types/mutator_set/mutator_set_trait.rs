@@ -49,4 +49,8 @@ where
     /// Updates the mutator set so as to remove the item determined by
     /// its removal record.
     fn remove(&mut self, removal_record: &RemovalRecord<H>);
+
+    /// get_commitment
+    /// Return a commitment to the entire mutator set
+    fn get_commitment(&self) -> H::Digest;
 }

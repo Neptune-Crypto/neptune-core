@@ -227,7 +227,9 @@ where
         let batch_index = new_item_index / BATCH_SIZE as u128;
         let old_window_start_batch_index = batch_index - 1;
         let new_chunk = Chunk {
-            bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
+            bits: mutator_set.swbf_active.bits[0..CHUNK_SIZE]
+                .try_into()
+                .unwrap(),
         };
         let hasher = H::new();
         let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&hasher);
@@ -388,7 +390,9 @@ where
         let old_window_start_batch_index = batch_index - 1;
         let new_window_start_batch_index = batch_index;
         let new_chunk = Chunk {
-            bits: mutator_set.swbf_active[0..CHUNK_SIZE].try_into().unwrap(),
+            bits: mutator_set.swbf_active.bits[0..CHUNK_SIZE]
+                .try_into()
+                .unwrap(),
         };
 
         let hasher = H::new();

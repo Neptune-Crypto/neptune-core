@@ -93,6 +93,10 @@ where
             self.chunks.insert(chunk_index, chunk);
         }
     }
+
+    fn get_commitment(&self) -> <H as Hasher>::Digest {
+        todo!()
+    }
 }
 
 /// Methods that only work when implementing using archival MMRs as the underlying two MMRs

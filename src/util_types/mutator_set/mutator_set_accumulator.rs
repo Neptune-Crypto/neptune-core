@@ -1,7 +1,7 @@
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr::mmr_accumulator::MmrAccumulator,
+        mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
         simple_hasher::{Hasher, ToDigest},
     },
 };
@@ -50,6 +50,14 @@ where
 
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
         self.remove_helper(removal_record);
+    }
+
+    fn get_commitment(&self) -> <H as Hasher>::Digest {
+        let aocl_mmr_bagged = self.aocl.bag_peaks();
+        let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
+        // TODO: add hashing of active window
+
+        todo!()
     }
 }
 
