@@ -95,7 +95,11 @@ where
     }
 
     fn get_commitment(&self) -> <H as Hasher>::Digest {
-        todo!()
+        let aocl_mmr_bagged = self.set_commitment.aocl.bag_peaks();
+        let inactive_swbf_bagged = self.set_commitment.swbf_inactive.bag_peaks();
+        let active_swbf_bagged = self.set_commitment.swbf_active.hash();
+        let hasher = H::new();
+        hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
     }
 }
 

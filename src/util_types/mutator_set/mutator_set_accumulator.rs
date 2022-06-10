@@ -55,9 +55,9 @@ where
     fn get_commitment(&self) -> <H as Hasher>::Digest {
         let aocl_mmr_bagged = self.aocl.bag_peaks();
         let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
-        // TODO: add hashing of active window
-
-        todo!()
+        let active_swbf_bagged = self.swbf_active.hash();
+        let hasher = H::new();
+        hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
     }
 }
 
