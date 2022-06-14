@@ -6,7 +6,7 @@ use serde_big_array::BigArray;
 use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
 use crate::util_types::simple_hasher::{self, Hasher, ToDigest};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActiveWindow<H: simple_hasher::Hasher> {
     // Consider using the `bit_vec` crate here instead
     #[serde(with = "BigArray")]

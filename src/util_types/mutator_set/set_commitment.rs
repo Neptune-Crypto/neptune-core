@@ -35,7 +35,7 @@ pub enum SetCommitmentError {
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
