@@ -5,7 +5,7 @@ use crate::util_types::{
     simple_hasher::{self, ToDigest},
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AdditionRecord<H: simple_hasher::Hasher> {
     pub commitment: H::Digest,
 

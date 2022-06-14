@@ -16,7 +16,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct RemovalRecord<H: simple_hasher::Hasher> {
     #[serde(with = "BigArray")]
     pub bit_indices: [u128; NUM_TRIALS],

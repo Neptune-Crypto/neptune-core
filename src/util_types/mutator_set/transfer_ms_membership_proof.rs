@@ -5,7 +5,7 @@ use crate::util_types::{mmr, simple_hasher};
 
 /// Type to transfer membership proof without risking that `cached_bits` are shared between
 /// peers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TransferMsMembershipProof<H: simple_hasher::Hasher> {
     pub randomness: H::Digest,
     pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
