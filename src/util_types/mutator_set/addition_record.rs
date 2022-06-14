@@ -31,6 +31,11 @@ where
         self.aocl_snapshot.count_leaves() == aocl_accumulator.count_leaves()
             && self.aocl_snapshot.get_peaks() == aocl_accumulator.get_peaks()
     }
+
+    pub fn hash(&self) -> H::Digest {
+        let mmr_digest = self.aocl_snapshot.bag_peaks();
+        H::new().hash_pair(&self.commitment, &mmr_digest)
+    }
 }
 
 #[cfg(test)]
@@ -43,6 +48,23 @@ mod addition_record_tests {
     };
 
     use super::*;
+
+    #[test]
+    fn hash_test() {
+        type Hasher = blake3::Hasher;
+
+        let msa0: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let msa1: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let addition_record_0: AdditionRecord<Hasher> =
+            msa0.commit(&1492u128.into(), &1522u128.into());
+        let addition_record_1: AdditionRecord<Hasher> =
+            msa1.commit(&1492u128.into(), &1522u128.into());
+        assert_eq!(
+            addition_record_0.hash(),
+            addition_record_1.hash(),
+            "Two addition records with same commitments and same MMR AOCLs must agree."
+        );
+    }
 
     #[test]
     fn has_matching_aocl_test() {
@@ -63,6 +85,11 @@ mod addition_record_tests {
         assert!(
             addition_record_0.has_matching_aocl(&msa1.aocl),
             "Addition record made from equivalent MS accumulator must match (1)"
+        );
+        assert_ne!(
+            addition_record_0.hash(),
+            addition_record_1.hash(),
+            "Two addition records with differing commitments but same MMR AOCLs must differ."
         );
 
         // Verify behavior with two different mutator sets, with different leaf count.
@@ -89,6 +116,12 @@ mod addition_record_tests {
 
         assert!(new_addition_record_0.has_matching_aocl(&new_addition_record_0.aocl_snapshot));
         assert!(!new_addition_record_0.has_matching_aocl(&new_addition_record_1.aocl_snapshot));
+
+        assert_ne!(
+            new_addition_record_0.hash(),
+            new_addition_record_1.hash(),
+            "Two addition records with same commitments but differing MMR AOCLs must differ."
+        );
     }
 
     #[test]
