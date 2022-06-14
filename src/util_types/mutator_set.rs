@@ -1,3 +1,4 @@
+pub mod active_window;
 pub mod addition_record;
 pub mod archival_mutator_set;
 pub mod chunk;

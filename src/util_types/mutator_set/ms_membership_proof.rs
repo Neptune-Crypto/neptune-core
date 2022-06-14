@@ -9,10 +9,7 @@ use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        mutator_set::{
-            chunk::Chunk,
-            set_commitment::{get_swbf_indices, BATCH_SIZE},
-        },
+        mutator_set::{chunk::Chunk, set_commitment::get_swbf_indices, shared::BATCH_SIZE},
         simple_hasher::{self, ToDigest},
     },
 };
@@ -21,7 +18,8 @@ use super::{
     addition_record::AdditionRecord,
     chunk_dictionary::ChunkDictionary,
     removal_record::RemovalRecord,
-    set_commitment::{SetCommitment, CHUNK_SIZE, NUM_TRIALS},
+    set_commitment::SetCommitment,
+    shared::{CHUNK_SIZE, NUM_TRIALS},
     transfer_ms_membership_proof::TransferMsMembershipProof,
 };
 
@@ -124,10 +122,10 @@ where
                     Some((mp, chnk)) => {
                         for bit_index in bit_indices.iter() {
                             let index = (bit_index % CHUNK_SIZE as u128) as usize;
-                            if !chnk.bits[index] {
+                            if !chnk.get_bit(index) {
                                 mutated_chunks_by_input_indices.insert(i);
                             }
-                            chnk.bits[index] = true;
+                            chnk.set_bit(index);
                         }
 
                         // If this leaf/membership proof pair has not already been collected,
@@ -150,8 +148,7 @@ where
                             Some((mp, chnk)) => {
                                 let mut target_chunk = chnk.to_owned();
                                 for bit_index in bit_indices.iter() {
-                                    target_chunk.bits[(bit_index % CHUNK_SIZE as u128) as usize] =
-                                        true;
+                                    target_chunk.set_bit((bit_index % CHUNK_SIZE as u128) as usize);
                                 }
 
                                 if !mutation_argument_hash_map.contains_key(chunk_index) {
@@ -227,9 +224,7 @@ where
         let batch_index = new_item_index / BATCH_SIZE as u128;
         let old_window_start_batch_index = batch_index - 1;
         let new_chunk = Chunk {
-            bits: mutator_set.swbf_active.bits[0..CHUNK_SIZE]
-                .try_into()
-                .unwrap(),
+            bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
         };
         let hasher = H::new();
         let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&hasher);
@@ -390,9 +385,7 @@ where
         let old_window_start_batch_index = batch_index - 1;
         let new_window_start_batch_index = batch_index;
         let new_chunk = Chunk {
-            bits: mutator_set.swbf_active.bits[0..CHUNK_SIZE]
-                .try_into()
-                .unwrap(),
+            bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
         };
 
         let hasher = H::new();
@@ -569,7 +562,7 @@ mod ms_proof_tests {
     use crate::util_types::{
         blake3_wrapper::{self, Blake3Hash},
         mmr,
-        mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
+        mutator_set::{mutator_set_accumulator::MutatorSetAccumulator, shared::BITS_PER_U32},
         simple_hasher::Hasher,
     };
     use rand::thread_rng;
@@ -680,7 +673,7 @@ mod ms_proof_tests {
 
         // Get an MMR membership proof by adding the 8th leaf
         let zero_chunk = Chunk {
-            bits: [false; CHUNK_SIZE],
+            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
         let mmr_mp = mmra.append(zero_chunk.hash(&hasher));
 

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use super::{
     chunk_dictionary::ChunkDictionary,
-    set_commitment::{SetCommitment, NUM_TRIALS},
-    shared::bit_indices_to_hash_map,
+    set_commitment::SetCommitment,
+    shared::{bit_indices_to_hash_map, NUM_TRIALS},
 };
 use crate::{
     shared_math::b_field_element::BFieldElement,
@@ -66,7 +66,7 @@ mod removal_record_tests {
             mutator_set::{
                 mutator_set_accumulator::MutatorSetAccumulator,
                 removal_record::RemovalRecord,
-                set_commitment::{CHUNK_SIZE, NUM_TRIALS},
+                shared::{CHUNK_SIZE, NUM_TRIALS},
             },
             simple_hasher::Hasher,
         },

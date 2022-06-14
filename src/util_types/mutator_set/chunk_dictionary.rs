@@ -35,7 +35,7 @@ mod chunk_dict_tests {
             mmr::{
                 archival_mmr::ArchivalMmr, mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr,
             },
-            mutator_set::set_commitment::CHUNK_SIZE,
+            mutator_set::shared::{BITS_PER_U32, CHUNK_SIZE},
             simple_hasher::Hasher,
         },
     };
@@ -68,7 +68,7 @@ mod chunk_dict_tests {
         let mp: MmrMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
-            bits: [true; CHUNK_SIZE],
+            bits: [0xFFFFFFFFu32; CHUNK_SIZE / BITS_PER_U32],
         };
 
         let key = 898989u128;

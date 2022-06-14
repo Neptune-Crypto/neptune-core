@@ -18,7 +18,8 @@ use super::{
     ms_membership_proof::MsMembershipProof,
     mutator_set_trait::MutatorSet,
     removal_record::RemovalRecord,
-    set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError, BATCH_SIZE, CHUNK_SIZE},
+    set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError},
+    shared::{BATCH_SIZE, CHUNK_SIZE},
 };
 
 pub struct ArchivalMutatorSet<H>

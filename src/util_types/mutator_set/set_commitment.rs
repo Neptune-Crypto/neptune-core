@@ -1,27 +1,23 @@
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use serde_big_array;
-use serde_big_array::BigArray;
 use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error, fmt, marker::PhantomData};
 
 use super::{
-    addition_record::AdditionRecord, chunk_dictionary::ChunkDictionary,
-    ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
-    shared::bit_indices_to_hash_map,
+    active_window::ActiveWindow,
+    addition_record::AdditionRecord,
+    chunk_dictionary::ChunkDictionary,
+    ms_membership_proof::MsMembershipProof,
+    removal_record::RemovalRecord,
+    shared::{bit_indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
 };
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::{self, mmr_trait::Mmr},
         mutator_set::chunk::Chunk,
-        simple_hasher::{self, Hasher, ToDigest},
+        simple_hasher::{Hasher, ToDigest},
     },
 };
-
-pub const WINDOW_SIZE: usize = 30000;
-pub const CHUNK_SIZE: usize = 1500;
-pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 160; // TODO: Change to 160 in production
 
 impl Error for SetCommitmentError {}
 
@@ -37,72 +33,6 @@ pub enum SetCommitmentError {
     RequestedSwbfAuthPathOutOfBounds((u128, u128)),
     MutatorSetIsEmpty,
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ActiveWindow<H: Hasher> {
-    // Consider using the `bit_vec` crate here instead
-    #[serde(with = "BigArray")]
-    pub bits: [bool; WINDOW_SIZE],
-    _hasher: PhantomData<H>,
-}
-
-impl<H: Hasher> ActiveWindow<H>
-where
-    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-{
-    fn default() -> Self {
-        Self {
-            bits: [false; WINDOW_SIZE as usize],
-            _hasher: PhantomData,
-        }
-    }
-
-    fn accumulate(&self) -> [u8; WINDOW_SIZE / 8] {
-        // Convert the bool array into a byte array
-        let mut ret = [0u8; WINDOW_SIZE / 8];
-        for i in 0..WINDOW_SIZE {
-            ret[i / 8] |= u8::from(self.bits[i]) << (i % 8);
-        }
-
-        ret
-    }
-
-    /// Return the number of u128s that are required to represent the active window
-    fn get_u128s_length() -> usize {
-        if WINDOW_SIZE % (8 * 16) == 0 {
-            WINDOW_SIZE / (8 * 16)
-        } else {
-            WINDOW_SIZE / (8 * 16) + 1
-        }
-    }
-
-    fn get_u128s(bytes: [u8; WINDOW_SIZE / 8]) -> Vec<u128> {
-        let mut u128s: Vec<u128> = vec![0u128; Self::get_u128s_length()];
-        for i in 0..(WINDOW_SIZE / 8) {
-            // u128s[i / 16] += (bytes[i] * (1 << (i % 16))) as u128;
-            let shift = 8 * (i % 16);
-            u128s[i / 16] += bytes[i] as u128 * (1u128 << shift);
-        }
-
-        u128s
-    }
-
-    /// Get a commitment for the active part of the sliding-window bloom filter
-    pub fn hash(&self) -> H::Digest {
-        // This function is made more complicated by the support of generic hash functions.
-        // You could simplify it a lot if it only had to support B field element hashes like
-        // Rescue Prime.
-        // In other words: When implementing this in Triton, another, probably simpler, implementation
-        // might be possible.
-        let bytes: [u8; WINDOW_SIZE / 8] = self.accumulate();
-        let u128s: Vec<u128> = Self::get_u128s(bytes);
-
-        let digests: Vec<H::Digest> = u128s.iter().map(|x| x.to_digest()).collect();
-        let hasher: H = H::new();
-
-        hasher.hash_many(&digests)
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -254,7 +184,7 @@ where
         // if window slides, update filter
         // First update the inactive part of the SWBF, the SWBF MMR
         let chunk: Chunk = Chunk {
-            bits: self.swbf_active.bits[..CHUNK_SIZE].try_into().unwrap(),
+            bits: self.swbf_active.get_sliding_chunk_bits(),
         };
         let hasher = H::new();
         let chunk_digest: H::Digest = chunk.hash::<H>(&hasher);
@@ -262,12 +192,7 @@ where
 
         // Then move window to the right, equivalent to moving values
         // inside window to the left.
-        for i in CHUNK_SIZE..WINDOW_SIZE {
-            self.swbf_active.bits[i - CHUNK_SIZE] = self.swbf_active.bits[i];
-        }
-        for i in (WINDOW_SIZE - CHUNK_SIZE)..WINDOW_SIZE {
-            self.swbf_active.bits[i] = false;
-        }
+        self.swbf_active.slide_window();
 
         let chunk_index_for_inserted_chunk = self.swbf_inactive.count_leaves() - 1;
 
@@ -290,16 +215,18 @@ where
             if chunk_index >= batch_index {
                 for bit_index in bit_indices {
                     let relative_index = bit_index - window_start;
-                    self.swbf_active.bits[relative_index as usize] = true;
+                    self.swbf_active.set_bit(relative_index as usize);
                 }
 
                 continue;
             }
 
             // If chunk index is not in the active part, set the bits in the relevant chunk
-            let mut relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
+            let relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
             for bit_index in bit_indices {
-                relevant_chunk.1.bits[(bit_index % CHUNK_SIZE as u128) as usize] = true;
+                relevant_chunk
+                    .1
+                    .set_bit((bit_index % CHUNK_SIZE as u128) as usize);
             }
         }
 
@@ -442,7 +369,7 @@ where
 
                 'inner_inactive: for bit_index in bit_indices {
                     let index_within_chunk = bit_index % CHUNK_SIZE as u128;
-                    if !mp_and_chunk.1.bits[index_within_chunk as usize] {
+                    if !mp_and_chunk.1.get_bit(index_within_chunk as usize) {
                         has_unset_bits = true;
                         break 'inner_inactive;
                     }
@@ -451,7 +378,7 @@ where
                 // bits are in active window
                 'inner_active: for bit_index in bit_indices {
                     let relative_index = bit_index - window_start;
-                    if !self.swbf_active.bits[relative_index as usize] {
+                    if !self.swbf_active.get_bit(relative_index as usize) {
                         has_unset_bits = true;
                         break 'inner_active;
                     }
@@ -461,89 +388,6 @@ where
 
         // return verdict
         is_aocl_member && entries_in_dictionary && all_auth_paths_are_valid && has_unset_bits
-    }
-}
-
-#[cfg(test)]
-mod active_window_tests {
-    use crate::shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH};
-
-    use super::*;
-
-    impl<H: Hasher> ActiveWindow<H> {
-        fn new(bits: [bool; WINDOW_SIZE as usize]) -> Self {
-            Self {
-                bits,
-                _hasher: PhantomData,
-            }
-        }
-    }
-
-    #[test]
-    fn u128s_length_test() {
-        // Let's just compare the output of this function to the result from my calculator
-        assert_eq!(
-            235,
-            ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::get_u128s_length()
-        );
-    }
-
-    #[test]
-    fn accumulate_test() {
-        type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
-        let mut active_window: ActiveWindow<Hasher> = ActiveWindow::new([true; WINDOW_SIZE]);
-        let mut converted: [u8; WINDOW_SIZE / 8] = active_window.accumulate();
-        for elem in converted.iter() {
-            assert_eq!(0xFFu8, *elem);
-        }
-
-        // Flip a bit an verify that result agrees
-        active_window.bits[7] = false;
-        converted = active_window.accumulate();
-        assert_eq!(0x7F, converted[0]);
-        for elem in converted.iter().skip(1) {
-            assert_eq!(0xFFu8, *elem);
-        }
-
-        // Flip all bits and verify that result is zero
-        active_window = ActiveWindow::default();
-        converted = active_window.accumulate();
-        for elem in converted.iter() {
-            assert_eq!(0x00u8, *elem);
-        }
-    }
-
-    #[test]
-    fn get_u128s_test() {
-        let mut bytes: [u8; WINDOW_SIZE / 8] = [0u8; WINDOW_SIZE / 8];
-        bytes[0] = 124;
-        bytes[1] = 125;
-        bytes[2] = 127;
-        bytes[14] = 144;
-        bytes[15] = 65;
-        bytes[21] = 98;
-        let u128s = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::get_u128s(bytes);
-        assert_eq!(235, u128s.len());
-        assert_eq!(98 * (1 << (5 * 8)), u128s[1]);
-        assert_eq!(
-            124 + 125 * (1 << 8) + 127 * (1 << 16) + 144 * (1 << (14 * 8)) + 65 * (1 << (15 * 8)),
-            u128s[0]
-        );
-    }
-
-    #[test]
-    fn hash_no_crash_test() {
-        // This is just a test to ensure that the hashing of the active part of the SWBF
-        // works in the runtime, for relevant hash functions
-        let hash_0 = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default().hash();
-        let hash_1 =
-            ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new([true; WINDOW_SIZE as usize])
-                .hash();
-        let hash_2 = ActiveWindow::<blake3::Hasher>::default().hash();
-        let hash_3 = ActiveWindow::<blake3::Hasher>::new([true; WINDOW_SIZE as usize]).hash();
-
-        assert_ne!(hash_0, hash_1);
-        assert_ne!(hash_2, hash_3);
     }
 }
 
@@ -1045,7 +889,7 @@ mod accumulation_scheme_tests {
         let s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
         assert!(s_back.aocl.is_empty());
         assert!(s_back.swbf_inactive.is_empty());
-        assert!(s_back.swbf_active.bits.iter().all(|b| !b));
+        assert!(s_back.swbf_active.bits.iter().all(|&b| b == 0u32));
 
         // Add an item, verify correct serialization
         let (mp, item) = insert_item(&mut mutator_set);
@@ -1054,7 +898,7 @@ mod accumulation_scheme_tests {
         let s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
         assert_eq!(1, s_back_one_add.aocl.count_leaves());
         assert!(s_back_one_add.swbf_inactive.is_empty());
-        assert!(s_back_one_add.swbf_active.bits.iter().all(|b| !b));
+        assert!(s_back_one_add.swbf_active.bits.iter().all(|&b| b == 0u32));
         assert!(s_back_one_add.verify(&item, &mp));
 
         // Remove an item, verify correct serialization
@@ -1077,7 +921,7 @@ mod accumulation_scheme_tests {
                 .swbf_active
                 .bits
                 .iter()
-                .all(|b| !b),
+                .all(|&b| b == 0u32),
             "Some of the bits in the active window must now be set"
         );
         assert!(
