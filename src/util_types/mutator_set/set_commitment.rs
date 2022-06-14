@@ -876,9 +876,12 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn ms_serialization_test() {
-        // You could argue that this test doesn't belong here, as it tests the behavior of
-        // an imported library. I included it here, though, because the setup seems a bit flimsy
-        // to me so far.
+        // This test verifies that the mutator set structure can be serialized and deserialized.
+        // When Rust spawns threads (as it does when it runs tests, and in the Neptune Core client),
+        // the new threads only get 2MB stack memory initially. This can result in stack overflows
+        // in the runtime. This test is to verify that that does not happen.
+        // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
+        // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
         type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
         type Mmr = MmrAccumulator<Hasher>;
         type Ms = SetCommitment<Hasher, Mmr>;
