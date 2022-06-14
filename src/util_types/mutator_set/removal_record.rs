@@ -48,6 +48,29 @@ where
     pub fn get_chunk_index_to_bit_indices(&self) -> HashMap<u128, Vec<u128>> {
         bit_indices_to_hash_map(&self.bit_indices)
     }
+
+    // Return a digest of the removal record
+    pub fn hash(&self) -> H::Digest {
+        // This method assumes that the bit_indices field is sorted. If they are not,
+        // then this method's output will not be deterministic. So we need a test for that,
+        // that the bit indices are sorted. This is what `verify_that_bit_indices_are_sorted_test`
+        // verifies.
+
+        let preimage: Vec<H::Digest> = self.get_preimage();
+        let hasher = H::new();
+
+        hasher.hash_many(&preimage)
+    }
+
+    fn get_preimage(&self) -> Vec<H::Digest> {
+        let mut preimage: Vec<H::Digest> = vec![];
+        for bi in self.bit_indices.iter() {
+            preimage.push(bi.to_digest());
+        }
+        preimage.push(self.target_chunks.hash());
+
+        preimage
+    }
 }
 
 #[cfg(test)]
@@ -70,8 +93,83 @@ mod removal_record_tests {
             },
             simple_hasher::Hasher,
         },
-        utils::has_unique_elements,
+        utils::{self, has_unique_elements},
     };
+
+    #[test]
+    fn verify_that_hash_preimage_elements_are_unique_test() {
+        type H = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
+        let hasher = H::new();
+        let mut prng = thread_rng();
+        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let mp = accumulator.prove(&item, &randomness, true);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+
+        let preimage = removal_record.get_preimage();
+        assert_eq!(NUM_TRIALS + 1, preimage.len());
+        assert!(utils::has_unique_elements(preimage));
+    }
+
+    #[test]
+    fn verify_that_bit_indices_are_sorted_test() {
+        type H = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
+        let hasher = H::new();
+        let mut prng = thread_rng();
+        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let mp = accumulator.prove(&item, &randomness, true);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+
+        let bit_indices = removal_record.bit_indices;
+        let mut bit_indices_sorted = bit_indices.clone();
+        bit_indices_sorted.sort_unstable();
+        assert_eq!(
+            bit_indices, bit_indices_sorted,
+            "bit indices must sorted in the removal record"
+        );
+
+        // Alternative way of checking that the indices are sorted (thanks, IRC)
+        assert!(
+            bit_indices.windows(2).all(|s| s[0] < s[1]),
+            "bit-indices must be sorted"
+        );
+    }
+
+    #[test]
+    fn hash_test() {
+        type H = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
+        let hasher = H::new();
+        let mut prng = thread_rng();
+        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let mp = accumulator.prove(&item, &randomness, true);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
+        assert_eq!(
+            removal_record.hash(),
+            removal_record_alt.hash(),
+            "Same removal record must hash to same value"
+        );
+        removal_record_alt.bit_indices[NUM_TRIALS / 4] += 1;
+
+        // Sanity check (theoretically, a collission in the bit indices could have happened)
+        assert!(
+            utils::has_unique_elements(removal_record_alt.bit_indices),
+            "Sanity check to ensure that bit indices are still all unique"
+        );
+        assert_ne!(
+            removal_record.hash(),
+            removal_record_alt.hash(),
+            "Changing a bit index must produce a new hash"
+        );
+    }
 
     #[test]
     fn get_chunk_index_to_bit_indices_test() {
