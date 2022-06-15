@@ -35,7 +35,7 @@ pub struct BlockHeader {
 
 impl BlockHeader {
     fn accumulate(&self) -> Vec<BFieldElement> {
-        let ret: Vec<BFieldElement> = vec![];
+        let mut ret: Vec<BFieldElement> = vec![];
         ret.push(self.version);
         ret.push(self.height.0);
         ret.append(&mut self.mutator_set_commitment.values().to_vec());
@@ -75,14 +75,21 @@ impl BlockHeader {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BlockBody {
     pub transactions: Vec<Transaction>,
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
     pub mutator_set_update: MutatorSetUpdate,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+impl BlockBody {
+    // /// Calculate a Merkle root of block body data structure
+    // pub fn get_merkle_root(&self) -> RescuePrimeDigest {
+    //     let preima
+    // }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Block {
     pub hash: RescuePrimeDigest,
     pub header: BlockHeader,
@@ -91,15 +98,16 @@ pub struct Block {
 
 impl Block {
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {
+        let digest = header.hash();
         Self {
             body,
             header,
-            hash: header.hash(),
+            hash: digest,
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TransferBlock {
     pub header: BlockHeader,
     pub body: BlockBody,
@@ -142,6 +150,12 @@ impl From<BlockHeight> for BFieldElement {
 impl From<u64> for BlockHeight {
     fn from(val: u64) -> Self {
         BlockHeight(BFieldElement::new(val))
+    }
+}
+
+impl From<BlockHeight> for u64 {
+    fn from(bh: BlockHeight) -> Self {
+        bh.0.value()
     }
 }
 

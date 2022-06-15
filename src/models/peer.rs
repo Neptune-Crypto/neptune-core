@@ -1,6 +1,6 @@
 use super::{
     blockchain::{
-        block::{Block, BlockBody, BlockHeader, BlockHeight, TransferBlock},
+        block::{Block, BlockHeight, TransferBlock},
         digest::RescuePrimeDigest,
     },
     shared::LatestBlockInfo,
@@ -58,8 +58,8 @@ pub enum ConnectionStatus {
     Accepted,
 }
 
-// #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+// #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PeerMessage {
     Handshake((Vec<u8>, HandshakeData)),
     Block(Box<TransferBlock>),

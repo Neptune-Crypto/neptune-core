@@ -1,20 +1,38 @@
 use super::*;
-use crate::models::blockchain::{Block, Transaction, Utxo};
+use crate::models::blockchain::block::Block;
+use crate::models::blockchain::block::BlockBody;
+use crate::models::blockchain::block::BlockHeader;
+use crate::models::blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES;
+use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::Utxo;
 use crate::models::peer::ConnectionRefusedReason;
 use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use leveldb::options::WriteOptions;
+use num_traits::Zero;
 use pin_project_lite::pin_project;
+use rand::thread_rng;
 use rand::{distributions::Alphanumeric, Rng};
+use secp256k1::rand::rngs::OsRng;
+use secp256k1::Secp256k1;
 use std::collections::hash_map::RandomState;
 use std::env;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::time::UNIX_EPOCH;
 use tokio_serde::Serializer;
 use tokio_test::io::Builder;
 use tokio_util::codec::Encoder;
+use twenty_first::amount::u32s::U32s;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::traits::GetRandomElements;
+use twenty_first::util_types::mutator_set::addition_record::AdditionRecord;
+use twenty_first::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 const UNIT_TEST_DB_DIRECTORY: &str = "neptune_unit_test_databases";
 
@@ -405,38 +423,65 @@ impl<Item> stream::Stream for Mock<Item> {
 
 /// Return a fake block with a random hash
 fn make_mock_block(height: u64) -> Block {
-    let utxo_pol = [0u32; 2048];
-    let utxo = Utxo {
-        pol0: utxo_pol,
-        pol1: utxo_pol,
+    let secp = Secp256k1::new();
+    let mut rng = OsRng::new().expect("OsRng");
+    let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+        secp.generate_keypair(&mut rng);
+
+    let coinbase_utxo = Utxo {
+        amount: U32s::new([100u32, 0, 0, 0]),
+        public_key,
+    };
+    let timestamp: BFieldElement = BFieldElement::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Got bad time timestamp in mining process")
+            .as_secs(),
+    );
+    let tx = Transaction {
+        inputs: vec![],
+        outputs: vec![coinbase_utxo.clone()],
+        public_scripts: vec![],
+        fee: U32s::zero(),
+        timestamp,
+    };
+    let mut new_ms = MutatorSetAccumulator::default();
+    let coinbase_digest: RescuePrimeDigest = coinbase_utxo.hash();
+    let randomness =
+        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+    let coinbase_addition_record: AdditionRecord<Hash> =
+        new_ms.commit(&coinbase_digest.into(), &randomness.into());
+    let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
+        removals: vec![],
+        additions: vec![coinbase_addition_record.clone()],
+    };
+    new_ms.add(&coinbase_addition_record);
+
+    let block_body: BlockBody = BlockBody {
+        transactions: vec![tx],
+        mutator_set_accumulator: new_ms.clone(),
+        mutator_set_update,
     };
 
-    let tx = Transaction {
-        input: vec![utxo.clone()],
-        output: vec![utxo.clone()],
-        public_scripts: vec![],
-        proof: vec![],
-    };
-    let block_hash_raw: [u8; 32] = rand::random();
-    Block {
-        version_bits: [0u8; 4],
-        timestamp: SystemTime::now(),
+    let zero = BFieldElement::ring_zero();
+    let block_header = BlockHeader {
+        version: zero,
         height: BlockHeight::from(height),
-        nonce: [0u8; 32],
-        predecessor: BlockHash::from([0u8; 32]),
-        predecessor_proof: vec![],
-        accumulated_pow_line: 0u128,
-        accumulated_pow_family: 0u128,
+        mutator_set_commitment: new_ms.get_commitment().into(),
+        prev_block_digest: RescuePrimeDigest::default(),
+        timestamp,
+        nonce: [zero, zero, zero],
+        max_block_size: 1_000_000,
+        proof_of_work_line: U32s::zero(),
+        proof_of_work_family: U32s::zero(),
+        target_difficulty: U32s::zero(),
+
+        // TODO: Wrong: Fix this by implementing a hash function on BlockBody
+        block_body_merkle_root: RescuePrimeDigest::default(),
         uncles: vec![],
-        target_difficulty: 0u128,
-        retarget_proof: vec![],
-        transaction: tx,
-        mixed_edges: vec![],
-        mix_proof: vec![],
-        edge_mmra: utxo,
-        edge_mmra_update: vec![],
-        hash: BlockHash::from(block_hash_raw),
-    }
+    };
+
+    Block::new(block_header, block_body)
 }
 
 #[tokio::test]
@@ -511,8 +556,8 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     let databases = get_unit_test_database(Network::Main)?;
 
     let block_14 = make_mock_block(14);
-    let latest_block_info_14 = LatestBlockInfo::new(block_14.hash, block_14.height);
-    let block_hash_raw: [u8; 32] = block_14.hash.into();
+    let latest_block_info_14 = LatestBlockInfo::new(block_14.hash, block_14.header.height);
+    // let block_hash_raw: [u8; 32] = block_14.hash.into();
     {
         let dbs = databases.lock().await;
         dbs.latest_block.put(
@@ -527,8 +572,8 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
         )?;
         dbs.block_height_to_hash.put(
             WriteOptions::new(),
-            block_14.height,
-            &bincode::serialize(&block_hash_raw)?,
+            block_14.header.height,
+            &bincode::serialize(&block_14.hash)?,
         )?;
     }
     let state = State {
@@ -537,7 +582,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     };
 
     let mock = Mock::new(vec![
-        Action::Read(PeerMessage::Block(Box::new(block_14))),
+        Action::Read(PeerMessage::Block(Box::new(block_14.into()))),
         Action::Read(PeerMessage::Bye),
     ]);
 
@@ -581,7 +626,7 @@ async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
     };
 
     let mock = Mock::new(vec![
-        Action::Read(PeerMessage::Block(Box::new(make_mock_block(0)))),
+        Action::Read(PeerMessage::Block(Box::new(make_mock_block(0).into()))),
         Action::Read(PeerMessage::Bye),
     ]);
 

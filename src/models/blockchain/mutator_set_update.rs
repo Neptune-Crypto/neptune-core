@@ -5,8 +5,19 @@ use twenty_first::util_types::mutator_set::{
 
 use super::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MutatorSetUpdate {
-    removals: Vec<RemovalRecord<Hash>>,
-    additions: Vec<AdditionRecord<Hash>>,
+    pub removals: Vec<RemovalRecord<Hash>>,
+    pub additions: Vec<AdditionRecord<Hash>>,
+}
+
+impl MutatorSetUpdate {
+    pub fn new(removals: Vec<RemovalRecord<Hash>>, additions: Vec<AdditionRecord<Hash>>) -> Self {
+        Self {
+            additions,
+            removals,
+        }
+    }
+
+    // TODO: Replace this with a Merkle root implementation that can handle a
 }

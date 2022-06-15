@@ -7,6 +7,8 @@ pub const RESCUE_PRIME_OUTPUT_SIZE_IN_BFES: usize = 6;
 pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
     RESCUE_PRIME_OUTPUT_SIZE_IN_BFES * BYTES_PER_BFE;
 
+// The data structure `RescuePrimeDigest` is primarily needed, so we can make
+// database keys out of rescue prime digests.
 #[derive(Clone, Copy, Debug, Serialize, serde::Deserialize, PartialEq)]
 pub struct RescuePrimeDigest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
 
@@ -18,11 +20,15 @@ impl RescuePrimeDigest {
     pub fn new(digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
         Self(digest)
     }
+
+    pub fn default() -> Self {
+        Self([BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+    }
 }
 
 impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for RescuePrimeDigest {
     fn from(item: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]) -> Self {
-        let bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
+        let mut bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
             [BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
         for i in 0..RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
             let start_index = i * RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
@@ -31,6 +37,31 @@ impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for RescuePrimeDigest {
         }
 
         Self(bfes)
+    }
+}
+
+impl From<[BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]> for RescuePrimeDigest {
+    fn from(array: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
+        RescuePrimeDigest(array)
+    }
+}
+
+impl From<RescuePrimeDigest> for [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
+    fn from(val: RescuePrimeDigest) -> Self {
+        val.0
+    }
+}
+
+impl From<Vec<BFieldElement>> for RescuePrimeDigest {
+    fn from(elems: Vec<BFieldElement>) -> Self {
+        let argument_length = elems.len();
+        let array: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
+            elems.try_into().expect(&format!(
+                "Digest must have length {}. Got: {}",
+                RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, argument_length,
+            ));
+
+        array.into()
     }
 }
 
