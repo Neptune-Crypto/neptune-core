@@ -100,6 +100,13 @@ mod accumulation_scheme_tests {
             let mut items: Vec<Digest> = vec![];
             let mut rands: Vec<Digest> = vec![];
             for i in 0..number_of_interactions {
+                // Verify that commitment to both the accumulator and archival data structure agree
+                assert_eq!(
+                    accumulator.get_commitment(),
+                    archival.get_commitment(),
+                    "Commitment to archival/accumulator MS must agree"
+                );
+
                 if prng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
                     let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
