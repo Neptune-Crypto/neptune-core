@@ -25,6 +25,15 @@ const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 8;
 const MOCK_REGTEST_MAX_MINING_DIFFERENCE_SECONDS: u64 = 8;
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
+const MOCK_BLOCK_THRESHOLD: RescuePrimeDigest = RescuePrimeDigest::new([
+    BFieldElement::new(BFieldElement::MAX / 100_000),
+    BFieldElement::ring_zero(),
+    BFieldElement::ring_zero(),
+    BFieldElement::ring_zero(),
+    BFieldElement::ring_zero(),
+    BFieldElement::ring_zero(),
+]);
+
 /// Return a fake block with a random hash
 fn make_mock_block(height: u64, current_block_digest: RescuePrimeDigest) -> Block {
     // TODO: Replace this with public key sent from the main thread
@@ -74,7 +83,7 @@ fn make_mock_block(height: u64, current_block_digest: RescuePrimeDigest) -> Bloc
     };
 
     let zero = BFieldElement::ring_zero();
-    let block_header = BlockHeader {
+    let mut block_header = BlockHeader {
         version: zero,
         height: BlockHeight::from(height),
         mutator_set_commitment: new_ms.get_commitment().into(),
@@ -85,11 +94,14 @@ fn make_mock_block(height: u64, current_block_digest: RescuePrimeDigest) -> Bloc
         proof_of_work_line: U32s::zero(),
         proof_of_work_family: U32s::zero(),
         target_difficulty: U32s::zero(),
-
-        // TODO: Wrong: Fix this by implementing a hash function on BlockBody
-        block_body_merkle_root: RescuePrimeDigest::default(),
+        block_body_merkle_root: block_body.hash().into(),
         uncles: vec![],
     };
+
+    // Mining takes place here
+    while block_header.hash() >= MOCK_BLOCK_THRESHOLD {
+        block_header.nonce[2].increment();
+    }
 
     Block::new(block_header, block_body)
 }

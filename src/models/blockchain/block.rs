@@ -6,7 +6,10 @@ use twenty_first::{
     amount::u32s::U32s,
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mutator_set::mutator_set_accumulator::MutatorSetAccumulator, simple_hasher::Hasher,
+        mutator_set::{
+            mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+        },
+        simple_hasher::Hasher,
     },
 };
 
@@ -84,9 +87,30 @@ pub struct BlockBody {
 
 impl BlockBody {
     // /// Calculate a Merkle root of block body data structure
-    // pub fn get_merkle_root(&self) -> RescuePrimeDigest {
-    //     let preima
-    // }
+    pub fn hash(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
+        let transactions_digests: Vec<[BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]> =
+            self.transactions.iter().map(|tx| tx.hash()).collect();
+        let ms_acc_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] = self
+            .mutator_set_accumulator
+            .get_commitment()
+            .try_into()
+            .unwrap();
+        let ms_update_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
+            self.mutator_set_update.hash();
+
+        let hasher = Hash::new();
+        let all_digests: Vec<Vec<_>> = vec![
+            transactions_digests,
+            vec![ms_acc_digest],
+            vec![ms_update_digest],
+        ]
+        .concat()
+        .iter()
+        .map(|array| array.to_vec())
+        .collect();
+
+        hasher.hash_many(&all_digests).try_into().unwrap()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

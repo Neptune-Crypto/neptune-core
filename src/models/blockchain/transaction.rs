@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use twenty_first::{
     amount::u32s::U32s,
-    shared_math::{b_field_element::BFieldElement, rescue_prime_xlix::RP_DEFAULT_OUTPUT_SIZE},
+    shared_math::b_field_element::BFieldElement,
     util_types::{
         mutator_set::{
             removal_record::RemovalRecord, transfer_ms_membership_proof::TransferMsMembershipProof,
@@ -56,7 +56,7 @@ pub struct Transaction {
 
 impl Transaction {
     /// Return the hash digest of a transaction
-    pub fn hash(&self) -> RescuePrimeDigest {
+    pub fn hash(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
         // TODO: This digest definition should be reworked
         let hasher = Hash::new();
 
@@ -66,7 +66,7 @@ impl Transaction {
             .iter()
             .map(|output| output.hash().into())
             .collect();
-        let _outputs_digest = hasher.hash_many(&outputs_preimage);
+        let outputs_digest = hasher.hash_many(&outputs_preimage);
 
         // Hash inputs
         let mut inputs_preimage: Vec<Vec<BFieldElement>> = vec![];
@@ -75,17 +75,32 @@ impl Transaction {
             // We don't hash the membership proofs as they aren't part of the main net blocks
             inputs_preimage.push(input.2.hash().into());
         }
-        let _inputs_digest = hasher.hash_many(&inputs_preimage);
+        let inputs_digest = hasher.hash_many(&inputs_preimage);
 
         // Hash fee
         let fee_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.fee.into();
-        let _fee_digest = hasher.hash(&fee_bfes, RP_DEFAULT_OUTPUT_SIZE);
+        let fee_digest = hasher.hash(&fee_bfes, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
 
         // Hash timestamp
-        let _timestamp_digest = hasher.hash(&vec![self.timestamp], RP_DEFAULT_OUTPUT_SIZE);
+        let timestamp_digest = hasher.hash(&vec![self.timestamp], RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
 
         // Hash public_scripts
+        let flatted_public_scripts: Vec<BFieldElement> = self.public_scripts.concat();
+        let public_scripts_digest =
+            hasher.hash(&flatted_public_scripts, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
 
-        todo!()
+        let all_digests = vec![
+            inputs_digest,
+            outputs_digest,
+            fee_digest,
+            timestamp_digest,
+            public_scripts_digest,
+        ]
+        .concat();
+
+        hasher
+            .hash(&all_digests, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
+            .try_into()
+            .unwrap()
     }
 }
