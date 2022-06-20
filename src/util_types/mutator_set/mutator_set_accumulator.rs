@@ -99,13 +99,23 @@ mod accumulation_scheme_tests {
             let mut membership_proofs_sequential: Vec<MsMembershipProof<Hasher>> = vec![];
             let mut items: Vec<Digest> = vec![];
             let mut rands: Vec<Digest> = vec![];
+            let mut last_ms_commitment: Option<Digest> = None;
             for i in 0..number_of_interactions {
                 // Verify that commitment to both the accumulator and archival data structure agree
+                let new_commitment = accumulator.get_commitment();
                 assert_eq!(
-                    accumulator.get_commitment(),
+                    new_commitment,
                     archival.get_commitment(),
                     "Commitment to archival/accumulator MS must agree"
                 );
+                match last_ms_commitment {
+                    None => (),
+                    Some(commitment) => assert_ne!(
+                        commitment, new_commitment,
+                        "MS commitment must change upon insertion/deletion"
+                    ),
+                };
+                last_ms_commitment = Some(new_commitment);
 
                 if prng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
@@ -168,6 +178,10 @@ mod accumulation_scheme_tests {
                 } else {
                     // Remove an item from the mutator set and update all membership proofs
                     if membership_proofs_batch.is_empty() {
+                        // Set `last_ms_commitment` to None since it will otherwise be the
+                        // same as in last iteration of this inner loop, and that will fail
+                        // a test condition.
+                        last_ms_commitment = None;
                         continue;
                     }
 

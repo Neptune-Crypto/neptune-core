@@ -404,6 +404,7 @@ mod accumulation_scheme_tests {
         util_types::{
             blake3_wrapper,
             mmr::{archival_mmr::ArchivalMmr, mmr_accumulator::MmrAccumulator},
+            mutator_set::mutator_set_trait::MutatorSet,
             simple_hasher::Hasher,
         },
         utils::has_unique_elements,
@@ -413,6 +414,55 @@ mod accumulation_scheme_tests {
     use rand_core::{RngCore, SeedableRng};
 
     use super::*;
+
+    #[test]
+    fn mutator_set_commitment_test() {
+        type Hasher = blake3::Hasher;
+        let hasher = Hasher::new();
+        let empty = SetCommitment::<Hasher, MmrAccumulator<Hasher>>::default();
+        let commitment_to_empty = empty.get_commitment();
+
+        // Add one element to append-only commitment list
+        let mut one_in_aocl = empty.clone();
+        let mut prng = thread_rng();
+        let item0 = hasher.hash(&BFieldElement::random_elements(3, &mut prng));
+        one_in_aocl.aocl.append(item0.clone());
+        let commitment_to_one_aocl = one_in_aocl.get_commitment();
+        assert_ne!(
+            commitment_to_empty, commitment_to_one_aocl,
+            "Changing AOCL must change MS commitment"
+        );
+
+        // Manipulate inactive SWBF
+        let mut one_in_inactive_window = empty.clone();
+        one_in_inactive_window.swbf_inactive.append(item0);
+        let commitment_to_one_in_inactive = one_in_inactive_window.get_commitment();
+        assert_ne!(
+            commitment_to_empty, commitment_to_one_in_inactive,
+            "Changing inactive must change MS commitment"
+        );
+        assert_ne!(
+            commitment_to_one_aocl, commitment_to_one_in_inactive,
+            "One in AOCL and one in inactive must hash to different digests"
+        );
+
+        // Manipulate active window
+        let mut active_window_changed = empty;
+        active_window_changed.swbf_active.set_bit(42);
+        assert_ne!(
+            commitment_to_empty,
+            active_window_changed.get_commitment(),
+            "Changing active window must change commitment"
+        );
+
+        // Sanity check bc reasons
+        active_window_changed.swbf_active.unset_bit(42);
+        assert_eq!(
+            commitment_to_empty,
+            active_window_changed.get_commitment(),
+            "Commitment to empty MS must be consistent"
+        );
+    }
 
     #[test]
     fn ms_get_indices_test() {
