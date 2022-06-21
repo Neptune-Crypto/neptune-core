@@ -24,9 +24,10 @@ use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 const MOCK_REGTEST_MINIMUM_MINE_INTERVAL_SECONDS: u64 = 8;
 const MOCK_REGTEST_MAX_MINING_DIFFERENCE_SECONDS: u64 = 8;
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
+const MOCK_DIFFICULTY: u64 = 1_000;
 
 const MOCK_BLOCK_THRESHOLD: RescuePrimeDigest = RescuePrimeDigest::new([
-    BFieldElement::new(BFieldElement::MAX / 100_000),
+    BFieldElement::new(BFieldElement::MAX / MOCK_DIFFICULTY),
     BFieldElement::ring_zero(),
     BFieldElement::ring_zero(),
     BFieldElement::ring_zero(),
@@ -100,8 +101,22 @@ fn make_mock_block(height: u64, current_block_digest: RescuePrimeDigest) -> Bloc
 
     // Mining takes place here
     while block_header.hash() >= MOCK_BLOCK_THRESHOLD {
+        if block_header.nonce[2].value() == BFieldElement::MAX {
+            block_header.nonce[2] = BFieldElement::ring_zero();
+            if block_header.nonce[1].value() == BFieldElement::MAX {
+                block_header.nonce[1] = BFieldElement::ring_zero();
+                block_header.nonce[0].increment();
+                continue;
+            }
+            block_header.nonce[1].increment();
+            continue;
+        }
         block_header.nonce[2].increment();
     }
+    info!(
+        "Found valid block with nonce: ({}, {}, {})",
+        block_header.nonce[0], block_header.nonce[1], block_header.nonce[2]
+    );
 
     Block::new(block_header, block_body)
 }

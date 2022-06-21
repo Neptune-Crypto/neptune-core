@@ -27,6 +27,7 @@ pub struct BlockHeader {
     pub mutator_set_commitment: RescuePrimeDigest,
     pub prev_block_digest: RescuePrimeDigest,
     pub timestamp: BFieldElement,
+    // TODO: Consider making a type for `nonce`
     pub nonce: [BFieldElement; 3],
     pub max_block_size: u32,
     pub proof_of_work_line: U32s<5>,
