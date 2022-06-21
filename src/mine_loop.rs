@@ -66,11 +66,10 @@ fn make_mock_block(height: u64, current_block_digest: RescuePrimeDigest) -> Bloc
     let mut new_ms = MutatorSetAccumulator::default();
 
     let coinbase_digest: RescuePrimeDigest = coinbase_utxo.hash();
-    let randomness =
+    let randomness: Vec<BFieldElement> =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
-
     let coinbase_addition_record: AdditionRecord<Hash> =
-        new_ms.commit(&coinbase_digest.into(), &randomness.into());
+        new_ms.commit(&coinbase_digest.into(), &randomness);
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],

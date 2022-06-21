@@ -73,7 +73,7 @@ impl Transaction {
         for input in self.inputs.iter() {
             inputs_preimage.push(input.0.hash().into());
             // We don't hash the membership proofs as they aren't part of the main net blocks
-            inputs_preimage.push(input.2.hash().into());
+            inputs_preimage.push(input.2.hash());
         }
         let inputs_digest = hasher.hash_many(&inputs_preimage);
 
@@ -82,7 +82,7 @@ impl Transaction {
         let fee_digest = hasher.hash(&fee_bfes, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
 
         // Hash timestamp
-        let timestamp_digest = hasher.hash(&vec![self.timestamp], RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let timestamp_digest = hasher.hash(&[self.timestamp], RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
 
         // Hash public_scripts
         let flatted_public_scripts: Vec<BFieldElement> = self.public_scripts.concat();

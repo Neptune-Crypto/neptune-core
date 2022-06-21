@@ -185,6 +185,8 @@ where
                             .get(read_opts_block, block_digest)
                             .expect("Failed to read from database")
                         {
+                            // I think it makes sense to panic here since we found the block in the height to digest
+                            // database. So it should be in the hash to block database.
                             None => panic!("Failed to find block with hash {:?}", hash_array),
                             Some(block_bytes) => {
                                 let deserialized: Block = bincode::deserialize(&block_bytes)?;
@@ -198,11 +200,9 @@ where
                 };
             }
 
-            match resp {
-                PeerMessage::BlockResponseByHeight(None) => {
-                    warn!("Returning bad result from BlockRequestByHeight")
-                }
-                _ => (),
+            // Print a warning if the response we're about to send is empty
+            if let PeerMessage::BlockResponseByHeight(None) = resp {
+                warn!("Returning bad result from BlockRequestByHeight");
             }
 
             peer.send(resp).await?;

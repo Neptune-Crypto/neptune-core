@@ -39,9 +39,7 @@ pub struct BlockHeader {
 
 impl BlockHeader {
     fn accumulate(&self) -> Vec<BFieldElement> {
-        let mut ret: Vec<BFieldElement> = vec![];
-        ret.push(self.version);
-        ret.push(self.height.0);
+        let mut ret: Vec<BFieldElement> = vec![self.version, self.height.0];
         ret.append(&mut self.mutator_set_commitment.values().to_vec());
         ret.append(&mut self.prev_block_digest.values().to_vec());
         ret.push(self.timestamp);

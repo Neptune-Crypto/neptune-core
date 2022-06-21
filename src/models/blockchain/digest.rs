@@ -22,7 +22,7 @@ impl PartialOrd for RescuePrimeDigest {
             }
         }
 
-        return None;
+        None
     }
 }
 
@@ -44,10 +44,10 @@ impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for RescuePrimeDigest {
     fn from(item: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]) -> Self {
         let mut bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
             [BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
-        for i in 0..RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
+        for (i, bfe) in bfes.iter_mut().enumerate() {
             let start_index = i * BYTES_PER_BFE;
             let end_index = (i + 1) * BYTES_PER_BFE;
-            bfes[i] = BFieldElement::ring_zero().from_vecu8(item[start_index..end_index].to_vec())
+            *bfe = BFieldElement::ring_zero().from_vecu8(item[start_index..end_index].to_vec())
         }
 
         Self(bfes)
@@ -70,10 +70,12 @@ impl From<Vec<BFieldElement>> for RescuePrimeDigest {
     fn from(elems: Vec<BFieldElement>) -> Self {
         let argument_length = elems.len();
         let array: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
-            elems.try_into().expect(&format!(
-                "Digest must have length {}. Got: {}",
-                RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, argument_length,
-            ));
+            elems.try_into().unwrap_or_else(|_| {
+                panic!(
+                    "Digest must have length {}. Got: {}",
+                    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, argument_length
+                )
+            });
 
         array.into()
     }
