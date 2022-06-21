@@ -54,6 +54,9 @@ all: lint build test bench-no-run
 help:
 	@echo "usage: make [debug=1]"
 
+restart:
+	@rm -rf ~/.local/share/neptune-integration-test
+
 clean:
 	@rm -rf target
 	cargo clean
