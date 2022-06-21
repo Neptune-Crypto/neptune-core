@@ -13,6 +13,8 @@ use twenty_first::{
     },
 };
 
+use crate::mine_loop::MOCK_BLOCK_THRESHOLD;
+
 use super::{
     digest::{RescuePrimeDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     mutator_set_update::MutatorSetUpdate,
@@ -26,12 +28,21 @@ pub struct BlockHeader {
     pub height: BlockHeight,
     pub mutator_set_commitment: RescuePrimeDigest,
     pub prev_block_digest: RescuePrimeDigest,
+
+    // TODO: Reject blocks that are more than 10 seconds into the future
     pub timestamp: BFieldElement,
+
     // TODO: Consider making a type for `nonce`
     pub nonce: [BFieldElement; 3],
     pub max_block_size: u32,
+
+    // use to compare two forks of different height
     pub proof_of_work_line: U32s<5>,
+
+    // use to compare two forks of the same height
     pub proof_of_work_family: U32s<5>,
+
+    // This is the target difficulty for the current (*this*) block.
     pub target_difficulty: U32s<5>,
     pub block_body_merkle_root: RescuePrimeDigest,
     pub uncles: Vec<RescuePrimeDigest>,
@@ -80,8 +91,10 @@ impl BlockHeader {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BlockBody {
     pub transactions: Vec<Transaction>,
-    pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+    pub next_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+    pub previous_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
     pub mutator_set_update: MutatorSetUpdate,
+    pub stark_proof: Vec<BFieldElement>,
 }
 
 impl BlockBody {
@@ -89,8 +102,13 @@ impl BlockBody {
     pub fn hash(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
         let transactions_digests: Vec<[BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]> =
             self.transactions.iter().map(|tx| tx.hash()).collect();
-        let ms_acc_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] = self
-            .mutator_set_accumulator
+        let next_ms_acc_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] = self
+            .next_mutator_set_accumulator
+            .get_commitment()
+            .try_into()
+            .unwrap();
+        let previous_ms_acc_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] = self
+            .previous_mutator_set_accumulator
             .get_commitment()
             .try_into()
             .unwrap();
@@ -100,7 +118,8 @@ impl BlockBody {
         let hasher = Hash::new();
         let all_digests: Vec<Vec<_>> = vec![
             transactions_digests,
-            vec![ms_acc_digest],
+            vec![next_ms_acc_digest],
+            vec![previous_ms_acc_digest],
             vec![ms_update_digest],
         ]
         .concat()
@@ -127,6 +146,72 @@ impl Block {
             header,
             hash: digest,
         }
+    }
+
+    fn devnet_is_valid(&self) -> bool {
+        // What belongs here are the things that would otherwise
+        // be verified by the block validity proof.
+
+        // 1. The transaction is valid.
+        // 1'. All transactions are valid.
+        // (with coinbase UTXO flag set)
+        //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
+        //   b) Verify that MS removal record is valid, done against `previous_mutator_set_accumulator`,
+        //   c) verify that all transactinos are represented in mutator_set_update
+        //     i) Verify that all input UTXOs are present in `removals`
+        //     ii) Verify that all output UTXOs are present in `additions`
+        //     iii) That there are no entries in `mutator_set_update` not present in a transaction.
+        //   d) verify that adding `mutator_set_update` to `previous_mutator_set_accumulator`
+        //      gives `next_mutator_set_accumulator`,
+        //   e) transaction timestamp <= block timestamp
+        //   f) call: `transaction.devnet_is_valid()`
+
+        // 2. accumulated proof-of-work was computed correctly
+        //  - look two blocks back, take proof_of_work_line
+        //  - look 1 block back, estimate proof-of-work
+        //  - add -> new proof_of_work_line
+        //  - look two blocks back, take proof_of_work_family
+        //  - look at all uncles, estimate proof-of-work
+        //  - add -> new proof_of_work_family
+
+        // 3. variable network parameters are computed correctly
+        // 3.a) target_difficulty <- pow_line
+        // 3.b) max_block_size <- difference between `pow_family[n-2] - pow_line[n-2] - (pow_family[n] - pow_line[n])`
+
+        // 4. for every uncle
+        //  4.1. verify that uncle's prev_block_digest matches with parent's prev_block_digest
+        //  4.2. verify that all uncles' hash are below parent's target_difficulty
+
+        // 5. height = previous height + 1
+
+        // 6. `block_body_merkle_root`
+        // Verify that membership p
+        true
+    }
+
+    pub fn is_valid(&self) -> bool {
+        // check that hash is below threshold
+        // TODO: Replace RHS with block `target_difficulty` from this block
+        if self.hash > MOCK_BLOCK_THRESHOLD {
+            return false;
+        }
+
+        // TODO: timestamp > previous and not more than 10 seconds into future
+
+        // TODO: `block_body_merkle_root` is hash of block body.
+
+        // Verify that STARK proof is valid
+        // TODO: Add STARK verification here
+
+        // Verify that `transactions` match
+        //     pub transactions: Vec<Transaction>,
+        // pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+        // pub mutator_set_update: MutatorSetUpdate,
+        if !self.devnet_is_valid() {
+            return false;
+        }
+
+        true
     }
 }
 

@@ -1,8 +1,13 @@
+use core::time;
+use std::iter;
+
+use secp256k1::ecdsa;
 use serde::{Deserialize, Serialize};
 use twenty_first::{
     amount::u32s::U32s,
     shared_math::b_field_element::BFieldElement,
     util_types::{
+        merkle_tree::MerkleTree,
         mutator_set::{
             removal_record::RemovalRecord, transfer_ms_membership_proof::TransferMsMembershipProof,
         },
@@ -45,6 +50,13 @@ impl Utxo {
     }
 }
 
+pub struct DevNetInput {
+    pub utxo: Utxo,
+    pub membership_proof: TransferMsMembershipProof<Hash>,
+    pub removal_record: RemovalRecord<Hash>,
+    pub signature: ecdsa::Signature,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
     pub inputs: Vec<(Utxo, TransferMsMembershipProof<Hash>, RemovalRecord<Hash>)>,
@@ -54,7 +66,68 @@ pub struct Transaction {
     pub timestamp: BFieldElement,
 }
 
+pub struct TransactionKernel {
+    pub input_utxos: Vec<Utxo>,
+    pub output_utxos: Vec<Utxo>,
+    pub public_scripts: Vec<Vec<BFieldElement>>,
+    pub fee: U32s<AMOUNT_SIZE_FOR_U32>,
+    pub timestamp: BFieldElement,
+}
+
+impl TransactionKernel {
+    pub fn hash(&self) -> RescuePrimeDigest {
+        let mut leafs: Vec<RescuePrimeDigest> = vec![];
+        leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
+            self.input_utxos
+                .iter()
+                .map(|i| i.hash())
+                .collect()
+                .try_into()
+                .unwrap(),
+        ));
+        leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
+            self.output_utxos
+                .iter()
+                .map(|i| i.hash())
+                .collect()
+                .try_into()
+                .unwrap(),
+        ));
+        leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
+            self.public_scripts.iter().map(|i| i.hash()).collect(),
+        ));
+        leafs.push(fee.hash());
+        leafs.push(time.hash());
+
+        MerkleTree::root_from_arbitrary_number_of_digests(&leafs)
+    }
+}
+
 impl Transaction {
+    fn get_kernel(&self) -> TransactionKernel {
+        TransactionKernel {
+            fee: self.fee,
+            input_utxos: self.inputs.iter().map(|inp| inp.0).collect(),
+            output_utxos: self.outputs,
+            public_scripts: self.public_scripts,
+            timestamp: self.timestamp,
+        }
+    }
+
+    pub fn devnet_is_valid(&self, coinbase_amount: Option<U32s<AMOUNT_SIZE_FOR_U32>>) -> bool {
+        // What belongs here are the things that would otherwise
+        // be verified by the transaction validity proof.
+
+        // Membership proofs and removal records are checked by caller, don't check here.
+
+        // 1. UTXO: sum(inputs) + coinbase_amount >= fee + sum(outputs)
+
+        // 2. signatures
+        //  - for all inputs
+        //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
+
+        todo!()
+    }
     /// Return the hash digest of a transaction
     pub fn hash(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
         // TODO: This digest definition should be reworked

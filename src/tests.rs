@@ -459,7 +459,7 @@ fn make_mock_block(height: u64) -> Block {
 
     let block_body: BlockBody = BlockBody {
         transactions: vec![tx],
-        mutator_set_accumulator: new_ms.clone(),
+        next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
     };
 

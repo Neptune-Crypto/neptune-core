@@ -26,7 +26,7 @@ const MOCK_REGTEST_MAX_MINING_DIFFERENCE_SECONDS: u64 = 8;
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u64 = 1_000;
 
-const MOCK_BLOCK_THRESHOLD: RescuePrimeDigest = RescuePrimeDigest::new([
+pub const MOCK_BLOCK_THRESHOLD: RescuePrimeDigest = RescuePrimeDigest::new([
     BFieldElement::new(BFieldElement::MAX / MOCK_DIFFICULTY),
     BFieldElement::ring_zero(),
     BFieldElement::ring_zero(),
@@ -78,7 +78,7 @@ fn make_mock_block(height: u64, current_block_digest: RescuePrimeDigest) -> Bloc
 
     let block_body: BlockBody = BlockBody {
         transactions: vec![tx],
-        mutator_set_accumulator: new_ms.clone(),
+        next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
     };
 

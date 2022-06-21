@@ -4,6 +4,7 @@ use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu
 
 pub const BYTES_PER_BFE: usize = 8;
 pub const RESCUE_PRIME_OUTPUT_SIZE_IN_BFES: usize = 6;
+pub const DEVNET_SIGNATURE_SIZE_IN_BYTES: usize = 32;
 pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
     RESCUE_PRIME_OUTPUT_SIZE_IN_BFES * BYTES_PER_BFE;
 
@@ -113,9 +114,35 @@ impl From<RescuePrimeDigest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
     }
 }
 
+// The implementations for dev net byte arrays are not to be used on main net
+impl From<RescuePrimeDigest> for [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] {
+    fn from(input: RescuePrimeDigest) -> Self {
+        let whole: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = input.into();
+        whole[0..DEVNET_SIGNATURE_SIZE_IN_BYTES]
+            .to_vec()
+            .try_into()
+            .unwrap()
+    }
+}
+
 #[cfg(test)]
 mod digest_tests {
     use super::*;
+
+    #[test]
+    fn devnet_signature_conversion_test() {
+        let bfe_array = [
+            BFieldElement::new(12),
+            BFieldElement::new(24),
+            BFieldElement::new(36),
+            BFieldElement::new(48),
+            BFieldElement::new(60),
+            BFieldElement::new(70),
+        ];
+        let rescue_prime_digest_type_from_array: RescuePrimeDigest = bfe_array.into();
+        let shorter: [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] =
+            rescue_prime_digest_type_from_array.into();
+    }
 
     #[test]
     fn digest_conversion_bytes_test() {
