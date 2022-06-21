@@ -1,4 +1,5 @@
-use crate::models::blockchain::{Block, BlockHash};
+use crate::models::blockchain::block::{Block, TransferBlock};
+use crate::models::blockchain::digest::{RescuePrimeDigest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::DatabaseUnit;
 use crate::models::peer::{PeerMessage, PeerStateData};
@@ -69,14 +70,16 @@ where
                 .await?;
             Ok(false)
         }
-        PeerMessage::Block(block) => {
+        PeerMessage::Block(t_block) => {
             debug!(
                 "Got new block from peer {}, block height {}",
-                peer_address, block.height
+                peer_address, t_block.header.height
             );
-            let new_block_height = block.height;
+            let new_block_height = t_block.header.height;
 
-            // TODO: Add validation of block, increase ban score if block is bad
+            // TODO: Add validation of block, increase ban score if block is bad.
+            // This includes checking that the block hash is below a threshold etc.
+            let block: Box<Block> = Box::new((*t_block).into());
             peer_state_info.highest_shared_block_height = new_block_height;
             {
                 let databases = state.databases.lock().await;
@@ -88,7 +91,7 @@ where
                     None => true,
                     Some(bytes) => {
                         let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
-                        own_latest_block_info.height < block.height
+                        own_latest_block_info.height < block.header.height
                     }
                 };
                 if block_is_new {
@@ -129,17 +132,15 @@ where
                     match peer.try_next().await {
                         Ok(Some(PeerMessage::BlockResponseByHeight(Some(received_block)))) => {
                             debug!("Got BlockResponseByHeight");
-                            if block_notification.height != received_block.height {
+                            if block_notification.height != received_block.header.height {
                                 warn!("Bad BlockResponseByHeight received");
                                 punish(state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY);
                                 return Ok(false);
                             }
 
-                            // TODO: Verify received block
-                            match to_main_tx
-                                .send(PeerThreadToMain::NewBlock(received_block))
-                                .await
-                            {
+                            // TODO: Verify received block, hash etc.
+                            let block: Box<Block> = Box::new((*received_block).into());
+                            match to_main_tx.send(PeerThreadToMain::NewBlock(block)).await {
                                 Ok(()) => (),
                                 Err(e) => panic!("{}", e),
                             };
@@ -170,18 +171,28 @@ where
                     None => PeerMessage::BlockResponseByHeight(None),
                     Some(hash) => {
                         let read_opts_block = ReadOptions::new();
-                        let hash_array: [u8; 32] = hash.try_into().unwrap_or_else(|v: Vec<u8>| {
-                            panic!("Expected a Vec of length {} but it was {}", 32, v.len())
-                        });
+                        let hash_array: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] =
+                            hash.try_into().unwrap_or_else(|v: Vec<u8>| {
+                                panic!(
+                                    "Expected a Vec of length {} but it was {}",
+                                    RESCUE_PRIME_DIGEST_SIZE_IN_BYTES,
+                                    v.len()
+                                )
+                            });
+                        let block_digest: RescuePrimeDigest = hash_array.into();
                         let block_response = match databases
                             .block_hash_to_block
-                            .get(read_opts_block, BlockHash::from(hash_array))
+                            .get(read_opts_block, block_digest)
                             .expect("Failed to read from database")
                         {
+                            // I think it makes sense to panic here since we found the block in the height to digest
+                            // database. So it should be in the hash to block database.
                             None => panic!("Failed to find block with hash {:?}", hash_array),
                             Some(block_bytes) => {
                                 let deserialized: Block = bincode::deserialize(&block_bytes)?;
-                                PeerMessage::BlockResponseByHeight(Some(Box::new(deserialized)))
+                                PeerMessage::BlockResponseByHeight(Some(Box::new(
+                                    deserialized.into(),
+                                )))
                             }
                         };
                         block_response
@@ -189,7 +200,8 @@ where
                 };
             }
 
-            if resp == PeerMessage::BlockResponseByHeight(None) {
+            // Print a warning if the response we're about to send is empty
+            if let PeerMessage::BlockResponseByHeight(None) = resp {
                 warn!("Returning bad result from BlockRequestByHeight");
             }
 
@@ -219,13 +231,14 @@ where
             // to reduce the risk that someone else finds another one and shares
             // it faster.
             info!("peer_loop got NewBlockFromMiner message from main");
-            let new_block_height = block.height;
-            peer.send(PeerMessage::Block(block)).await?;
+            let new_block_height = block.header.height;
+            let t_block: Box<TransferBlock> = Box::new((*block).into());
+            peer.send(PeerMessage::Block(t_block)).await?;
             peer_state_info.highest_shared_block_height = new_block_height;
         }
         MainToPeerThread::Block(block) => {
             info!("NewBlock message from main");
-            let new_block_height = block.height;
+            let new_block_height = block.header.height;
             if new_block_height > peer_state_info.highest_shared_block_height {
                 debug!("Sending PeerMessage::BlockNotification");
                 peer_state_info.highest_shared_block_height = new_block_height;

@@ -1,5 +1,5 @@
 [package]
-authors = ["sword-smith <thv@neptune.cash>", "Alan Szepieniec <as@neptune.cash>", "Philip Munksgaard <philip@munksgaard.me>"]
+authors = ["sword-smith <thor@neptune.cash>", "Alan Szepieniec <alan@neptune.cash>", "Philip Munksgaard <philip@munksgaard.me>"]
 edition = "2021"
 name = "neptune-core"
 version = "0.1.0"
@@ -11,7 +11,7 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", tag = "with-mutator-sets" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "9377d96794d159720d9cf3e84b7bf88d6ce3e7a6" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"
@@ -20,8 +20,10 @@ db-key = "0.0.5" # Should match the one used by `leveldb`
 directories = "4"
 futures = "0.3"
 leveldb = "0.8"
+num-traits = "0.2"
 paw = "1" # Command-line argument parsing
 rand = "0.8"
+secp256k1 = { version = "0", features = ["rand-std", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"

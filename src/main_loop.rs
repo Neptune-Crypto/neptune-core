@@ -1,4 +1,5 @@
 use crate::config_models::cli_args;
+use crate::models::blockchain::digest::RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
 use crate::models::database::{DatabaseUnit, Databases};
 use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer};
 use crate::models::State;
@@ -149,7 +150,8 @@ async fn handle_miner_thread_message(
             // When receiving a block from the miner thread, we assume it is valid
             // and we assume it is the longest chain even though we could have received
             // a block from a peer thread before this event is triggered.
-            info!("Miner found new block: {}", block.height);
+            // info!("Miner found new block: {}", block.height);
+            info!("Miner found new block: {}", block.header.height);
             main_to_peer_broadcast_tx
                 .send(MainToPeerThread::BlockFromMiner(block.clone()))
                 .expect(
@@ -157,8 +159,9 @@ async fn handle_miner_thread_message(
                 );
 
             // Store block in database
-            let block_hash_raw: [u8; 32] = block.hash.into();
-            let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
+            // let block_hash_raw: [u8; 32] = block.hash.into();
+            let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = block.hash.into();
+            let latest_block_info = LatestBlockInfo::new(block.hash, block.header.height);
             {
                 let db = databases.lock().await;
                 db.block_hash_to_block.put(
@@ -166,8 +169,11 @@ async fn handle_miner_thread_message(
                     block.hash,
                     &bincode::serialize(&block).expect("Failed to serialize block"),
                 )?;
-                db.block_height_to_hash
-                    .put(WriteOptions::new(), block.height, &block_hash_raw)?;
+                db.block_height_to_hash.put(
+                    WriteOptions::new(),
+                    block.header.height,
+                    &block_hash_raw,
+                )?;
                 db.latest_block.put(
                     WriteOptions::new(),
                     DatabaseUnit(),
@@ -204,7 +210,7 @@ async fn handle_peer_thread_message(
                     None => true,
                     Some(bytes) => {
                         let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
-                        own_latest_block_info.height < block.height
+                        own_latest_block_info.height < block.header.height
                     }
                 };
                 if !block_is_new {
@@ -218,16 +224,19 @@ async fn handle_peer_thread_message(
                 }
 
                 // Store block in database
-                let block_hash_raw: [u8; 32] = block.hash.into();
-                let latest_block_info = LatestBlockInfo::new(block.hash, block.height);
+                let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = block.hash.into();
+                let latest_block_info = LatestBlockInfo::new(block.hash, block.header.height);
 
                 db.block_hash_to_block.put(
                     WriteOptions::new(),
                     block.hash,
                     &bincode::serialize(&block).expect("Failed to serialize block"),
                 )?;
-                db.block_height_to_hash
-                    .put(WriteOptions::new(), block.height, &block_hash_raw)?;
+                db.block_height_to_hash.put(
+                    WriteOptions::new(),
+                    block.header.height,
+                    &block_hash_raw,
+                )?;
                 db.latest_block.put(
                     WriteOptions::new(),
                     DatabaseUnit(),

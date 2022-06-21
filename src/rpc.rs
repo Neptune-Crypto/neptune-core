@@ -1,4 +1,4 @@
-use crate::models::blockchain::BlockHeight;
+use crate::models::blockchain::block::BlockHeight;
 use crate::models::database::DatabaseUnit;
 use crate::models::peer::Peer;
 use crate::models::shared::LatestBlockInfo;
@@ -14,6 +14,8 @@ use tarpc::context;
 pub trait RPC {
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
+
+    // Returns info about the peers we are connected to
     async fn get_peer_info() -> Vec<Peer>;
 }
 
