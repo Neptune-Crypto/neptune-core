@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        merkle_tree::MerkleTree,
-        mutator_set::{addition_record::AdditionRecord, removal_record::RemovalRecord},
-        simple_hasher::Hasher,
-    },
+use twenty_first::util_types::{
+    merkle_tree::MerkleTree,
+    mutator_set::{addition_record::AdditionRecord, removal_record::RemovalRecord},
+    simple_hasher::Hasher,
 };
 
-use super::{digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, shared::Hash};
+use super::{
+    digest::{Digest, Hashable},
+    shared::Hash,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MutatorSetUpdate {
@@ -16,15 +16,8 @@ pub struct MutatorSetUpdate {
     pub additions: Vec<AdditionRecord<Hash>>,
 }
 
-impl MutatorSetUpdate {
-    pub fn new(removals: Vec<RemovalRecord<Hash>>, additions: Vec<AdditionRecord<Hash>>) -> Self {
-        Self {
-            additions,
-            removals,
-        }
-    }
-
-    pub fn hash(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
+impl Hashable for MutatorSetUpdate {
+    fn hash(&self) -> Digest {
         let addition_digests: Vec<_> = self.additions.iter().map(|a| a.hash()).collect();
         let removal_digests: Vec<_> = self.removals.iter().map(|a| a.hash()).collect();
         let additions_root =
@@ -33,9 +26,20 @@ impl MutatorSetUpdate {
             MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(&removal_digests);
         let hasher = Hash::new();
 
-        hasher
-            .hash_pair(&additions_root, &removals_root)
-            .try_into()
-            .unwrap()
+        Digest::new(
+            hasher
+                .hash_pair(&additions_root, &removals_root)
+                .try_into()
+                .unwrap(),
+        )
+    }
+}
+
+impl MutatorSetUpdate {
+    pub fn new(removals: Vec<RemovalRecord<Hash>>, additions: Vec<AdditionRecord<Hash>>) -> Self {
+        Self {
+            additions,
+            removals,
+        }
     }
 }

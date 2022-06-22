@@ -2,6 +2,8 @@ use super::*;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::block::BlockBody;
 use crate::models::blockchain::block::BlockHeader;
+use crate::models::blockchain::digest::Digest;
+use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES;
 use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::shared::Hash;
@@ -446,7 +448,7 @@ fn make_mock_block(height: u64) -> Block {
         timestamp,
     };
     let mut new_ms = MutatorSetAccumulator::default();
-    let coinbase_digest: KeyableDigest = coinbase_utxo.hash();
+    let coinbase_digest: Digest = coinbase_utxo.hash();
     let randomness =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
     let coinbase_addition_record: AdditionRecord<Hash> =
@@ -470,7 +472,7 @@ fn make_mock_block(height: u64) -> Block {
         version: zero,
         height: BlockHeight::from(height),
         mutator_set_commitment: new_ms.get_commitment().into(),
-        prev_block_digest: KeyableDigest::default(),
+        prev_block_digest: Digest::default(),
         timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
@@ -479,7 +481,7 @@ fn make_mock_block(height: u64) -> Block {
         target_difficulty: U32s::zero(),
 
         // TODO: Wrong: Fix this by implementing a hash function on BlockBody
-        block_body_merkle_root: KeyableDigest::default(),
+        block_body_merkle_root: Digest::default(),
         uncles: vec![],
     };
 
@@ -567,9 +569,9 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
             DatabaseUnit(),
             &bincode::serialize(&latest_block_info_14)?,
         )?;
-        dbs.block_hash_to_block.put(
+        dbs.block_hash_to_block.put::<KeyableDigest>(
             WriteOptions::new(),
-            block_14.hash,
+            block_14.hash.into(),
             &bincode::serialize(&block_14)?,
         )?;
         dbs.block_height_to_hash.put(

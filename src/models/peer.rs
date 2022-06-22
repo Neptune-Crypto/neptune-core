@@ -1,7 +1,7 @@
 use super::{
     blockchain::{
         block::{Block, BlockHeight, TransferBlock},
-        digest::KeyableDigest,
+        digest::Digest,
     },
     shared::LatestBlockInfo,
 };
@@ -32,7 +32,7 @@ pub struct HandshakeData {
 /// send the entire block
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PeerBlockNotification {
-    pub hash: KeyableDigest,
+    pub hash: Digest,
     pub height: BlockHeight,
 }
 
@@ -66,7 +66,7 @@ pub enum PeerMessage {
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
     BlockResponseByHeight(Option<Box<TransferBlock>>),
-    BlockRequestByHash(KeyableDigest),
+    BlockRequestByHash(Digest),
     BlockResponseByHash(Option<Box<TransferBlock>>),
     NewTransaction(i32),
     PeerListRequest,

@@ -16,7 +16,7 @@ use twenty_first::{
 use crate::mine_loop::MOCK_BLOCK_THRESHOLD;
 
 use super::{
-    digest::{KeyableDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{ordered_digest::OrderedDigest, Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     mutator_set_update::MutatorSetUpdate,
     shared::Hash,
     transaction::Transaction,
@@ -26,8 +26,8 @@ use super::{
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,
-    pub mutator_set_commitment: KeyableDigest,
-    pub prev_block_digest: KeyableDigest,
+    pub mutator_set_commitment: Digest,
+    pub prev_block_digest: Digest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
     pub timestamp: BFieldElement,
@@ -44,8 +44,8 @@ pub struct BlockHeader {
 
     // This is the target difficulty for the current (*this*) block.
     pub target_difficulty: U32s<5>,
-    pub block_body_merkle_root: KeyableDigest,
-    pub uncles: Vec<KeyableDigest>,
+    pub block_body_merkle_root: Digest,
+    pub uncles: Vec<Digest>,
 }
 
 impl BlockHeader {
@@ -76,10 +76,12 @@ impl BlockHeader {
 
         ret
     }
+}
 
-    pub fn hash(&self) -> KeyableDigest {
+impl Hashable for BlockHeader {
+    fn hash(&self) -> Digest {
         let hasher = Hash::new();
-        KeyableDigest::new(
+        Digest::new(
             hasher
                 .hash(&self.accumulate(), RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
                 .try_into()
@@ -97,43 +99,32 @@ pub struct BlockBody {
     pub stark_proof: Vec<BFieldElement>,
 }
 
-impl BlockBody {
-    // /// Calculate a Merkle root of block body data structure
-    pub fn hash(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
-        let transactions_digests: Vec<[BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]> =
-            self.transactions.iter().map(|tx| tx.hash()).collect();
-        let next_ms_acc_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] = self
-            .next_mutator_set_accumulator
-            .get_commitment()
-            .try_into()
-            .unwrap();
-        let previous_ms_acc_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] = self
-            .previous_mutator_set_accumulator
-            .get_commitment()
-            .try_into()
-            .unwrap();
-        let ms_update_digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
-            self.mutator_set_update.hash();
+impl Hashable for BlockBody {
+    fn hash(&self) -> Digest {
+        // It's not necessary to hash `previous_mutator_set_accumulator` and `ms_update_digest` here,
+        // as they are fully determined by `next_ms_acc_digest` assuming a good hash function.
+        let transactions_digests: Vec<Vec<BFieldElement>> = self
+            .transactions
+            .iter()
+            .map(|tx| Into::<Vec<BFieldElement>>::into(tx.hash()))
+            .collect();
+        let mut next_ms_acc_digest: Vec<BFieldElement> =
+            self.next_mutator_set_accumulator.get_commitment();
+        let mut all_digests: Vec<BFieldElement> = transactions_digests.concat();
+        all_digests.append(&mut next_ms_acc_digest);
+        all_digests.append(&mut self.stark_proof.clone());
 
         let hasher = Hash::new();
-        let all_digests: Vec<Vec<_>> = vec![
-            transactions_digests,
-            vec![next_ms_acc_digest],
-            vec![previous_ms_acc_digest],
-            vec![ms_update_digest],
-        ]
-        .concat()
-        .iter()
-        .map(|array| array.to_vec())
-        .collect();
 
-        hasher.hash_many(&all_digests).try_into().unwrap()
+        hasher
+            .hash(&all_digests, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
+            .into()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Block {
-    pub hash: KeyableDigest,
+    pub hash: Digest,
     pub header: BlockHeader,
     pub body: BlockBody,
 }
@@ -192,7 +183,7 @@ impl Block {
     pub fn is_valid(&self) -> bool {
         // check that hash is below threshold
         // TODO: Replace RHS with block `target_difficulty` from this block
-        if self.hash > MOCK_BLOCK_THRESHOLD {
+        if Into::<OrderedDigest>::into(self.hash) > MOCK_BLOCK_THRESHOLD {
             return false;
         }
 

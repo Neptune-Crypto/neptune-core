@@ -1,5 +1,6 @@
 use crate::models::blockchain::block::{Block, BlockBody, BlockHeader, BlockHeight};
-use crate::models::blockchain::digest::{KeyableDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
+use crate::models::blockchain::digest::ordered_digest::OrderedDigest;
+use crate::models::blockchain::digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
 use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::{Transaction, Utxo};
@@ -26,7 +27,7 @@ const MOCK_REGTEST_MAX_MINING_DIFFERENCE_SECONDS: u64 = 8;
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u64 = 1_000;
 
-pub const MOCK_BLOCK_THRESHOLD: KeyableDigest = KeyableDigest::new([
+pub const MOCK_BLOCK_THRESHOLD: OrderedDigest = OrderedDigest::new([
     BFieldElement::new(BFieldElement::MAX / MOCK_DIFFICULTY),
     BFieldElement::ring_zero(),
     BFieldElement::ring_zero(),
@@ -36,7 +37,7 @@ pub const MOCK_BLOCK_THRESHOLD: KeyableDigest = KeyableDigest::new([
 ]);
 
 /// Return a fake block with a random hash
-fn make_mock_block(height: u64, current_block_digest: KeyableDigest) -> Block {
+fn make_mock_block(height: u64, current_block_digest: Digest) -> Block {
     // TODO: Replace this with public key sent from the main thread
     let secp = Secp256k1::new();
     let mut rng = OsRng::new().expect("OsRng");
@@ -65,7 +66,7 @@ fn make_mock_block(height: u64, current_block_digest: KeyableDigest) -> Block {
     // For now, we just assume that the mutator set was empty prior to this block
     let mut new_ms = MutatorSetAccumulator::default();
 
-    let coinbase_digest: KeyableDigest = coinbase_utxo.hash();
+    let coinbase_digest: Digest = coinbase_utxo.hash();
     let randomness: Vec<BFieldElement> =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
     let coinbase_addition_record: AdditionRecord<Hash> =
@@ -81,7 +82,7 @@ fn make_mock_block(height: u64, current_block_digest: KeyableDigest) -> Block {
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
         previous_mutator_set_accumulator: todo!(),
-        stark_proof: todo!(),
+        stark_proof: vec![],
     };
 
     let zero = BFieldElement::ring_zero();
@@ -96,12 +97,12 @@ fn make_mock_block(height: u64, current_block_digest: KeyableDigest) -> Block {
         proof_of_work_line: U32s::zero(),
         proof_of_work_family: U32s::zero(),
         target_difficulty: U32s::zero(),
-        block_body_merkle_root: block_body.hash().into(),
+        block_body_merkle_root: block_body.hash(),
         uncles: vec![],
     };
 
     // Mining takes place here
-    while block_header.hash() >= MOCK_BLOCK_THRESHOLD {
+    while Into::<OrderedDigest>::into(block_header.hash()) >= MOCK_BLOCK_THRESHOLD {
         if block_header.nonce[2].value() == BFieldElement::MAX {
             block_header.nonce[2] = BFieldElement::ring_zero();
             if block_header.nonce[1].value() == BFieldElement::MAX {
@@ -128,8 +129,8 @@ pub async fn mock_regtest_mine(
     to_main: mpsc::Sender<MinerToMain>,
     latest_block_info: Option<LatestBlockInfo>,
 ) -> Result<()> {
-    let (mut block_height, mut block_digest): (u64, KeyableDigest) = match latest_block_info {
-        None => (0u64, KeyableDigest::default()),
+    let (mut block_height, mut block_digest): (u64, Digest) = match latest_block_info {
+        None => (0u64, Digest::default()),
         Some(block_info) => (block_info.height.into(), block_info.hash),
     };
     loop {

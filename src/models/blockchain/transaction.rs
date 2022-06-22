@@ -16,7 +16,7 @@ use twenty_first::{
 };
 
 use super::{
-    digest::{KeyableDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
 };
 
@@ -38,10 +38,12 @@ impl Utxo {
             BFieldElement::from_byte_array(bytes).try_into().unwrap();
         vec![amount_bfes.to_vec(), pk_bfes.to_vec()].concat()
     }
+}
 
-    pub fn hash(&self) -> KeyableDigest {
+impl Hashable for Utxo {
+    fn hash(&self) -> Digest {
         let hasher = Hash::new();
-        KeyableDigest::new(
+        Digest::new(
             hasher
                 .hash(&self.accumulate(), RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
                 .try_into()
@@ -74,8 +76,9 @@ pub struct TransactionKernel {
     pub timestamp: BFieldElement,
 }
 
-impl TransactionKernel {
-    pub fn hash(&self) -> KeyableDigest {
+impl Hashable for TransactionKernel {
+    fn hash(&self) -> Digest {
+        todo!()
         // let mut leafs: Vec<RescuePrimeDigest> = vec![];
         // leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
         //     self.input_utxos
@@ -100,37 +103,11 @@ impl TransactionKernel {
         // leafs.push(time.hash());
 
         // MerkleTree::root_from_arbitrary_number_of_digests(&leafs)
-        todo!();
     }
 }
 
-impl Transaction {
-    fn get_kernel(&self) -> TransactionKernel {
-        TransactionKernel {
-            fee: self.fee,
-            input_utxos: self.inputs.iter().map(|inp| inp.0.to_owned()).collect(),
-            output_utxos: self.outputs.clone(),
-            public_scripts: self.public_scripts.clone(),
-            timestamp: self.timestamp,
-        }
-    }
-
-    pub fn devnet_is_valid(&self, coinbase_amount: Option<U32s<AMOUNT_SIZE_FOR_U32>>) -> bool {
-        // What belongs here are the things that would otherwise
-        // be verified by the transaction validity proof.
-
-        // Membership proofs and removal records are checked by caller, don't check here.
-
-        // 1. UTXO: sum(inputs) + coinbase_amount >= fee + sum(outputs)
-
-        // 2. signatures
-        //  - for all inputs
-        //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
-
-        todo!()
-    }
-    /// Return the hash digest of a transaction
-    pub fn hash(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
+impl Hashable for Transaction {
+    fn hash(&self) -> Digest {
         // TODO: This digest definition should be reworked
         let hasher = Hash::new();
 
@@ -172,9 +149,38 @@ impl Transaction {
         ]
         .concat();
 
-        hasher
-            .hash(&all_digests, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
-            .try_into()
-            .unwrap()
+        Digest::new(
+            hasher
+                .hash(&all_digests, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
+                .try_into()
+                .unwrap(),
+        )
+    }
+}
+
+impl Transaction {
+    fn get_kernel(&self) -> TransactionKernel {
+        TransactionKernel {
+            fee: self.fee,
+            input_utxos: self.inputs.iter().map(|inp| inp.0.to_owned()).collect(),
+            output_utxos: self.outputs.clone(),
+            public_scripts: self.public_scripts.clone(),
+            timestamp: self.timestamp,
+        }
+    }
+
+    pub fn devnet_is_valid(&self, coinbase_amount: Option<U32s<AMOUNT_SIZE_FOR_U32>>) -> bool {
+        // What belongs here are the things that would otherwise
+        // be verified by the transaction validity proof.
+
+        // Membership proofs and removal records are checked by caller, don't check here.
+
+        // 1. UTXO: sum(inputs) + coinbase_amount >= fee + sum(outputs)
+
+        // 2. signatures
+        //  - for all inputs
+        //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
+
+        todo!()
     }
 }

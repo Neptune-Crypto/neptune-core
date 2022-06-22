@@ -1,4 +1,5 @@
 use crate::config_models::cli_args;
+use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
 use crate::models::database::{DatabaseUnit, Databases};
 use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer};
@@ -164,9 +165,9 @@ async fn handle_miner_thread_message(
             let latest_block_info = LatestBlockInfo::new(block.hash, block.header.height);
             {
                 let db = databases.lock().await;
-                db.block_hash_to_block.put(
+                db.block_hash_to_block.put::<KeyableDigest>(
                     WriteOptions::new(),
-                    block.hash,
+                    block.hash.into(),
                     &bincode::serialize(&block).expect("Failed to serialize block"),
                 )?;
                 db.block_height_to_hash.put(
@@ -227,9 +228,9 @@ async fn handle_peer_thread_message(
                 let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = block.hash.into();
                 let latest_block_info = LatestBlockInfo::new(block.hash, block.header.height);
 
-                db.block_hash_to_block.put(
+                db.block_hash_to_block.put::<KeyableDigest>(
                     WriteOptions::new(),
-                    block.hash,
+                    block.hash.into(),
                     &bincode::serialize(&block).expect("Failed to serialize block"),
                 )?;
                 db.block_height_to_hash.put(

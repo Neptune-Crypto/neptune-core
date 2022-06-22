@@ -21,7 +21,7 @@ use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions};
 use models::blockchain::block::BlockHeight;
-use models::blockchain::digest::KeyableDigest;
+use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::database::{DatabaseUnit, Databases};
 use models::peer::Peer;
 use models::State;

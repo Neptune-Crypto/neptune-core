@@ -4,7 +4,7 @@ use crate::models::blockchain::block::BlockHeight;
 use db_key::Key;
 use leveldb::database::Database;
 
-use super::blockchain::digest::KeyableDigest;
+use super::blockchain::digest::keyable_digest::KeyableDigest;
 
 pub struct Databases {
     pub block_height_to_hash: Database<BlockHeight>,
