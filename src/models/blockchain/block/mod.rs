@@ -1,4 +1,12 @@
+use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
+use twenty_first::{
+    amount::u32s::U32s,
+    shared_math::b_field_element::BFieldElement,
+    util_types::mutator_set::{
+        mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+    },
+};
 
 pub mod block_body;
 pub mod block_header;
@@ -6,7 +14,10 @@ pub mod block_height;
 pub mod mutator_set_update;
 pub mod transfer_block;
 
-use self::{block_body::BlockBody, block_header::BlockHeader, transfer_block::TransferBlock};
+use self::{
+    block_body::BlockBody, block_header::BlockHeader, mutator_set_update::MutatorSetUpdate,
+    transfer_block::TransferBlock,
+};
 use super::digest::{ordered_digest::OrderedDigest, Digest, Hashable};
 use crate::mine_loop::MOCK_BLOCK_THRESHOLD;
 
@@ -37,6 +48,41 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
+    pub fn genesis_block() -> Self {
+        let empty_mutator = MutatorSetAccumulator::default();
+        let body: BlockBody = BlockBody {
+            transactions: vec![],
+            next_mutator_set_accumulator: empty_mutator.clone(),
+            previous_mutator_set_accumulator: empty_mutator.clone(),
+            mutator_set_update: MutatorSetUpdate::default(),
+            stark_proof: vec![],
+        };
+
+        // This is just the UNIX timestamp when this code was written
+        let timestamp: BFieldElement = BFieldElement::new(1655916990u64);
+
+        let header: BlockHeader = BlockHeader {
+            version: BFieldElement::ring_zero(),
+            height: BFieldElement::ring_zero().into(),
+            mutator_set_commitment: empty_mutator.get_commitment().into(),
+            prev_block_digest: Digest::default(),
+            timestamp,
+            nonce: [
+                BFieldElement::ring_zero(),
+                BFieldElement::ring_zero(),
+                BFieldElement::ring_zero(),
+            ],
+            max_block_size: 10_000,
+            proof_of_work_line: U32s::zero(),
+            proof_of_work_family: U32s::zero(),
+            target_difficulty: U32s::one(),
+            block_body_merkle_root: body.hash(),
+            uncles: vec![],
+        };
+
+        Self::new(header, body)
+    }
+
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {
         let digest = header.hash();
         Self {

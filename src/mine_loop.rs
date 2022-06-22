@@ -131,12 +131,10 @@ fn make_mock_block(height: u64, current_block_digest: Digest) -> Block {
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
-    latest_block_info: Option<LatestBlockInfo>,
+    latest_block_info: LatestBlockInfo,
 ) -> Result<()> {
-    let (mut block_height, mut block_digest): (u64, Digest) = match latest_block_info {
-        None => (0u64, Digest::default()),
-        Some(block_info) => (block_info.height.into(), block_info.hash),
-    };
+    let (mut block_height, mut block_digest): (u64, Digest) =
+        (latest_block_info.height.into(), latest_block_info.hash);
     loop {
         let rand_time: u64 = rand::random::<u64>() % MOCK_REGTEST_MAX_MINING_DIFFERENCE_SECONDS;
         select! {

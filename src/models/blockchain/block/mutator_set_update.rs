@@ -34,6 +34,13 @@ impl Hashable for MutatorSetUpdate {
 }
 
 impl MutatorSetUpdate {
+    pub fn default() -> Self {
+        MutatorSetUpdate {
+            removals: vec![],
+            additions: vec![],
+        }
+    }
+
     pub fn new(removals: Vec<RemovalRecord<Hash>>, additions: Vec<AdditionRecord<Hash>>) -> Self {
         Self {
             additions,

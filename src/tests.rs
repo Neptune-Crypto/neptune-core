@@ -84,10 +84,21 @@ fn get_dummy_version() -> String {
     "0.1.0".to_string()
 }
 
+fn get_dummy_latest_block() -> (Block, LatestBlockInfo, Arc<std::sync::Mutex<BlockHeader>>) {
+    let block = Block::genesis_block();
+    let latest_block_info: LatestBlockInfo = block.clone().into();
+    let block_header = block.header.clone();
+    (
+        block,
+        latest_block_info,
+        Arc::new(std::sync::Mutex::new(block_header)),
+    )
+}
+
 fn get_dummy_handshake_data(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
-        latest_block_info: None,
+        latest_block_info: get_dummy_latest_block().1,
         listen_address: Some(get_dummy_address()),
         network,
         version: get_dummy_version(),
@@ -120,11 +131,13 @@ fn get_dummy_setup(
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let peer_map = get_peer_map();
+    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> = get_peer_map();
+    let (_, _, latest_block_header) = get_dummy_latest_block();
     let databases = get_unit_test_database(network)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
     Ok((
         peer_broadcast_tx,
@@ -312,6 +325,7 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
     let peer_map = get_peer_map();
     let peer_address0 = get_dummy_address();
     let peer_address1 = std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap();
+    let (_, _, latest_block_header) = get_dummy_latest_block();
     peer_map
         .lock()
         .unwrap()
@@ -323,6 +337,7 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
     let state = State {
         peer_map,
         databases: get_unit_test_database(Network::Main)?,
+        latest_block_header,
     };
 
     if let Err(_) = main_loop::answer_peer(
@@ -505,9 +520,11 @@ async fn test_peer_loop_bye() -> Result<()> {
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
+    let (_, _, latest_block_header) = get_dummy_latest_block();
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
@@ -528,9 +545,11 @@ async fn test_peer_loop_peer_list() -> Result<()> {
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
+    let (_, _, latest_block_header) = get_dummy_latest_block();
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
 
     let mock = Mock::new(vec![
@@ -583,9 +602,11 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
             &bincode::serialize(&block_14.hash)?,
         )?;
     }
+    let (_, _, latest_block_header) = get_dummy_latest_block();
     let state = State {
         peer_map: peer_map.clone(),
         databases: databases,
+        latest_block_header,
     };
 
     let mock = Mock::new(vec![
@@ -627,9 +648,11 @@ async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
+    let (_, _, latest_block_header) = get_dummy_latest_block();
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
 
     let mock = Mock::new(vec![
@@ -665,9 +688,11 @@ async fn test_get_connection_status() -> Result<()> {
     let peer_id = peer.instance_id;
     peer_map.lock().unwrap().insert(peer_address, peer);
     let databases = get_unit_test_database(network)?;
+    let (_, _, latest_block_header) = get_dummy_latest_block();
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
 
     let own_handshake = get_dummy_handshake_data(network);
