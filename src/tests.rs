@@ -1,14 +1,14 @@
 use super::*;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::Digest;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES;
-use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::Utxo;
 use crate::models::peer::ConnectionRefusedReason;
 use bytes::{Bytes, BytesMut};
 use futures::sink;

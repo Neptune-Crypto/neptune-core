@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub mod block_body;
 pub mod block_header;
 pub mod block_height;
+pub mod mutator_set_update;
 pub mod transfer_block;
 
 use self::{block_body::BlockBody, block_header::BlockHeader, transfer_block::TransferBlock};

@@ -5,10 +5,8 @@ use twenty_first::util_types::{
     simple_hasher::Hasher,
 };
 
-use super::{
-    digest::{Digest, Hashable},
-    shared::Hash,
-};
+use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::shared::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MutatorSetUpdate {

@@ -1,12 +1,13 @@
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::ordered_digest::OrderedDigest;
 use crate::models::blockchain::digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
-use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::{Transaction, Utxo};
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::{MainToMiner, MinerToMain};
 use crate::models::shared::LatestBlockInfo;
 use anyhow::{Context, Result};

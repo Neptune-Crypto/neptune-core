@@ -5,9 +5,10 @@ use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use twenty_first::util_types::simple_hasher::Hasher;
 
 use crate::models::blockchain::digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
-use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
+
+use super::mutator_set_update::MutatorSetUpdate;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BlockBody {
