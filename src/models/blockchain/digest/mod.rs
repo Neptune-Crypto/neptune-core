@@ -1,3 +1,6 @@
+pub mod keyable_digest;
+pub mod ordered_digest;
+
 use db_key::Key;
 use serde::Serialize;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
@@ -11,11 +14,11 @@ pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
 // The data structure `RescuePrimeDigest` is primarily needed, so we can make
 // database keys out of rescue prime digests.
 #[derive(Clone, Copy, Debug, Serialize, serde::Deserialize, PartialEq)]
-pub struct RescuePrimeDigest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+pub struct KeyableDigest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
 
 // Digest needs a partial ordering for the mining/PoW process, to check if
 // a digest is below the difficulty threshold.
-impl PartialOrd for RescuePrimeDigest {
+impl PartialOrd for KeyableDigest {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         for i in 0..RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
             if self.0[i].value() != other.0[i].value() {
@@ -27,7 +30,7 @@ impl PartialOrd for RescuePrimeDigest {
     }
 }
 
-impl RescuePrimeDigest {
+impl KeyableDigest {
     pub fn values(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
         self.0
     }
@@ -41,7 +44,7 @@ impl RescuePrimeDigest {
     }
 }
 
-impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for RescuePrimeDigest {
+impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for KeyableDigest {
     fn from(item: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]) -> Self {
         let mut bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
             [BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
@@ -55,19 +58,19 @@ impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for RescuePrimeDigest {
     }
 }
 
-impl From<[BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]> for RescuePrimeDigest {
+impl From<[BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]> for KeyableDigest {
     fn from(array: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
-        RescuePrimeDigest(array)
+        KeyableDigest(array)
     }
 }
 
-impl From<RescuePrimeDigest> for [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
-    fn from(val: RescuePrimeDigest) -> Self {
+impl From<KeyableDigest> for [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
+    fn from(val: KeyableDigest) -> Self {
         val.0
     }
 }
 
-impl From<Vec<BFieldElement>> for RescuePrimeDigest {
+impl From<Vec<BFieldElement>> for KeyableDigest {
     fn from(elems: Vec<BFieldElement>) -> Self {
         let argument_length = elems.len();
         let array: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
@@ -82,13 +85,13 @@ impl From<Vec<BFieldElement>> for RescuePrimeDigest {
     }
 }
 
-impl From<RescuePrimeDigest> for Vec<BFieldElement> {
-    fn from(val: RescuePrimeDigest) -> Self {
+impl From<KeyableDigest> for Vec<BFieldElement> {
+    fn from(val: KeyableDigest) -> Self {
         val.0.to_vec()
     }
 }
 
-impl Key for RescuePrimeDigest {
+impl Key for KeyableDigest {
     fn from_u8(key: &[u8]) -> Self {
         let converted_key: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = key
             .to_owned()
@@ -103,8 +106,8 @@ impl Key for RescuePrimeDigest {
     }
 }
 
-impl From<RescuePrimeDigest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
-    fn from(item: RescuePrimeDigest) -> Self {
+impl From<KeyableDigest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
+    fn from(item: KeyableDigest) -> Self {
         let u64s = item.0.iter().map(|x| x.value());
         u64s.map(|x| x.to_ne_bytes())
             .collect::<Vec<_>>()
@@ -115,8 +118,8 @@ impl From<RescuePrimeDigest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
 }
 
 // The implementations for dev net byte arrays are not to be used on main net
-impl From<RescuePrimeDigest> for [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] {
-    fn from(input: RescuePrimeDigest) -> Self {
+impl From<KeyableDigest> for [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] {
+    fn from(input: KeyableDigest) -> Self {
         let whole: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = input.into();
         whole[0..DEVNET_SIGNATURE_SIZE_IN_BYTES]
             .to_vec()
@@ -139,7 +142,7 @@ mod digest_tests {
             BFieldElement::new(60),
             BFieldElement::new(70),
         ];
-        let rescue_prime_digest_type_from_array: RescuePrimeDigest = bfe_array.into();
+        let rescue_prime_digest_type_from_array: KeyableDigest = bfe_array.into();
         let shorter: [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] =
             rescue_prime_digest_type_from_array.into();
     }
@@ -151,7 +154,7 @@ mod digest_tests {
             219, 14, 203, 155, 214, 203, 227, 78, 111, 164, 128, 128, 236, 166, 4, 248, 213, 253,
             7, 230, 222, 16, 130, 56, 160, 127, 32, 132, 196,
         ];
-        let rescue_prime_digest_type: RescuePrimeDigest = bytes.into();
+        let rescue_prime_digest_type: KeyableDigest = bytes.into();
         let back_to_bytes: [u8; 48] = rescue_prime_digest_type.into();
         assert_eq!(bytes, back_to_bytes);
     }
@@ -167,7 +170,7 @@ mod digest_tests {
             BFieldElement::new(60),
             BFieldElement::new(70),
         ];
-        let rescue_prime_digest_type_from_array: RescuePrimeDigest = bfe_array.into();
+        let rescue_prime_digest_type_from_array: KeyableDigest = bfe_array.into();
         let back_to_bfes_from_array: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
             rescue_prime_digest_type_from_array.into();
         assert_eq!(
@@ -184,7 +187,7 @@ mod digest_tests {
             BFieldElement::new(60),
             BFieldElement::new(70),
         ];
-        let rescue_prime_digest_type_from_vec: RescuePrimeDigest = bfe_vec.clone().into();
+        let rescue_prime_digest_type_from_vec: KeyableDigest = bfe_vec.clone().into();
         let back_to_bfes_from_vec: Vec<BFieldElement> = rescue_prime_digest_type_from_vec.into();
         assert_eq!(
             bfe_vec, back_to_bfes_from_vec,
@@ -200,9 +203,8 @@ mod digest_tests {
 
     #[test]
     fn digest_ordering() {
-        let val0 =
-            RescuePrimeDigest::new([BFieldElement::new(0); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
-        let val1 = RescuePrimeDigest::new([
+        let val0 = KeyableDigest::new([BFieldElement::new(0); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let val1 = KeyableDigest::new([
             BFieldElement::new(14),
             BFieldElement::new(0),
             BFieldElement::new(0),
@@ -212,12 +214,11 @@ mod digest_tests {
         ]);
         assert!(val0 < val1);
 
-        let val2 =
-            RescuePrimeDigest::new([BFieldElement::new(14); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let val2 = KeyableDigest::new([BFieldElement::new(14); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
         assert!(val2 > val1);
         assert!(val2 > val0);
 
-        let val3 = RescuePrimeDigest::new([
+        let val3 = KeyableDigest::new([
             BFieldElement::new(14),
             BFieldElement::new(14),
             BFieldElement::new(14),
@@ -229,7 +230,7 @@ mod digest_tests {
         assert!(val3 > val1);
         assert!(val3 > val0);
 
-        let val4 = RescuePrimeDigest::new([
+        let val4 = KeyableDigest::new([
             BFieldElement::new(14),
             BFieldElement::new(14),
             BFieldElement::new(14),

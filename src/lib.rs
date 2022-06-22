@@ -21,7 +21,7 @@ use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions};
 use models::blockchain::block::BlockHeight;
-use models::blockchain::digest::RescuePrimeDigest;
+use models::blockchain::digest::KeyableDigest;
 use models::database::{DatabaseUnit, Databases};
 use models::peer::Peer;
 use models::State;
@@ -88,7 +88,7 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
 
     let mut hash_options = Options::new();
     hash_options.create_if_missing = true;
-    let block_hash_to_block: Database<RescuePrimeDigest> =
+    let block_hash_to_block: Database<KeyableDigest> =
         match Database::open(block_hash_to_block_path.as_path(), hash_options) {
             Ok(db) => db,
             Err(e) => {

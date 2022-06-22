@@ -446,7 +446,7 @@ fn make_mock_block(height: u64) -> Block {
         timestamp,
     };
     let mut new_ms = MutatorSetAccumulator::default();
-    let coinbase_digest: RescuePrimeDigest = coinbase_utxo.hash();
+    let coinbase_digest: KeyableDigest = coinbase_utxo.hash();
     let randomness =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
     let coinbase_addition_record: AdditionRecord<Hash> =
@@ -461,6 +461,8 @@ fn make_mock_block(height: u64) -> Block {
         transactions: vec![tx],
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
+        previous_mutator_set_accumulator: todo!(),
+        stark_proof: todo!(),
     };
 
     let zero = BFieldElement::ring_zero();
@@ -468,7 +470,7 @@ fn make_mock_block(height: u64) -> Block {
         version: zero,
         height: BlockHeight::from(height),
         mutator_set_commitment: new_ms.get_commitment().into(),
-        prev_block_digest: RescuePrimeDigest::default(),
+        prev_block_digest: KeyableDigest::default(),
         timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
@@ -477,7 +479,7 @@ fn make_mock_block(height: u64) -> Block {
         target_difficulty: U32s::zero(),
 
         // TODO: Wrong: Fix this by implementing a hash function on BlockBody
-        block_body_merkle_root: RescuePrimeDigest::default(),
+        block_body_merkle_root: KeyableDigest::default(),
         uncles: vec![],
     };
 

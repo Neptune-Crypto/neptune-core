@@ -4,11 +4,11 @@ use crate::models::blockchain::block::BlockHeight;
 use db_key::Key;
 use leveldb::database::Database;
 
-use super::blockchain::digest::RescuePrimeDigest;
+use super::blockchain::digest::KeyableDigest;
 
 pub struct Databases {
     pub block_height_to_hash: Database<BlockHeight>,
-    pub block_hash_to_block: Database<RescuePrimeDigest>,
+    pub block_hash_to_block: Database<KeyableDigest>,
     pub latest_block: Database<DatabaseUnit>,
 }
 

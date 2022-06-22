@@ -1,5 +1,5 @@
 use crate::models::blockchain::block::{Block, TransferBlock};
-use crate::models::blockchain::digest::{RescuePrimeDigest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
+use crate::models::blockchain::digest::{KeyableDigest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::DatabaseUnit;
 use crate::models::peer::{PeerMessage, PeerStateData};
@@ -179,7 +179,7 @@ where
                                     v.len()
                                 )
                             });
-                        let block_digest: RescuePrimeDigest = hash_array.into();
+                        let block_digest: KeyableDigest = hash_array.into();
                         let block_response = match databases
                             .block_hash_to_block
                             .get(read_opts_block, block_digest)

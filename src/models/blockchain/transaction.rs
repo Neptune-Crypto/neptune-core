@@ -16,7 +16,7 @@ use twenty_first::{
 };
 
 use super::{
-    digest::{RescuePrimeDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{KeyableDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
 };
 
@@ -39,9 +39,9 @@ impl Utxo {
         vec![amount_bfes.to_vec(), pk_bfes.to_vec()].concat()
     }
 
-    pub fn hash(&self) -> RescuePrimeDigest {
+    pub fn hash(&self) -> KeyableDigest {
         let hasher = Hash::new();
-        RescuePrimeDigest::new(
+        KeyableDigest::new(
             hasher
                 .hash(&self.accumulate(), RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
                 .try_into()
@@ -75,31 +75,32 @@ pub struct TransactionKernel {
 }
 
 impl TransactionKernel {
-    pub fn hash(&self) -> RescuePrimeDigest {
-        let mut leafs: Vec<RescuePrimeDigest> = vec![];
-        leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
-            self.input_utxos
-                .iter()
-                .map(|i| i.hash())
-                .collect()
-                .try_into()
-                .unwrap(),
-        ));
-        leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
-            self.output_utxos
-                .iter()
-                .map(|i| i.hash())
-                .collect()
-                .try_into()
-                .unwrap(),
-        ));
-        leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
-            self.public_scripts.iter().map(|i| i.hash()).collect(),
-        ));
-        leafs.push(fee.hash());
-        leafs.push(time.hash());
+    pub fn hash(&self) -> KeyableDigest {
+        // let mut leafs: Vec<RescuePrimeDigest> = vec![];
+        // leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
+        //     self.input_utxos
+        //         .iter()
+        //         .map(|i| i.hash())
+        //         .collect()
+        //         .try_into()
+        //         .unwrap(),
+        // ));
+        // leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
+        //     self.output_utxos
+        //         .iter()
+        //         .map(|i| i.hash())
+        //         .collect()
+        //         .try_into()
+        //         .unwrap(),
+        // ));
+        // leafs.push(MerkleTree::root_from_arbitrary_number_of_digests(
+        //     self.public_scripts.iter().map(|i| i.hash()).collect(),
+        // ));
+        // leafs.push(fee.hash());
+        // leafs.push(time.hash());
 
-        MerkleTree::root_from_arbitrary_number_of_digests(&leafs)
+        // MerkleTree::root_from_arbitrary_number_of_digests(&leafs)
+        todo!();
     }
 }
 
@@ -107,9 +108,9 @@ impl Transaction {
     fn get_kernel(&self) -> TransactionKernel {
         TransactionKernel {
             fee: self.fee,
-            input_utxos: self.inputs.iter().map(|inp| inp.0).collect(),
-            output_utxos: self.outputs,
-            public_scripts: self.public_scripts,
+            input_utxos: self.inputs.iter().map(|inp| inp.0.to_owned()).collect(),
+            output_utxos: self.outputs.clone(),
+            public_scripts: self.public_scripts.clone(),
             timestamp: self.timestamp,
         }
     }

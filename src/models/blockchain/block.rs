@@ -16,7 +16,7 @@ use twenty_first::{
 use crate::mine_loop::MOCK_BLOCK_THRESHOLD;
 
 use super::{
-    digest::{RescuePrimeDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{KeyableDigest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     mutator_set_update::MutatorSetUpdate,
     shared::Hash,
     transaction::Transaction,
@@ -26,8 +26,8 @@ use super::{
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,
-    pub mutator_set_commitment: RescuePrimeDigest,
-    pub prev_block_digest: RescuePrimeDigest,
+    pub mutator_set_commitment: KeyableDigest,
+    pub prev_block_digest: KeyableDigest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
     pub timestamp: BFieldElement,
@@ -44,8 +44,8 @@ pub struct BlockHeader {
 
     // This is the target difficulty for the current (*this*) block.
     pub target_difficulty: U32s<5>,
-    pub block_body_merkle_root: RescuePrimeDigest,
-    pub uncles: Vec<RescuePrimeDigest>,
+    pub block_body_merkle_root: KeyableDigest,
+    pub uncles: Vec<KeyableDigest>,
 }
 
 impl BlockHeader {
@@ -77,9 +77,9 @@ impl BlockHeader {
         ret
     }
 
-    pub fn hash(&self) -> RescuePrimeDigest {
+    pub fn hash(&self) -> KeyableDigest {
         let hasher = Hash::new();
-        RescuePrimeDigest::new(
+        KeyableDigest::new(
             hasher
                 .hash(&self.accumulate(), RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
                 .try_into()
@@ -133,7 +133,7 @@ impl BlockBody {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Block {
-    pub hash: RescuePrimeDigest,
+    pub hash: KeyableDigest,
     pub header: BlockHeader,
     pub body: BlockBody,
 }
