@@ -7,7 +7,6 @@ use twenty_first::{
     amount::u32s::U32s,
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        merkle_tree::MerkleTree,
         mutator_set::{
             removal_record::RemovalRecord, transfer_ms_membership_proof::TransferMsMembershipProof,
         },

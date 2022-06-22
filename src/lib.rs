@@ -20,7 +20,7 @@ use futures::StreamExt;
 use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions};
-use models::blockchain::block::BlockHeight;
+use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::database::{DatabaseUnit, Databases};
 use models::peer::Peer;

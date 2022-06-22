@@ -1,6 +1,6 @@
 use super::{
     blockchain::{
-        block::{Block, BlockHeight, TransferBlock},
+        block::{block_height::BlockHeight, transfer_block::TransferBlock, Block},
         digest::Digest,
     },
     shared::LatestBlockInfo,

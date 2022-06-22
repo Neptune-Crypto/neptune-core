@@ -1,4 +1,5 @@
-use crate::models::blockchain::block::{Block, TransferBlock};
+use crate::models::blockchain::block::transfer_block::TransferBlock;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};

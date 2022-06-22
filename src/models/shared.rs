@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::blockchain::{block::BlockHeight, digest::Digest};
+use super::blockchain::{block::block_height::BlockHeight, digest::Digest};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LatestBlockInfo {

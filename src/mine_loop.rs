@@ -1,4 +1,7 @@
-use crate::models::blockchain::block::{Block, BlockBody, BlockHeader, BlockHeight};
+use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::ordered_digest::OrderedDigest;
 use crate::models::blockchain::digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
 use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;

@@ -1,7 +1,7 @@
 use super::*;
+use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::block::BlockBody;
-use crate::models::blockchain::block::BlockHeader;
 use crate::models::blockchain::digest::Digest;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES;
@@ -448,6 +448,7 @@ fn make_mock_block(height: u64) -> Block {
         timestamp,
     };
     let mut new_ms = MutatorSetAccumulator::default();
+    let empty_ms = new_ms.clone();
     let coinbase_digest: Digest = coinbase_utxo.hash();
     let randomness =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
@@ -463,8 +464,10 @@ fn make_mock_block(height: u64) -> Block {
         transactions: vec![tx],
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
-        previous_mutator_set_accumulator: todo!(),
-        stark_proof: todo!(),
+
+        // TODO: Consider to use something else than an empty MS here
+        previous_mutator_set_accumulator: empty_ms,
+        stark_proof: vec![],
     };
 
     let zero = BFieldElement::ring_zero();
