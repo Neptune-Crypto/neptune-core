@@ -18,8 +18,7 @@ use self::{
     block_body::BlockBody, block_header::BlockHeader, mutator_set_update::MutatorSetUpdate,
     transfer_block::TransferBlock,
 };
-use super::digest::{ordered_digest::OrderedDigest, Digest, Hashable};
-use crate::mine_loop::MOCK_BLOCK_THRESHOLD;
+use super::digest::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Block {

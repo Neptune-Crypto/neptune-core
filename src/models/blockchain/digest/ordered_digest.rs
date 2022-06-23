@@ -1,7 +1,7 @@
 use num_bigint::BigUint;
 use num_traits::Zero;
 use serde::Serialize;
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
 use super::{Digest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
 
@@ -27,12 +27,27 @@ impl PartialOrd for OrderedDigest {
 }
 
 impl OrderedDigest {
+    pub const fn max() -> Self {
+        Self([BFieldElement::new(BFieldElement::MAX); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+    }
+
     pub const fn default() -> Self {
         Self([BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
     }
 
     pub const fn new(digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
         Self(digest)
+    }
+
+    pub fn to_digest_threshold(target_difficulty: U32s<5>) -> Self {
+        println!("target_difficulty = {:?}", target_difficulty);
+        let difficulty_as_bui: BigUint = target_difficulty.into();
+        println!("difficulty_as_bui = {}", difficulty_as_bui);
+        let max_threshold_as_bui: BigUint = Self::max().into();
+        println!("Self::max() = {:?}", Self::max());
+        let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
+
+        threshold_as_bui.into()
     }
 }
 
@@ -82,6 +97,23 @@ mod ordered_digest_tests {
     use rand::{thread_rng, RngCore};
 
     use super::*;
+
+    #[test]
+    fn difficulty_to_threshold_test() {
+        // Verify that a difficulty of 2 accepts half of the digests
+        let two = U32s::<5>::one() + U32s::<5>::one();
+        let threshold_for_difficulty_two: OrderedDigest = OrderedDigest::to_digest_threshold(two);
+        assert_eq!(
+            BFieldElement::MAX / 2,
+            threshold_for_difficulty_two.0[5].value()
+        );
+
+        // Verify that a difficulty of BFieldElement::MAX accepts all digests where the last BFieldElement is zero
+        let bfe_max = U32s::<5>::new([1, u32::MAX, 0, 0, 0]);
+        let threshold_for_bfe_max: OrderedDigest = OrderedDigest::to_digest_threshold(bfe_max);
+        assert_eq!(0u64, threshold_for_bfe_max.0[5].value());
+        assert_eq!(BFieldElement::MAX, threshold_for_bfe_max.0[4].value());
+    }
 
     #[test]
     #[should_panic(expected = "Overflow when converting from BigUint to OrderedDigest")]
