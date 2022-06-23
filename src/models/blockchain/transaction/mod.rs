@@ -2,24 +2,17 @@ pub mod devnet_input;
 pub mod transaction_kernel;
 pub mod utxo;
 
-use core::time;
-use secp256k1::ecdsa;
+use num_traits::Zero;
+use secp256k1::Message;
 use serde::{Deserialize, Serialize};
-use std::iter;
 use twenty_first::{
-    amount::u32s::U32s,
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mutator_set::{
-            removal_record::RemovalRecord, transfer_ms_membership_proof::TransferMsMembershipProof,
-        },
-        simple_hasher::Hasher,
-    },
+    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
+    util_types::simple_hasher::Hasher,
 };
 
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
 use super::{
-    digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{Digest, Hashable, DEVNET_SIGNATURE_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
 };
 
@@ -27,7 +20,6 @@ pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
-    // pub inputs: Vec<(Utxo, TransferMsMembershipProof<Hash>, RemovalRecord<Hash>)>,
     pub inputs: Vec<DevNetInput>,
     pub outputs: Vec<Utxo>,
     pub public_scripts: Vec<Vec<BFieldElement>>,
@@ -37,7 +29,7 @@ pub struct Transaction {
 
 impl Hashable for Transaction {
     fn hash(&self) -> Digest {
-        // TODO: This digest definition should be reworked
+        // TODO: Consider using a Merkle tree construction here instead
         let hasher = Hash::new();
 
         // Hash outputs
@@ -65,6 +57,9 @@ impl Hashable for Transaction {
         let timestamp_digest = hasher.hash(&[self.timestamp], RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
 
         // Hash public_scripts
+        // If public scripts are not padded or end with a specific instruction, then it might
+        // be possible to find a collission for this digest. If that's the case, each public script
+        // can be padded with a B field element that's not a valid VM instruction.
         let flatted_public_scripts: Vec<BFieldElement> = self.public_scripts.concat();
         let public_scripts_digest =
             hasher.hash(&flatted_public_scripts, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
@@ -105,11 +100,37 @@ impl Transaction {
         // Membership proofs and removal records are checked by caller, don't check here.
 
         // 1. UTXO: sum(inputs) + coinbase_amount >= fee + sum(outputs)
+        let mut spendable_amount: U32s<AMOUNT_SIZE_FOR_U32> =
+            self.inputs.iter().map(|input| input.utxo.amount).sum();
+        spendable_amount = spendable_amount
+            + match coinbase_amount {
+                None => U32s::zero(),
+                Some(amount) => amount,
+            };
+
+        let output_amount = self.fee + self.outputs.iter().map(|utxo| utxo.amount).sum();
+
+        if output_amount > spendable_amount {
+            return false;
+        }
 
         // 2. signatures
         //  - for all inputs
         //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
+        let kernel: TransactionKernel = self.get_kernel();
+        let kernel_digest: Digest = kernel.hash();
+        let kernel_digest_as_bytes: [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] = kernel_digest.into();
+        for input in self.inputs.iter() {
+            let msg: Message = Message::from_slice(&kernel_digest_as_bytes).unwrap();
+            if input
+                .signature
+                .verify(&msg, &input.utxo.public_key)
+                .is_err()
+            {
+                return false;
+            }
+        }
 
-        todo!()
+        true
     }
 }

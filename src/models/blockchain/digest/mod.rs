@@ -78,3 +78,34 @@ impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for Digest {
         Self(bfes)
     }
 }
+
+// The implementations for dev net byte arrays are not to be used on main net
+impl From<Digest> for [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] {
+    fn from(input: Digest) -> Self {
+        let whole: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = input.into();
+        whole[0..DEVNET_SIGNATURE_SIZE_IN_BYTES]
+            .to_vec()
+            .try_into()
+            .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod digest_tests {
+    use super::*;
+
+    #[test]
+    fn devnet_signature_digest_conversion_test() {
+        let bfe_vec = vec![
+            BFieldElement::new(12),
+            BFieldElement::new(24),
+            BFieldElement::new(36),
+            BFieldElement::new(48),
+            BFieldElement::new(60),
+            BFieldElement::new(70),
+        ];
+        let rescue_prime_digest_type_from_array: Digest = bfe_vec.into();
+        let _shorter: [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] =
+            rescue_prime_digest_type_from_array.into();
+    }
+}

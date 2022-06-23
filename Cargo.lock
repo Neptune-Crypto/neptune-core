@@ -1915,7 +1915,7 @@ dependencies = [
 [[package]]
 name = "twenty-first"
 version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=9377d96794d159720d9cf3e84b7bf88d6ce3e7a6#9377d96794d159720d9cf3e84b7bf88d6ce3e7a6"
+source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=246c173c2b8e252e39ca54eca9a98e3245006f2d#246c173c2b8e252e39ca54eca9a98e3245006f2d"
 dependencies = [
  "anyhow",
  "bincode",
