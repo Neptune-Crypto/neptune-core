@@ -21,9 +21,11 @@ pub struct BlockBody {
 }
 
 impl Hashable for BlockBody {
+    /// Return a Merkle root for all digests in the block body
     fn hash(&self) -> Digest {
         // It's not necessary to hash `previous_mutator_set_accumulator` and `ms_update_digest` here,
         // as they are fully determined by `next_ms_acc_digest` assuming a good hash function.
+
         let mut all_digests: Vec<Vec<BFieldElement>> = self
             .transactions
             .iter()

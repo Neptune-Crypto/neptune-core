@@ -85,7 +85,7 @@ fn make_mock_block(height: u64, current_block_digest: Digest) -> Block {
         transactions: vec![tx],
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
-        previous_mutator_set_accumulator: todo!(),
+        previous_mutator_set_accumulator: MutatorSetAccumulator::default(),
         stark_proof: vec![],
     };
 
