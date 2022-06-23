@@ -10,6 +10,8 @@ use crate::models::blockchain::shared::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MutatorSetUpdate {
+    // The ordering of the removal/addition records must match that of
+    // the block.
     pub removals: Vec<RemovalRecord<Hash>>,
     pub additions: Vec<AdditionRecord<Hash>>,
 }

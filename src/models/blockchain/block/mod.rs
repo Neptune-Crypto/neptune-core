@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use twenty_first::{
@@ -5,6 +7,7 @@ use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::mutator_set::{
         mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+        removal_record::RemovalRecord,
     },
 };
 
@@ -18,7 +21,8 @@ use self::{
     block_body::BlockBody, block_header::BlockHeader, mutator_set_update::MutatorSetUpdate,
     transfer_block::TransferBlock,
 };
-use super::digest::*;
+use super::digest::{ordered_digest::OrderedDigest, *};
+use crate::models::blockchain::shared::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Block {
@@ -91,6 +95,22 @@ impl Block {
         }
     }
 
+    fn count_outputs(&self) -> usize {
+        self.body
+            .transactions
+            .iter()
+            .map(|tx| tx.outputs.len())
+            .sum()
+    }
+
+    fn count_inputs(&self) -> usize {
+        self.body
+            .transactions
+            .iter()
+            .map(|tx| tx.inputs.len())
+            .sum()
+    }
+
     fn devnet_is_valid(&self) -> bool {
         // What belongs here are the things that would otherwise
         // be verified by the block validity proof.
@@ -100,7 +120,7 @@ impl Block {
         // (with coinbase UTXO flag set)
         //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
         //   b) Verify that MS removal record is valid, done against `previous_mutator_set_accumulator`,
-        //   c) verify that all transactinos are represented in mutator_set_update
+        //   c) verify that all transactions are represented in mutator_set_update
         //     i) Verify that all input UTXOs are present in `removals`
         //     ii) Verify that all output UTXOs are present in `additions`
         //     iii) That there are no entries in `mutator_set_update` not present in a transaction.
@@ -108,6 +128,51 @@ impl Block {
         //      gives `next_mutator_set_accumulator`,
         //   e) transaction timestamp <= block timestamp
         //   f) call: `transaction.devnet_is_valid()`
+
+        for tx in self.body.transactions.iter() {
+            for input in tx.inputs.iter() {
+                // 1.a) Verify validity of membership proofs
+                if !self.body.previous_mutator_set_accumulator.verify(
+                    &input.utxo.hash().into(),
+                    &input.membership_proof.clone().into(),
+                ) {
+                    return false;
+                }
+            }
+        }
+
+        // 1.c) Verify that transactions and mutator_set_update agree
+        if self.count_inputs() != self.body.mutator_set_update.removals.len() {
+            return false;
+        }
+
+        if self.count_outputs() != self.body.mutator_set_update.additions.len() {
+            return false;
+        }
+
+        let mut i = 0;
+        let mut j = 0;
+        for tx in self.body.transactions.iter() {
+            for input in tx.inputs.iter() {
+                if input.removal_record != self.body.mutator_set_update.removals[i] {
+                    return false;
+                }
+                i += 1;
+            }
+
+            // for output in tx.outputs.iter() {
+            //     if output.
+            // }
+        }
+
+        // 1.d) Verify that the two mutator sets, previous and current, are
+        // consistent with the transactions.
+        let mut ms = self.body.previous_mutator_set_accumulator.clone();
+        for tx in self.body.transactions.iter() {
+            for input in tx.inputs.iter() {
+                ms.remove(&input.removal_record);
+            }
+        }
 
         // 2. accumulated proof-of-work was computed correctly
         //  - look two blocks back, take proof_of_work_line
@@ -132,14 +197,19 @@ impl Block {
         true
     }
 
-    pub fn is_valid(&self) -> bool {
-        // check that hash is below threshold
-        // TODO: Replace RHS with block `target_difficulty` from this block
-        if Into::<OrderedDigest>::into(self.hash) > MOCK_BLOCK_THRESHOLD {
+    pub fn is_valid(&self, parent: &Self) -> bool {
+        // Check that self is the child of parent
+        if parent.hash != self.header.prev_block_digest {
             return false;
         }
 
-        // TODO: timestamp > previous and not more than 10 seconds into future
+        // check that hash is below threshold
+        // TODO: Replace RHS with block `target_difficulty` from this block
+        if Into::<OrderedDigest>::into(self.hash)
+            > OrderedDigest::to_digest_threshold(self.header.target_difficulty)
+        {
+            return false;
+        }
 
         // TODO: `block_body_merkle_root` is hash of block body.
 
