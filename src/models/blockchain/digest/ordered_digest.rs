@@ -40,11 +40,13 @@ impl OrderedDigest {
     }
 
     pub fn to_digest_threshold(target_difficulty: U32s<5>) -> Self {
-        println!("target_difficulty = {:?}", target_difficulty);
+        assert!(
+            !target_difficulty.is_zero(),
+            "Difficulty cannot be less than 1"
+        );
+
         let difficulty_as_bui: BigUint = target_difficulty.into();
-        println!("difficulty_as_bui = {}", difficulty_as_bui);
         let max_threshold_as_bui: BigUint = Self::max().into();
-        println!("Self::max() = {:?}", Self::max());
         let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
 
         threshold_as_bui.into()

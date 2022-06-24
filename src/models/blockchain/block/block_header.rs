@@ -11,6 +11,9 @@ use crate::models::blockchain::{
 
 use super::block_height::BlockHeight;
 
+pub const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
+pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BlockHeader {
     pub version: BFieldElement,
@@ -26,13 +29,13 @@ pub struct BlockHeader {
     pub max_block_size: u32,
 
     // use to compare two forks of different height
-    pub proof_of_work_line: U32s<5>,
+    pub proof_of_work_line: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 
     // use to compare two forks of the same height
-    pub proof_of_work_family: U32s<5>,
+    pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 
     // This is the target difficulty for the current (*this*) block.
-    pub target_difficulty: U32s<5>,
+    pub target_difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
     pub block_body_merkle_root: Digest,
     pub uncles: Vec<Digest>,
 }

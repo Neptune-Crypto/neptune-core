@@ -7,6 +7,16 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockHeight(BFieldElement);
 
+// Assuming a block time of 10 minutes, and a halving every three years,
+// the number of blocks per halving cycle is 157680.
+pub const BLOCKS_PER_GENERATION: u64 = 157680;
+
+impl BlockHeight {
+    pub fn get_generation(&self) -> u64 {
+        self.0.value() / BLOCKS_PER_GENERATION
+    }
+}
+
 impl From<BFieldElement> for BlockHeight {
     fn from(item: BFieldElement) -> Self {
         BlockHeight(item)

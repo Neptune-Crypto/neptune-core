@@ -21,7 +21,9 @@ pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
     pub inputs: Vec<DevNetInput>,
-    pub outputs: Vec<Utxo>,
+
+    // In `outputs`, element 0 is the UTXO, element 1 is the MS canonical commitment
+    pub outputs: Vec<(Utxo, Digest)>,
     pub public_scripts: Vec<Vec<BFieldElement>>,
     pub fee: U32s<AMOUNT_SIZE_FOR_U32>,
     pub timestamp: BFieldElement,
@@ -36,7 +38,7 @@ impl Hashable for Transaction {
         let outputs_preimage: Vec<Vec<BFieldElement>> = self
             .outputs
             .iter()
-            .map(|output| output.hash().into())
+            .map(|(output_utxo, _)| output_utxo.hash().into())
             .collect();
         let outputs_digest = hasher.hash_many(&outputs_preimage);
 
@@ -87,7 +89,12 @@ impl Transaction {
         TransactionKernel {
             fee: self.fee,
             input_utxos: self.inputs.iter().map(|inp| inp.utxo.to_owned()).collect(),
-            output_utxos: self.outputs.clone(),
+            output_utxos: self
+                .outputs
+                .clone()
+                .into_iter()
+                .map(|(utxo, _)| utxo)
+                .collect(),
             public_scripts: self.public_scripts.clone(),
             timestamp: self.timestamp,
         }
@@ -108,7 +115,7 @@ impl Transaction {
                 Some(amount) => amount,
             };
 
-        let output_amount = self.fee + self.outputs.iter().map(|utxo| utxo.amount).sum();
+        let output_amount = self.fee + self.outputs.iter().map(|(utxo, _)| utxo.amount).sum();
 
         if output_amount > spendable_amount {
             return false;

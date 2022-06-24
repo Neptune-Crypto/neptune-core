@@ -1,13 +1,14 @@
-use std::collections::HashSet;
-
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use twenty_first::{
     amount::u32s::U32s,
     shared_math::b_field_element::BFieldElement,
-    util_types::mutator_set::{
-        mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
-        removal_record::RemovalRecord,
+    util_types::{
+        mutator_set::{
+            mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+        },
+        simple_hasher::Hasher,
     },
 };
 
@@ -18,10 +19,13 @@ pub mod mutator_set_update;
 pub mod transfer_block;
 
 use self::{
-    block_body::BlockBody, block_header::BlockHeader, mutator_set_update::MutatorSetUpdate,
-    transfer_block::TransferBlock,
+    block_body::BlockBody, block_header::BlockHeader, block_height::BlockHeight,
+    mutator_set_update::MutatorSetUpdate, transfer_block::TransferBlock,
 };
-use super::digest::{ordered_digest::OrderedDigest, *};
+use super::{
+    digest::{ordered_digest::OrderedDigest, *},
+    transaction::AMOUNT_SIZE_FOR_U32,
+};
 use crate::models::blockchain::shared::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -51,6 +55,16 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
+    pub fn get_mining_reward(block_height: BlockHeight) -> U32s<AMOUNT_SIZE_FOR_U32> {
+        let mut reward: U32s<AMOUNT_SIZE_FOR_U32> = U32s::new([100, 0, 0, 0]);
+        let generation = block_height.get_generation();
+        for _ in 0..generation {
+            reward.div_two()
+        }
+
+        reward
+    }
+
     pub fn genesis_block() -> Self {
         let empty_mutator = MutatorSetAccumulator::default();
         let body: BlockBody = BlockBody {
@@ -150,8 +164,9 @@ impl Block {
             return false;
         }
 
+        // Go over all input UTXOs and verify that the removal record is found at the same index
+        // in the `mutator_set_update` data structure
         let mut i = 0;
-        let mut j = 0;
         for tx in self.body.transactions.iter() {
             for input in tx.inputs.iter() {
                 if input.removal_record != self.body.mutator_set_update.removals[i] {
@@ -159,10 +174,26 @@ impl Block {
                 }
                 i += 1;
             }
+        }
 
-            // for output in tx.outputs.iter() {
-            //     if output.
-            // }
+        // Go over all output UTXOs and verify that the addition record is found at the same index
+        // in the `mutator_set_update` data structure
+        i = 0;
+        let hasher = Hash::new();
+        for tx in self.body.transactions.iter() {
+            for (utxo, randomness) in tx.outputs.iter() {
+                let expected_commitment =
+                    hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
+                if self.body.mutator_set_update.additions[i].commitment != expected_commitment {
+                    return false;
+                }
+                if !self.body.mutator_set_update.additions[i]
+                    .has_matching_aocl(&self.body.previous_mutator_set_accumulator.aocl)
+                {
+                    return false;
+                }
+                i += 1;
+            }
         }
 
         // 1.d) Verify that the two mutator sets, previous and current, are
@@ -170,7 +201,41 @@ impl Block {
         let mut ms = self.body.previous_mutator_set_accumulator.clone();
         for tx in self.body.transactions.iter() {
             for input in tx.inputs.iter() {
+                // TODO: This will probably fail with more than one removal record
+                // in the block, since we are not updating the removal records.
                 ms.remove(&input.removal_record);
+            }
+        }
+
+        // Construct all the addition records for all the transaction outputs. Then
+        // use these addition records to insert into the mutator set.
+        for tx in self.body.transactions.iter() {
+            for (utxo, randomness) in tx.outputs.iter() {
+                let addition_record = ms.commit(&utxo.hash().into(), &randomness.to_owned().into());
+                ms.add(&addition_record);
+            }
+        }
+
+        if ms.get_commitment() != self.body.next_mutator_set_accumulator.get_commitment() {
+            return false;
+        }
+
+        if ms.get_commitment()
+            != Into::<Vec<BFieldElement>>::into(self.header.mutator_set_commitment)
+        {
+            return false;
+        }
+
+        // 1.f) Verify all transactions
+        for (i, tx) in self.body.transactions.iter().enumerate() {
+            let miner_reward = if i == 0 {
+                Some(Self::get_mining_reward(self.header.height))
+            } else {
+                None
+            };
+            if !tx.devnet_is_valid(miner_reward) {
+                warn!("Invalid transaction found in block");
+                return false;
             }
         }
 
@@ -197,17 +262,18 @@ impl Block {
         true
     }
 
-    pub fn is_valid(&self, parent: &Self) -> bool {
+    pub fn is_valid(&self) -> bool {
         // Check that self is the child of parent
-        if parent.hash != self.header.prev_block_digest {
-            return false;
-        }
+        // if parent.hash != self.header.prev_block_digest {
+        //     return false;
+        // }
 
         // check that hash is below threshold
         // TODO: Replace RHS with block `target_difficulty` from this block
         if Into::<OrderedDigest>::into(self.hash)
             > OrderedDigest::to_digest_threshold(self.header.target_difficulty)
         {
+            warn!("Block digest exceeds target difficulty");
             return false;
         }
 
@@ -221,6 +287,7 @@ impl Block {
         // pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
         // pub mutator_set_update: MutatorSetUpdate,
         if !self.devnet_is_valid() {
+            warn!("Block devnet test failed");
             return false;
         }
 
