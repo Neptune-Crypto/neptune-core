@@ -1,18 +1,22 @@
 use super::*;
+use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_header::TARGET_DIFFICULTY_U32_SIZE;
+use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::block::BlockBody;
-use crate::models::blockchain::block::BlockHeader;
+use crate::models::blockchain::digest::Digest;
+use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES;
-use crate::models::blockchain::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::Utxo;
 use crate::models::peer::ConnectionRefusedReason;
 use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use leveldb::options::WriteOptions;
+use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::thread_rng;
@@ -82,10 +86,27 @@ fn get_dummy_version() -> String {
     "0.1.0".to_string()
 }
 
+fn get_dummy_latest_block(
+    input_block: Option<Block>,
+) -> (Block, LatestBlockInfo, Arc<std::sync::Mutex<BlockHeader>>) {
+    let block = match input_block {
+        None => Block::genesis_block(),
+        Some(block) => block,
+    };
+
+    let latest_block_info: LatestBlockInfo = block.clone().into();
+    let block_header = block.header.clone();
+    (
+        block,
+        latest_block_info,
+        Arc::new(std::sync::Mutex::new(block_header)),
+    )
+}
+
 fn get_dummy_handshake_data(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
-        latest_block_info: None,
+        latest_block_info: get_dummy_latest_block(None).1,
         listen_address: Some(get_dummy_address()),
         network,
         version: get_dummy_version(),
@@ -118,11 +139,13 @@ fn get_dummy_setup(
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let peer_map = get_peer_map();
+    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> = get_peer_map();
+    let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let databases = get_unit_test_database(network)?;
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
     Ok((
         peer_broadcast_tx,
@@ -310,6 +333,7 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
     let peer_map = get_peer_map();
     let peer_address0 = get_dummy_address();
     let peer_address1 = std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap();
+    let (_, _, latest_block_header) = get_dummy_latest_block(None);
     peer_map
         .lock()
         .unwrap()
@@ -321,6 +345,7 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
     let state = State {
         peer_map,
         databases: get_unit_test_database(Network::Main)?,
+        latest_block_header,
     };
 
     if let Err(_) = main_loop::answer_peer(
@@ -422,16 +447,23 @@ impl<Item> stream::Stream for Mock<Item> {
 }
 
 /// Return a fake block with a random hash
-fn make_mock_block(height: u64) -> Block {
+fn make_mock_block(
+    height: u64,
+    block_target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
+) -> Block {
     let secp = Secp256k1::new();
     let mut rng = OsRng::new().expect("OsRng");
     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
         secp.generate_keypair(&mut rng);
 
+    let block_height: BlockHeight = height.into();
     let coinbase_utxo = Utxo {
-        amount: U32s::new([100u32, 0, 0, 0]),
+        amount: Block::get_mining_reward(block_height),
         public_key,
     };
+    println!("coinbase_utxo = {:?}", coinbase_utxo);
+    let output_randomness =
+        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
     let timestamp: BFieldElement = BFieldElement::new(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -440,17 +472,17 @@ fn make_mock_block(height: u64) -> Block {
     );
     let tx = Transaction {
         inputs: vec![],
-        outputs: vec![coinbase_utxo.clone()],
+        outputs: vec![(coinbase_utxo.clone(), output_randomness.clone().into())],
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,
     };
     let mut new_ms = MutatorSetAccumulator::default();
-    let coinbase_digest: RescuePrimeDigest = coinbase_utxo.hash();
-    let randomness =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+    let empty_ms = new_ms.clone();
+    let coinbase_digest: Digest = coinbase_utxo.hash();
+
     let coinbase_addition_record: AdditionRecord<Hash> =
-        new_ms.commit(&coinbase_digest.into(), &randomness.into());
+        new_ms.commit(&coinbase_digest.into(), &output_randomness.into());
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
@@ -459,8 +491,12 @@ fn make_mock_block(height: u64) -> Block {
 
     let block_body: BlockBody = BlockBody {
         transactions: vec![tx],
-        mutator_set_accumulator: new_ms.clone(),
+        next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
+
+        // TODO: Consider to use something else than an empty MS here
+        previous_mutator_set_accumulator: empty_ms,
+        stark_proof: vec![],
     };
 
     let zero = BFieldElement::ring_zero();
@@ -468,16 +504,19 @@ fn make_mock_block(height: u64) -> Block {
         version: zero,
         height: BlockHeight::from(height),
         mutator_set_commitment: new_ms.get_commitment().into(),
-        prev_block_digest: RescuePrimeDigest::default(),
+        prev_block_digest: Digest::default(),
         timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
         proof_of_work_line: U32s::zero(),
         proof_of_work_family: U32s::zero(),
-        target_difficulty: U32s::zero(),
+        target_difficulty: match block_target_difficulty {
+            None => U32s::one(),
+            Some(td) => td,
+        },
 
         // TODO: Wrong: Fix this by implementing a hash function on BlockBody
-        block_body_merkle_root: RescuePrimeDigest::default(),
+        block_body_merkle_root: block_body.hash(),
         uncles: vec![],
     };
 
@@ -498,9 +537,11 @@ async fn test_peer_loop_bye() -> Result<()> {
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
+    let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
@@ -521,9 +562,11 @@ async fn test_peer_loop_peer_list() -> Result<()> {
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
+    let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
 
     let mock = Mock::new(vec![
@@ -546,6 +589,56 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 }
 
 #[tokio::test]
+async fn bad_block_test() -> Result<()> {
+    let peer_map = get_peer_map();
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let databases = get_unit_test_database(Network::Main)?;
+
+    // Make a with hash above what the implied threshold from
+    // `target_difficulty` requires
+    let block_without_valid_pow = make_mock_block(
+        1,
+        Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
+            1_000_000, 0, 0, 0, 0,
+        ])),
+    );
+    let (_, _, genesis_block_header) = get_dummy_latest_block(None);
+    let state = State {
+        peer_map: peer_map.clone(),
+        databases: databases,
+        latest_block_header: genesis_block_header,
+    };
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_without_valid_pow.into()))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
+    let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+    let from_main_rx_clone = peer_broadcast_tx.subscribe();
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    // Verify that no message was sent to main loop
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(_block)) => {
+            bail!("Block notification must not be sent for block with invalid PoW")
+        }
+        Some(msg) => bail!(
+            "No message must be sent to main loop when receiving old block. Got {:?}",
+            msg
+        ),
+        None => (),
+    };
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     let peer_map = get_peer_map();
     let peer_address = get_dummy_address();
@@ -555,7 +648,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
 
-    let block_14 = make_mock_block(14);
+    let block_14 = make_mock_block(14, None);
     let latest_block_info_14 = LatestBlockInfo::new(block_14.hash, block_14.header.height);
     // let block_hash_raw: [u8; 32] = block_14.hash.into();
     {
@@ -565,9 +658,9 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
             DatabaseUnit(),
             &bincode::serialize(&latest_block_info_14)?,
         )?;
-        dbs.block_hash_to_block.put(
+        dbs.block_hash_to_block.put::<KeyableDigest>(
             WriteOptions::new(),
-            block_14.hash,
+            block_14.hash.into(),
             &bincode::serialize(&block_14)?,
         )?;
         dbs.block_height_to_hash.put(
@@ -576,9 +669,11 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
             &bincode::serialize(&block_14.hash)?,
         )?;
     }
+    let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let state = State {
         peer_map: peer_map.clone(),
         databases: databases,
+        latest_block_header,
     };
 
     let mock = Mock::new(vec![
@@ -620,13 +715,17 @@ async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let databases = get_unit_test_database(Network::Main)?;
+    let (_, _, genesis_block_header) = get_dummy_latest_block(None);
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header: genesis_block_header,
     };
 
     let mock = Mock::new(vec![
-        Action::Read(PeerMessage::Block(Box::new(make_mock_block(0).into()))),
+        Action::Read(PeerMessage::Block(Box::new(
+            make_mock_block(1, None).into(),
+        ))),
         Action::Read(PeerMessage::Bye),
     ]);
 
@@ -658,9 +757,11 @@ async fn test_get_connection_status() -> Result<()> {
     let peer_id = peer.instance_id;
     peer_map.lock().unwrap().insert(peer_address, peer);
     let databases = get_unit_test_database(network)?;
+    let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let state = State {
         peer_map: peer_map.clone(),
         databases,
+        latest_block_header,
     };
 
     let own_handshake = get_dummy_handshake_data(network);

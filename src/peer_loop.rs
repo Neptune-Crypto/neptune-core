@@ -1,5 +1,7 @@
-use crate::models::blockchain::block::{Block, TransferBlock};
-use crate::models::blockchain::digest::{RescuePrimeDigest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
+use crate::models::blockchain::block::transfer_block::TransferBlock;
+use crate::models::blockchain::block::Block;
+use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
+use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::DatabaseUnit;
 use crate::models::peer::{PeerMessage, PeerStateData};
@@ -18,6 +20,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
 const PEER_TOLERANCE: u8 = 50;
+const INVALID_BLOCK_SEVERITY: u8 = 10;
 const BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY: u8 = 3;
 
 pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
@@ -36,7 +39,34 @@ pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
     }
 }
 
-/// Handle peer messages and return Ok(true) iff connection should be closed.
+/// Function for handling the receiving of a new block from a peer
+async fn handle_new_block(
+    block: Box<Block>,
+    peer_address: &SocketAddr,
+    state: &State,
+    to_main_tx: &mpsc::Sender<PeerThreadToMain>,
+) -> Result<()> {
+    if !block.is_valid() {
+        warn!("Received invalid block from peer with IP {}", peer_address);
+        punish(state, peer_address, INVALID_BLOCK_SEVERITY);
+    } else {
+        info!("Block is valid");
+
+        // Send the new block to the main thread which handles the state update
+        // and storage to the database.
+        let new_block_height = block.header.height;
+        to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
+        info!(
+            "Updated block info by block from peer. block height {}",
+            new_block_height
+        );
+    }
+
+    Ok(())
+}
+
+/// Handle peer messages and returns Ok(true) if connection should be closed.
+/// Otherwise returns OK(false).
 async fn handle_peer_message<S>(
     msg: PeerMessage,
     state: &State,
@@ -95,11 +125,7 @@ where
                     }
                 };
                 if block_is_new {
-                    to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
-                    info!(
-                        "Updated block info by block from peer. block height {}",
-                        new_block_height
-                    );
+                    handle_new_block(block, peer_address, state, to_main_tx).await?;
                 } else {
                     info!("Got non-new block from peer, height: {}", new_block_height);
                 }
@@ -128,7 +154,6 @@ where
                         .await?;
                     debug!("Sent BlockRequestByHeight to peer");
 
-                    // The response should be caught by `PeerMessage::Block` above
                     match peer.try_next().await {
                         Ok(Some(PeerMessage::BlockResponseByHeight(Some(received_block)))) => {
                             debug!("Got BlockResponseByHeight");
@@ -138,16 +163,8 @@ where
                                 return Ok(false);
                             }
 
-                            // TODO: Verify received block, hash etc.
                             let block: Box<Block> = Box::new((*received_block).into());
-                            match to_main_tx.send(PeerThreadToMain::NewBlock(block)).await {
-                                Ok(()) => (),
-                                Err(e) => panic!("{}", e),
-                            };
-                            debug!(
-                                "Updated block info by block from peer. block height {}",
-                                block_notification.height
-                            );
+                            handle_new_block(block, peer_address, state, to_main_tx).await?;
                         }
                         _ => {
                             warn!("Got invalid block response");
@@ -179,10 +196,10 @@ where
                                     v.len()
                                 )
                             });
-                        let block_digest: RescuePrimeDigest = hash_array.into();
+                        let block_digest: Digest = hash_array.into();
                         let block_response = match databases
                             .block_hash_to_block
-                            .get(read_opts_block, block_digest)
+                            .get::<KeyableDigest>(read_opts_block, block_digest.into())
                             .expect("Failed to read from database")
                         {
                             // I think it makes sense to panic here since we found the block in the height to digest
@@ -291,7 +308,7 @@ where
                                 break;
                             }
                             Some(peer_msg) => {
-                                let close_connection = handle_peer_message(peer_msg, &state, peer_address, &mut peer, &mut peer_state_info, &to_main_tx).await?;
+                                let close_connection: bool = handle_peer_message(peer_msg, &state, peer_address, &mut peer, &mut peer_state_info, &to_main_tx).await?;
                                 if close_connection {
                                     state.peer_map
                                     .lock()

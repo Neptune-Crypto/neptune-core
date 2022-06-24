@@ -20,8 +20,9 @@ use futures::StreamExt;
 use leveldb::database::Database;
 use leveldb::kv::KV;
 use leveldb::options::{Options, ReadOptions};
-use models::blockchain::block::BlockHeight;
-use models::blockchain::digest::RescuePrimeDigest;
+use models::blockchain::block::block_height::BlockHeight;
+use models::blockchain::block::Block;
+use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::database::{DatabaseUnit, Databases};
 use models::peer::Peer;
 use models::State;
@@ -88,7 +89,7 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
 
     let mut hash_options = Options::new();
     hash_options.create_if_missing = true;
-    let block_hash_to_block: Database<RescuePrimeDigest> =
+    let block_hash_to_block: Database<KeyableDigest> =
         match Database::open(block_hash_to_block_path.as_path(), hash_options) {
             Ok(db) => db,
             Err(e) => {
@@ -141,23 +142,41 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     ));
 
     // Get latest block height
-    let latest_block_info: Option<LatestBlockInfo> = {
+    // Use genesis block if nothing is in database
+    let (latest_block_info, latest_block): (LatestBlockInfo, Block) = {
         let dbs = databases.lock().await;
-        let lookup_res = dbs
+        let lookup_res_info = dbs
             .latest_block
             .get(ReadOptions::new(), DatabaseUnit())
             .expect("Failed to get latest block info on init");
-        lookup_res.map(|bytes| {
-            bincode::deserialize(&bytes).expect("Failed to deserialize latest block info")
-        })
+        let genesis_block = Block::genesis_block();
+        let (latest_info_res, latest_block_res): (LatestBlockInfo, Block) = match lookup_res_info {
+            None => {
+                info!("No previous state saved. Using genesis block.");
+                (
+                    LatestBlockInfo::new(genesis_block.hash, genesis_block.header.height),
+                    genesis_block,
+                )
+            }
+            Some(bytes) => {
+                let latest_block_info_res_res: LatestBlockInfo =
+                    bincode::deserialize(&bytes).expect("Failed to deserialize latest block info");
+                info!(
+                    "Latest block was block height {}, hash = {:?}",
+                    latest_block_info_res_res.height, latest_block_info_res_res.hash
+                );
+                let latest_block_serialized = dbs
+                    .block_hash_to_block
+                    .get::<KeyableDigest>(ReadOptions::new(), latest_block_info_res_res.hash.into())
+                    .expect("Failed to get latest block from database");
+                let latest_block: Block = bincode::deserialize(&latest_block_serialized.unwrap())
+                    .expect("Failed to deserialize latest block info");
+                (latest_block_info_res_res, latest_block)
+            }
+        };
+
+        (latest_info_res, latest_block_res)
     };
-    match latest_block_info {
-        None => info!("No previous state saved"),
-        Some(block) => info!(
-            "Latest block was block height {}, hash = {:?}",
-            block.height, block.hash
-        ),
-    }
 
     // Bind socket to port on this machine
     let listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
@@ -185,12 +204,15 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
 
     // Connect to peers
+    let latest_block_header = Arc::new(std::sync::Mutex::new(latest_block.header));
     for peer in cli_args.peers.clone() {
         let peer_map_thread = Arc::clone(&peer_map);
         let databases_thread = Arc::clone(&databases);
+        let block_head_header = Arc::clone(&latest_block_header);
         let state = State {
             peer_map: peer_map_thread,
             databases: databases_thread,
+            latest_block_header: block_head_header,
         };
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
@@ -229,9 +251,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     rpc_listener.config_mut().max_frame_length(usize::MAX);
     let peer_map_thread = Arc::clone(&peer_map);
     let databases_thread = Arc::clone(&databases);
+    let latest_block_header_thread = Arc::clone(&latest_block_header);
     let state = State {
         peer_map: peer_map_thread,
         databases: databases_thread,
+        latest_block_header: latest_block_header_thread,
     };
     tokio::spawn(async move {
         rpc_listener
@@ -267,6 +291,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         miner_to_main_rx,
         cli_args,
         main_to_miner_tx,
+        latest_block_header,
     )
     .await
 }

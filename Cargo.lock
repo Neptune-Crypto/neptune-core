@@ -798,6 +798,7 @@ dependencies = [
  "directories",
  "futures",
  "leveldb",
+ "num-bigint",
  "num-traits",
  "paw",
  "pin-project-lite",
@@ -1915,7 +1916,7 @@ dependencies = [
 [[package]]
 name = "twenty-first"
 version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=9377d96794d159720d9cf3e84b7bf88d6ce3e7a6#9377d96794d159720d9cf3e84b7bf88d6ce3e7a6"
+source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=3237ca0b848366ec7621b06e2375b021a49a52bb#3237ca0b848366ec7621b06e2375b021a49a52bb"
 dependencies = [
  "anyhow",
  "bincode",
