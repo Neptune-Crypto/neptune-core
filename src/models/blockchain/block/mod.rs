@@ -229,6 +229,7 @@ impl Block {
         // 1.f) Verify all transactions
         for (i, tx) in self.body.transactions.iter().enumerate() {
             let miner_reward = if i == 0 {
+                // The 1st transaction in the block can collect a coinbase transaction
                 Some(Self::get_mining_reward(self.header.height))
             } else {
                 None
@@ -262,7 +263,8 @@ impl Block {
         true
     }
 
-    pub fn is_valid(&self) -> bool {
+    /// The archival-version of block validation. Archival nodes should run this version.
+    pub fn archival_is_valid(&self) -> bool {
         // Check that self is the child of parent
         // if parent.hash != self.header.prev_block_digest {
         //     return false;

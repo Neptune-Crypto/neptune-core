@@ -2,7 +2,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::database::DatabaseUnit;
 use crate::models::peer::Peer;
 use crate::models::shared::LatestBlockInfo;
-use crate::models::State;
+use crate::models::state::State;
 use futures::executor;
 use futures::future::{self, Ready};
 use leveldb::kv::KV;

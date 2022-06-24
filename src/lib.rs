@@ -8,6 +8,7 @@ pub mod rpc;
 #[cfg(test)]
 mod tests;
 
+use crate::models::state::State;
 use crate::rpc::RPC;
 use anyhow::{bail, Context, Result};
 use config_models::cli_args;
@@ -25,7 +26,6 @@ use models::blockchain::block::Block;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::database::{DatabaseUnit, Databases};
 use models::peer::Peer;
-use models::State;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::Unpin;
@@ -205,14 +205,17 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Connect to peers
     let latest_block_header = Arc::new(std::sync::Mutex::new(latest_block.header));
+    let syncing = Arc::new(std::sync::RwLock::new(false));
     for peer in cli_args.peers.clone() {
         let peer_map_thread = Arc::clone(&peer_map);
         let databases_thread = Arc::clone(&databases);
         let block_head_header = Arc::clone(&latest_block_header);
+        let syncing_thread = Arc::clone(&syncing);
         let state = State {
             peer_map: peer_map_thread,
             databases: databases_thread,
             latest_block_header: block_head_header,
+            syncing: syncing_thread,
         };
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
@@ -252,11 +255,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let peer_map_thread = Arc::clone(&peer_map);
     let databases_thread = Arc::clone(&databases);
     let latest_block_header_thread = Arc::clone(&latest_block_header);
+    let syncing_thread = Arc::clone(&syncing);
     let state = State {
         peer_map: peer_map_thread,
         databases: databases_thread,
         latest_block_header: latest_block_header_thread,
+        syncing: syncing_thread,
     };
+    let rpc_listener_state: State = state.clone();
     tokio::spawn(async move {
         rpc_listener
             // Ignore accept errors.
@@ -269,7 +275,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             .map(|channel| {
                 let server = rpc::NeptuneRPCServer {
                     socket_address: channel.transport().peer_addr().unwrap(),
-                    state: state.clone(),
+                    state: rpc_listener_state.clone(),
                 };
                 channel.execute(server.serve())
             })
@@ -282,7 +288,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
     main_loop::main_loop(
         listener,
-        peer_map,
+        state,
         databases,
         main_to_peer_broadcast_tx,
         peer_thread_to_main_tx,
@@ -291,7 +297,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         miner_to_main_rx,
         cli_args,
         main_to_miner_tx,
-        latest_block_header,
     )
     .await
 }

@@ -146,6 +146,7 @@ fn get_dummy_setup(
         peer_map: peer_map.clone(),
         databases,
         latest_block_header,
+        syncing: Arc::new(std::sync::RwLock::new(false)),
     };
     Ok((
         peer_broadcast_tx,
@@ -328,12 +329,11 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
         )))?)
         .build();
 
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, _, _) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
         get_dummy_setup(Network::Main)?;
-    let peer_map = get_peer_map();
     let peer_address0 = get_dummy_address();
     let peer_address1 = std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap();
-    let (_, _, latest_block_header) = get_dummy_latest_block(None);
+    let (_, _, _latest_block_header) = get_dummy_latest_block(None);
     peer_map
         .lock()
         .unwrap()
@@ -342,11 +342,6 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address1, get_dummy_peer(peer_address1));
-    let state = State {
-        peer_map,
-        databases: get_unit_test_database(Network::Main)?,
-        latest_block_header,
-    };
 
     if let Err(_) = main_loop::answer_peer(
         mock,
@@ -528,21 +523,15 @@ async fn test_peer_loop_bye() -> Result<()> {
     let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
     let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
-    let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+    let (_to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
+    let (_peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(Network::Main)?;
 
-    let peer_map = get_peer_map();
     let peer_address = get_dummy_address();
     peer_map
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
-    let databases = get_unit_test_database(Network::Main)?;
-    let (_, _, latest_block_header) = get_dummy_latest_block(None);
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-        latest_block_header,
-    };
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
@@ -555,19 +544,13 @@ async fn test_peer_loop_bye() -> Result<()> {
 
 #[tokio::test]
 async fn test_peer_loop_peer_list() -> Result<()> {
-    let peer_map = get_peer_map();
+    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
-    let databases = get_unit_test_database(Network::Main)?;
-    let (_, _, latest_block_header) = get_dummy_latest_block(None);
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-        latest_block_header,
-    };
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::PeerListRequest),
@@ -590,13 +573,13 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 
 #[tokio::test]
 async fn bad_block_test() -> Result<()> {
-    let peer_map = get_peer_map();
+    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
-    let databases = get_unit_test_database(Network::Main)?;
 
     // Make a with hash above what the implied threshold from
     // `target_difficulty` requires
@@ -606,12 +589,6 @@ async fn bad_block_test() -> Result<()> {
             1_000_000, 0, 0, 0, 0,
         ])),
     );
-    let (_, _, genesis_block_header) = get_dummy_latest_block(None);
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases: databases,
-        latest_block_header: genesis_block_header,
-    };
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_without_valid_pow.into()))),
         Action::Read(PeerMessage::Bye),
@@ -640,19 +617,19 @@ async fn bad_block_test() -> Result<()> {
 
 #[tokio::test]
 async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
-    let peer_map = get_peer_map();
+    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
-    let databases = get_unit_test_database(Network::Main)?;
 
     let block_14 = make_mock_block(14, None);
     let latest_block_info_14 = LatestBlockInfo::new(block_14.hash, block_14.header.height);
     // let block_hash_raw: [u8; 32] = block_14.hash.into();
     {
-        let dbs = databases.lock().await;
+        let dbs = state.databases.lock().await;
         dbs.latest_block.put(
             WriteOptions::new(),
             DatabaseUnit(),
@@ -669,12 +646,6 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
             &bincode::serialize(&block_14.hash)?,
         )?;
     }
-    let (_, _, latest_block_header) = get_dummy_latest_block(None);
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases: databases,
-        latest_block_header,
-    };
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_14.into()))),
@@ -708,19 +679,13 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 
 #[tokio::test]
 async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
-    let peer_map = get_peer_map();
+    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
-    let databases = get_unit_test_database(Network::Main)?;
-    let (_, _, genesis_block_header) = get_dummy_latest_block(None);
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-        latest_block_header: genesis_block_header,
-    };
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(
@@ -751,18 +716,12 @@ async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
 #[tokio::test]
 async fn test_get_connection_status() -> Result<()> {
     let network = Network::Main;
-    let peer_map = get_peer_map();
+    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+        get_dummy_setup(network)?;
     let peer_address = get_dummy_address();
     let peer = get_dummy_peer(peer_address);
     let peer_id = peer.instance_id;
     peer_map.lock().unwrap().insert(peer_address, peer);
-    let databases = get_unit_test_database(network)?;
-    let (_, _, latest_block_header) = get_dummy_latest_block(None);
-    let state = State {
-        peer_map: peer_map.clone(),
-        databases,
-        latest_block_header,
-    };
 
     let own_handshake = get_dummy_handshake_data(network);
     let mut other_handshake = get_dummy_handshake_data(network);

@@ -1,18 +1,14 @@
 use crate::config_models::cli_args;
-use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
 use crate::models::database::{DatabaseUnit, Databases};
 use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer};
-use crate::models::State;
+use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use leveldb::kv::KV;
 use leveldb::options::{ReadOptions, WriteOptions};
-use std::collections::hash_map::RandomState;
-use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -262,7 +258,7 @@ async fn handle_peer_thread_message(
 #[allow(clippy::too_many_arguments)]
 pub async fn main_loop(
     listener: TcpListener,
-    peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer, RandomState>>>,
+    state: State,
     databases: Arc<tokio::sync::Mutex<Databases>>,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
@@ -271,21 +267,13 @@ pub async fn main_loop(
     mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
     cli_args: cli_args::Args,
     main_to_miner_tx: watch::Sender<MainToMiner>,
-    latest_block_header: Arc<std::sync::Mutex<BlockHeader>>,
 ) -> Result<()> {
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
     loop {
         select! {
             // The second item contains the IP and port of the new connection.
             Ok((stream, _)) = listener.accept() => {
-                let peer_map_thread = Arc::clone(&peer_map);
-                let databases_thread = Arc::clone(&databases);
-                let latest_block_header_thread = Arc::clone(&latest_block_header);
-                let state = State {
-                    peer_map: peer_map_thread,
-                    databases: databases_thread,
-                    latest_block_header: latest_block_header_thread,
-                };
+                let state = state.clone();
                 let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = main_to_peer_broadcast_tx.subscribe();
                 let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = peer_thread_to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();

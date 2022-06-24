@@ -6,7 +6,7 @@ use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::DatabaseUnit;
 use crate::models::peer::{PeerMessage, PeerStateData};
 use crate::models::shared::LatestBlockInfo;
-use crate::models::State;
+use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
@@ -46,7 +46,7 @@ async fn handle_new_block(
     state: &State,
     to_main_tx: &mpsc::Sender<PeerThreadToMain>,
 ) -> Result<()> {
-    if !block.is_valid() {
+    if !block.archival_is_valid() {
         warn!("Received invalid block from peer with IP {}", peer_address);
         punish(state, peer_address, INVALID_BLOCK_SEVERITY);
     } else {
