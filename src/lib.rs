@@ -130,6 +130,43 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
     }
 }
 
+async fn get_latest_block(
+    databases: Arc<tokio::sync::Mutex<Databases>>,
+) -> (LatestBlockInfo, Block) {
+    let dbs = databases.lock().await;
+    let lookup_res_info = dbs
+        .latest_block
+        .get(ReadOptions::new(), DatabaseUnit())
+        .expect("Failed to get latest block info on init");
+    let genesis_block = Block::genesis_block();
+    let (latest_info_res, latest_block_res): (LatestBlockInfo, Block) = match lookup_res_info {
+        None => {
+            info!("No previous state saved. Using genesis block.");
+            (
+                LatestBlockInfo::new(genesis_block.hash, genesis_block.header.height),
+                genesis_block,
+            )
+        }
+        Some(bytes) => {
+            let latest_block_info_res_res: LatestBlockInfo =
+                bincode::deserialize(&bytes).expect("Failed to deserialize latest block info");
+            info!(
+                "Latest block was block height {}, hash = {:?}",
+                latest_block_info_res_res.height, latest_block_info_res_res.hash
+            );
+            let latest_block_serialized = dbs
+                .block_hash_to_block
+                .get::<KeyableDigest>(ReadOptions::new(), latest_block_info_res_res.hash.into())
+                .expect("Failed to get latest block from database");
+            let latest_block: Block = bincode::deserialize(&latest_block_serialized.unwrap())
+                .expect("Failed to deserialize latest block info");
+            (latest_block_info_res_res, latest_block)
+        }
+    };
+
+    (latest_info_res, latest_block_res)
+}
+
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Connect to database
@@ -141,42 +178,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         initialize_databases(root_path, cli_args.network),
     ));
 
-    // Get latest block height
-    // Use genesis block if nothing is in database
-    let (latest_block_info, latest_block): (LatestBlockInfo, Block) = {
-        let dbs = databases.lock().await;
-        let lookup_res_info = dbs
-            .latest_block
-            .get(ReadOptions::new(), DatabaseUnit())
-            .expect("Failed to get latest block info on init");
-        let genesis_block = Block::genesis_block();
-        let (latest_info_res, latest_block_res): (LatestBlockInfo, Block) = match lookup_res_info {
-            None => {
-                info!("No previous state saved. Using genesis block.");
-                (
-                    LatestBlockInfo::new(genesis_block.hash, genesis_block.header.height),
-                    genesis_block,
-                )
-            }
-            Some(bytes) => {
-                let latest_block_info_res_res: LatestBlockInfo =
-                    bincode::deserialize(&bytes).expect("Failed to deserialize latest block info");
-                info!(
-                    "Latest block was block height {}, hash = {:?}",
-                    latest_block_info_res_res.height, latest_block_info_res_res.hash
-                );
-                let latest_block_serialized = dbs
-                    .block_hash_to_block
-                    .get::<KeyableDigest>(ReadOptions::new(), latest_block_info_res_res.hash.into())
-                    .expect("Failed to get latest block from database");
-                let latest_block: Block = bincode::deserialize(&latest_block_serialized.unwrap())
-                    .expect("Failed to deserialize latest block info");
-                (latest_block_info_res_res, latest_block)
-            }
-        };
-
-        (latest_info_res, latest_block_res)
-    };
+    // Get latest block. Use hardcoded genesis block if nothing is in database.
+    let (latest_block_info, latest_block): (LatestBlockInfo, Block) =
+        get_latest_block(Arc::clone(&databases)).await;
 
     // Bind socket to port on this machine
     let listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
