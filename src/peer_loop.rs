@@ -3,9 +3,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
-use crate::models::database::DatabaseUnit;
 use crate::models::peer::{PeerMessage, PeerStateData};
-use crate::models::shared::LatestBlockInfo;
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
@@ -46,6 +44,11 @@ async fn handle_new_block(
     state: &State,
     to_main_tx: &mpsc::Sender<PeerThreadToMain>,
 ) -> Result<()> {
+    // Get from peer the previous blocks if own latest block is not parent to this
+    // For this, we need to read from the database by looking up the parent hash
+    // until we reach a block that we know. Potentially going all the way back to
+    //
+
     if !block.archival_is_valid() {
         warn!("Received invalid block from peer with IP {}", peer_address);
         punish(state, peer_address, INVALID_BLOCK_SEVERITY);
@@ -111,24 +114,21 @@ where
             // This includes checking that the block hash is below a threshold etc.
             let block: Box<Block> = Box::new((*t_block).into());
             peer_state_info.highest_shared_block_height = new_block_height;
-            {
-                let databases = state.databases.lock().await;
-                let own_block_info = databases
-                    .latest_block
-                    .get(ReadOptions::new(), DatabaseUnit())
-                    .expect("Failed to read from 'latest' database");
-                let block_is_new = match own_block_info {
-                    None => true,
-                    Some(bytes) => {
-                        let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
-                        own_latest_block_info.height < block.header.height
-                    }
-                };
-                if block_is_new {
-                    handle_new_block(block, peer_address, state, to_main_tx).await?;
-                } else {
-                    info!("Got non-new block from peer, height: {}", new_block_height);
-                }
+            let block_is_new = state
+                .latest_block_header
+                .lock()
+                .unwrap()
+                .proof_of_work_family
+                < block.header.proof_of_work_family;
+
+            println!("block_is_new = {}", block_is_new);
+            if block_is_new {
+                handle_new_block(block, peer_address, state, to_main_tx).await?;
+            } else {
+                info!(
+                    "Got non canonical block from peer, height: {}, PoW family: {:?}",
+                    new_block_height, block.header.proof_of_work_family,
+                );
             }
             Ok(false)
         }
@@ -136,18 +136,12 @@ where
             debug!("Got BlockNotification");
             peer_state_info.highest_shared_block_height = block_notification.height;
             {
-                let databases = state.databases.lock().await;
-                let own_block_info = databases
-                    .latest_block
-                    .get(ReadOptions::new(), DatabaseUnit())
-                    .expect("Failed to read from 'latest' database");
-                let block_is_new = match own_block_info {
-                    None => true,
-                    Some(bytes) => {
-                        let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
-                        own_latest_block_info.height < block_notification.height
-                    }
-                };
+                let block_is_new = state
+                    .latest_block_header
+                    .lock()
+                    .unwrap()
+                    .proof_of_work_family
+                    < block_notification.proof_of_work_family;
 
                 if block_is_new {
                     peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))

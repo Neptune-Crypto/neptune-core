@@ -172,7 +172,7 @@ async fn handle_miner_thread_message(
                     block.header.height,
                     &block_hash_raw,
                 )?;
-                db.latest_block.put(
+                db.latest_block_header.put(
                     WriteOptions::new(),
                     DatabaseUnit(),
                     &bincode::serialize(&latest_block_info).expect("Failed to serialize block"),
@@ -197,13 +197,11 @@ async fn handle_peer_thread_message(
             {
                 let db = databases.lock().await;
                 let own_block_info = db
-                    .latest_block
+                    .latest_block_header
                     .get(ReadOptions::new(), DatabaseUnit())
                     .expect("Failed to read from 'latest' database");
 
-                // If block is not new, abort
-                // Block could have been new when peer thread had a lock on the database
-                // but no longer be new now, so we have to check again
+                // TODO: Fix this to use block header instead!
                 let block_is_new = match own_block_info {
                     None => true,
                     Some(bytes) => {
@@ -235,7 +233,7 @@ async fn handle_peer_thread_message(
                     block.header.height,
                     &block_hash_raw,
                 )?;
-                db.latest_block.put(
+                db.latest_block_header.put(
                     WriteOptions::new(),
                     DatabaseUnit(),
                     &bincode::serialize(&latest_block_info).expect("Failed to serialize block"),

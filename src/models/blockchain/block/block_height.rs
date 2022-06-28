@@ -15,6 +15,10 @@ impl BlockHeight {
     pub fn get_generation(&self) -> u64 {
         self.0.value() / BLOCKS_PER_GENERATION
     }
+
+    pub fn next(&self) -> Self {
+        Self(self.0 + BFieldElement::ring_one())
+    }
 }
 
 impl From<BFieldElement> for BlockHeight {

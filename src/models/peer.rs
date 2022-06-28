@@ -1,6 +1,9 @@
 use super::{
     blockchain::{
-        block::{block_height::BlockHeight, transfer_block::TransferBlock, Block},
+        block::{
+            block_header::PROOF_OF_WORK_COUNT_U32_SIZE, block_height::BlockHeight,
+            transfer_block::TransferBlock, Block,
+        },
         digest::Digest,
     },
     shared::LatestBlockInfo,
@@ -8,6 +11,7 @@ use super::{
 use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::SystemTime};
+use twenty_first::amount::u32s::U32s;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Peer {
@@ -34,6 +38,7 @@ pub struct HandshakeData {
 pub struct PeerBlockNotification {
     pub hash: Digest,
     pub height: BlockHeight,
+    pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 }
 
 impl From<Block> for PeerBlockNotification {
@@ -41,6 +46,7 @@ impl From<Block> for PeerBlockNotification {
         PeerBlockNotification {
             hash: block.hash,
             height: block.header.height,
+            proof_of_work_family: block.header.proof_of_work_family,
         }
     }
 }
@@ -59,7 +65,6 @@ pub enum ConnectionStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-// #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum PeerMessage {
     Handshake((Vec<u8>, HandshakeData)),
     Block(Box<TransferBlock>),

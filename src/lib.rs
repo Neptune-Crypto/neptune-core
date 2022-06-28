@@ -126,7 +126,7 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
     Databases {
         block_hash_to_block,
         block_height_to_hash,
-        latest_block,
+        latest_block_header: latest_block,
     }
 }
 
@@ -135,7 +135,7 @@ async fn get_latest_block(
 ) -> (LatestBlockInfo, Block) {
     let dbs = databases.lock().await;
     let lookup_res_info = dbs
-        .latest_block
+        .latest_block_header
         .get(ReadOptions::new(), DatabaseUnit())
         .expect("Failed to get latest block info on init");
     let genesis_block = Block::genesis_block();
@@ -208,7 +208,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
 
     // Connect to peers
-    let latest_block_header = Arc::new(std::sync::Mutex::new(latest_block.header));
+    let latest_block_header = Arc::new(std::sync::Mutex::new(latest_block.header.clone()));
     let syncing = Arc::new(std::sync::RwLock::new(false));
     for peer in cli_args.peers.clone() {
         let peer_map_thread = Arc::clone(&peer_map);
@@ -243,7 +243,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     if cli_args.mine && cli_args.network == Network::RegTest {
         tokio::spawn(async move {
-            mine_loop::mock_regtest_mine(main_to_miner_rx, miner_to_main_tx, latest_block_info)
+            mine_loop::mock_regtest_mine(main_to_miner_rx, miner_to_main_tx, latest_block.header)
                 .await
                 .expect("Error in mining thread");
         });
@@ -411,6 +411,9 @@ where
         .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
         .entry(peer_address)
         .or_insert(new_peer);
+
+    // Do we want to set the "syncing" status here, and do something different if we are
+    // syncing?
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
     peer_loop::peer_loop(

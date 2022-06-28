@@ -7,7 +7,7 @@ use super::blockchain::{block::block_height::BlockHeight, digest::keyable_digest
 pub struct Databases {
     pub block_height_to_hash: Database<BlockHeight>,
     pub block_hash_to_block: Database<KeyableDigest>,
-    pub latest_block: Database<DatabaseUnit>,
+    pub latest_block_header: Database<DatabaseUnit>,
 }
 
 // We have to implement `Debug` for `Databases` as the `State` struct

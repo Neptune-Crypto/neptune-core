@@ -32,7 +32,7 @@ impl RPC for NeptuneRPCServer {
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         let databases = executor::block_on(self.state.databases.lock());
         let lookup_res = databases
-            .latest_block
+            .latest_block_header
             .get(ReadOptions::new(), DatabaseUnit())
             .expect("Failed to get latest block info on init");
         let block_info: Option<LatestBlockInfo> = lookup_res.map(|bytes| {

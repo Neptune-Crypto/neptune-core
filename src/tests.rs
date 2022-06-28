@@ -443,17 +443,17 @@ impl<Item> stream::Stream for Mock<Item> {
 
 /// Return a fake block with a random hash
 fn make_mock_block(
-    height: u64,
-    block_target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
+    previous_block: BlockHeader,
+    target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
 ) -> Block {
     let secp = Secp256k1::new();
     let mut rng = OsRng::new().expect("OsRng");
     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
         secp.generate_keypair(&mut rng);
 
-    let block_height: BlockHeight = height.into();
+    let new_block_height: BlockHeight = previous_block.height.next();
     let coinbase_utxo = Utxo {
-        amount: Block::get_mining_reward(block_height),
+        amount: Block::get_mining_reward(new_block_height),
         public_key,
     };
     println!("coinbase_utxo = {:?}", coinbase_utxo);
@@ -494,23 +494,24 @@ fn make_mock_block(
         stark_proof: vec![],
     };
 
+    let block_target_difficulty = previous_block.target_difficulty;
+    let pow_line = previous_block.proof_of_work_line + block_target_difficulty;
+    let pow_family = pow_line;
     let zero = BFieldElement::ring_zero();
     let block_header = BlockHeader {
         version: zero,
-        height: BlockHeight::from(height),
+        height: new_block_height,
         mutator_set_commitment: new_ms.get_commitment().into(),
         prev_block_digest: Digest::default(),
         timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
-        proof_of_work_line: U32s::zero(),
-        proof_of_work_family: U32s::zero(),
-        target_difficulty: match block_target_difficulty {
-            None => U32s::one(),
+        proof_of_work_line: pow_family,
+        proof_of_work_family: pow_family,
+        target_difficulty: match target_difficulty {
             Some(td) => td,
+            None => U32s::one(),
         },
-
-        // TODO: Wrong: Fix this by implementing a hash function on BlockBody
         block_body_merkle_root: block_body.hash(),
         uncles: vec![],
     };
@@ -580,11 +581,12 @@ async fn bad_block_test() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
 
     // Make a with hash above what the implied threshold from
     // `target_difficulty` requires
     let block_without_valid_pow = make_mock_block(
-        1,
+        genesis_block_header,
         Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
             1_000_000, 0, 0, 0, 0,
         ])),
@@ -624,31 +626,33 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
 
-    let block_14 = make_mock_block(14, None);
-    let latest_block_info_14 = LatestBlockInfo::new(block_14.hash, block_14.header.height);
-    // let block_hash_raw: [u8; 32] = block_14.hash.into();
+    let block_1 = make_mock_block(genesis_block_header, None);
+    let latest_block_info_1 = LatestBlockInfo::new(block_1.hash, block_1.header.height);
     {
         let dbs = state.databases.lock().await;
-        dbs.latest_block.put(
+        dbs.latest_block_header.put(
             WriteOptions::new(),
             DatabaseUnit(),
-            &bincode::serialize(&latest_block_info_14)?,
+            &bincode::serialize(&latest_block_info_1)?,
         )?;
         dbs.block_hash_to_block.put::<KeyableDigest>(
             WriteOptions::new(),
-            block_14.hash.into(),
-            &bincode::serialize(&block_14)?,
+            block_1.hash.into(),
+            &bincode::serialize(&block_1)?,
         )?;
         dbs.block_height_to_hash.put(
             WriteOptions::new(),
-            block_14.header.height,
-            &bincode::serialize(&block_14.hash)?,
+            block_1.header.height,
+            &bincode::serialize(&block_1.hash)?,
         )?;
+        let mut lbh = state.latest_block_header.lock().unwrap();
+        *lbh = block_1.clone().header;
     }
 
     let mock = Mock::new(vec![
-        Action::Read(PeerMessage::Block(Box::new(block_14.into()))),
+        Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
         Action::Read(PeerMessage::Bye),
     ]);
 
@@ -686,10 +690,11 @@ async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
         .lock()
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(
-            make_mock_block(1, None).into(),
+            make_mock_block(genesis_block_header, None).into(),
         ))),
         Action::Read(PeerMessage::Bye),
     ]);
