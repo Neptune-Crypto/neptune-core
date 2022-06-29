@@ -1,10 +1,20 @@
+use leveldb::kv::KV;
+use leveldb::options::{ReadOptions, WriteOptions};
+
 use super::blockchain::block::block_header::BlockHeader;
-use super::database::Databases;
+use super::blockchain::block::Block;
+use super::blockchain::digest::keyable_digest::KeyableDigest;
+use super::blockchain::digest::{Hashable, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
+use super::database::{DatabaseUnit, Databases};
 use super::peer;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+/// State handles all state of the client that is shared across threads.
+/// The policy used here is that only the main thread should update the
+/// state, all other threads are only allowed to read from the state.
 #[derive(Debug)]
 pub struct State {
     // From the documentation of `tokio::sync::Mutex`:
@@ -33,5 +43,50 @@ impl Clone for State {
             databases,
             syncing,
         }
+    }
+}
+
+impl State {
+    fn get_latest_block_header_from_ram(&self) -> BlockHeader {
+        self.latest_block_header.lock().unwrap().to_owned()
+    }
+
+    /// Method for applying the latest block to the database. Warning: A lock *must* be held on
+    /// `block_header` by the caller, over this function call, for this to be a safe operation.
+    pub async fn update_latest_block_only_database(&self, new_block: Box<Block>) -> Result<()> {
+        let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = new_block.hash.into();
+        let dbs = self.databases.lock().await;
+
+        // TODO: Mutliple blocks can have the same height: fix!
+        dbs.block_height_to_hash.put(
+            WriteOptions::new(),
+            new_block.header.height,
+            &block_hash_raw,
+        )?;
+        dbs.block_hash_to_block.put::<KeyableDigest>(
+            WriteOptions::new(),
+            new_block.hash.into(),
+            &bincode::serialize(&new_block).expect("Failed to serialize block"),
+        )?;
+
+        dbs.latest_block_header.put(
+            WriteOptions::new(),
+            DatabaseUnit(),
+            &bincode::serialize(&new_block.header).expect("Failed to serialize block"),
+        )?;
+
+        Ok(())
+    }
+
+    pub async fn update_latest_block(&self, new_block: Box<Block>) -> Result<()> {
+        let mut block_head_header = self
+            .latest_block_header
+            .lock()
+            .expect("Locking block header must succeed");
+        self.update_latest_block_only_database(new_block.clone())
+            .await?;
+        *block_head_header = new_block.header;
+
+        Ok(())
     }
 }

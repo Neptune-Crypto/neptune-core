@@ -1,7 +1,8 @@
 use crate::config_models::cli_args;
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
-use crate::models::database::{DatabaseUnit, Databases};
+use crate::models::database::DatabaseUnit;
 use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer};
 use crate::models::state::State;
 use anyhow::{bail, Result};
@@ -9,7 +10,6 @@ use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use leveldb::kv::KV;
 use leveldb::options::{ReadOptions, WriteOptions};
-use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
@@ -141,7 +141,7 @@ where
 async fn handle_miner_thread_message(
     msg: MinerToMain,
     main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
-    databases: &Arc<tokio::sync::Mutex<Databases>>,
+    state: State,
 ) -> Result<()> {
     match msg {
         MinerToMain::NewBlock(block) => {
@@ -157,27 +157,7 @@ async fn handle_miner_thread_message(
                 );
 
             // Store block in database
-            // let block_hash_raw: [u8; 32] = block.hash.into();
-            let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = block.hash.into();
-            let latest_block_info = LatestBlockInfo::new(block.hash, block.header.height);
-            {
-                let db = databases.lock().await;
-                db.block_hash_to_block.put::<KeyableDigest>(
-                    WriteOptions::new(),
-                    block.hash.into(),
-                    &bincode::serialize(&block).expect("Failed to serialize block"),
-                )?;
-                db.block_height_to_hash.put(
-                    WriteOptions::new(),
-                    block.header.height,
-                    &block_hash_raw,
-                )?;
-                db.latest_block_header.put(
-                    WriteOptions::new(),
-                    DatabaseUnit(),
-                    &bincode::serialize(&latest_block_info).expect("Failed to serialize block"),
-                )?;
-            }
+            state.update_latest_block(block).await?;
         }
     }
 
@@ -188,7 +168,6 @@ async fn handle_peer_thread_message(
     msg: PeerThreadToMain,
     mine: bool,
     main_to_miner_tx: &watch::Sender<MainToMiner>,
-    // databases: &Arc<tokio::sync::Mutex<Databases>>,
     state: State,
     main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
 ) -> Result<()> {
@@ -196,20 +175,16 @@ async fn handle_peer_thread_message(
     match msg {
         PeerThreadToMain::NewBlock(block) => {
             {
-                let db = state.databases.lock().await;
-                let own_block_info = db
+                let mut block_header = state
                     .latest_block_header
-                    .get(ReadOptions::new(), DatabaseUnit())
-                    .expect("Failed to read from 'latest' database");
+                    .lock()
+                    .expect("Lock on block header must succeed");
 
-                // TODO: Fix this to use block header instead!
-                let block_is_new = match own_block_info {
-                    None => true,
-                    Some(bytes) => {
-                        let own_latest_block_info: LatestBlockInfo = bincode::deserialize(&bytes)?;
-                        own_latest_block_info.height < block.header.height
-                    }
-                };
+                // The peer threads also check this condition, if block is more canonical than current
+                // tip, but we have to check it again since the block update might have already been applied
+                // though a message from another peer.
+                let block_is_new =
+                    block_header.proof_of_work_family < block.header.proof_of_work_family;
                 if !block_is_new {
                     return Ok(());
                 }
@@ -220,28 +195,13 @@ async fn handle_peer_thread_message(
                     main_to_miner_tx.send(MainToMiner::NewBlock(block.clone()))?;
                 }
 
-                // Store block in database
-                let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = block.hash.into();
-                let latest_block_info = LatestBlockInfo::new(block.hash, block.header.height);
+                // Store block in database without locking block header, because it's already locked
+                state
+                    .update_latest_block_only_database(block.clone())
+                    .await?;
 
-                db.block_hash_to_block.put::<KeyableDigest>(
-                    WriteOptions::new(),
-                    block.hash.into(),
-                    &bincode::serialize(&block).expect("Failed to serialize block"),
-                )?;
-                db.block_height_to_hash.put(
-                    WriteOptions::new(),
-                    block.header.height,
-                    &block_hash_raw,
-                )?;
-                db.latest_block_header.put(
-                    WriteOptions::new(),
-                    DatabaseUnit(),
-                    &bincode::serialize(&latest_block_info).expect("Failed to serialize block"),
-                )?;
-                let mut latest_block_header = state.latest_block_header.lock().unwrap();
-                *latest_block_header = block.header.clone();
-                debug!("Storing block {:?} in database", block_hash_raw);
+                *block_header = block.header.clone();
+                debug!("Storing block {:?} in database", block.hash);
             }
 
             main_to_peer_broadcast_tx
@@ -260,7 +220,6 @@ async fn handle_peer_thread_message(
 pub async fn main_loop(
     listener: TcpListener,
     state: State,
-    databases: Arc<tokio::sync::Mutex<Databases>>,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
@@ -301,7 +260,7 @@ pub async fn main_loop(
                 handle_peer_thread_message(msg, cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx).await?
             }
             Some(main_message) = miner_to_main_rx.recv() => {
-                handle_miner_thread_message(main_message, &main_to_peer_broadcast_tx, &databases).await?
+                handle_miner_thread_message(main_message, &main_to_peer_broadcast_tx, state.clone()).await?
             }
             // TODO: Add signal::ctrl_c/shutdown handling here
         }
