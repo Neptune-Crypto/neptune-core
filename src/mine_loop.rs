@@ -10,13 +10,14 @@ use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use anyhow::{Context, Result};
+use futures::channel::oneshot;
 use num_traits::identities::Zero;
 use rand::thread_rng;
 use secp256k1::{rand::rngs::OsRng, Secp256k1};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
-use tracing::{info, instrument};
+use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::traits::GetRandomElements;
@@ -25,10 +26,11 @@ use twenty_first::util_types::mutator_set::mutator_set_accumulator::MutatorSetAc
 use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
-const MOCK_DIFFICULTY: u32 = 100_000;
+const MOCK_DIFFICULTY: u32 = 30_000;
 
 /// Return a fake block with a random hash
-async fn make_mock_block(previous_block_header: BlockHeader) -> Block {
+/// Maybe the problem is that this isn't actually an async method?
+async fn make_mock_block(previous_block_header: BlockHeader, sender: oneshot::Sender<Block>) {
     // TODO: Replace this with public key sent from the main thread
     let secp = Secp256k1::new();
     let mut rng = OsRng::new().expect("OsRng");
@@ -118,7 +120,10 @@ async fn make_mock_block(previous_block_header: BlockHeader) -> Block {
         block_header.nonce[0], block_header.nonce[1], block_header.nonce[2]
     );
 
-    Block::new(block_header, block_body)
+    // Block::new(block_header, block_body)
+    sender
+        .send(Block::new(block_header, block_body))
+        .expect("Sender upon finding new block must succeed")
 }
 
 #[instrument]
@@ -127,9 +132,47 @@ pub async fn mock_regtest_mine(
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block_header: BlockHeader,
 ) -> Result<()> {
+    //  Joining two values using `select!`.
+
+    //  ```
+    //  use tokio::sync::oneshot;
+
+    //  #[tokio::main]
+    //  async fn main() {
+    //      let (tx1, mut rx1) = oneshot::channel();
+    //      let (tx2, mut rx2) = oneshot::channel();
+
+    //      tokio::spawn(async move {
+    //          tx1.send("first").unwrap();
+    //      });
+
+    //      tokio::spawn(async move {
+    //          tx2.send("second").unwrap();
+    //      });
+
+    //      let mut a = None;
+    //      let mut b = None;
+
+    //      while a.is_none() || b.is_none() {
+    //          tokio::select! {
+    //              v1 = (&mut rx1), if a.is_none() => a = Some(v1.unwrap()),
+    //              v2 = (&mut rx2), if b.is_none() => b = Some(v2.unwrap()),
+    //          }
+    //      }
+
+    //      let res = (a.unwrap(), b.unwrap());
+
+    //      assert_eq!(res.0, "first");
+    //      assert_eq!(res.1, "second");
+    //  }
+
     loop {
+        let (sender, mut receiver) = oneshot::channel::<Block>();
+        tokio::spawn(make_mock_block(latest_block_header.clone(), sender));
+
         select! {
             changed = from_main.changed() => {
+                info!("Mining thread got message from main");
                 if let e@Err(_) = changed {
                     return e.context("Miner failed to read from watch channel");
                 }
@@ -140,10 +183,11 @@ pub async fn mock_regtest_mine(
                         latest_block_header = block.header;
                         info!("Miner thread received regtest block height {}", latest_block_header.height);
                     }
-                    MainToMiner::Empty => ()
+                    MainToMiner::Empty => { break; }
                 }
             }
-            new_fake_block = make_mock_block(latest_block_header.clone()) => {
+            new_fake_block_res = receiver => {
+                let new_fake_block  = new_fake_block_res.unwrap();
 
                 info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.header.height, new_fake_block.hash);
                 latest_block_header = new_fake_block.header.clone();
@@ -151,4 +195,6 @@ pub async fn mock_regtest_mine(
             }
         }
     }
+
+    Ok(())
 }

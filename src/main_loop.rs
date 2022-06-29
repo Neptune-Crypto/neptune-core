@@ -188,14 +188,15 @@ async fn handle_peer_thread_message(
     msg: PeerThreadToMain,
     mine: bool,
     main_to_miner_tx: &watch::Sender<MainToMiner>,
-    databases: &Arc<tokio::sync::Mutex<Databases>>,
+    // databases: &Arc<tokio::sync::Mutex<Databases>>,
+    state: State,
     main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
 ) -> Result<()> {
     info!("Received message sent to main thread.");
     match msg {
         PeerThreadToMain::NewBlock(block) => {
             {
-                let db = databases.lock().await;
+                let db = state.databases.lock().await;
                 let own_block_info = db
                     .latest_block_header
                     .get(ReadOptions::new(), DatabaseUnit())
@@ -238,6 +239,8 @@ async fn handle_peer_thread_message(
                     DatabaseUnit(),
                     &bincode::serialize(&latest_block_info).expect("Failed to serialize block"),
                 )?;
+                let mut latest_block_header = state.latest_block_header.lock().unwrap();
+                *latest_block_header = block.header.clone();
                 debug!("Storing block {:?} in database", block_hash_raw);
             }
 
@@ -295,7 +298,7 @@ pub async fn main_loop(
             }
             Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
-                handle_peer_thread_message(msg, cli_args.mine, &main_to_miner_tx, &databases, &main_to_peer_broadcast_tx).await?
+                handle_peer_thread_message(msg, cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx).await?
             }
             Some(main_message) = miner_to_main_rx.recv() => {
                 handle_miner_thread_message(main_message, &main_to_peer_broadcast_tx, &databases).await?
