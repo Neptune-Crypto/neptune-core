@@ -103,6 +103,18 @@ async fn make_mock_block(previous_block_header: BlockHeader, sender: oneshot::Se
     while Into::<OrderedDigest>::into(block_header.hash())
         >= OrderedDigest::to_digest_threshold(difficulty)
     {
+        // If the sender is cancelled, the parent to this thread most
+        // likely received a new block, and this thread hasn't been stopped
+        // yet by the operating system, although the call to abort this
+        // thread *has* been made.
+        if sender.is_canceled() {
+            info!(
+                "Abandoning mining of current block with height {}",
+                next_block_height
+            );
+            return;
+        }
+
         if block_header.nonce[2].value() == BFieldElement::MAX {
             block_header.nonce[2] = BFieldElement::ring_zero();
             if block_header.nonce[1].value() == BFieldElement::MAX {
@@ -120,10 +132,9 @@ async fn make_mock_block(previous_block_header: BlockHeader, sender: oneshot::Se
         block_header.nonce[0], block_header.nonce[1], block_header.nonce[2]
     );
 
-    // Block::new(block_header, block_body)
     sender
         .send(Block::new(block_header, block_body))
-        .expect("Sender upon finding new block must succeed")
+        .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
 #[instrument]
@@ -132,43 +143,9 @@ pub async fn mock_regtest_mine(
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block_header: BlockHeader,
 ) -> Result<()> {
-    //  Joining two values using `select!`.
-
-    //  ```
-    //  use tokio::sync::oneshot;
-
-    //  #[tokio::main]
-    //  async fn main() {
-    //      let (tx1, mut rx1) = oneshot::channel();
-    //      let (tx2, mut rx2) = oneshot::channel();
-
-    //      tokio::spawn(async move {
-    //          tx1.send("first").unwrap();
-    //      });
-
-    //      tokio::spawn(async move {
-    //          tx2.send("second").unwrap();
-    //      });
-
-    //      let mut a = None;
-    //      let mut b = None;
-
-    //      while a.is_none() || b.is_none() {
-    //          tokio::select! {
-    //              v1 = (&mut rx1), if a.is_none() => a = Some(v1.unwrap()),
-    //              v2 = (&mut rx2), if b.is_none() => b = Some(v2.unwrap()),
-    //          }
-    //      }
-
-    //      let res = (a.unwrap(), b.unwrap());
-
-    //      assert_eq!(res.0, "first");
-    //      assert_eq!(res.1, "second");
-    //  }
-
     loop {
-        let (sender, mut receiver) = oneshot::channel::<Block>();
-        tokio::spawn(make_mock_block(latest_block_header.clone(), sender));
+        let (sender, receiver) = oneshot::channel::<Block>();
+        let miner_thread = tokio::spawn(make_mock_block(latest_block_header.clone(), sender));
 
         select! {
             changed = from_main.changed() => {
@@ -180,14 +157,21 @@ pub async fn mock_regtest_mine(
                 let main_message: MainToMiner = from_main.borrow_and_update().clone();
                 match main_message {
                     MainToMiner::NewBlock(block) => {
+                        miner_thread.abort();
                         latest_block_header = block.header;
                         info!("Miner thread received regtest block height {}", latest_block_header.height);
                     }
-                    MainToMiner::Empty => { break; }
+                    MainToMiner::Empty => (),
                 }
             }
             new_fake_block_res = receiver => {
-                let new_fake_block  = new_fake_block_res.unwrap();
+                let new_fake_block = match new_fake_block_res {
+                    Ok(block) => block,
+                    Err(err) => {
+                        warn!("Mining thread was cancelled prematurely. Got: {}", err);
+                        continue;
+                    }
+                };
 
                 info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.header.height, new_fake_block.hash);
                 latest_block_header = new_fake_block.header.clone();
@@ -195,6 +179,4 @@ pub async fn mock_regtest_mine(
             }
         }
     }
-
-    Ok(())
 }
