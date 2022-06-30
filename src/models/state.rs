@@ -4,10 +4,10 @@ use leveldb::options::{ReadOptions, WriteOptions};
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::Block;
 use super::blockchain::digest::keyable_digest::KeyableDigest;
-use super::blockchain::digest::{Hashable, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
+use super::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use super::database::{DatabaseUnit, Databases};
 use super::peer;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -47,45 +47,71 @@ impl Clone for State {
 }
 
 impl State {
-    fn get_latest_block_header_from_ram(&self) -> BlockHeader {
-        self.latest_block_header.lock().unwrap().to_owned()
+    // Return the block with a given block digest, iff it's available in state somewhere
+    pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
+        // First see if we can get block from database
+        let block_bytes: Option<Vec<u8>> =
+            self.databases
+                .lock()
+                .await
+                .block_hash_to_block
+                .get::<KeyableDigest>(ReadOptions::new(), block_digest.into())?;
+        let mut block: Option<Block> = block_bytes
+            .map(|bytes| bincode::deserialize(&bytes).expect("Deserialization of block failed"));
+
+        // If block was not found in database, check if the digest matches the genesis block
+        let genesis = Block::genesis_block();
+        if genesis.hash == block_digest {
+            block = Some(genesis);
+        }
+
+        Ok(block)
     }
 
-    /// Method for applying the latest block to the database. Warning: A lock *must* be held on
-    /// `block_header` by the caller, over this function call, for this to be a safe operation.
-    pub async fn update_latest_block_only_database(&self, new_block: Box<Block>) -> Result<()> {
+    // Method for updating state's block header and database entry. A lock must be held on bloc
+    // header by the caller
+    pub fn update_latest_block_with_block_header_mutexguard(
+        &self,
+        new_block: Box<Block>,
+        databases: tokio::sync::MutexGuard<Databases>,
+        mut block_header: std::sync::MutexGuard<BlockHeader>,
+    ) -> Result<()> {
         let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = new_block.hash.into();
-        let dbs = self.databases.lock().await;
 
         // TODO: Mutliple blocks can have the same height: fix!
-        dbs.block_height_to_hash.put(
+        databases.block_height_to_hash.put(
             WriteOptions::new(),
             new_block.header.height,
             &block_hash_raw,
         )?;
-        dbs.block_hash_to_block.put::<KeyableDigest>(
+        databases.block_hash_to_block.put::<KeyableDigest>(
             WriteOptions::new(),
             new_block.hash.into(),
             &bincode::serialize(&new_block).expect("Failed to serialize block"),
         )?;
 
-        dbs.latest_block_header.put(
+        databases.latest_block_header.put(
             WriteOptions::new(),
             DatabaseUnit(),
             &bincode::serialize(&new_block.header).expect("Failed to serialize block"),
         )?;
 
+        *block_header = new_block.header;
+
         Ok(())
     }
 
     pub async fn update_latest_block(&self, new_block: Box<Block>) -> Result<()> {
-        let mut block_head_header = self
+        let databases = self.databases.lock().await;
+        let block_head_header = self
             .latest_block_header
             .lock()
             .expect("Locking block header must succeed");
-        self.update_latest_block_only_database(new_block.clone())
-            .await?;
-        *block_head_header = new_block.header;
+        self.update_latest_block_with_block_header_mutexguard(
+            new_block.clone(),
+            databases,
+            block_head_header,
+        )?;
 
         Ok(())
     }

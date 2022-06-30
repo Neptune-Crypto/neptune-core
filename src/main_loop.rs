@@ -1,15 +1,9 @@
 use crate::config_models::cli_args;
-use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
-use crate::models::blockchain::digest::RESCUE_PRIME_DIGEST_SIZE_IN_BYTES;
-use crate::models::database::DatabaseUnit;
 use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
-use leveldb::kv::KV;
-use leveldb::options::{ReadOptions, WriteOptions};
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
@@ -21,7 +15,6 @@ use tracing::{debug, error, info, instrument};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::{HandshakeData, PeerMessage};
-use crate::models::shared::LatestBlockInfo;
 
 pub fn get_connection_status(
     max_peers: u16,
@@ -175,14 +168,15 @@ async fn handle_peer_thread_message(
     match msg {
         PeerThreadToMain::NewBlock(block) => {
             {
-                let mut block_header = state
+                let databases = state.databases.lock().await;
+                let block_header = state
                     .latest_block_header
                     .lock()
                     .expect("Lock on block header must succeed");
 
                 // The peer threads also check this condition, if block is more canonical than current
                 // tip, but we have to check it again since the block update might have already been applied
-                // though a message from another peer.
+                // through a message from another peer.
                 let block_is_new =
                     block_header.proof_of_work_family < block.header.proof_of_work_family;
                 if !block_is_new {
@@ -196,11 +190,12 @@ async fn handle_peer_thread_message(
                 }
 
                 // Store block in database without locking block header, because it's already locked
-                state
-                    .update_latest_block_only_database(block.clone())
-                    .await?;
+                state.update_latest_block_with_block_header_mutexguard(
+                    block.clone(),
+                    databases,
+                    block_header,
+                )?;
 
-                *block_header = block.header.clone();
                 debug!("Storing block {:?} in database", block.hash);
             }
 

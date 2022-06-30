@@ -11,6 +11,15 @@ pub struct LatestBlockInfo {
     pub hash: Digest,
 }
 
+impl From<&Block> for LatestBlockInfo {
+    fn from(b: &Block) -> Self {
+        Self {
+            hash: b.hash,
+            height: b.header.height,
+        }
+    }
+}
+
 impl From<Block> for LatestBlockInfo {
     fn from(b: Block) -> Self {
         Self {

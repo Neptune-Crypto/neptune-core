@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use db_key::Key;
 use leveldb::{database::Database, kv::KV, options::ReadOptions};
 use std::fmt;

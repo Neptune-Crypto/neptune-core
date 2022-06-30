@@ -1,7 +1,6 @@
-use std::{cmp::Ordering, fmt::Display};
-
 use db_key::Key;
 use serde::{Deserialize, Serialize};
+use std::{cmp::Ordering, fmt::Display};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +17,14 @@ impl BlockHeight {
 
     pub fn next(&self) -> Self {
         Self(self.0 + BFieldElement::ring_one())
+    }
+
+    pub fn previous(&self) -> Self {
+        Self(self.0 - BFieldElement::ring_one())
+    }
+
+    pub const fn genesis() -> Self {
+        Self(BFieldElement::ring_zero())
     }
 }
 

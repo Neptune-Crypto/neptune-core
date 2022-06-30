@@ -1,3 +1,4 @@
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
@@ -20,6 +21,7 @@ use tracing::{debug, info, warn};
 const PEER_TOLERANCE: u8 = 50;
 const INVALID_BLOCK_SEVERITY: u8 = 10;
 const BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY: u8 = 3;
+const DIFFERENT_GENESIS_SEVERITY: u8 = u8::MAX;
 
 pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
     // (state: State, peer_address: &SocketAddr, severity: u8) => {
@@ -38,31 +40,85 @@ pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
 }
 
 /// Function for handling the receiving of a new block from a peer
-async fn handle_new_block(
-    block: Box<Block>,
+async fn handle_new_block<S>(
+    received_tip_block: Box<Block>,
     peer_address: &SocketAddr,
     state: &State,
     to_main_tx: &mpsc::Sender<PeerThreadToMain>,
-) -> Result<()> {
-    // Get from peer the previous blocks if own latest block is not parent to this
-    // For this, we need to read from the database by looking up the parent hash
-    // until we reach a block that we know. Potentially going all the way back to
-    //
+    peer: &mut S,
+) -> Result<()>
+where
+    S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
+    <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
+    <S as TryStream>::Error: std::error::Error,
+{
+    let mut new_blocks: Vec<Block> = vec![*received_tip_block.clone()];
+    let mut parent_digest = received_tip_block.header.prev_block_digest;
+    let mut parent_block = state.get_block(parent_digest).await?;
+    let mut parent_height = received_tip_block.header.height.previous();
 
-    if !block.archival_is_valid() {
-        warn!("Received invalid block from peer with IP {}", peer_address);
-        punish(state, peer_address, INVALID_BLOCK_SEVERITY);
-    } else {
-        info!("Block is valid");
-
-        // Send the new block to the main thread which handles the state update
-        // and storage to the database.
-        let new_block_height = block.header.height;
-        to_main_tx.send(PeerThreadToMain::NewBlock(block)).await?;
+    // If parent is not known, request all blocks until we find a parent that is known.
+    while parent_block.is_none() && parent_height > BlockHeight::genesis() {
         info!(
-            "Updated block info by block from peer. block height {}",
-            new_block_height
+            "Parent not know: Requesting previous block with height {} from peer",
+            parent_height
         );
+        peer.send(PeerMessage::BlockRequestByHash(parent_digest))
+            .await?;
+        let received_block: Block = match peer.try_next().await {
+            Ok(Some(PeerMessage::BlockResponseByHash(Some(received_transfer_block)))) => {
+                let received_block_res: Block = (*received_transfer_block).into();
+
+                debug!("Got BlockResponseByHash");
+                if parent_height != received_block_res.header.height
+                    || parent_digest != received_block_res.hash
+                {
+                    warn!("Bad BlockResponseByHeight received");
+                    punish(state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY);
+                    return Ok(());
+                }
+
+                received_block_res
+            }
+            _ => {
+                warn!("Got invalid block response");
+                return Ok(());
+            }
+        };
+
+        parent_digest = received_block.header.prev_block_digest;
+        parent_height = parent_height.previous();
+        new_blocks.push(received_block);
+        parent_block = state.get_block(parent_digest).await?;
+    }
+
+    // We got all the way back to genesis, but disagree about genesis. Ban peer.
+    if parent_block.is_none() && parent_height == BlockHeight::genesis() {
+        punish(state, peer_address, DIFFERENT_GENESIS_SEVERITY);
+        return Ok(());
+    }
+
+    // We want to treat the received blocks in reverse order, from oldest to newest
+    new_blocks.reverse();
+
+    for new_block in new_blocks {
+        if !new_block.archival_is_valid() {
+            warn!("Received invalid block from peer with IP {}", peer_address);
+            punish(state, peer_address, INVALID_BLOCK_SEVERITY);
+        } else {
+            info!("Block is valid");
+
+            // Send the new block to the main thread which handles the state update
+            // and storage to the database.
+            let new_block_height = new_block.header.height;
+            to_main_tx
+                .send(PeerThreadToMain::NewBlock(Box::new(new_block)))
+                .await?;
+            info!(
+                "Updated block info by block from peer. block height {}",
+                new_block_height
+            );
+        }
     }
 
     Ok(())
@@ -121,9 +177,8 @@ where
                 .proof_of_work_family
                 < block.header.proof_of_work_family;
 
-            println!("block_is_new = {}", block_is_new);
             if block_is_new {
-                handle_new_block(block, peer_address, state, to_main_tx).await?;
+                handle_new_block(block, peer_address, state, to_main_tx, peer).await?;
             } else {
                 info!(
                     "Got non canonical block from peer, height: {}, PoW family: {:?}",
@@ -158,7 +213,7 @@ where
                             }
 
                             let block: Box<Block> = Box::new((*received_block).into());
-                            handle_new_block(block, peer_address, state, to_main_tx).await?;
+                            handle_new_block(block, peer_address, state, to_main_tx, peer).await?;
                         }
                         _ => {
                             warn!("Got invalid block response");
@@ -166,6 +221,16 @@ where
                     }
                 }
             }
+            Ok(false)
+        }
+        PeerMessage::BlockRequestByHash(block_digest) => {
+            let resp;
+            {
+                let block = state.get_block(block_digest).await?;
+                resp = PeerMessage::BlockResponseByHash(block.map(|b| Box::new(b.into())));
+            }
+
+            peer.send(resp).await?;
             Ok(false)
         }
         PeerMessage::BlockRequestByHeight(block_height) => {

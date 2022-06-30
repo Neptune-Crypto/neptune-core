@@ -19,9 +19,7 @@ use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use futures::StreamExt;
 use leveldb::database::Database;
-use leveldb::kv::KV;
-use leveldb::options::{Options, ReadOptions};
-use models::blockchain::block::block_header::BlockHeader;
+use leveldb::options::Options;
 use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
@@ -47,7 +45,6 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage};
-use crate::models::shared::LatestBlockInfo;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -184,7 +181,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Create handshake data which is used when connecting to peers
     let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.peer_port);
     let own_handshake_data = HandshakeData {
-        latest_block_info: latest_block.into(),
+        latest_block_info: (&latest_block).into(),
         listen_address: Some(listen_addr_socket),
         network: cli_args.network,
         instance_id: rand::random(),

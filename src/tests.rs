@@ -11,10 +11,12 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::peer::ConnectionRefusedReason;
+use crate::models::shared::LatestBlockInfo;
 use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
+use leveldb::kv::KV;
 use leveldb::options::WriteOptions;
 use num_traits::One;
 use num_traits::Zero;
@@ -124,7 +126,11 @@ fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
-fn get_dummy_setup(
+/// Return a setup with empty databases, and with the genesis block in the
+/// block header field of the state.
+/// Returns:
+/// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, state, peer_map)
+fn get_genesis_setup(
     network: Network,
 ) -> Result<(
     broadcast::Sender<MainToPeerThread>,
@@ -186,7 +192,7 @@ async fn test_incoming_connection_succeed() -> Result<()> {
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(network)?;
+        get_genesis_setup(network)?;
     main_loop::answer_peer(
         mock,
         state,
@@ -220,7 +226,7 @@ async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
         .build();
 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
-        get_dummy_setup(network)?;
+        get_genesis_setup(network)?;
     if let Err(_) = main_loop::answer_peer(
         mock,
         state,
@@ -254,7 +260,7 @@ async fn test_incoming_connection_fail_bad_network() -> Result<()> {
         .build();
 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
-        get_dummy_setup(Network::Main)?;
+        get_genesis_setup(Network::Main)?;
     if let Err(_) = main_loop::answer_peer(
         mock,
         state,
@@ -293,7 +299,7 @@ async fn test_outgoing_connection_succeed() -> Result<()> {
         .build();
 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(Network::Main)?;
+        get_genesis_setup(Network::Main)?;
     call_peer(
         mock,
         state,
@@ -330,7 +336,7 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
         .build();
 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(Network::Main)?;
+        get_genesis_setup(Network::Main)?;
     let peer_address0 = get_dummy_address();
     let peer_address1 = std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap();
     let (_, _, _latest_block_header) = get_dummy_latest_block(None);
@@ -456,7 +462,6 @@ fn make_mock_block(
         amount: Block::get_mining_reward(new_block_height),
         public_key,
     };
-    println!("coinbase_utxo = {:?}", coinbase_utxo);
     let output_randomness =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
     let timestamp: BFieldElement = BFieldElement::new(
@@ -502,7 +507,7 @@ fn make_mock_block(
         version: zero,
         height: new_block_height,
         mutator_set_commitment: new_ms.get_commitment().into(),
-        prev_block_digest: Digest::default(),
+        prev_block_digest: previous_block.hash(),
         timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
@@ -526,7 +531,7 @@ async fn test_peer_loop_bye() -> Result<()> {
     let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
     let (_to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let (_peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(Network::Main)?;
+        get_genesis_setup(Network::Main)?;
 
     let peer_address = get_dummy_address();
     peer_map
@@ -546,7 +551,7 @@ async fn test_peer_loop_bye() -> Result<()> {
 #[tokio::test]
 async fn test_peer_loop_peer_list() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(Network::Main)?;
+        get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
@@ -575,7 +580,7 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 #[tokio::test]
 async fn bad_block_test() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(Network::Main)?;
+        get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
@@ -620,7 +625,7 @@ async fn bad_block_test() -> Result<()> {
 #[tokio::test]
 async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(Network::Main)?;
+        get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
@@ -682,9 +687,9 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
-    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(Network::Main)?;
+async fn test_peer_loop_receival_of_first_block() -> Result<()> {
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
     peer_map
         .lock()
@@ -698,10 +703,6 @@ async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
         ))),
         Action::Read(PeerMessage::Bye),
     ]);
-
-    let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
-    let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
-    let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
@@ -719,10 +720,187 @@ async fn test_peer_loop_block_no_existing_block_in_db() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main)?;
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let block_1 = make_mock_block(genesis_block_header.clone(), None);
+    let block_2 = make_mock_block(block_1.header.clone(), None);
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
+        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
+            block_1.clone().into(),
+        )))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_1.hash {
+                bail!("1st received block by main loop must be block 1");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 1"),
+    };
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_2.hash {
+                bail!("2nd received block by main loop must be block 2");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 2"),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main)?;
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let block_1 = make_mock_block(genesis_block_header.clone(), None);
+    let block_2 = make_mock_block(block_1.header.clone(), None);
+    let block_3 = make_mock_block(block_2.header.clone(), None);
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
+            block_2.clone().into(),
+        )))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
+        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
+            block_1.clone().into(),
+        )))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_1.hash {
+                bail!("1st received block by main loop must be block 1");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 1"),
+    };
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_2.hash {
+                bail!("2nd received block by main loop must be block 2");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 2"),
+    };
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_3.hash {
+                bail!("3rd received block by main loop must be block 3");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 3"),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main)?;
+    let peer_address = get_dummy_address();
+    peer_map
+        .lock()
+        .unwrap()
+        .insert(peer_address, get_dummy_peer(peer_address));
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let block_1 = make_mock_block(genesis_block_header.clone(), None);
+    let block_2 = make_mock_block(block_1.header.clone(), None);
+    let block_3 = make_mock_block(block_2.header.clone(), None);
+    let block_4 = make_mock_block(block_3.header.clone(), None);
+    state.update_latest_block(Box::new(block_1)).await?;
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
+            block_3.clone().into(),
+        )))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
+            block_2.clone().into(),
+        )))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_2.hash {
+                bail!("1st received block by main loop must be block 1");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 1"),
+    };
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_3.hash {
+                bail!("2nd received block by main loop must be block 2");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 2"),
+    };
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlock(block)) => {
+            if block.hash != block_4.hash {
+                bail!("3rd received block by main loop must be block 3");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread 3"),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    } else {
+        Ok(())
+    }
+}
+
+#[tokio::test]
 async fn test_get_connection_status() -> Result<()> {
     let network = Network::Main;
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_dummy_setup(network)?;
+        get_genesis_setup(network)?;
     let peer_address = get_dummy_address();
     let peer = get_dummy_peer(peer_address);
     let peer_id = peer.instance_id;
