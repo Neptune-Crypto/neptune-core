@@ -1,6 +1,8 @@
 pub mod keyable_digest;
 pub mod ordered_digest;
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
 
@@ -30,6 +32,13 @@ impl Digest {
 
     pub const fn default() -> Self {
         Self([BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+    }
+}
+
+impl fmt::Display for Digest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string = self.0.map(|elem| elem.to_string()).join(", ");
+        write!(f, "{}", string)
     }
 }
 

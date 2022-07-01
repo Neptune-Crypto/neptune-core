@@ -721,6 +721,8 @@ async fn test_peer_loop_receival_of_first_block() -> Result<()> {
 
 #[tokio::test]
 async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
+    // In this scenario, the client only knows the genesis block (block 0) and then
+    // receives block 2, meaning that block 1 will have to be requested.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
@@ -735,9 +737,7 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
         Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
-        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
-            block_1.clone().into(),
-        )))),
+        Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
         Action::Read(PeerMessage::Bye),
     ]);
 
@@ -779,13 +779,9 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
         Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
-        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
-            block_2.clone().into(),
-        )))),
+        Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
         Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
-        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
-            block_1.clone().into(),
-        )))),
+        Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
         Action::Read(PeerMessage::Bye),
     ]);
 
@@ -832,13 +828,9 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
         Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
-        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
-            block_3.clone().into(),
-        )))),
+        Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
         Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
-        Action::Read(PeerMessage::BlockResponseByHash(Some(Box::new(
-            block_2.clone().into(),
-        )))),
+        Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
         Action::Read(PeerMessage::Bye),
     ]);
 

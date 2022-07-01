@@ -4,7 +4,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
-use crate::models::peer::{PeerMessage, PeerStateData};
+use crate::models::peer::{PeerMessage, PeerState};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
@@ -20,7 +20,6 @@ use tracing::{debug, info, warn};
 
 const PEER_TOLERANCE: u8 = 50;
 const INVALID_BLOCK_SEVERITY: u8 = 10;
-const BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY: u8 = 3;
 const DIFFERENT_GENESIS_SEVERITY: u8 = u8::MAX;
 
 pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
@@ -41,55 +40,50 @@ pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
 
 /// Function for handling the receiving of a new block from a peer
 async fn handle_new_block<S>(
-    received_tip_block: Box<Block>,
+    received_block: Box<Block>,
     peer_address: &SocketAddr,
     state: &State,
     to_main_tx: &mpsc::Sender<PeerThreadToMain>,
     peer: &mut S,
+    peer_state: &mut PeerState,
 ) -> Result<()>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
     <S as TryStream>::Error: std::error::Error,
 {
-    let mut new_blocks: Vec<Block> = vec![*received_tip_block.clone()];
-    let mut parent_digest = received_tip_block.header.prev_block_digest;
-    let mut parent_block = state.get_block(parent_digest).await?;
-    let mut parent_height = received_tip_block.header.height.previous();
+    let parent_digest = received_block.header.prev_block_digest;
+    let parent_block = state.get_block(parent_digest).await?;
+    let parent_height = received_block.header.height.previous();
 
-    // If parent is not known, request all blocks until we find a parent that is known.
-    while parent_block.is_none() && parent_height > BlockHeight::genesis() {
+    // If parent is not known, request the parent, and add the current to the peer fork resolution list
+    if parent_block.is_none() && parent_height > BlockHeight::genesis() {
         info!(
             "Parent not know: Requesting previous block with height {} from peer",
             parent_height
         );
+        if peer_state.fork_reconciliation_blocks.is_empty()
+            || peer_state
+                .fork_reconciliation_blocks
+                .last()
+                .unwrap()
+                .header
+                .height
+                .previous()
+                == received_block.header.height
+        {
+            peer_state.fork_reconciliation_blocks.push(*received_block);
+        } else {
+            // Blocks received out of order. Give up on block resolution attempt.
+            // TODO: Consider punishing here
+            peer_state.fork_reconciliation_blocks = vec![];
+            return Ok(());
+        }
+
         peer.send(PeerMessage::BlockRequestByHash(parent_digest))
             .await?;
-        let received_block: Block = match peer.try_next().await {
-            Ok(Some(PeerMessage::BlockResponseByHash(Some(received_transfer_block)))) => {
-                let received_block_res: Block = (*received_transfer_block).into();
 
-                debug!("Got BlockResponseByHash");
-                if parent_height != received_block_res.header.height
-                    || parent_digest != received_block_res.hash
-                {
-                    warn!("Bad BlockResponseByHeight received");
-                    punish(state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY);
-                    return Ok(());
-                }
-
-                received_block_res
-            }
-            _ => {
-                warn!("Got invalid block response");
-                return Ok(());
-            }
-        };
-
-        parent_digest = received_block.header.prev_block_digest;
-        parent_height = parent_height.previous();
-        new_blocks.push(received_block);
-        parent_block = state.get_block(parent_digest).await?;
+        return Ok(());
     }
 
     // We got all the way back to genesis, but disagree about genesis. Ban peer.
@@ -99,7 +93,20 @@ where
     }
 
     // We want to treat the received blocks in reverse order, from oldest to newest
+    let mut new_blocks = peer_state.fork_reconciliation_blocks.clone();
+    new_blocks.push(*received_block);
     new_blocks.reverse();
+
+    // Reset the fork resolution state since we got all the way back to find a block that we have
+    peer_state.fork_reconciliation_blocks = vec![];
+
+    // Sanity check, that the blocks are correctly sorted (they should be)
+    let mut new_blocks_sorted_check = new_blocks.clone();
+    new_blocks_sorted_check.sort_by(|a, b| a.header.height.cmp(&b.header.height));
+    assert_eq!(
+        new_blocks_sorted_check, new_blocks,
+        "Block list in fork resolution must be sorted"
+    );
 
     for new_block in new_blocks.iter() {
         if !new_block.archival_is_valid() {
@@ -107,7 +114,7 @@ where
             punish(state, peer_address, INVALID_BLOCK_SEVERITY);
             return Ok(());
         } else {
-            info!("Block is valid");
+            info!("Block with height {} is valid", new_block.header.height);
         }
     }
 
@@ -132,7 +139,7 @@ async fn handle_peer_message<S>(
     state: &State,
     peer_address: &SocketAddr,
     peer: &mut S,
-    peer_state_info: &mut PeerStateData,
+    peer_state_info: &mut PeerState,
     to_main_tx: &mpsc::Sender<PeerThreadToMain>,
 ) -> Result<bool>
 where
@@ -171,15 +178,26 @@ where
             // This includes checking that the block hash is below a threshold etc.
             let block: Box<Block> = Box::new((*t_block).into());
             peer_state_info.highest_shared_block_height = new_block_height;
+
+            // TODO: Handle the situation where peer_state_info.fork_resolution_blocks is not empty better.
             let block_is_new = state
                 .latest_block_header
                 .lock()
                 .unwrap()
                 .proof_of_work_family
-                < block.header.proof_of_work_family;
+                < block.header.proof_of_work_family
+                || !peer_state_info.fork_reconciliation_blocks.is_empty();
 
             if block_is_new {
-                handle_new_block(block, peer_address, state, to_main_tx, peer).await?;
+                handle_new_block(
+                    block,
+                    peer_address,
+                    state,
+                    to_main_tx,
+                    peer,
+                    peer_state_info,
+                )
+                .await?;
             } else {
                 info!(
                     "Got non canonical block from peer, height: {}, PoW family: {:?}",
@@ -202,62 +220,53 @@ where
                 if block_is_new {
                     peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
                         .await?;
-                    debug!("Sent BlockRequestByHeight to peer");
-
-                    match peer.try_next().await {
-                        Ok(Some(PeerMessage::BlockResponseByHeight(Some(received_block)))) => {
-                            debug!("Got BlockResponseByHeight");
-                            if block_notification.height != received_block.header.height {
-                                warn!("Bad BlockResponseByHeight received");
-                                punish(state, peer_address, BAD_BLOCK_RESPONSE_BY_HEIGHT_SEVERITY);
-                                return Ok(false);
-                            }
-
-                            let block: Box<Block> = Box::new((*received_block).into());
-                            handle_new_block(block, peer_address, state, to_main_tx, peer).await?;
-                        }
-                        _ => {
-                            warn!("Got invalid block response");
-                        }
-                    }
                 }
             }
+
             Ok(false)
         }
         PeerMessage::BlockRequestByHash(block_digest) => {
-            let resp;
-            {
-                let block = state.get_block(block_digest).await?;
-                resp = PeerMessage::BlockResponseByHash(block.map(|b| Box::new(b.into())));
+            match state.get_block(block_digest).await? {
+                None => {
+                    // TODO: Consider punishing here
+                    warn!("Peer requested unkown block with hash {}", block_digest);
+                    Ok(false)
+                }
+                Some(b) => {
+                    peer.send(PeerMessage::Block(Box::new(b.into()))).await?;
+                    Ok(false)
+                }
             }
-
-            peer.send(resp).await?;
-            Ok(false)
         }
         PeerMessage::BlockRequestByHeight(block_height) => {
             debug!("Got BlockRequestByHeight");
 
-            let resp;
+            let block_response;
             {
                 let databases = state.databases.lock().await;
                 let hash_res = databases
                     .block_height_to_hash
                     .get(ReadOptions::new(), block_height)
                     .expect("Failed to read from database");
-                resp = match hash_res {
-                    None => PeerMessage::BlockResponseByHeight(None),
-                    Some(hash) => {
+                match hash_res {
+                    None => {
+                        warn!("Got block request by height for unknown block");
+                        // TODO: Consider punishing here
+                        return Ok(false);
+                    }
+                    Some(digest) => {
                         let read_opts_block = ReadOptions::new();
                         let hash_array: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] =
-                            hash.try_into().unwrap_or_else(|v: Vec<u8>| {
+                            digest.try_into().unwrap_or_else(|v: Vec<u8>| {
                                 panic!(
                                     "Expected a Vec of length {} but it was {}",
                                     RESCUE_PRIME_DIGEST_SIZE_IN_BYTES,
                                     v.len()
                                 )
                             });
+
                         let block_digest: Digest = hash_array.into();
-                        let block_response = match databases
+                        block_response = match databases
                             .block_hash_to_block
                             .get::<KeyableDigest>(read_opts_block, block_digest.into())
                             .expect("Failed to read from database")
@@ -267,22 +276,14 @@ where
                             None => panic!("Failed to find block with hash {:?}", hash_array),
                             Some(block_bytes) => {
                                 let deserialized: Block = bincode::deserialize(&block_bytes)?;
-                                PeerMessage::BlockResponseByHeight(Some(Box::new(
-                                    deserialized.into(),
-                                )))
+                                PeerMessage::Block(Box::new(deserialized.into()))
                             }
                         };
-                        block_response
                     }
-                };
+                }
             }
 
-            // Print a warning if the response we're about to send is empty
-            if let PeerMessage::BlockResponseByHeight(None) = resp {
-                warn!("Returning bad result from BlockRequestByHeight");
-            }
-
-            peer.send(resp).await?;
+            peer.send(block_response).await?;
             Ok(false)
         }
         msg => {
@@ -295,7 +296,7 @@ where
 async fn handle_main_thread_message<S>(
     msg: MainToPeerThread,
     peer: &mut S,
-    peer_state_info: &mut PeerStateData,
+    peer_state_info: &mut PeerState,
 ) -> Result<()>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
@@ -346,9 +347,7 @@ where
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
     <S as TryStream>::Error: std::error::Error,
 {
-    let mut peer_state_info = PeerStateData {
-        highest_shared_block_height: 0.into(),
-    };
+    let mut peer_state_info = PeerState::default();
 
     loop {
         select! {
