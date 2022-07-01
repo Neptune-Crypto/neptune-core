@@ -609,7 +609,7 @@ async fn bad_block_test() -> Result<()> {
 
     // Verify that no message was sent to main loop
     match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(_block)) => {
+        Some(PeerThreadToMain::NewBlocks(_block)) => {
             bail!("Block notification must not be sent for block with invalid PoW")
         }
         Some(msg) => bail!(
@@ -669,7 +669,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 
     // Verify that no message was sent to main loop
     match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(_block)) => {
+        Some(PeerThreadToMain::NewBlocks(_block)) => {
             bail!("Block notification must not be sent for old block")
         }
         Some(msg) => bail!(
@@ -708,7 +708,7 @@ async fn test_peer_loop_receival_of_first_block() -> Result<()> {
 
     // Verify that a message was sent to `main_loop`?
     match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(_block)) => (),
+        Some(PeerThreadToMain::NewBlocks(_block)) => (),
         _ => bail!("Did not find msg sent to main thread"),
     };
 
@@ -744,21 +744,15 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
     match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_1.hash {
+        Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            if blocks[0].hash != block_1.hash {
                 bail!("1st received block by main loop must be block 1");
             }
-        }
-        _ => bail!("Did not find msg sent to main thread 1"),
-    };
-
-    match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_2.hash {
+            if blocks[1].hash != block_2.hash {
                 bail!("2nd received block by main loop must be block 2");
             }
         }
-        _ => bail!("Did not find msg sent to main thread 2"),
+        _ => bail!("Did not find msg sent to main thread 1"),
     };
 
     if !peer_map.lock().unwrap().is_empty() {
@@ -798,30 +792,18 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
     match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_1.hash {
+        Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            if blocks[0].hash != block_1.hash {
                 bail!("1st received block by main loop must be block 1");
             }
-        }
-        _ => bail!("Did not find msg sent to main thread 1"),
-    };
-
-    match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_2.hash {
+            if blocks[1].hash != block_2.hash {
                 bail!("2nd received block by main loop must be block 2");
             }
-        }
-        _ => bail!("Did not find msg sent to main thread 2"),
-    };
-
-    match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_3.hash {
+            if blocks[2].hash != block_3.hash {
                 bail!("3rd received block by main loop must be block 3");
             }
         }
-        _ => bail!("Did not find msg sent to main thread 3"),
+        _ => bail!("Did not find msg sent to main thread"),
     };
 
     if !peer_map.lock().unwrap().is_empty() {
@@ -863,30 +845,18 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
     peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
 
     match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_2.hash {
+        Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            if blocks[0].hash != block_2.hash {
                 bail!("1st received block by main loop must be block 1");
             }
-        }
-        _ => bail!("Did not find msg sent to main thread 1"),
-    };
-
-    match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_3.hash {
+            if blocks[1].hash != block_3.hash {
                 bail!("2nd received block by main loop must be block 2");
             }
-        }
-        _ => bail!("Did not find msg sent to main thread 2"),
-    };
-
-    match to_main_rx1.recv().await {
-        Some(PeerThreadToMain::NewBlock(block)) => {
-            if block.hash != block_4.hash {
+            if blocks[2].hash != block_4.hash {
                 bail!("3rd received block by main loop must be block 3");
             }
         }
-        _ => bail!("Did not find msg sent to main thread 3"),
+        _ => bail!("Did not find msg sent to main thread"),
     };
 
     if !peer_map.lock().unwrap().is_empty() {

@@ -23,6 +23,6 @@ pub enum MainToPeerThread {
 
 #[derive(Clone, Debug)]
 pub enum PeerThreadToMain {
-    NewBlock(Box<Block>),
+    NewBlocks(Vec<Block>),
     NewTransaction(i32),
 }

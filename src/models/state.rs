@@ -73,8 +73,8 @@ impl State {
     pub fn update_latest_block_with_block_header_mutexguard(
         &self,
         new_block: Box<Block>,
-        databases: tokio::sync::MutexGuard<Databases>,
-        mut block_header: std::sync::MutexGuard<BlockHeader>,
+        databases: &tokio::sync::MutexGuard<Databases>,
+        block_header: &mut std::sync::MutexGuard<BlockHeader>,
     ) -> Result<()> {
         let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = new_block.hash.into();
 
@@ -96,21 +96,21 @@ impl State {
             &bincode::serialize(&new_block.header).expect("Failed to serialize block"),
         )?;
 
-        *block_header = new_block.header;
+        **block_header = new_block.header;
 
         Ok(())
     }
 
     pub async fn update_latest_block(&self, new_block: Box<Block>) -> Result<()> {
         let databases = self.databases.lock().await;
-        let block_head_header = self
+        let mut block_head_header = self
             .latest_block_header
             .lock()
             .expect("Locking block header must succeed");
         self.update_latest_block_with_block_header_mutexguard(
             new_block.clone(),
-            databases,
-            block_head_header,
+            &databases,
+            &mut block_head_header,
         )?;
 
         Ok(())

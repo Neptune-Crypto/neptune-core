@@ -166,10 +166,11 @@ async fn handle_peer_thread_message(
 ) -> Result<()> {
     info!("Received message sent to main thread.");
     match msg {
-        PeerThreadToMain::NewBlock(block) => {
+        PeerThreadToMain::NewBlocks(blocks) => {
+            let last_block = blocks.last().unwrap().to_owned();
             {
                 let databases = state.databases.lock().await;
-                let block_header = state
+                let mut block_header = state
                     .latest_block_header
                     .lock()
                     .expect("Lock on block header must succeed");
@@ -178,7 +179,7 @@ async fn handle_peer_thread_message(
                 // tip, but we have to check it again since the block update might have already been applied
                 // through a message from another peer.
                 let block_is_new =
-                    block_header.proof_of_work_family < block.header.proof_of_work_family;
+                    block_header.proof_of_work_family < last_block.header.proof_of_work_family;
                 if !block_is_new {
                     return Ok(());
                 }
@@ -186,21 +187,22 @@ async fn handle_peer_thread_message(
                 // When receiving a block from a peer thread, we assume it is verified.
                 // It is the peer thread's responsibility to verify the block.
                 if mine {
-                    main_to_miner_tx.send(MainToMiner::NewBlock(block.clone()))?;
+                    main_to_miner_tx.send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                 }
 
-                // Store block in database without locking block header, because it's already locked
-                state.update_latest_block_with_block_header_mutexguard(
-                    block.clone(),
-                    databases,
-                    block_header,
-                )?;
-
-                debug!("Storing block {:?} in database", block.hash);
+                // Store block in database
+                for block in blocks {
+                    debug!("Storing block {:?} in database", block.hash);
+                    state.update_latest_block_with_block_header_mutexguard(
+                        Box::new(block),
+                        &databases,
+                        &mut block_header,
+                    )?;
+                }
             }
 
             main_to_peer_broadcast_tx
-                .send(MainToPeerThread::Block(block))
+                .send(MainToPeerThread::Block(Box::new(last_block)))
                 .expect("Peer handler broadcast was closed. This should never happen");
         }
         PeerThreadToMain::NewTransaction(_txs) => {

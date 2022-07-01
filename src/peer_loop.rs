@@ -101,25 +101,26 @@ where
     // We want to treat the received blocks in reverse order, from oldest to newest
     new_blocks.reverse();
 
-    for new_block in new_blocks {
+    for new_block in new_blocks.iter() {
         if !new_block.archival_is_valid() {
             warn!("Received invalid block from peer with IP {}", peer_address);
             punish(state, peer_address, INVALID_BLOCK_SEVERITY);
+            return Ok(());
         } else {
             info!("Block is valid");
-
-            // Send the new block to the main thread which handles the state update
-            // and storage to the database.
-            let new_block_height = new_block.header.height;
-            to_main_tx
-                .send(PeerThreadToMain::NewBlock(Box::new(new_block)))
-                .await?;
-            info!(
-                "Updated block info by block from peer. block height {}",
-                new_block_height
-            );
         }
     }
+
+    // Send the new blocks to the main thread which handles the state update
+    // and storage to the database.
+    let new_block_height = new_blocks.last().unwrap().header.height;
+    to_main_tx
+        .send(PeerThreadToMain::NewBlocks(new_blocks))
+        .await?;
+    info!(
+        "Updated block info by block from peer. block height {}",
+        new_block_height
+    );
 
     Ok(())
 }
