@@ -130,6 +130,7 @@ fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
 /// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, state, peer_map)
 fn get_genesis_setup(
     network: Network,
+    peer_count: u8,
 ) -> Result<(
     broadcast::Sender<MainToPeerThread>,
     broadcast::Receiver<MainToPeerThread>,
@@ -144,6 +145,15 @@ fn get_genesis_setup(
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
     let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> = get_peer_map();
+    for i in 0..peer_count {
+        let peer_address =
+            std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
+        peer_map
+            .lock()
+            .unwrap()
+            .insert(peer_address, get_dummy_peer(peer_address));
+    }
+
     let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let databases = get_unit_test_database(network)?;
     let state = State {
@@ -190,7 +200,7 @@ async fn test_incoming_connection_succeed() -> Result<()> {
         .read(&to_bytes(&PeerMessage::Bye)?)
         .build();
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(network)?;
+        get_genesis_setup(network, 0)?;
     main_loop::answer_peer(
         mock,
         state,
@@ -224,7 +234,7 @@ async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
         .build();
 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
-        get_genesis_setup(network)?;
+        get_genesis_setup(network, 0)?;
     if let Err(_) = main_loop::answer_peer(
         mock,
         state,
@@ -258,7 +268,7 @@ async fn test_incoming_connection_fail_bad_network() -> Result<()> {
         .build();
 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
-        get_genesis_setup(Network::Main)?;
+        get_genesis_setup(Network::Main, 0)?;
     if let Err(_) = main_loop::answer_peer(
         mock,
         state,
@@ -297,7 +307,7 @@ async fn test_outgoing_connection_succeed() -> Result<()> {
         .build();
 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
+        get_genesis_setup(Network::Main, 0)?;
     call_peer(
         mock,
         state,
@@ -333,19 +343,9 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
         )))?)
         .build();
 
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address0 = get_dummy_address();
-    let peer_address1 = std::net::SocketAddr::from_str("123.123.123.123:8080").unwrap();
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _peer_map) =
+        get_genesis_setup(Network::Main, 2)?;
     let (_, _, _latest_block_header) = get_dummy_latest_block(None);
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address0, get_dummy_peer(peer_address0));
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address1, get_dummy_peer(peer_address1));
 
     if let Err(_) = main_loop::answer_peer(
         mock,
@@ -532,13 +532,9 @@ async fn test_peer_loop_bye() -> Result<()> {
     let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
     let (_to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let (_peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
+        get_genesis_setup(Network::Main, 1)?;
 
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
     let mut peer_state = PeerState::default();
     peer_loop::peer_loop(
@@ -565,12 +561,8 @@ async fn test_peer_loop_bye() -> Result<()> {
 #[tokio::test]
 async fn test_peer_loop_peer_list() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::PeerListRequest),
@@ -607,12 +599,8 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 #[tokio::test]
 async fn bad_block_test() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
 
     // Make a with hash above what the implied threshold from
@@ -668,12 +656,8 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     // in the database. The expected behavior is to ignore the block and not send
     // a message to the main thread.
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
 
     let block_1 = make_mock_block(genesis_block_header, None);
@@ -726,12 +710,8 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 async fn test_peer_loop_receival_of_first_block() -> Result<()> {
     // Scenario: client only knows genesis block. The receives block 1.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
 
     let mock = Mock::new(vec![
@@ -774,12 +754,8 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
     // In this scenario, the client only knows the genesis block (block 0) and then
     // receives block 2, meaning that block 1 will have to be requested.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
     let block_1 = make_mock_block(genesis_block_header.clone(), None);
     let block_2 = make_mock_block(block_1.header.clone(), None);
@@ -830,12 +806,8 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
     // In this scenario, the client only knows the genesis block (block 0) and then
     // receives block 3, meaning that block 2 and 1 will have to be requested.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
     let block_1 = make_mock_block(genesis_block_header.clone(), None);
     let block_2 = make_mock_block(block_1.header.clone(), None);
@@ -892,12 +864,8 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
     // In this scenario, the client know the genesis block (block 0) and block 1, it
     // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
-        get_genesis_setup(Network::Main)?;
-    let peer_address = get_dummy_address();
-    peer_map
-        .lock()
-        .unwrap()
-        .insert(peer_address, get_dummy_peer(peer_address));
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
     let block_1 = make_mock_block(genesis_block_header.clone(), None);
     let block_2 = make_mock_block(block_1.header.clone(), None);
@@ -955,11 +923,9 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
 async fn test_get_connection_status() -> Result<()> {
     let network = Network::Main;
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-        get_genesis_setup(network)?;
-    let peer_address = get_dummy_address();
-    let peer = get_dummy_peer(peer_address);
+        get_genesis_setup(network, 1)?;
+    let peer = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].clone();
     let peer_id = peer.instance_id;
-    peer_map.lock().unwrap().insert(peer_address, peer);
 
     let own_handshake = get_dummy_handshake_data(network);
     let mut other_handshake = get_dummy_handshake_data(network);
