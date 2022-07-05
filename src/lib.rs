@@ -44,7 +44,7 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
-use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage};
+use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerState};
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -402,6 +402,7 @@ where
         peer_thread_to_main_tx,
         state,
         &peer_address,
+        &mut PeerState::default(),
     )
     .await?;
 

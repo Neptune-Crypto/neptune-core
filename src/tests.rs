@@ -16,8 +16,6 @@ use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
-use leveldb::kv::KV;
-use leveldb::options::WriteOptions;
 use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
@@ -442,6 +440,9 @@ impl<Item> stream::Stream for Mock<Item> {
         if let Some(Action::Read(a)) = self.actions.pop() {
             Poll::Ready(Some(Ok(a)))
         } else {
+            // Returning `Poll::Ready(None)` here would probably simulate better
+            // a peer closing the connection. Otherwise we have to close with a
+            // `Bye` in all tests.
             Poll::Ready(Some(Err(MockError::UnexpectedRead)))
         }
     }
@@ -539,13 +540,26 @@ async fn test_peer_loop_bye() -> Result<()> {
         .unwrap()
         .insert(peer_address, get_dummy_peer(peer_address));
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     if !peer_map.lock().unwrap().is_empty() {
         bail!("peer map must be empty after closing connection gracefully");
-    } else {
-        Ok(())
     }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("for reconciliation block list must be empty");
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -568,13 +582,26 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     if !peer_map.lock().unwrap().is_empty() {
         bail!("peer map must be empty after closing connection gracefully");
-    } else {
-        Ok(())
     }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("for reconciliation block list must be empty");
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -605,7 +632,16 @@ async fn bad_block_test() -> Result<()> {
     let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     // Verify that no message was sent to main loop
     match to_main_rx1.recv().await {
@@ -618,6 +654,10 @@ async fn bad_block_test() -> Result<()> {
         ),
         None => (),
     };
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("for reconciliation block list must be empty");
+    }
 
     Ok(())
 }
@@ -648,7 +688,16 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     // Verify that no message was sent to main loop
     match to_main_rx1.recv().await {
@@ -664,9 +713,13 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 
     if !peer_map.lock().unwrap().is_empty() {
         bail!("peer map must be empty after closing connection gracefully");
-    } else {
-        Ok(())
     }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("for reconciliation block list must be empty");
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -688,7 +741,16 @@ async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         Action::Read(PeerMessage::Bye),
     ]);
 
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     // Verify that a message was sent to `main_loop`?
     match to_main_rx1.recv().await {
@@ -698,9 +760,13 @@ async fn test_peer_loop_receival_of_first_block() -> Result<()> {
 
     if !peer_map.lock().unwrap().is_empty() {
         bail!("peer map must be empty after closing connection gracefully");
-    } else {
-        Ok(())
     }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("for reconciliation block list must be empty");
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -725,7 +791,16 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
         Action::Read(PeerMessage::Bye),
     ]);
 
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     match to_main_rx1.recv().await {
         Some(PeerThreadToMain::NewBlocks(blocks)) => {
@@ -741,9 +816,13 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
 
     if !peer_map.lock().unwrap().is_empty() {
         bail!("peer map must be empty after closing connection gracefully");
-    } else {
-        Ok(())
     }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("fork reconciliation block list must be empty after two-depth reconciliation");
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -771,7 +850,16 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
         Action::Read(PeerMessage::Bye),
     ]);
 
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     match to_main_rx1.recv().await {
         Some(PeerThreadToMain::NewBlocks(blocks)) => {
@@ -790,9 +878,13 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
 
     if !peer_map.lock().unwrap().is_empty() {
         bail!("peer map must be empty after closing connection gracefully");
-    } else {
-        Ok(())
     }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("fork reconciliation block list must be empty after three-depth reconciliation");
+    }
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -822,7 +914,16 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
         Action::Read(PeerMessage::Bye),
     ]);
 
-    peer_loop::peer_loop(mock, from_main_rx_clone, to_main_tx, state, &peer_address).await?;
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
 
     match to_main_rx1.recv().await {
         Some(PeerThreadToMain::NewBlocks(blocks)) => {
@@ -841,9 +942,13 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
 
     if !peer_map.lock().unwrap().is_empty() {
         bail!("peer map must be empty after closing connection gracefully");
-    } else {
-        Ok(())
     }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("fork reconciliation block list must be empty after three-depth reconciliation");
+    }
+
+    Ok(())
 }
 
 #[tokio::test]

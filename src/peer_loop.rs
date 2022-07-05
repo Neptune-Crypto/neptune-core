@@ -207,7 +207,10 @@ where
             Ok(false)
         }
         PeerMessage::BlockNotification(block_notification) => {
-            debug!("Got BlockNotification");
+            debug!(
+                "Got BlockNotification of height {}",
+                block_notification.height
+            );
             peer_state_info.highest_shared_block_height = block_notification.height;
             {
                 let block_is_new = state
@@ -341,14 +344,13 @@ pub async fn peer_loop<S>(
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
     state: State,
     peer_address: &SocketAddr,
+    peer_state_info: &mut PeerState,
 ) -> Result<()>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
     <S as TryStream>::Error: std::error::Error,
 {
-    let mut peer_state_info = PeerState::default();
-
     loop {
         select! {
             // Handle peer messages
@@ -367,7 +369,7 @@ where
                                 break;
                             }
                             Some(peer_msg) => {
-                                let close_connection: bool = handle_peer_message(peer_msg, &state, peer_address, &mut peer, &mut peer_state_info, &to_main_tx).await?;
+                                let close_connection: bool = handle_peer_message(peer_msg, &state, peer_address, &mut peer, peer_state_info, &to_main_tx).await?;
                                 if close_connection {
                                     state.peer_map
                                     .lock()
@@ -395,7 +397,7 @@ where
             // Handle messages from main thread
             main_msg_res = from_main_rx.recv() => {
                 match main_msg_res {
-                    Ok(main_msg) => handle_main_thread_message(main_msg, &mut peer, &mut peer_state_info).await?,
+                    Ok(main_msg) => handle_main_thread_message(main_msg, &mut peer, peer_state_info).await?,
                     Err(e) => panic!("Failed to read from main loop: {}", e),
                 }
             }
