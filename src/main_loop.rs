@@ -1,5 +1,5 @@
 use crate::config_models::cli_args;
-use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer};
+use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer, PeerState};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
@@ -125,6 +125,7 @@ where
         peer_thread_to_main_tx,
         state,
         &peer_address,
+        &mut PeerState::default(),
     )
     .await?;
 

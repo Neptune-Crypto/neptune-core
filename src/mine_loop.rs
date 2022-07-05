@@ -26,7 +26,7 @@ use twenty_first::util_types::mutator_set::mutator_set_accumulator::MutatorSetAc
 use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
-const MOCK_DIFFICULTY: u32 = 30_000;
+const MOCK_DIFFICULTY: u32 = 10_000;
 
 /// Return a fake block with a random hash
 /// Maybe the problem is that this isn't actually an async method?

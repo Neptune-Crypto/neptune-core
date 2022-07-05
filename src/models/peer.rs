@@ -70,9 +70,7 @@ pub enum PeerMessage {
     Block(Box<TransferBlock>),
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
-    BlockResponseByHeight(Option<Box<TransferBlock>>),
     BlockRequestByHash(Digest),
-    BlockResponseByHash(Option<Box<TransferBlock>>),
     NewTransaction(i32),
     PeerListRequest,
     PeerListResponse(Vec<SocketAddr>),
@@ -80,7 +78,17 @@ pub enum PeerMessage {
     ConnectionStatus(ConnectionStatus),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PeerStateData {
+#[derive(Clone, Debug)]
+pub struct PeerState {
     pub highest_shared_block_height: BlockHeight,
+    pub fork_reconciliation_blocks: Vec<Block>,
+}
+
+impl PeerState {
+    pub fn default() -> Self {
+        Self {
+            highest_shared_block_height: 0.into(),
+            fork_reconciliation_blocks: vec![],
+        }
+    }
 }
