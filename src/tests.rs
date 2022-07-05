@@ -598,6 +598,8 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 
 #[tokio::test]
 async fn bad_block_test() -> Result<()> {
+    // In this scenario, a block without a valid PoW is received. This block should be rejected
+    // by the peer loop and a notification should never reach the main loop.
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
@@ -802,6 +804,66 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
 }
 
 #[tokio::test]
+async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
+    // In this scenario, the client know the genesis block (block 0) and block 1, it
+    // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let block_1 = make_mock_block(genesis_block_header.clone(), None);
+    let block_2 = make_mock_block(block_1.header.clone(), None);
+    let block_3 = make_mock_block(block_2.header.clone(), None);
+    let block_4 = make_mock_block(block_3.header.clone(), None);
+    state.update_latest_block(Box::new(block_1)).await?;
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+        Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+        Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            if blocks[0].hash != block_2.hash {
+                bail!("1st received block by main loop must be block 1");
+            }
+            if blocks[1].hash != block_3.hash {
+                bail!("2nd received block by main loop must be block 2");
+            }
+            if blocks[2].hash != block_4.hash {
+                bail!("3rd received block by main loop must be block 3");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread"),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("fork reconciliation block list must be empty after three-depth reconciliation");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
     // In this scenario, the client only knows the genesis block (block 0) and then
     // receives block 3, meaning that block 2 and 1 will have to be requested.
@@ -860,9 +922,87 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
 }
 
 #[tokio::test]
-async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
+async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
     // In this scenario, the client know the genesis block (block 0) and block 1, it
     // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
+    // But the requests are interrupted by the peer sending another message: a new block
+    // notification.
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let block_1 = make_mock_block(genesis_block_header.clone(), None);
+    let block_2 = make_mock_block(block_1.header.clone(), None);
+    let block_3 = make_mock_block(block_2.header.clone(), None);
+    let block_4 = make_mock_block(block_3.header.clone(), None);
+    let block_5 = make_mock_block(block_4.header.clone(), None);
+    state.update_latest_block(Box::new(block_1)).await?;
+
+    let mock = Mock::new(vec![
+        Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+        Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+        Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+        //
+        // Now make the interruption of the block reconciliation process
+        Action::Read(PeerMessage::BlockNotification(block_5.clone().into())),
+        //
+        // Complete the block reconciliation process by requesting the last block
+        // in this process, to get back to a mutually known block.
+        Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+        //
+        // Then anticipate the request of the block that was announced
+        // in the interruption.
+        // Note that we cannot anticipate the response, as only the main
+        // thread writes to the database. And the database needs to be updated
+        // for the handling of block 5 to be done correctly.
+        Action::Write(PeerMessage::BlockRequestByHeight(block_5.header.height)),
+        Action::Read(PeerMessage::Bye),
+    ]);
+
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state,
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
+
+    match to_main_rx1.recv().await {
+        Some(PeerThreadToMain::NewBlocks(blocks)) => {
+            if blocks[0].hash != block_2.hash {
+                bail!("1st received block by main loop must be block 1");
+            }
+            if blocks[1].hash != block_3.hash {
+                bail!("2nd received block by main loop must be block 2");
+            }
+            if blocks[2].hash != block_4.hash {
+                bail!("3rd received block by main loop must be block 3");
+            }
+        }
+        _ => bail!("Did not find msg sent to main thread"),
+    };
+
+    if !peer_map.lock().unwrap().is_empty() {
+        bail!("peer map must be empty after closing connection gracefully");
+    }
+
+    if !peer_state.fork_reconciliation_blocks.is_empty() {
+        bail!("fork reconciliation block list must be empty after three-depth reconciliation");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
+    // In this scenario, the client knows the genesis block (block 0) and block 1, it
+    // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
+    // But the requests are interrupted by the peer sending another message: a request
+    // for a list of peers.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
@@ -878,6 +1018,15 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
         Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
         Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
         Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+        //
+        // Now make the interruption of the block reconciliation process
+        Action::Read(PeerMessage::PeerListRequest),
+        //
+        // Answer the request for a peer list
+        Action::Write(PeerMessage::PeerListResponse(vec![peer_address])),
+        //
+        // Complete the block reconciliation process by requesting the last block
+        // in this process, to get back to a mutually known block.
         Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
         Action::Read(PeerMessage::Bye),
     ]);

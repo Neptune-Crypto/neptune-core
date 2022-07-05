@@ -165,7 +165,7 @@ async fn handle_peer_thread_message(
     state: State,
     main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
 ) -> Result<()> {
-    info!("Received message sent to main thread.");
+    debug!("Received message sent to main thread.");
     match msg {
         PeerThreadToMain::NewBlocks(blocks) => {
             let last_block = blocks.last().unwrap().to_owned();

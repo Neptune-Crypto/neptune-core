@@ -98,6 +98,7 @@ where
     new_blocks.reverse();
 
     // Reset the fork resolution state since we got all the way back to find a block that we have
+    let fork_reconciliation_event = !peer_state.fork_reconciliation_blocks.is_empty();
     peer_state.fork_reconciliation_blocks = vec![];
 
     // Sanity check, that the blocks are correctly sorted (they should be)
@@ -128,6 +129,16 @@ where
         "Updated block info by block from peer. block height {}",
         new_block_height
     );
+
+    // If `BlockNotification` was received during a block reconciliation
+    // event, then the peer might have one (or more (unlikely)) blocks
+    // that we do not have. We should thus request those blocks.
+    if fork_reconciliation_event && peer_state.highest_shared_block_height > new_block_height {
+        peer.send(PeerMessage::BlockRequestByHeight(
+            peer_state.highest_shared_block_height,
+        ))
+        .await?;
+    }
 
     Ok(())
 }
@@ -174,10 +185,13 @@ where
             );
             let new_block_height = t_block.header.height;
 
-            // TODO: Add validation of block, increase ban score if block is bad.
-            // This includes checking that the block hash is below a threshold etc.
             let block: Box<Block> = Box::new((*t_block).into());
-            peer_state_info.highest_shared_block_height = new_block_height;
+
+            // Update the value for the highest known height that peer possesses iff
+            // we are not in a fork reconciliation state.
+            if peer_state_info.fork_reconciliation_blocks.is_empty() {
+                peer_state_info.highest_shared_block_height = new_block_height;
+            }
 
             // TODO: Handle the situation where peer_state_info.fork_resolution_blocks is not empty better.
             let block_is_new = state
@@ -220,7 +234,10 @@ where
                     .proof_of_work_family
                     < block_notification.proof_of_work_family;
 
-                if block_is_new {
+                // Only request block if it is new, and if we are not currently reconciling
+                // a fork. If we are reconciling, that is handled later, and the information
+                // about that is stored in `highest_shared_block_height`.
+                if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty() {
                     peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
                         .await?;
                 }
