@@ -624,6 +624,9 @@ async fn bad_block_test() -> Result<()> {
 
 #[tokio::test]
 async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
+    // The scenario tested here is that a client receives a block that is already
+    // in the database. The expected behavior is to ignore the block and not send
+    // a message to the main thread.
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
@@ -634,27 +637,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
 
     let block_1 = make_mock_block(genesis_block_header, None);
-    let latest_block_info_1 = LatestBlockInfo::new(block_1.hash, block_1.header.height);
-    {
-        let dbs = state.databases.lock().await;
-        dbs.latest_block_header.put(
-            WriteOptions::new(),
-            DatabaseUnit(),
-            &bincode::serialize(&latest_block_info_1)?,
-        )?;
-        dbs.block_hash_to_block.put::<KeyableDigest>(
-            WriteOptions::new(),
-            block_1.hash.into(),
-            &bincode::serialize(&block_1)?,
-        )?;
-        dbs.block_height_to_hash.put(
-            WriteOptions::new(),
-            block_1.header.height,
-            &bincode::serialize(&block_1.hash)?,
-        )?;
-        let mut lbh = state.latest_block_header.lock().unwrap();
-        *lbh = block_1.clone().header;
-    }
+    state.update_latest_block(Box::new(block_1.clone())).await?;
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
@@ -688,6 +671,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 
 #[tokio::test]
 async fn test_peer_loop_receival_of_first_block() -> Result<()> {
+    // Scenario: client only knows genesis block. The receives block 1.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
@@ -764,6 +748,8 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
 
 #[tokio::test]
 async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
+    // In this scenario, the client only knows the genesis block (block 0) and then
+    // receives block 3, meaning that block 2 and 1 will have to be requested.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
@@ -811,6 +797,8 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
 
 #[tokio::test]
 async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
+    // In this scenario, the client know the genesis block (block 0) and block 1, it
+    // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main)?;
     let peer_address = get_dummy_address();
