@@ -19,14 +19,15 @@ use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use futures::StreamExt;
 use leveldb::database::Database;
-use leveldb::options::Options;
 use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
+use models::blockchain::wallet::Wallet;
 use models::database::{DatabaseUnit, Databases};
 use models::peer::Peer;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fs;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -55,8 +56,12 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
 const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
 const LATEST_BLOCK_DB_NAME: &str = "latest";
+const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
+const WALLET_FILE_NAME: &str = "wallet.dat";
+const STANDARD_WALLET_NAME: &str = "standard";
+const STANDARD_WALLET_VERSION: u8 = 0;
 
-fn get_database_root_path() -> Result<PathBuf> {
+fn get_data_directory() -> Result<PathBuf> {
     let data_home = if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
         Ok(proj_dirs.data_dir().to_path_buf())
     } else {
@@ -66,9 +71,103 @@ fn get_database_root_path() -> Result<PathBuf> {
     data_home
 }
 
+/// Create a wallet file, and set restrictive permissions
+#[cfg(target_family = "unix")]
+fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) {
+    // On Unix/Linux we set the file permissions to 600, to disallow
+    // other users on the same machine to access the secrets.
+    use std::os::unix::prelude::OpenOptionsExt;
+    fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)
+        .unwrap();
+    fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
+}
+
+/// Create a wallet file, without setting restrictive UNIX permissions
+// #[cfg(not(target_family = "unix"))]
+fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) {
+    fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
+}
+
+/// Read the wallet from disk. Create one if none exists.
+fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8) -> Wallet {
+    let mut path = root_path.to_owned();
+    path.push(network.to_string());
+
+    // Create directory for wallet if it does not exist
+    std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+        panic!(
+            "Failed to create or open wallet directory in {}",
+            path.to_string_lossy()
+        )
+    });
+
+    path.push(WALLET_FILE_NAME);
+
+    // Check if file exists
+    let wallet: Wallet = if path.exists() {
+        info!("Found wallet file: {}", path.to_string_lossy());
+
+        // Read wallet from disk
+        let file_content: String = match fs::read_to_string(path.clone()) {
+            Ok(fc) => fc,
+            Err(err) => panic!(
+                "Failed to read file {}. Got error: {}",
+                path.to_string_lossy(),
+                err
+            ),
+        };
+
+        // Parse wallet as JSON and return result
+        match serde_json::from_str(&file_content) {
+            Ok(stored_wallet) => stored_wallet,
+            Err(err) => {
+                panic!(
+                    "Failed to parse {} as Wallet in JSON format. Is the wallet file corrupted? Error: {}",
+                    path.to_string_lossy(),
+                    err
+                )
+            }
+        }
+    } else {
+        info!("Found wallet file: {}", path.to_string_lossy());
+
+        // New wallet must be made and stored to disk
+        let new_wallet: Wallet = Wallet::new_random_wallet(name, version);
+        let wallet_as_json: String =
+            serde_json::to_string(&new_wallet).expect("wallet serialization must succeed");
+
+        // Store to disk, with the right permissions
+        if cfg!(target_family = "unix") {
+            create_wallet_file_unix(&path, wallet_as_json);
+        } else {
+            create_wallet_file_windows(&path, wallet_as_json);
+        }
+
+        new_wallet
+    };
+
+    // Sanity check that wallet file was stored on disk.
+    assert!(
+        path.exists(),
+        "wallet file must exist on disk after creation."
+    );
+
+    wallet
+}
+
 fn initialize_databases(root_path: &Path, network: Network) -> Databases {
     let mut path = root_path.to_owned();
     path.push(network.to_string());
+    path.push(DATABASE_DIRECTORY_ROOT_NAME);
 
     // Create directory for database if it does not exist
     std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
@@ -85,7 +184,7 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
     let mut latest_path = path;
     latest_path.push(LATEST_BLOCK_DB_NAME);
 
-    let mut hash_options = Options::new();
+    let mut hash_options = leveldb::options::Options::new();
     hash_options.create_if_missing = true;
     let block_hash_to_block: Database<KeyableDigest> =
         match Database::open(block_hash_to_block_path.as_path(), hash_options) {
@@ -98,7 +197,7 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
             }
         };
 
-    let mut height_options = Options::new();
+    let mut height_options = leveldb::options::Options::new();
     height_options.create_if_missing = true;
     let block_height_to_hash: Database<BlockHeight> =
         match Database::open(block_height_to_hash_path.as_path(), height_options) {
@@ -111,7 +210,7 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
             }
         };
 
-    let mut latest_options = Options::new();
+    let mut latest_options = leveldb::options::Options::new();
     latest_options.create_if_missing = true;
     let latest_block: Database<DatabaseUnit> =
         match Database::open(latest_path.as_path(), latest_options) {
@@ -151,11 +250,19 @@ async fn get_latest_block(databases: Arc<tokio::sync::Mutex<Databases>>) -> Resu
 
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    // Connect to database
-    let path_buf = get_database_root_path()?;
+    let path_buf = get_data_directory()?;
     let root_path = path_buf.as_path();
-    debug!("Database root path is {:?}", root_path);
 
+    // Get wallet object, create one if none exists
+    debug!("Data root path is {:?}", root_path);
+    let wallet: Wallet = initialize_wallet(
+        root_path,
+        cli_args.network,
+        STANDARD_WALLET_NAME,
+        STANDARD_WALLET_VERSION,
+    );
+
+    // Connect to database
     let databases: Arc<tokio::sync::Mutex<Databases>> = Arc::new(tokio::sync::Mutex::new(
         initialize_databases(root_path, cli_args.network),
     ));
@@ -224,9 +331,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     if cli_args.mine && cli_args.network == Network::RegTest {
         tokio::spawn(async move {
-            mine_loop::mock_regtest_mine(main_to_miner_rx, miner_to_main_tx, latest_block.header)
-                .await
-                .expect("Error in mining thread");
+            mine_loop::mock_regtest_mine(
+                main_to_miner_rx,
+                miner_to_main_tx,
+                latest_block.header,
+                wallet.get_public_key(),
+            )
+            .await
+            .expect("Error in mining thread");
         });
     }
 

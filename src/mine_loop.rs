@@ -13,7 +13,6 @@ use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
 use rand::thread_rng;
-use secp256k1::{rand::rngs::OsRng, Secp256k1};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -30,13 +29,11 @@ const MOCK_DIFFICULTY: u32 = 10_000;
 
 /// Return a fake block with a random hash
 /// Maybe the problem is that this isn't actually an async method?
-async fn make_mock_block(previous_block_header: BlockHeader, sender: oneshot::Sender<Block>) {
-    // TODO: Replace this with public key sent from the main thread
-    let secp = Secp256k1::new();
-    let mut rng = OsRng::new().expect("OsRng");
-    let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-        secp.generate_keypair(&mut rng);
-
+async fn make_mock_block(
+    previous_block_header: BlockHeader,
+    sender: oneshot::Sender<Block>,
+    public_key: secp256k1::PublicKey,
+) {
     let next_block_height: BlockHeight = previous_block_header.height.next();
     let coinbase_utxo = Utxo {
         amount: Block::get_mining_reward(next_block_height),
@@ -142,10 +139,15 @@ pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block_header: BlockHeader,
+    own_public_key: secp256k1::PublicKey,
 ) -> Result<()> {
     loop {
         let (sender, receiver) = oneshot::channel::<Block>();
-        let miner_thread = tokio::spawn(make_mock_block(latest_block_header.clone(), sender));
+        let miner_thread = tokio::spawn(make_mock_block(
+            latest_block_header.clone(),
+            sender,
+            own_public_key,
+        ));
 
         select! {
             changed = from_main.changed() => {

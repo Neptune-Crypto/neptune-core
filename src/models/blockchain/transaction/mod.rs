@@ -12,7 +12,7 @@ use twenty_first::{
 
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
 use super::{
-    digest::{Digest, Hashable, DEVNET_SIGNATURE_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
 };
 
@@ -126,7 +126,7 @@ impl Transaction {
         //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = kernel.hash();
-        let kernel_digest_as_bytes: [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] = kernel_digest.into();
+        let kernel_digest_as_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = kernel_digest.into();
         for input in self.inputs.iter() {
             let msg: Message = Message::from_slice(&kernel_digest_as_bytes).unwrap();
             if input

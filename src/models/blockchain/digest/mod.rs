@@ -10,7 +10,8 @@ use self::keyable_digest::KeyableDigest;
 
 pub const BYTES_PER_BFE: usize = 8;
 pub const RESCUE_PRIME_OUTPUT_SIZE_IN_BFES: usize = 6;
-pub const DEVNET_SIGNATURE_SIZE_IN_BYTES: usize = 32;
+pub const DEVNET_MSG_DIGEST_SIZE_IN_BYTES: usize = 32;
+pub const DEVNET_SECRET_KEY_SIZE_IN_BYTES: usize = 32;
 pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
     RESCUE_PRIME_OUTPUT_SIZE_IN_BFES * BYTES_PER_BFE;
 
@@ -89,10 +90,10 @@ impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for Digest {
 }
 
 // The implementations for dev net byte arrays are not to be used on main net
-impl From<Digest> for [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] {
+impl From<Digest> for [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] {
     fn from(input: Digest) -> Self {
         let whole: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = input.into();
-        whole[0..DEVNET_SIGNATURE_SIZE_IN_BYTES]
+        whole[0..DEVNET_MSG_DIGEST_SIZE_IN_BYTES]
             .to_vec()
             .try_into()
             .unwrap()
@@ -114,7 +115,7 @@ mod digest_tests {
             BFieldElement::new(70),
         ];
         let rescue_prime_digest_type_from_array: Digest = bfe_vec.into();
-        let _shorter: [u8; DEVNET_SIGNATURE_SIZE_IN_BYTES] =
+        let _shorter: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] =
             rescue_prime_digest_type_from_array.into();
     }
 }
