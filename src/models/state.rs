@@ -47,6 +47,19 @@ impl Clone for State {
 }
 
 impl State {
+    /// Return latest block from database, or genesis block if no other block
+    /// is known.
+    pub async fn get_latest_block(&self) -> Block {
+        let dbs = self.databases.lock().await;
+        let lookup_res_info: Option<Block> =
+            Databases::get_latest_block(dbs).expect("Failed to read from DB");
+
+        match lookup_res_info {
+            None => Block::genesis_block(),
+            Some(block) => block,
+        }
+    }
+
     // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         // First see if we can get block from database

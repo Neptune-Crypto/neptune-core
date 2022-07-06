@@ -103,6 +103,7 @@ fn get_dummy_latest_block(
     )
 }
 
+/// Return a handshake object with a randomly set instance ID
 fn get_dummy_handshake_data(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
@@ -450,7 +451,7 @@ impl<Item> stream::Stream for Mock<Item> {
 
 /// Return a fake block with a random hash
 fn make_mock_block(
-    previous_block: BlockHeader,
+    previous_block: Block,
     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
 ) -> Block {
     let secp = Secp256k1::new();
@@ -458,7 +459,7 @@ fn make_mock_block(
     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
         secp.generate_keypair(&mut rng);
 
-    let new_block_height: BlockHeight = previous_block.height.next();
+    let new_block_height: BlockHeight = previous_block.header.height.next();
     let coinbase_utxo = Utxo {
         amount: Block::get_mining_reward(new_block_height),
         public_key,
@@ -478,8 +479,8 @@ fn make_mock_block(
         fee: U32s::zero(),
         timestamp,
     };
-    let mut new_ms = MutatorSetAccumulator::default();
-    let empty_ms = new_ms.clone();
+    let mut new_ms = previous_block.body.next_mutator_set_accumulator;
+    let previous_ms = new_ms.clone();
     let coinbase_digest: Digest = coinbase_utxo.hash();
 
     let coinbase_addition_record: AdditionRecord<Hash> =
@@ -496,19 +497,19 @@ fn make_mock_block(
         mutator_set_update,
 
         // TODO: Consider to use something else than an empty MS here
-        previous_mutator_set_accumulator: empty_ms,
+        previous_mutator_set_accumulator: previous_ms,
         stark_proof: vec![],
     };
 
-    let block_target_difficulty = previous_block.target_difficulty;
-    let pow_line = previous_block.proof_of_work_line + block_target_difficulty;
+    let block_target_difficulty = previous_block.header.target_difficulty;
+    let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
     let pow_family = pow_line;
     let zero = BFieldElement::ring_zero();
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
         mutator_set_commitment: new_ms.get_commitment().into(),
-        prev_block_digest: previous_block.hash(),
+        prev_block_digest: previous_block.hash,
         timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
@@ -603,12 +604,12 @@ async fn bad_block_test() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let genesis_block: Block = state.get_latest_block().await;
 
     // Make a with hash above what the implied threshold from
     // `target_difficulty` requires
     let block_without_valid_pow = make_mock_block(
-        genesis_block_header,
+        genesis_block,
         Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
             1_000_000, 0, 0, 0, 0,
         ])),
@@ -660,9 +661,9 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let genesis_block: Block = state.get_latest_block().await;
 
-    let block_1 = make_mock_block(genesis_block_header, None);
+    let block_1 = make_mock_block(genesis_block, None);
     state.update_latest_block(Box::new(block_1.clone())).await?;
 
     let mock = Mock::new(vec![
@@ -714,11 +715,11 @@ async fn test_peer_loop_receival_of_first_block() -> Result<()> {
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
+    let genesis_block: Block = state.get_latest_block().await;
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(
-            make_mock_block(genesis_block_header, None).into(),
+            make_mock_block(genesis_block, None).into(),
         ))),
         Action::Read(PeerMessage::Bye),
     ]);
@@ -758,9 +759,9 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
-    let block_1 = make_mock_block(genesis_block_header.clone(), None);
-    let block_2 = make_mock_block(block_1.header.clone(), None);
+    let genesis_block: Block = state.get_latest_block().await;
+    let block_1 = make_mock_block(genesis_block.clone(), None);
+    let block_2 = make_mock_block(block_1.clone(), None);
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -810,11 +811,11 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
-    let block_1 = make_mock_block(genesis_block_header.clone(), None);
-    let block_2 = make_mock_block(block_1.header.clone(), None);
-    let block_3 = make_mock_block(block_2.header.clone(), None);
-    let block_4 = make_mock_block(block_3.header.clone(), None);
+    let genesis_block: Block = state.get_latest_block().await;
+    let block_1 = make_mock_block(genesis_block.clone(), None);
+    let block_2 = make_mock_block(block_1.clone(), None);
+    let block_3 = make_mock_block(block_2.clone(), None);
+    let block_4 = make_mock_block(block_3.clone(), None);
     state.update_latest_block(Box::new(block_1)).await?;
 
     let mock = Mock::new(vec![
@@ -870,10 +871,10 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
-    let block_1 = make_mock_block(genesis_block_header.clone(), None);
-    let block_2 = make_mock_block(block_1.header.clone(), None);
-    let block_3 = make_mock_block(block_2.header.clone(), None);
+    let genesis_block: Block = state.get_latest_block().await;
+    let block_1 = make_mock_block(genesis_block.clone(), None);
+    let block_2 = make_mock_block(block_1.clone(), None);
+    let block_3 = make_mock_block(block_2.clone(), None);
 
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -930,12 +931,12 @@ async fn test_block_reconciliation_interrupted_by_block_notification() -> Result
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
-    let block_1 = make_mock_block(genesis_block_header.clone(), None);
-    let block_2 = make_mock_block(block_1.header.clone(), None);
-    let block_3 = make_mock_block(block_2.header.clone(), None);
-    let block_4 = make_mock_block(block_3.header.clone(), None);
-    let block_5 = make_mock_block(block_4.header.clone(), None);
+    let genesis_block: Block = state.get_latest_block().await;
+    let block_1 = make_mock_block(genesis_block.clone(), None);
+    let block_2 = make_mock_block(block_1.clone(), None);
+    let block_3 = make_mock_block(block_2.clone(), None);
+    let block_4 = make_mock_block(block_3.clone(), None);
+    let block_5 = make_mock_block(block_4.clone(), None);
     state.update_latest_block(Box::new(block_1)).await?;
 
     let mock = Mock::new(vec![
@@ -1006,11 +1007,11 @@ async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
-    let genesis_block_header: BlockHeader = state.latest_block_header.lock().unwrap().to_owned();
-    let block_1 = make_mock_block(genesis_block_header.clone(), None);
-    let block_2 = make_mock_block(block_1.header.clone(), None);
-    let block_3 = make_mock_block(block_2.header.clone(), None);
-    let block_4 = make_mock_block(block_3.header.clone(), None);
+    let genesis_block: Block = state.get_latest_block().await;
+    let block_1 = make_mock_block(genesis_block.clone(), None);
+    let block_2 = make_mock_block(block_1.clone(), None);
+    let block_3 = make_mock_block(block_2.clone(), None);
+    let block_4 = make_mock_block(block_3.clone(), None);
     state.update_latest_block(Box::new(block_1)).await?;
 
     let mock = Mock::new(vec![

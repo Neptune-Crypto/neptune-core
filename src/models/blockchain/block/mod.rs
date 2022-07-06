@@ -125,10 +125,12 @@ impl Block {
             .sum()
     }
 
-    fn devnet_is_valid(&self) -> bool {
+    /// Verify a block. It is assumed that `previous_block` is valid.
+    fn devnet_is_valid(&self, previous_block: &Block) -> bool {
         // What belongs here are the things that would otherwise
         // be verified by the block validity proof.
 
+        // 0. `previous_block` is consistent with current block
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
         // (with coinbase UTXO flag set)
@@ -142,6 +144,22 @@ impl Block {
         //      gives `next_mutator_set_accumulator`,
         //   e) transaction timestamp <= block timestamp
         //   f) call: `transaction.devnet_is_valid()`
+
+        // `previous_block` is parent of new block
+        if previous_block.header.height.next() != self.header.height {
+            return false;
+        }
+
+        if previous_block.hash != self.header.prev_block_digest {
+            return false;
+        }
+
+        // `previous_block`'s accumuluator must agree with current block's `parent_accumulator`
+        if previous_block.body.next_mutator_set_accumulator
+            != self.body.previous_mutator_set_accumulator
+        {
+            return false;
+        }
 
         for tx in self.body.transactions.iter() {
             for input in tx.inputs.iter() {
@@ -260,15 +278,16 @@ impl Block {
         //  4.1. verify that uncle's prev_block_digest matches with parent's prev_block_digest
         //  4.2. verify that all uncles' hash are below parent's target_difficulty
 
-        // 5. height = previous height + 1
+        // 5. `block_body_merkle_root`
+        if self.header.block_body_merkle_root != self.body.hash() {
+            return false;
+        }
 
-        // 6. `block_body_merkle_root`
-        // Verify that membership p
         true
     }
 
     /// The archival-version of block validation. Archival nodes should run this version.
-    pub fn archival_is_valid(&self) -> bool {
+    pub fn archival_is_valid(&self, previous_block: &Block) -> bool {
         // Check that self is the child of parent
         // if parent.hash != self.header.prev_block_digest {
         //     return false;
@@ -292,7 +311,7 @@ impl Block {
         //     pub transactions: Vec<Transaction>,
         // pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
         // pub mutator_set_update: MutatorSetUpdate,
-        if !self.devnet_is_valid() {
+        if !self.devnet_is_valid(previous_block) {
             warn!("Block devnet test failed");
             return false;
         }
