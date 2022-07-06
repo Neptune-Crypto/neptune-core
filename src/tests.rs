@@ -31,11 +31,11 @@ use std::time::UNIX_EPOCH;
 use tokio_serde::Serializer;
 use tokio_test::io::Builder;
 use tokio_util::codec::Encoder;
+use tracing_test::traced_test;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::traits::GetRandomElements;
 use twenty_first::util_types::mutator_set::addition_record::AdditionRecord;
-use twenty_first::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 const UNIT_TEST_DB_DIRECTORY: &str = "neptune_unit_test_databases";
@@ -173,6 +173,7 @@ fn get_genesis_setup(
     ))
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_incoming_connection_succeed() -> Result<()> {
     // This builds a mock object which expects to have a certain
@@ -222,6 +223,7 @@ async fn test_incoming_connection_succeed() -> Result<()> {
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
     let network = Network::Main;
@@ -253,6 +255,7 @@ async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
     }
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_incoming_connection_fail_bad_network() -> Result<()> {
     let other_handshake = get_dummy_handshake_data(Network::Testnet);
@@ -287,6 +290,7 @@ async fn test_incoming_connection_fail_bad_network() -> Result<()> {
     }
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_outgoing_connection_succeed() -> Result<()> {
     let network = Network::Main;
@@ -328,6 +332,7 @@ async fn test_outgoing_connection_succeed() -> Result<()> {
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
     let network = Network::Main;
@@ -526,6 +531,7 @@ fn make_mock_block(
     Block::new(block_header, block_body)
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_peer_loop_bye() -> Result<()> {
     let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
@@ -559,6 +565,7 @@ async fn test_peer_loop_bye() -> Result<()> {
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_peer_loop_peer_list() -> Result<()> {
     let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
@@ -597,6 +604,7 @@ async fn test_peer_loop_peer_list() -> Result<()> {
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn bad_block_test() -> Result<()> {
     // In this scenario, a block without a valid PoW is received. This block should be rejected
@@ -653,6 +661,7 @@ async fn bad_block_test() -> Result<()> {
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     // The scenario tested here is that a client receives a block that is already
@@ -709,6 +718,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_peer_loop_receival_of_first_block() -> Result<()> {
     // Scenario: client only knows genesis block. The receives block 1.
@@ -752,6 +762,7 @@ async fn test_peer_loop_receival_of_first_block() -> Result<()> {
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
     // In this scenario, the client only knows the genesis block (block 0) and then
@@ -804,6 +815,7 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
     // In this scenario, the client know the genesis block (block 0) and block 1, it
@@ -864,6 +876,7 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
     // In this scenario, the client only knows the genesis block (block 0) and then
@@ -922,6 +935,7 @@ async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> 
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
     // In this scenario, the client know the genesis block (block 0) and block 1, it
@@ -998,6 +1012,7 @@ async fn test_block_reconciliation_interrupted_by_block_notification() -> Result
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
     // In this scenario, the client knows the genesis block (block 0) and block 1, it
@@ -1069,6 +1084,7 @@ async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<
     Ok(())
 }
 
+#[traced_test]
 #[tokio::test]
 async fn test_get_connection_status() -> Result<()> {
     let network = Network::Main;

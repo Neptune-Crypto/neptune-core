@@ -815,6 +815,7 @@ dependencies = [
  "tokio-util 0.7.2",
  "tracing",
  "tracing-subscriber",
+ "tracing-test",
  "twenty-first",
 ]
 
@@ -1914,6 +1915,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-test"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6992d8a98f570be1c729fe8b6f464fb18c4117054c10f1f952c22d533b48a74"
+dependencies = [
+ "lazy_static",
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "719fa6c65bada6a7a3b8466702ec6fb4c4189b69339f78c9e597f796e493712e"
+dependencies = [
+ "lazy_static",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "twenty-first"
 version = "0.1.0"
 source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=3237ca0b848366ec7621b06e2375b021a49a52bb#3237ca0b848366ec7621b06e2375b021a49a52bb"
@@ -1934,8 +1958,8 @@ dependencies = [
  "phf",
  "primitive-types",
  "rand 0.8.5",
- "rand_chacha 0.1.1",
- "rand_core 0.3.1",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.3",
  "rand_distr",
  "rand_pcg 0.3.1",
  "rayon",

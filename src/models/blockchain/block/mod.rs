@@ -147,10 +147,12 @@ impl Block {
 
         // `previous_block` is parent of new block
         if previous_block.header.height.next() != self.header.height {
+            warn!("Height does not match previous height");
             return false;
         }
 
         if previous_block.hash != self.header.prev_block_digest {
+            warn!("Hash digest does not match previous digest");
             return false;
         }
 
@@ -158,6 +160,7 @@ impl Block {
         if previous_block.body.next_mutator_set_accumulator
             != self.body.previous_mutator_set_accumulator
         {
+            warn!("Value for previous mutator set does not match previous block");
             return false;
         }
 
@@ -168,6 +171,7 @@ impl Block {
                     &input.utxo.hash().into(),
                     &input.membership_proof.clone().into(),
                 ) {
+                    warn!("Invalid membership proof found in block");
                     return false;
                 }
             }
@@ -175,10 +179,12 @@ impl Block {
 
         // 1.c) Verify that transactions and mutator_set_update agree
         if self.count_inputs() != self.body.mutator_set_update.removals.len() {
+            warn!("Bad removal record count");
             return false;
         }
 
         if self.count_outputs() != self.body.mutator_set_update.additions.len() {
+            warn!("Bad addition record count");
             return false;
         }
 
@@ -188,6 +194,7 @@ impl Block {
         for tx in self.body.transactions.iter() {
             for input in tx.inputs.iter() {
                 if input.removal_record != self.body.mutator_set_update.removals[i] {
+                    warn!("Invalid removal record found in block");
                     return false;
                 }
                 i += 1;
@@ -203,11 +210,13 @@ impl Block {
                 let expected_commitment =
                     hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
                 if self.body.mutator_set_update.additions[i].commitment != expected_commitment {
+                    warn!("Bad commitment found in addition record");
                     return false;
                 }
                 if !self.body.mutator_set_update.additions[i]
                     .has_matching_aocl(&self.body.previous_mutator_set_accumulator.aocl)
                 {
+                    warn!("Addition record does not have matching AOCL");
                     return false;
                 }
                 i += 1;
@@ -237,6 +246,7 @@ impl Block {
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.
         if ms.get_commitment() != self.body.next_mutator_set_accumulator.get_commitment() {
+            warn!("Mutator set does not match calculated object");
             return false;
         }
 
@@ -245,6 +255,7 @@ impl Block {
         if ms.get_commitment()
             != Into::<Vec<BFieldElement>>::into(self.header.mutator_set_commitment)
         {
+            warn!("Mutator set commitment does not match calculated object");
             return false;
         }
 
@@ -256,6 +267,7 @@ impl Block {
             .iter()
             .any(|tx| tx.timestamp.value() > self.header.timestamp.value())
         {
+            warn!("Transaction with invalid timestamp found");
             return false;
         }
 
@@ -291,6 +303,7 @@ impl Block {
 
         // 5. `block_body_merkle_root`
         if self.header.block_body_merkle_root != self.body.hash() {
+            warn!("Block body does not match referenced block body Merkle root");
             return false;
         }
 

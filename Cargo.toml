@@ -34,6 +34,7 @@ tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "env-filter", "time"] }
+tracing-test = "0"
 tarpc = { version = "0.29", features = ["tokio1", "serde-transport", "tcp"] }
 
 [dev-dependencies]
