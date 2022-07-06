@@ -272,8 +272,8 @@ impl Block {
         }
 
         // 1.f) Verify all transactions
-        for (i, tx) in self.body.transactions.iter().enumerate() {
-            let miner_reward = if i == 0 {
+        for (j, tx) in self.body.transactions.iter().enumerate() {
+            let miner_reward = if j == 0 {
                 // The 1st transaction in the block can collect a coinbase transaction
                 Some(Self::get_mining_reward(self.header.height))
             } else {

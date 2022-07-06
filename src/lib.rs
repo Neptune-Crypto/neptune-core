@@ -1,3 +1,4 @@
+#![deny(clippy::shadow_unrelated)]
 pub mod config_models;
 mod main_loop;
 mod mine_loop;

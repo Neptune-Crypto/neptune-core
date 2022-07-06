@@ -43,11 +43,11 @@ impl Databases {
     pub fn get_latest_block(
         databases: tokio::sync::MutexGuard<Databases>,
     ) -> Result<Option<Block>> {
-        let bytes = databases
+        let bytes_opt: Option<Vec<u8>> = databases
             .latest_block_header
             .get(ReadOptions::new(), DatabaseUnit())
             .expect("Failed to get latest block info on init");
-        let block_header_res: Option<BlockHeader> = bytes.map(|bts| {
+        let block_header_res: Option<BlockHeader> = bytes_opt.map(|bts| {
             bincode::deserialize(&bts).expect("Failed to deserialize latest block info")
         });
         let block_header = match block_header_res {

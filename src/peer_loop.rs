@@ -407,14 +407,14 @@ where
                             }
                         }
                     }
-                    Err(e) => {
+                    Err(err) => {
                         state.peer_map
                             .lock()
                             .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .remove(peer_address)
                             .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                       peer_address));
-                        bail!("Error when receiving from peer: {}. Closing connection.", e);
+                        bail!("Error when receiving from peer: {}. Closing connection.", err);
                     }
                 }
             }
