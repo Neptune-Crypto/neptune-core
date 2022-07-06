@@ -248,6 +248,17 @@ impl Block {
             return false;
         }
 
+        // 1.e) verify that all transaction timestamps are less than or equal to
+        // the block's timestamp.
+        if self
+            .body
+            .transactions
+            .iter()
+            .any(|tx| tx.timestamp.value() > self.header.timestamp.value())
+        {
+            return false;
+        }
+
         // 1.f) Verify all transactions
         for (i, tx) in self.body.transactions.iter().enumerate() {
             let miner_reward = if i == 0 {
