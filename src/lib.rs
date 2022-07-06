@@ -24,7 +24,7 @@ use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::blockchain::wallet::Wallet;
-use models::database::{DatabaseUnit, Databases};
+use models::database::{DatabaseUnit, Databases, KeyableIpAddress};
 use models::peer::Peer;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -57,6 +57,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
 const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
 const LATEST_BLOCK_DB_NAME: &str = "latest";
+const BANNED_IPS_DB_NAME: &str = "banned_ips";
 const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard";
@@ -165,7 +166,23 @@ fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8
     wallet
 }
 
+/// Create and return the `databases` struct in the state.
 fn initialize_databases(root_path: &Path, network: Network) -> Databases {
+    /// Create a database with key type `T`, name `db_name` in directory `path/db_name/`
+    /// Returns this database.
+    fn initialize_database<T: db_key::Key>(path: &PathBuf, db_name: &str) -> Database<T> {
+        let mut path = path.to_owned();
+        path.push(db_name);
+        let mut options = leveldb::options::Options::new();
+        options.create_if_missing = true;
+        match Database::open(path.as_path(), options) {
+            Ok(db) => db,
+            Err(e) => {
+                panic!("failed to open {} database: {:?}", db_name, e)
+            }
+        }
+    }
+
     let mut path = root_path.to_owned();
     path.push(network.to_string());
     path.push(DATABASE_DIRECTORY_ROOT_NAME);
@@ -178,53 +195,20 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
         )
     });
 
-    let mut block_height_to_hash_path = path.to_owned();
-    block_height_to_hash_path.push(BLOCK_HEIGHT_TO_HASH_DB_NAME);
-    let mut block_hash_to_block_path = path.to_owned();
-    block_hash_to_block_path.push(BLOCK_HASH_TO_BLOCK_DB_NAME);
-    let mut latest_path = path;
-    latest_path.push(LATEST_BLOCK_DB_NAME);
-
-    let mut hash_options = leveldb::options::Options::new();
-    hash_options.create_if_missing = true;
     let block_hash_to_block: Database<KeyableDigest> =
-        match Database::open(block_hash_to_block_path.as_path(), hash_options) {
-            Ok(db) => db,
-            Err(e) => {
-                panic!(
-                    "failed to open {} database: {:?}",
-                    BLOCK_HASH_TO_BLOCK_DB_NAME, e
-                )
-            }
-        };
-
-    let mut height_options = leveldb::options::Options::new();
-    height_options.create_if_missing = true;
+        initialize_database::<KeyableDigest>(&path, BLOCK_HASH_TO_BLOCK_DB_NAME);
     let block_height_to_hash: Database<BlockHeight> =
-        match Database::open(block_height_to_hash_path.as_path(), height_options) {
-            Ok(db) => db,
-            Err(e) => {
-                panic!(
-                    "failed to open {} database: {:?}",
-                    BLOCK_HASH_TO_BLOCK_DB_NAME, e
-                )
-            }
-        };
-
-    let mut latest_options = leveldb::options::Options::new();
-    latest_options.create_if_missing = true;
+        initialize_database::<BlockHeight>(&path, BLOCK_HEIGHT_TO_HASH_DB_NAME);
     let latest_block: Database<DatabaseUnit> =
-        match Database::open(latest_path.as_path(), latest_options) {
-            Ok(db) => db,
-            Err(e) => {
-                panic!("failed to open {} database: {:?}", LATEST_BLOCK_DB_NAME, e)
-            }
-        };
+        initialize_database::<DatabaseUnit>(&path, LATEST_BLOCK_DB_NAME);
+    let banned_peers: Database<KeyableIpAddress> =
+        initialize_database::<KeyableIpAddress>(&path, BANNED_IPS_DB_NAME);
 
     Databases {
         block_hash_to_block,
         block_height_to_hash,
         latest_block_header: latest_block,
+        banned_peers,
     }
 }
 
