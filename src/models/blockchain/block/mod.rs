@@ -216,10 +216,14 @@ impl Block {
             }
         }
 
+        // Verify that the locally constructed mutator set matches that in the received
+        // block's body.
         if ms.get_commitment() != self.body.next_mutator_set_accumulator.get_commitment() {
             return false;
         }
 
+        // Verify that the locally constructed mutator set matches that in the received
+        // block's header
         if ms.get_commitment()
             != Into::<Vec<BFieldElement>>::into(self.header.mutator_set_commitment)
         {

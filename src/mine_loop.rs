@@ -27,14 +27,13 @@ use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
 
-/// Return a fake block with a random hash
-/// Maybe the problem is that this isn't actually an async method?
-async fn make_mock_block(
-    previous_block_header: BlockHeader,
+/// Attempt to mine a valid block for the network
+async fn make_devnet_block(
+    previous_block: Block,
     sender: oneshot::Sender<Block>,
     public_key: secp256k1::PublicKey,
 ) {
-    let next_block_height: BlockHeight = previous_block_header.height.next();
+    let next_block_height: BlockHeight = previous_block.header.height.next();
     let coinbase_utxo = Utxo {
         amount: Block::get_mining_reward(next_block_height),
         public_key,
@@ -49,7 +48,7 @@ async fn make_mock_block(
 
     let output_randomness: Vec<BFieldElement> =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
-    let tx = Transaction {
+    let coinbase_transaction = Transaction {
         inputs: vec![],
         outputs: vec![(coinbase_utxo.clone(), output_randomness.clone().into())],
         public_scripts: vec![],
@@ -57,11 +56,12 @@ async fn make_mock_block(
         timestamp,
     };
 
-    // For now, we just assume that the mutator set was empty prior to this block
-    let mut new_ms = MutatorSetAccumulator::default();
-
+    // For now, we just mine blocks with only the coinbase transaction. Therefore, the
+    // mutator set update structure only contains an addition record, and no removal
+    // records, as these represent spent UTXOs
+    let mut new_ms: MutatorSetAccumulator<Hash> =
+        previous_block.body.next_mutator_set_accumulator.clone();
     let coinbase_digest: Digest = coinbase_utxo.hash();
-
     let coinbase_addition_record: AdditionRecord<Hash> =
         new_ms.commit(&coinbase_digest.into(), &output_randomness);
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
@@ -71,21 +71,21 @@ async fn make_mock_block(
     new_ms.add(&coinbase_addition_record);
 
     let block_body: BlockBody = BlockBody {
-        transactions: vec![tx],
+        transactions: vec![coinbase_transaction],
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
-        previous_mutator_set_accumulator: MutatorSetAccumulator::default(),
+        previous_mutator_set_accumulator: previous_block.body.next_mutator_set_accumulator,
         stark_proof: vec![],
     };
 
     let zero = BFieldElement::ring_zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
-    let new_pow_line = previous_block_header.proof_of_work_family + difficulty;
+    let new_pow_line = previous_block.header.proof_of_work_family + difficulty;
     let mut block_header = BlockHeader {
         version: zero,
         height: next_block_height,
         mutator_set_commitment: new_ms.get_commitment().into(),
-        prev_block_digest: previous_block_header.hash(),
+        prev_block_digest: previous_block.header.hash(),
         timestamp,
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
@@ -138,13 +138,13 @@ async fn make_mock_block(
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
-    mut latest_block_header: BlockHeader,
+    mut latest_block: Block,
     own_public_key: secp256k1::PublicKey,
 ) -> Result<()> {
     loop {
         let (sender, receiver) = oneshot::channel::<Block>();
-        let miner_thread = tokio::spawn(make_mock_block(
-            latest_block_header.clone(),
+        let miner_thread = tokio::spawn(make_devnet_block(
+            latest_block.clone(),
             sender,
             own_public_key,
         ));
@@ -160,8 +160,8 @@ pub async fn mock_regtest_mine(
                 match main_message {
                     MainToMiner::NewBlock(block) => {
                         miner_thread.abort();
-                        latest_block_header = block.header;
-                        info!("Miner thread received regtest block height {}", latest_block_header.height);
+                        latest_block = *block;
+                        info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
                 }
@@ -176,7 +176,7 @@ pub async fn mock_regtest_mine(
                 };
 
                 info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.header.height, new_fake_block.hash);
-                latest_block_header = new_fake_block.header.clone();
+                latest_block = new_fake_block.clone();
                 to_main.send(MinerToMain::NewBlock(Box::new(new_fake_block))).await?;
             }
         }

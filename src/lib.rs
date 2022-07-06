@@ -334,7 +334,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             mine_loop::mock_regtest_mine(
                 main_to_miner_rx,
                 miner_to_main_tx,
-                latest_block.header,
+                latest_block,
                 wallet.get_public_key(),
             )
             .await
