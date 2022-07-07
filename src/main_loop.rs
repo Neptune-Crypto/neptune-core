@@ -170,7 +170,7 @@ async fn handle_peer_thread_message(
         PeerThreadToMain::NewBlocks(blocks) => {
             let last_block = blocks.last().unwrap().to_owned();
             {
-                let databases = state.databases.lock().await;
+                let databases = state.block_databases.lock().await;
                 let mut block_header = state
                     .latest_block_header
                     .lock()

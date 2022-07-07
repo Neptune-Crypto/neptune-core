@@ -30,7 +30,7 @@ impl RPC for NeptuneRPCServer {
     type GetPeerInfoFut = Ready<Vec<Peer>>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
-        let databases = executor::block_on(self.state.databases.lock());
+        let databases = executor::block_on(self.state.block_databases.lock());
         let lookup_res = databases
             .latest_block_header
             .get(ReadOptions::new(), DatabaseUnit())

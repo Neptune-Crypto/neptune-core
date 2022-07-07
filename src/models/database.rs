@@ -8,10 +8,13 @@ use super::blockchain::{
     digest::{keyable_digest::KeyableDigest, Hashable},
 };
 
-pub struct Databases {
+pub struct BlockDatabases {
     pub block_height_to_hash: Database<BlockHeight>,
     pub block_hash_to_block: Database<KeyableDigest>,
     pub latest_block_header: Database<DatabaseUnit>,
+}
+
+pub struct PeerDatabases {
     pub banned_peers: Database<KeyableIpAddress>,
 }
 
@@ -21,7 +24,13 @@ pub struct Databases {
 // attributes from the `tracing` crate, and this requires all input
 // arguments to the function to implement the `Debug` trait as this
 // info is written on all logging events.
-impl fmt::Debug for Databases {
+impl fmt::Debug for BlockDatabases {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("").finish()
+    }
+}
+
+impl fmt::Debug for PeerDatabases {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("").finish()
     }
@@ -85,10 +94,10 @@ impl From<KeyableIpAddress> for IpAddr {
     }
 }
 
-impl Databases {
+impl BlockDatabases {
     /// Given a mutex lock on the database, return the latest block
     pub fn get_latest_block(
-        databases: tokio::sync::MutexGuard<Databases>,
+        databases: tokio::sync::MutexGuard<BlockDatabases>,
     ) -> Result<Option<Block>> {
         let bytes_opt: Option<Vec<u8>> = databases
             .latest_block_header

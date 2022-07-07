@@ -34,7 +34,6 @@ pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
 
     if peers[peer_address].banscore > PEER_TOLERANCE {
         warn!("Banning peer");
-        todo!();
     }
 }
 
@@ -271,7 +270,7 @@ where
 
             let block_response;
             {
-                let databases = state.databases.lock().await;
+                let databases = state.block_databases.lock().await;
                 let hash_res = databases
                     .block_height_to_hash
                     .get(ReadOptions::new(), block_height)

@@ -47,10 +47,16 @@ fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> {
 // Create databases for unit tests on disk, and return objects for them.
 // For now, we use databases on disk, but it would be nicer to use
 // something that is in-memory only.
-fn get_unit_test_database(network: Network) -> Result<Arc<tokio::sync::Mutex<Databases>>> {
+fn databases(
+    network: Network,
+) -> Result<(
+    Arc<tokio::sync::Mutex<BlockDatabases>>,
+    Arc<tokio::sync::Mutex<PeerDatabases>>,
+)> {
     let temp_dir = env::temp_dir();
     let mut path = temp_dir.to_owned();
     path.push(UNIT_TEST_DB_DIRECTORY);
+    path.push(network.to_string());
 
     // Create a randomly named directory to allow the tests to run in parallel.
     // If this is not done, the parallel execution of unit tests will fail as
@@ -62,9 +68,12 @@ fn get_unit_test_database(network: Network) -> Result<Arc<tokio::sync::Mutex<Dat
         .collect();
     path.push(random_directory);
 
-    let db = initialize_databases(path.as_path(), network);
+    let (block_dbs, peer_dbs) = initialize_databases(&path);
 
-    Ok(Arc::new(tokio::sync::Mutex::new(db)))
+    Ok((
+        Arc::new(tokio::sync::Mutex::new(block_dbs)),
+        Arc::new(tokio::sync::Mutex::new(peer_dbs)),
+    ))
 }
 
 fn get_dummy_address() -> SocketAddr {
@@ -156,12 +165,13 @@ fn get_genesis_setup(
     }
 
     let (_, _, latest_block_header) = get_dummy_latest_block(None);
-    let databases = get_unit_test_database(network)?;
+    let (block_databases, peer_databases) = databases(network)?;
     let state = State {
         peer_map: peer_map.clone(),
-        databases,
+        block_databases,
         latest_block_header,
         syncing: Arc::new(std::sync::RwLock::new(false)),
+        peer_databases,
     };
     Ok((
         peer_broadcast_tx,

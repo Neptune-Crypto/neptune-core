@@ -24,7 +24,7 @@ use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::blockchain::wallet::Wallet;
-use models::database::{DatabaseUnit, Databases, KeyableIpAddress};
+use models::database::{BlockDatabases, DatabaseUnit, KeyableIpAddress, PeerDatabases};
 use models::peer::Peer;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -63,14 +63,14 @@ const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard";
 const STANDARD_WALLET_VERSION: u8 = 0;
 
-fn get_data_directory() -> Result<PathBuf> {
-    let data_home = if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
-        Ok(proj_dirs.data_dir().to_path_buf())
+fn get_data_directory(network: Network) -> Result<PathBuf> {
+    if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
+        let mut path = proj_dirs.data_dir().to_path_buf();
+        path.push(network.to_string());
+        Ok(path)
     } else {
-        bail!("Could not determine data directory");
-    };
-
-    data_home
+        bail!("Could not determine data directory")
+    }
 }
 
 /// Create a wallet file, and set restrictive permissions
@@ -100,18 +100,8 @@ fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) {
 }
 
 /// Read the wallet from disk. Create one if none exists.
-fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8) -> Wallet {
+fn initialize_wallet(root_path: &Path, name: &str, version: u8) -> Wallet {
     let mut path = root_path.to_owned();
-    path.push(network.to_string());
-
-    // Create directory for wallet if it does not exist
-    std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
-        panic!(
-            "Failed to create or open wallet directory in {}",
-            path.to_string_lossy()
-        )
-    });
-
     path.push(WALLET_FILE_NAME);
 
     // Check if file exists
@@ -140,7 +130,7 @@ fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8
             }
         }
     } else {
-        info!("Found wallet file: {}", path.to_string_lossy());
+        info!("Creating new wallet file: {}", path.to_string_lossy());
 
         // New wallet must be made and stored to disk
         let new_wallet: Wallet = Wallet::new_random_wallet(name, version);
@@ -166,28 +156,27 @@ fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8
     wallet
 }
 
-/// Create and return the `databases` struct in the state.
-fn initialize_databases(root_path: &Path, network: Network) -> Databases {
-    /// Create a database with key type `T`, name `db_name` in directory `path/db_name/`
-    /// Returns this database.
-    fn initialize_database<T: db_key::Key>(path: &PathBuf, db_name: &str) -> Database<T> {
-        let mut path = path.to_owned();
-        path.push(db_name);
-        let mut options = leveldb::options::Options::new();
-        options.create_if_missing = true;
-        match Database::open(path.as_path(), options) {
-            Ok(db) => db,
-            Err(e) => {
-                panic!("failed to open {} database: {:?}", db_name, e)
-            }
+/// Create a database with key type `T`, name `db_name` in directory `path/db_name/`
+/// Returns this database.
+fn initialize_database<T: db_key::Key>(path: &PathBuf, db_name: &str) -> Database<T> {
+    let mut path = path.to_owned();
+    path.push(db_name);
+    let mut options = leveldb::options::Options::new();
+    options.create_if_missing = true;
+    match Database::open(path.as_path(), options) {
+        Ok(db) => db,
+        Err(e) => {
+            panic!("failed to open {} database: {:?}", db_name, e)
         }
     }
+}
 
+/// Create databases if they don't already exists. Also return the databases used by the client.
+fn initialize_databases(root_path: &Path) -> (BlockDatabases, PeerDatabases) {
     let mut path = root_path.to_owned();
-    path.push(network.to_string());
     path.push(DATABASE_DIRECTORY_ROOT_NAME);
 
-    // Create directory for database if it does not exist
+    // Create root directory for all databases if it does not exist
     std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
         panic!(
             "Failed to create database directory in {}",
@@ -204,19 +193,21 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
     let banned_peers: Database<KeyableIpAddress> =
         initialize_database::<KeyableIpAddress>(&path, BANNED_IPS_DB_NAME);
 
-    Databases {
-        block_hash_to_block,
-        block_height_to_hash,
-        latest_block_header: latest_block,
-        banned_peers,
-    }
+    (
+        BlockDatabases {
+            block_hash_to_block,
+            block_height_to_hash,
+            latest_block_header: latest_block,
+        },
+        PeerDatabases { banned_peers },
+    )
 }
 
 /// Return the tip of the blockchain, the most canonical block. If no block is stored in the database,
 /// the use the genesis block.
-async fn get_latest_block(databases: Arc<tokio::sync::Mutex<Databases>>) -> Result<Block> {
+async fn get_latest_block(databases: Arc<tokio::sync::Mutex<BlockDatabases>>) -> Result<Block> {
     let dbs = databases.lock().await;
-    let lookup_res_info: Option<Block> = Databases::get_latest_block(dbs)?;
+    let lookup_res_info: Option<Block> = BlockDatabases::get_latest_block(dbs)?;
 
     match lookup_res_info {
         None => {
@@ -235,27 +226,35 @@ async fn get_latest_block(databases: Arc<tokio::sync::Mutex<Databases>>) -> Resu
 
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    let path_buf = get_data_directory()?;
+    let path_buf = get_data_directory(cli_args.network)?;
+
+    // The root path is where both the wallet and all databases are stored
     let root_path = path_buf.as_path();
+
+    // Create root directory for databases and wallet if it does not already exist
+    std::fs::create_dir_all(root_path).unwrap_or_else(|_| {
+        panic!(
+            "Failed to create data directory in {}",
+            root_path.to_string_lossy()
+        )
+    });
 
     // Get wallet object, create one if none exists
     debug!("Data root path is {:?}", root_path);
-    let wallet: Wallet = initialize_wallet(
-        root_path,
-        cli_args.network,
-        STANDARD_WALLET_NAME,
-        STANDARD_WALLET_VERSION,
-    );
+    let wallet: Wallet =
+        initialize_wallet(root_path, STANDARD_WALLET_NAME, STANDARD_WALLET_VERSION);
 
-    // Connect to database
-    let databases: Arc<tokio::sync::Mutex<Databases>> = Arc::new(tokio::sync::Mutex::new(
-        initialize_databases(root_path, cli_args.network),
-    ));
+    // Connect to or create databases for block state, and for peer state
+    let (block_databases, peer_databases) = initialize_databases(root_path);
+    let block_databases: Arc<tokio::sync::Mutex<BlockDatabases>> =
+        Arc::new(tokio::sync::Mutex::new(block_databases));
+    let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
+        Arc::new(tokio::sync::Mutex::new(peer_databases));
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
-    let latest_block = get_latest_block(Arc::clone(&databases)).await?;
+    let latest_block = get_latest_block(Arc::clone(&block_databases)).await?;
 
-    // Bind socket to port on this machine
+    // Bind socket to port on this machine, to handle incoming connections from peers
     let listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
         .await
         .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
@@ -280,20 +279,18 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         version: VERSION.to_string(),
     };
 
-    // Connect to peers
+    // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let latest_block_header = Arc::new(std::sync::Mutex::new(latest_block.header.clone()));
     let syncing = Arc::new(std::sync::RwLock::new(false));
+    let state = State {
+        peer_map: Arc::clone(&peer_map),
+        block_databases: Arc::clone(&block_databases),
+        latest_block_header: Arc::clone(&latest_block_header),
+        syncing: Arc::clone(&syncing),
+        peer_databases: Arc::clone(&peer_databases),
+    };
     for peer in cli_args.peers.clone() {
-        let peer_map_thread = Arc::clone(&peer_map);
-        let databases_thread = Arc::clone(&databases);
-        let block_head_header = Arc::clone(&latest_block_header);
-        let syncing_thread = Arc::clone(&syncing);
-        let state = State {
-            peer_map: peer_map_thread,
-            databases: databases_thread,
-            latest_block_header: block_head_header,
-            syncing: syncing_thread,
-        };
+        let peer_state_var = state.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
         let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> =
@@ -302,7 +299,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         tokio::spawn(async move {
             call_peer_wrapper(
                 peer,
-                state,
+                peer_state_var.clone(),
                 main_to_peer_broadcast_rx_clone,
                 peer_thread_to_main_tx_clone,
                 &own_handshake_data_clone,
@@ -334,16 +331,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     )
     .await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
-    let peer_map_thread = Arc::clone(&peer_map);
-    let databases_thread = Arc::clone(&databases);
-    let latest_block_header_thread = Arc::clone(&latest_block_header);
-    let syncing_thread = Arc::clone(&syncing);
-    let state = State {
-        peer_map: peer_map_thread,
-        databases: databases_thread,
-        latest_block_header: latest_block_header_thread,
-        syncing: syncing_thread,
-    };
     let rpc_listener_state: State = state.clone();
     tokio::spawn(async move {
         rpc_listener
