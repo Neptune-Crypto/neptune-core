@@ -5,11 +5,11 @@ use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::Block;
 use super::blockchain::digest::keyable_digest::KeyableDigest;
 use super::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
-use super::database::{BlockDatabases, DatabaseUnit, PeerDatabases};
-use super::peer;
+use super::database::{BlockDatabases, DatabaseUnit, KeyableIpAddress, PeerDatabases};
+use super::peer::{self, PeerStanding};
 use anyhow::Result;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 /// State handles all state of the client that is shared across threads.
@@ -21,7 +21,7 @@ pub struct State {
     // "If the value behind the mutex is just data, it's usually appropriate to use a blocking mutex
     // such as the one in the standard library or (...)"
     pub latest_block_header: Arc<std::sync::Mutex<BlockHeader>>,
-    pub peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, peer::Peer>>>,
+    pub peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, peer::PeerInfo>>>,
 
     // Since this is a database, we use the tokio Mutex here.
     pub block_databases: Arc<tokio::sync::Mutex<BlockDatabases>>,
@@ -132,5 +132,15 @@ impl State {
         )?;
 
         Ok(())
+    }
+
+    pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
+        let peer_databases = self.peer_databases.lock().await;
+        let peer_info_bytes = peer_databases
+            .banned_peers
+            .get::<KeyableIpAddress>(ReadOptions::new(), ip.into())
+            .expect("Failed to read from peer info db");
+        peer_info_bytes
+            .map(|bytes| bincode::deserialize(&bytes).expect("Failed to deserialize peer info"))
     }
 }

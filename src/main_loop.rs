@@ -1,9 +1,14 @@
 use crate::config_models::cli_args;
-use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer, PeerState};
+use crate::models::database::KeyableIpAddress;
+use crate::models::peer::{
+    ConnectionRefusedReason, ConnectionStatus, PeerInfo, PeerStanding, PeerState,
+};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
+use leveldb::kv::KV;
+use leveldb::options::ReadOptions;
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
@@ -103,9 +108,24 @@ where
     };
 
     // Add peer to peer map if not already there
-    let new_peer = Peer {
+    let standing: PeerStanding =
+        match state
+            .peer_databases
+            .lock()
+            .await
+            .banned_peers
+            .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into())
+        {
+            Ok(res) => match res {
+                None => PeerStanding::default(),
+                Some(standing_bytes) => bincode::deserialize(&standing_bytes)
+                    .expect("Failed to deserialize peer standing"),
+            },
+            Err(_) => panic!("Failed to read from peer standing database"),
+        };
+    let new_peer = PeerInfo {
         address: peer_address,
-        banscore: 0,
+        standing,
         inbound: true,
         instance_id: peer_handshake_data.instance_id,
         last_seen: SystemTime::now(),

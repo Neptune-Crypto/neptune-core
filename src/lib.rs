@@ -20,12 +20,14 @@ use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use futures::StreamExt;
 use leveldb::database::Database;
+use leveldb::kv::KV;
+use leveldb::options::ReadOptions;
 use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::blockchain::wallet::Wallet;
 use models::database::{BlockDatabases, DatabaseUnit, KeyableIpAddress, PeerDatabases};
-use models::peer::Peer;
+use models::peer::PeerInfo;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
@@ -46,7 +48,7 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
-use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerState};
+use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerStanding, PeerState};
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -460,13 +462,30 @@ where
         }
     }
 
-    // Add peer to peer map if not already there
-    let new_peer = Peer {
+    // Check if peer standing exists in database, return default if it does not.
+    let standing: PeerStanding =
+        match state
+            .peer_databases
+            .lock()
+            .await
+            .banned_peers
+            .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into())
+        {
+            Ok(res) => match res {
+                None => PeerStanding::default(),
+                Some(standing_bytes) => bincode::deserialize(&standing_bytes)
+                    .expect("Failed to deserialize peer standing"),
+            },
+            Err(_) => panic!("Failed to read from peer standing database"),
+        };
+
+    // Add peer to peer map
+    let new_peer = PeerInfo {
         address: peer_address,
-        banscore: 0,
         inbound: false,
         instance_id: peer_handshake_data.instance_id,
         last_seen: SystemTime::now(),
+        standing,
         version: peer_handshake_data.version,
     };
     state

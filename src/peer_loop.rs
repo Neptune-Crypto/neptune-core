@@ -4,37 +4,40 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
-use crate::models::peer::{PeerMessage, PeerState};
+use crate::models::database::KeyableIpAddress;
+use crate::models::peer::{PeerInfo, PeerMessage, PeerSanctionReason, PeerState};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
 use leveldb::kv::KV;
-use leveldb::options::ReadOptions;
+use leveldb::options::{ReadOptions, WriteOptions};
 use std::convert::TryInto;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
-const PEER_TOLERANCE: u8 = 50;
-const INVALID_BLOCK_SEVERITY: u8 = 10;
-const DIFFERENT_GENESIS_SEVERITY: u8 = u8::MAX;
+// TODO: Move peer tolerance to a parameter in CLI arguments
+const PEER_TOLERANCE: u16 = 50;
 
-pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
-    // (state: State, peer_address: &SocketAddr, severity: u8) => {
+pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReason) -> Result<()> {
     let mut peers = state
         .peer_map
         .lock()
         .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+    let new_standing: &mut u16 = &mut 0;
     peers
         .entry(*peer_address)
-        .and_modify(|p| p.banscore += severity);
+        .and_modify(|p| *new_standing = p.standing.sanction(reason));
 
-    if peers[peer_address].banscore > PEER_TOLERANCE {
+    if *new_standing > PEER_TOLERANCE {
         warn!("Banning peer");
+        bail!("Banning peer");
     }
+
+    Ok(())
 }
 
 /// Function for handling the receiving of a new block from a peer
@@ -87,7 +90,7 @@ where
 
     // We got all the way back to genesis, but disagree about genesis. Ban peer.
     if parent_block.is_none() && parent_height == BlockHeight::genesis() {
-        punish(state, peer_address, DIFFERENT_GENESIS_SEVERITY);
+        punish(state, peer_address, PeerSanctionReason::DifferentGenesis)?;
         return Ok(());
     }
 
@@ -117,7 +120,11 @@ where
                 "Received invalid block of height {} from peer with IP {}",
                 new_block.header.height, peer_address
             );
-            punish(state, peer_address, INVALID_BLOCK_SEVERITY);
+            punish(
+                state,
+                peer_address,
+                PeerSanctionReason::InvalidBlock((new_block.header.height, new_block.hash)),
+            )?;
             return Ok(());
         } else {
             info!("Block with height {} is valid", new_block.header.height);
@@ -375,6 +382,7 @@ where
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
     <S as TryStream>::Error: std::error::Error,
 {
+    let peer_info_writeback: PeerInfo;
     loop {
         select! {
             // Handle peer messages
@@ -384,18 +392,27 @@ where
                         match peer_message {
                             None => {
                                 info!("Peer closed connection.");
-                                state.peer_map
+                                peer_info_writeback = state.peer_map
                                     .lock()
                                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
                                     .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                               peer_address));
+
+
                                 break;
                             }
                             Some(peer_msg) => {
-                                let close_connection: bool = handle_peer_message(peer_msg, &state, peer_address, &mut peer, peer_state_info, &to_main_tx).await?;
+                                let close_connection: bool = match handle_peer_message(peer_msg, &state, peer_address, &mut peer, peer_state_info, &to_main_tx).await {
+                                    Ok(close) => close,
+                                    Err(err) => {
+                                        error!("{}. Closing connection.", err);
+                                        true
+                                    }
+                                };
+
                                 if close_connection {
-                                    state.peer_map
+                                    peer_info_writeback = state.peer_map
                                     .lock()
                                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
@@ -407,13 +424,15 @@ where
                         }
                     }
                     Err(err) => {
-                        state.peer_map
+                        peer_info_writeback = state.peer_map
                             .lock()
                             .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .remove(peer_address)
                             .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                       peer_address));
-                        bail!("Error when receiving from peer: {}. Closing connection.", err);
+                        error!("Error when receiving from peer: {}. Closing connection.", err);
+
+                        break;
                     }
                 }
             }
@@ -427,6 +446,20 @@ where
             }
         }
     }
+
+    // Storing IP addresses is, according to this answer, not a violation of GDPR:
+    // https://law.stackexchange.com/a/28609/45846
+    // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
+    state
+        .peer_databases
+        .lock()
+        .await
+        .banned_peers
+        .put::<KeyableIpAddress>(
+            WriteOptions::new(),
+            peer_address.ip().into(),
+            &bincode::serialize(&peer_info_writeback).expect("Failed to serialize peer info"),
+        )?;
 
     Ok(())
 }

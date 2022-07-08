@@ -11,6 +11,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::peer::ConnectionRefusedReason;
+use crate::models::peer::PeerStanding;
 use crate::models::shared::LatestBlockInfo;
 use bytes::{Bytes, BytesMut};
 use futures::sink;
@@ -40,7 +41,7 @@ use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 const UNIT_TEST_DB_DIRECTORY: &str = "neptune_unit_test_databases";
 
-fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> {
+fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
     Arc::new(std::sync::Mutex::new(HashMap::new()))
 }
 
@@ -80,13 +81,13 @@ fn get_dummy_address() -> SocketAddr {
     std::net::SocketAddr::from_str("127.0.0.1:8080").unwrap()
 }
 
-fn get_dummy_peer(address: SocketAddr) -> Peer {
-    Peer {
+fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
+    PeerInfo {
         address,
-        banscore: 0,
         inbound: false,
         instance_id: rand::random(),
         last_seen: SystemTime::now(),
+        standing: PeerStanding::default(),
         version: get_dummy_version(),
     }
 }
@@ -147,14 +148,14 @@ fn get_genesis_setup(
     mpsc::Sender<PeerThreadToMain>,
     mpsc::Receiver<PeerThreadToMain>,
     State,
-    Arc<std::sync::Mutex<HashMap<SocketAddr, Peer, RandomState>>>,
+    Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo, RandomState>>>,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =
         broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> = get_peer_map();
+    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
@@ -632,6 +633,9 @@ async fn bad_block_test() -> Result<()> {
             1_000_000, 0, 0, 0, 0,
         ])),
     );
+
+    // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
+    // tolerance that is set in the client. For this reason, we include a "Bye" here.
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_without_valid_pow.into()))),
         Action::Read(PeerMessage::Bye),
@@ -646,7 +650,7 @@ async fn bad_block_test() -> Result<()> {
         mock,
         from_main_rx_clone,
         to_main_tx,
-        state,
+        state.clone(),
         &peer_address,
         &mut peer_state,
     )
@@ -667,6 +671,21 @@ async fn bad_block_test() -> Result<()> {
     if !peer_state.fork_reconciliation_blocks.is_empty() {
         bail!("for reconciliation block list must be empty");
     }
+
+    // Verify that peer standing was stored in database
+    let standing_bytes = state
+        .peer_databases
+        .lock()
+        .await
+        .banned_peers
+        .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into());
+    assert!(standing_bytes.is_ok());
+    let peer_info: PeerInfo = bincode::deserialize(&standing_bytes.unwrap().unwrap())?;
+    println!("New standing: {}", peer_info.standing.standing);
+    assert!(
+        peer_info.standing.standing > 0,
+        "Peer must be sanctioned for sending a bad block"
+    );
 
     Ok(())
 }
@@ -731,7 +750,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 #[traced_test]
 #[tokio::test]
 async fn test_peer_loop_receival_of_first_block() -> Result<()> {
-    // Scenario: client only knows genesis block. The receives block 1.
+    // Scenario: client only knows genesis block. Then receives block 1.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
