@@ -17,6 +17,7 @@ use std::{
 use twenty_first::amount::u32s::U32s;
 
 const INVALID_BLOCK_SEVERITY: u16 = 10;
+const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
 const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
