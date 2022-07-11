@@ -30,7 +30,7 @@ pub struct PeerInfo {
     pub version: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum PeerSanctionReason {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
@@ -38,12 +38,12 @@ pub enum PeerSanctionReason {
 }
 
 impl PeerSanctionReason {
-    pub fn to_severity(&self) -> u16 {
+    pub fn to_severity(self) -> u16 {
         match self {
             PeerSanctionReason::InvalidBlock(_) => INVALID_BLOCK_SEVERITY,
-            PeerSanctionReason::DifferentGenesis => u16::MAX,
+            PeerSanctionReason::DifferentGenesis => DIFFERENT_GENESIS_SEVERITY,
             PeerSanctionReason::ForkResolutionError((_height, count, _digest)) => {
-                FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK * *count
+                FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK * count
             }
         }
     }
@@ -51,7 +51,7 @@ impl PeerSanctionReason {
 
 /// This is object that gets stored in the database to record how well a peer
 /// at a certain IP behaves. A lower number is better.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct PeerStanding {
     pub standing: u16,
     pub latest_sanction: Option<PeerSanctionReason>,

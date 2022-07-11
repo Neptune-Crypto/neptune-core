@@ -134,10 +134,25 @@ impl State {
         Ok(())
     }
 
+    // Storing IP addresses is, according to this answer, not a violation of GDPR:
+    // https://law.stackexchange.com/a/28609/45846
+    // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
+    pub async fn write_peer_standing_to_database(&self, ip: IpAddr, standing: PeerStanding) {
+        let peer_databases = self.peer_databases.lock().await;
+        peer_databases
+            .peer_standings
+            .put::<KeyableIpAddress>(
+                WriteOptions::new(),
+                ip.into(),
+                &bincode::serialize(&standing).expect("Failed to serialize peer standing"),
+            )
+            .expect("Failed to write to database");
+    }
+
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
         let peer_databases = self.peer_databases.lock().await;
         let peer_info_bytes = peer_databases
-            .banned_peers
+            .peer_standings
             .get::<KeyableIpAddress>(ReadOptions::new(), ip.into())
             .expect("Failed to read from peer info db");
         peer_info_bytes

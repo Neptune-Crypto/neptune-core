@@ -113,7 +113,7 @@ where
             .peer_databases
             .lock()
             .await
-            .banned_peers
+            .peer_standings
             .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into())
         {
             Ok(res) => match res {

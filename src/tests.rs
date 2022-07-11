@@ -11,6 +11,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::peer::ConnectionRefusedReason;
+use crate::models::peer::PeerSanctionReason;
 use crate::models::peer::PeerStanding;
 use crate::models::shared::LatestBlockInfo;
 use bytes::{Bytes, BytesMut};
@@ -45,15 +46,16 @@ fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
     Arc::new(std::sync::Mutex::new(HashMap::new()))
 }
 
-// Create databases for unit tests on disk, and return objects for them.
-// For now, we use databases on disk, but it would be nicer to use
-// something that is in-memory only.
+/// Return empty database objects
 fn databases(
     network: Network,
 ) -> Result<(
     Arc<tokio::sync::Mutex<BlockDatabases>>,
     Arc<tokio::sync::Mutex<PeerDatabases>>,
 )> {
+    // Create databases for unit tests on disk, and return objects for them.
+    // For now, we use databases on disk, but it would be nicer to use
+    // something that is in-memory only.
     let temp_dir = env::temp_dir();
     let mut path = temp_dir.to_owned();
     path.push(UNIT_TEST_DB_DIRECTORY);
@@ -617,6 +619,49 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 
 #[traced_test]
 #[tokio::test]
+async fn different_genesis_test() -> Result<()> {
+    // In this scenario a peer provides another genesis block than what has been
+    // hardcoded. This should lead to the closing of the connection to this peer
+    // and a ban.
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+
+    // Although the database is empty, `get_latest_block` still returns the genesis block,
+    // since that block is hardcoded.
+    let mut different_genesis_block: Block = state.get_latest_block().await;
+    different_genesis_block.header.nonce[2].increment();
+    different_genesis_block.hash = different_genesis_block.header.hash();
+    let block_1_with_different_genesis = make_mock_block(different_genesis_block, None);
+    let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
+        block_1_with_different_genesis.into(),
+    )))]);
+
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state.clone(),
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
+
+    let peer_standing = state
+        .get_peer_standing_from_database(peer_address.ip())
+        .await;
+    assert_eq!(u16::MAX, peer_standing.unwrap().standing);
+    assert_eq!(
+        PeerSanctionReason::DifferentGenesis,
+        peer_standing.unwrap().latest_sanction.unwrap()
+    );
+
+    Ok(())
+}
+
+#[traced_test]
+#[tokio::test]
 async fn bad_block_test() -> Result<()> {
     // In this scenario, a block without a valid PoW is received. This block should be rejected
     // by the peer loop and a notification should never reach the main loop.
@@ -677,13 +722,12 @@ async fn bad_block_test() -> Result<()> {
         .peer_databases
         .lock()
         .await
-        .banned_peers
+        .peer_standings
         .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into());
     assert!(standing_bytes.is_ok());
-    let peer_info: PeerInfo = bincode::deserialize(&standing_bytes.unwrap().unwrap())?;
-    println!("New standing: {}", peer_info.standing.standing);
+    let standing: PeerStanding = bincode::deserialize(&standing_bytes.unwrap().unwrap())?;
     assert!(
-        peer_info.standing.standing > 0,
+        standing.standing > 0,
         "Peer must be sanctioned for sending a bad block"
     );
 

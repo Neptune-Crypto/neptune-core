@@ -15,7 +15,7 @@ pub struct BlockDatabases {
 }
 
 pub struct PeerDatabases {
-    pub banned_peers: Database<KeyableIpAddress>,
+    pub peer_standings: Database<KeyableIpAddress>,
 }
 
 // We have to implement `Debug` for `Databases` as the `State` struct

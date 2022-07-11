@@ -201,7 +201,9 @@ fn initialize_databases(root_path: &Path) -> (BlockDatabases, PeerDatabases) {
             block_height_to_hash,
             latest_block_header: latest_block,
         },
-        PeerDatabases { banned_peers },
+        PeerDatabases {
+            peer_standings: banned_peers,
+        },
     )
 }
 
@@ -468,7 +470,7 @@ where
             .peer_databases
             .lock()
             .await
-            .banned_peers
+            .peer_standings
             .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into())
         {
             Ok(res) => match res {

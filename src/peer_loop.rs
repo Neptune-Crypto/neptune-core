@@ -4,14 +4,13 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
-use crate::models::database::KeyableIpAddress;
 use crate::models::peer::{PeerInfo, PeerMessage, PeerSanctionReason, PeerState};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
 use leveldb::kv::KV;
-use leveldb::options::{ReadOptions, WriteOptions};
+use leveldb::options::ReadOptions;
 use std::convert::TryInto;
 use std::marker::Unpin;
 use std::net::SocketAddr;
@@ -158,6 +157,7 @@ where
 }
 
 /// Handle peer messages and returns Ok(true) if connection should be closed.
+/// Connection should also be closed if an error is returned.
 /// Otherwise returns OK(false).
 async fn handle_peer_message<S>(
     msg: PeerMessage,
@@ -418,6 +418,7 @@ where
                                     .remove(peer_address)
                                     .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                               peer_address));
+
                                     break;
                                 }
                             }
@@ -447,19 +448,9 @@ where
         }
     }
 
-    // Storing IP addresses is, according to this answer, not a violation of GDPR:
-    // https://law.stackexchange.com/a/28609/45846
-    // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
     state
-        .peer_databases
-        .lock()
-        .await
-        .banned_peers
-        .put::<KeyableIpAddress>(
-            WriteOptions::new(),
-            peer_address.ip().into(),
-            &bincode::serialize(&peer_info_writeback).expect("Failed to serialize peer info"),
-        )?;
+        .write_peer_standing_to_database(peer_address.ip(), peer_info_writeback.standing)
+        .await;
 
     Ok(())
 }
