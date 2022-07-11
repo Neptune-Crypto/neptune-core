@@ -34,7 +34,7 @@ use std::fs;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
@@ -263,7 +263,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         .await
         .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
 
-    let peer_map = Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let peer_map: Arc<Mutex<HashMap<SocketAddr, PeerInfo>>> =
+        Arc::new(std::sync::Mutex::new(HashMap::new()));
 
     // Construct the broadcast channel to communicate from the main thread to peer threads
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =

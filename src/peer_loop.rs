@@ -229,7 +229,7 @@ where
                 .await?;
             } else {
                 info!(
-                    "Got non canonical block from peer, height: {}, PoW family: {:?}",
+                    "Got non-canonical block from peer, height: {}, PoW family: {:?}",
                     new_block_height, block.header.proof_of_work_family,
                 );
             }
