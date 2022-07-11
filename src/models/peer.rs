@@ -69,7 +69,12 @@ impl PeerStanding {
 
     /// Sanction peer and return latest standing score
     pub fn sanction(&mut self, reason: PeerSanctionReason) -> u16 {
-        self.standing += reason.to_severity();
+        let (mut new_standing, overflow) = self.standing.overflowing_add(reason.to_severity());
+        if overflow {
+            new_standing = u16::MAX;
+        }
+
+        self.standing = new_standing;
         self.latest_sanction = Some(reason);
         self.timestamp_of_latest_sanction = Some(
             SystemTime::now()
@@ -113,6 +118,7 @@ impl From<Block> for PeerBlockNotification {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ConnectionRefusedReason {
     AlreadyConnected,
+    BadStanding,
     MaxPeerNumberExceeded,
     SelfConnect,
 }

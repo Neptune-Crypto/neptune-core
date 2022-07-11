@@ -19,9 +19,10 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
 // TODO: Move peer tolerance to a parameter in CLI arguments
-const PEER_TOLERANCE: u16 = 50;
+pub const PEER_TOLERANCE: u16 = 50;
 
 pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReason) -> Result<()> {
+    warn!("Sanctioning peer {} for {:?}", peer_address.ip(), reason);
     let mut peers = state
         .peer_map
         .lock()
@@ -406,7 +407,7 @@ where
                                 let close_connection: bool = match handle_peer_message(peer_msg, &state, peer_address, &mut peer, peer_state_info, &to_main_tx).await {
                                     Ok(close) => close,
                                     Err(err) => {
-                                        error!("{}. Closing connection.", err);
+                                        warn!("{}. Closing connection.", err);
                                         true
                                     }
                                 };
