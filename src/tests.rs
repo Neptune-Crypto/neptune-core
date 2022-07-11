@@ -11,6 +11,8 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::peer::ConnectionRefusedReason;
+use crate::models::peer::PeerSanctionReason;
+use crate::models::peer::PeerStanding;
 use crate::models::shared::LatestBlockInfo;
 use bytes::{Bytes, BytesMut};
 use futures::sink;
@@ -40,17 +42,24 @@ use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 const UNIT_TEST_DB_DIRECTORY: &str = "neptune_unit_test_databases";
 
-fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> {
+fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
     Arc::new(std::sync::Mutex::new(HashMap::new()))
 }
 
-// Create databases for unit tests on disk, and return objects for them.
-// For now, we use databases on disk, but it would be nicer to use
-// something that is in-memory only.
-fn get_unit_test_database(network: Network) -> Result<Arc<tokio::sync::Mutex<Databases>>> {
+/// Return empty database objects
+fn databases(
+    network: Network,
+) -> Result<(
+    Arc<tokio::sync::Mutex<BlockDatabases>>,
+    Arc<tokio::sync::Mutex<PeerDatabases>>,
+)> {
+    // Create databases for unit tests on disk, and return objects for them.
+    // For now, we use databases on disk, but it would be nicer to use
+    // something that is in-memory only.
     let temp_dir = env::temp_dir();
     let mut path = temp_dir.to_owned();
     path.push(UNIT_TEST_DB_DIRECTORY);
+    path.push(network.to_string());
 
     // Create a randomly named directory to allow the tests to run in parallel.
     // If this is not done, the parallel execution of unit tests will fail as
@@ -62,22 +71,25 @@ fn get_unit_test_database(network: Network) -> Result<Arc<tokio::sync::Mutex<Dat
         .collect();
     path.push(random_directory);
 
-    let db = initialize_databases(path.as_path(), network);
+    let (block_dbs, peer_dbs) = initialize_databases(&path);
 
-    Ok(Arc::new(tokio::sync::Mutex::new(db)))
+    Ok((
+        Arc::new(tokio::sync::Mutex::new(block_dbs)),
+        Arc::new(tokio::sync::Mutex::new(peer_dbs)),
+    ))
 }
 
 fn get_dummy_address() -> SocketAddr {
     std::net::SocketAddr::from_str("127.0.0.1:8080").unwrap()
 }
 
-fn get_dummy_peer(address: SocketAddr) -> Peer {
-    Peer {
+fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
+    PeerInfo {
         address,
-        banscore: 0,
         inbound: false,
         instance_id: rand::random(),
         last_seen: SystemTime::now(),
+        standing: PeerStanding::default(),
         version: get_dummy_version(),
     }
 }
@@ -138,14 +150,14 @@ fn get_genesis_setup(
     mpsc::Sender<PeerThreadToMain>,
     mpsc::Receiver<PeerThreadToMain>,
     State,
-    Arc<std::sync::Mutex<HashMap<SocketAddr, Peer, RandomState>>>,
+    Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo, RandomState>>>,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =
         broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, Peer>>> = get_peer_map();
+    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
@@ -156,12 +168,13 @@ fn get_genesis_setup(
     }
 
     let (_, _, latest_block_header) = get_dummy_latest_block(None);
-    let databases = get_unit_test_database(network)?;
+    let (block_databases, peer_databases) = databases(network)?;
     let state = State {
         peer_map: peer_map.clone(),
-        databases,
+        block_databases,
         latest_block_header,
         syncing: Arc::new(std::sync::RwLock::new(false)),
+        peer_databases,
     };
     Ok((
         peer_broadcast_tx,
@@ -368,6 +381,73 @@ async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
     } else {
         bail!("Expected error from run")
     }
+}
+
+#[traced_test]
+#[tokio::test]
+async fn disallow_ingoing_connections_from_banned_peers_test() -> Result<()> {
+    // In this scenario a peer has been banned, and is attempting to make an ingoing
+    // connection. This should not be possible.
+    let network = Network::Main;
+    let other_handshake = get_dummy_handshake_data(network);
+    let own_handshake = get_dummy_handshake_data(network);
+    let mock = Builder::new()
+        .read(&to_bytes(&PeerMessage::Handshake((
+            MAGIC_STRING_REQUEST.to_vec(),
+            other_handshake,
+        )))?)
+        .write(&to_bytes(&PeerMessage::Handshake((
+            MAGIC_STRING_RESPONSE.to_vec(),
+            own_handshake.clone(),
+        )))?)
+        .write(&to_bytes(&PeerMessage::ConnectionStatus(
+            ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding),
+        ))?)
+        .build();
+
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main, 0)?;
+    let bad_standing: PeerStanding = PeerStanding {
+        standing: u16::MAX,
+        latest_sanction: Some(PeerSanctionReason::InvalidBlock((
+            7u64.into(),
+            Digest::default(),
+        ))),
+        timestamp_of_latest_sanction: Some(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Failed to generate timestamp for peer standing")
+                .as_secs(),
+        ),
+    };
+    let peer_address = get_dummy_address();
+    state
+        .write_peer_standing_to_database(peer_address.ip(), bad_standing)
+        .await;
+
+    if let Err(_) = main_loop::answer_peer(
+        mock,
+        state,
+        peer_address,
+        from_main_rx_clone,
+        to_main_tx,
+        own_handshake,
+        42,
+    )
+    .await
+    {
+        ()
+    } else {
+        bail!("Expected error from run")
+    }
+
+    // Verify that peer map is empty after connection has been refused
+    match peer_map.lock().unwrap().keys().len() {
+        0 => (),
+        _ => bail!("Incorrect number of maps in peer map"),
+    };
+
+    Ok(())
 }
 
 pin_project! {
@@ -606,6 +686,49 @@ async fn test_peer_loop_peer_list() -> Result<()> {
 
 #[traced_test]
 #[tokio::test]
+async fn different_genesis_test() -> Result<()> {
+    // In this scenario a peer provides another genesis block than what has been
+    // hardcoded. This should lead to the closing of the connection to this peer
+    // and a ban.
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+        get_genesis_setup(Network::Main, 1)?;
+    let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+
+    // Although the database is empty, `get_latest_block` still returns the genesis block,
+    // since that block is hardcoded.
+    let mut different_genesis_block: Block = state.get_latest_block().await;
+    different_genesis_block.header.nonce[2].increment();
+    different_genesis_block.hash = different_genesis_block.header.hash();
+    let block_1_with_different_genesis = make_mock_block(different_genesis_block, None);
+    let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
+        block_1_with_different_genesis.into(),
+    )))]);
+
+    let mut peer_state = PeerState::default();
+    peer_loop::peer_loop(
+        mock,
+        from_main_rx_clone,
+        to_main_tx,
+        state.clone(),
+        &peer_address,
+        &mut peer_state,
+    )
+    .await?;
+
+    let peer_standing = state
+        .get_peer_standing_from_database(peer_address.ip())
+        .await;
+    assert_eq!(u16::MAX, peer_standing.unwrap().standing);
+    assert_eq!(
+        PeerSanctionReason::DifferentGenesis,
+        peer_standing.unwrap().latest_sanction.unwrap()
+    );
+
+    Ok(())
+}
+
+#[traced_test]
+#[tokio::test]
 async fn bad_block_test() -> Result<()> {
     // In this scenario, a block without a valid PoW is received. This block should be rejected
     // by the peer loop and a notification should never reach the main loop.
@@ -622,6 +745,9 @@ async fn bad_block_test() -> Result<()> {
             1_000_000, 0, 0, 0, 0,
         ])),
     );
+
+    // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
+    // tolerance that is set in the client. For this reason, we include a "Bye" here.
     let mock = Mock::new(vec![
         Action::Read(PeerMessage::Block(Box::new(block_without_valid_pow.into()))),
         Action::Read(PeerMessage::Bye),
@@ -636,7 +762,7 @@ async fn bad_block_test() -> Result<()> {
         mock,
         from_main_rx_clone,
         to_main_tx,
-        state,
+        state.clone(),
         &peer_address,
         &mut peer_state,
     )
@@ -657,6 +783,20 @@ async fn bad_block_test() -> Result<()> {
     if !peer_state.fork_reconciliation_blocks.is_empty() {
         bail!("for reconciliation block list must be empty");
     }
+
+    // Verify that peer standing was stored in database
+    let standing_bytes = state
+        .peer_databases
+        .lock()
+        .await
+        .peer_standings
+        .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into());
+    assert!(standing_bytes.is_ok());
+    let standing: PeerStanding = bincode::deserialize(&standing_bytes.unwrap().unwrap())?;
+    assert!(
+        standing.standing > 0,
+        "Peer must be sanctioned for sending a bad block"
+    );
 
     Ok(())
 }
@@ -721,7 +861,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 #[traced_test]
 #[tokio::test]
 async fn test_peer_loop_receival_of_first_block() -> Result<()> {
-    // Scenario: client only knows genesis block. The receives block 1.
+    // Scenario: client only knows genesis block. Then receives block 1.
     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
@@ -1096,17 +1236,33 @@ async fn test_get_connection_status() -> Result<()> {
     let own_handshake = get_dummy_handshake_data(network);
     let mut other_handshake = get_dummy_handshake_data(network);
 
-    let mut status = main_loop::get_connection_status(4, &state, &own_handshake, &other_handshake);
+    let mut status = main_loop::get_connection_status(
+        4,
+        &state,
+        &own_handshake,
+        &other_handshake,
+        &peer.address,
+    )
+    .await;
     if status != ConnectionStatus::Accepted {
         bail!("Must return ConnectionStatus::Accepted");
     }
 
-    status = main_loop::get_connection_status(4, &state, &own_handshake, &own_handshake);
+    status =
+        main_loop::get_connection_status(4, &state, &own_handshake, &own_handshake, &peer.address)
+            .await;
     if status != ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
         bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
     }
 
-    status = main_loop::get_connection_status(1, &state, &own_handshake, &other_handshake);
+    status = main_loop::get_connection_status(
+        1,
+        &state,
+        &own_handshake,
+        &other_handshake,
+        &peer.address,
+    )
+    .await;
     if status != ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded) {
         bail!(
             "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
@@ -1115,7 +1271,14 @@ async fn test_get_connection_status() -> Result<()> {
 
     // Attempt to connect to already connected peer
     other_handshake.instance_id = peer_id;
-    status = main_loop::get_connection_status(100, &state, &own_handshake, &other_handshake);
+    status = main_loop::get_connection_status(
+        100,
+        &state,
+        &own_handshake,
+        &other_handshake,
+        &peer.address,
+    )
+    .await;
     if status != ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
         bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))");
     }

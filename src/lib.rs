@@ -20,19 +20,21 @@ use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use futures::StreamExt;
 use leveldb::database::Database;
+use leveldb::kv::KV;
+use leveldb::options::ReadOptions;
 use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
 use models::blockchain::digest::keyable_digest::KeyableDigest;
 use models::blockchain::wallet::Wallet;
-use models::database::{DatabaseUnit, Databases};
-use models::peer::Peer;
+use models::database::{BlockDatabases, DatabaseUnit, KeyableIpAddress, PeerDatabases};
+use models::peer::PeerInfo;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
@@ -46,7 +48,7 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
-use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerState};
+use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerStanding, PeerState};
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -57,19 +59,20 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
 const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
 const LATEST_BLOCK_DB_NAME: &str = "latest";
+const BANNED_IPS_DB_NAME: &str = "banned_ips";
 const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard";
 const STANDARD_WALLET_VERSION: u8 = 0;
 
-fn get_data_directory() -> Result<PathBuf> {
-    let data_home = if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
-        Ok(proj_dirs.data_dir().to_path_buf())
+fn get_data_directory(network: Network) -> Result<PathBuf> {
+    if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
+        let mut path = proj_dirs.data_dir().to_path_buf();
+        path.push(network.to_string());
+        Ok(path)
     } else {
-        bail!("Could not determine data directory");
-    };
-
-    data_home
+        bail!("Could not determine data directory")
+    }
 }
 
 /// Create a wallet file, and set restrictive permissions
@@ -99,18 +102,8 @@ fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) {
 }
 
 /// Read the wallet from disk. Create one if none exists.
-fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8) -> Wallet {
+fn initialize_wallet(root_path: &Path, name: &str, version: u8) -> Wallet {
     let mut path = root_path.to_owned();
-    path.push(network.to_string());
-
-    // Create directory for wallet if it does not exist
-    std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
-        panic!(
-            "Failed to create or open wallet directory in {}",
-            path.to_string_lossy()
-        )
-    });
-
     path.push(WALLET_FILE_NAME);
 
     // Check if file exists
@@ -139,7 +132,7 @@ fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8
             }
         }
     } else {
-        info!("Found wallet file: {}", path.to_string_lossy());
+        info!("Creating new wallet file: {}", path.to_string_lossy());
 
         // New wallet must be made and stored to disk
         let new_wallet: Wallet = Wallet::new_random_wallet(name, version);
@@ -165,12 +158,27 @@ fn initialize_wallet(root_path: &Path, network: Network, name: &str, version: u8
     wallet
 }
 
-fn initialize_databases(root_path: &Path, network: Network) -> Databases {
+/// Create a database with key type `T`, name `db_name` in directory `path/db_name/`
+/// Returns this database.
+fn initialize_database<T: db_key::Key>(path: &PathBuf, db_name: &str) -> Database<T> {
+    let mut path = path.to_owned();
+    path.push(db_name);
+    let mut options = leveldb::options::Options::new();
+    options.create_if_missing = true;
+    match Database::open(path.as_path(), options) {
+        Ok(db) => db,
+        Err(e) => {
+            panic!("failed to open {} database: {:?}", db_name, e)
+        }
+    }
+}
+
+/// Create databases if they don't already exists. Also return the databases used by the client.
+fn initialize_databases(root_path: &Path) -> (BlockDatabases, PeerDatabases) {
     let mut path = root_path.to_owned();
-    path.push(network.to_string());
     path.push(DATABASE_DIRECTORY_ROOT_NAME);
 
-    // Create directory for database if it does not exist
+    // Create root directory for all databases if it does not exist
     std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
         panic!(
             "Failed to create database directory in {}",
@@ -178,61 +186,32 @@ fn initialize_databases(root_path: &Path, network: Network) -> Databases {
         )
     });
 
-    let mut block_height_to_hash_path = path.to_owned();
-    block_height_to_hash_path.push(BLOCK_HEIGHT_TO_HASH_DB_NAME);
-    let mut block_hash_to_block_path = path.to_owned();
-    block_hash_to_block_path.push(BLOCK_HASH_TO_BLOCK_DB_NAME);
-    let mut latest_path = path;
-    latest_path.push(LATEST_BLOCK_DB_NAME);
-
-    let mut hash_options = leveldb::options::Options::new();
-    hash_options.create_if_missing = true;
     let block_hash_to_block: Database<KeyableDigest> =
-        match Database::open(block_hash_to_block_path.as_path(), hash_options) {
-            Ok(db) => db,
-            Err(e) => {
-                panic!(
-                    "failed to open {} database: {:?}",
-                    BLOCK_HASH_TO_BLOCK_DB_NAME, e
-                )
-            }
-        };
-
-    let mut height_options = leveldb::options::Options::new();
-    height_options.create_if_missing = true;
+        initialize_database::<KeyableDigest>(&path, BLOCK_HASH_TO_BLOCK_DB_NAME);
     let block_height_to_hash: Database<BlockHeight> =
-        match Database::open(block_height_to_hash_path.as_path(), height_options) {
-            Ok(db) => db,
-            Err(e) => {
-                panic!(
-                    "failed to open {} database: {:?}",
-                    BLOCK_HASH_TO_BLOCK_DB_NAME, e
-                )
-            }
-        };
-
-    let mut latest_options = leveldb::options::Options::new();
-    latest_options.create_if_missing = true;
+        initialize_database::<BlockHeight>(&path, BLOCK_HEIGHT_TO_HASH_DB_NAME);
     let latest_block: Database<DatabaseUnit> =
-        match Database::open(latest_path.as_path(), latest_options) {
-            Ok(db) => db,
-            Err(e) => {
-                panic!("failed to open {} database: {:?}", LATEST_BLOCK_DB_NAME, e)
-            }
-        };
+        initialize_database::<DatabaseUnit>(&path, LATEST_BLOCK_DB_NAME);
+    let banned_peers: Database<KeyableIpAddress> =
+        initialize_database::<KeyableIpAddress>(&path, BANNED_IPS_DB_NAME);
 
-    Databases {
-        block_hash_to_block,
-        block_height_to_hash,
-        latest_block_header: latest_block,
-    }
+    (
+        BlockDatabases {
+            block_hash_to_block,
+            block_height_to_hash,
+            latest_block_header: latest_block,
+        },
+        PeerDatabases {
+            peer_standings: banned_peers,
+        },
+    )
 }
 
 /// Return the tip of the blockchain, the most canonical block. If no block is stored in the database,
 /// the use the genesis block.
-async fn get_latest_block(databases: Arc<tokio::sync::Mutex<Databases>>) -> Result<Block> {
+async fn get_latest_block(databases: Arc<tokio::sync::Mutex<BlockDatabases>>) -> Result<Block> {
     let dbs = databases.lock().await;
-    let lookup_res_info: Option<Block> = Databases::get_latest_block(dbs)?;
+    let lookup_res_info: Option<Block> = BlockDatabases::get_latest_block(dbs)?;
 
     match lookup_res_info {
         None => {
@@ -251,32 +230,41 @@ async fn get_latest_block(databases: Arc<tokio::sync::Mutex<Databases>>) -> Resu
 
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    let path_buf = get_data_directory()?;
+    let path_buf = get_data_directory(cli_args.network)?;
+
+    // The root path is where both the wallet and all databases are stored
     let root_path = path_buf.as_path();
+
+    // Create root directory for databases and wallet if it does not already exist
+    std::fs::create_dir_all(root_path).unwrap_or_else(|_| {
+        panic!(
+            "Failed to create data directory in {}",
+            root_path.to_string_lossy()
+        )
+    });
 
     // Get wallet object, create one if none exists
     debug!("Data root path is {:?}", root_path);
-    let wallet: Wallet = initialize_wallet(
-        root_path,
-        cli_args.network,
-        STANDARD_WALLET_NAME,
-        STANDARD_WALLET_VERSION,
-    );
+    let wallet: Wallet =
+        initialize_wallet(root_path, STANDARD_WALLET_NAME, STANDARD_WALLET_VERSION);
 
-    // Connect to database
-    let databases: Arc<tokio::sync::Mutex<Databases>> = Arc::new(tokio::sync::Mutex::new(
-        initialize_databases(root_path, cli_args.network),
-    ));
+    // Connect to or create databases for block state, and for peer state
+    let (block_databases, peer_databases) = initialize_databases(root_path);
+    let block_databases: Arc<tokio::sync::Mutex<BlockDatabases>> =
+        Arc::new(tokio::sync::Mutex::new(block_databases));
+    let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
+        Arc::new(tokio::sync::Mutex::new(peer_databases));
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
-    let latest_block = get_latest_block(Arc::clone(&databases)).await?;
+    let latest_block = get_latest_block(Arc::clone(&block_databases)).await?;
 
-    // Bind socket to port on this machine
+    // Bind socket to port on this machine, to handle incoming connections from peers
     let listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
         .await
         .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
 
-    let peer_map = Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let peer_map: Arc<Mutex<HashMap<SocketAddr, PeerInfo>>> =
+        Arc::new(std::sync::Mutex::new(HashMap::new()));
 
     // Construct the broadcast channel to communicate from the main thread to peer threads
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =
@@ -296,20 +284,18 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         version: VERSION.to_string(),
     };
 
-    // Connect to peers
+    // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let latest_block_header = Arc::new(std::sync::Mutex::new(latest_block.header.clone()));
     let syncing = Arc::new(std::sync::RwLock::new(false));
+    let state = State {
+        peer_map: Arc::clone(&peer_map),
+        block_databases: Arc::clone(&block_databases),
+        latest_block_header: Arc::clone(&latest_block_header),
+        syncing: Arc::clone(&syncing),
+        peer_databases: Arc::clone(&peer_databases),
+    };
     for peer in cli_args.peers.clone() {
-        let peer_map_thread = Arc::clone(&peer_map);
-        let databases_thread = Arc::clone(&databases);
-        let block_head_header = Arc::clone(&latest_block_header);
-        let syncing_thread = Arc::clone(&syncing);
-        let state = State {
-            peer_map: peer_map_thread,
-            databases: databases_thread,
-            latest_block_header: block_head_header,
-            syncing: syncing_thread,
-        };
+        let peer_state_var = state.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
         let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> =
@@ -318,7 +304,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         tokio::spawn(async move {
             call_peer_wrapper(
                 peer,
-                state,
+                peer_state_var.clone(),
                 main_to_peer_broadcast_rx_clone,
                 peer_thread_to_main_tx_clone,
                 &own_handshake_data_clone,
@@ -350,16 +336,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     )
     .await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
-    let peer_map_thread = Arc::clone(&peer_map);
-    let databases_thread = Arc::clone(&databases);
-    let latest_block_header_thread = Arc::clone(&latest_block_header);
-    let syncing_thread = Arc::clone(&syncing);
-    let state = State {
-        peer_map: peer_map_thread,
-        databases: databases_thread,
-        latest_block_header: latest_block_header_thread,
-        syncing: syncing_thread,
-    };
     let rpc_listener_state: State = state.clone();
     tokio::spawn(async move {
         rpc_listener
@@ -489,13 +465,30 @@ where
         }
     }
 
-    // Add peer to peer map if not already there
-    let new_peer = Peer {
+    // Check if peer standing exists in database, return default if it does not.
+    let standing: PeerStanding =
+        match state
+            .peer_databases
+            .lock()
+            .await
+            .peer_standings
+            .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into())
+        {
+            Ok(res) => match res {
+                None => PeerStanding::default(),
+                Some(standing_bytes) => bincode::deserialize(&standing_bytes)
+                    .expect("Failed to deserialize peer standing"),
+            },
+            Err(_) => panic!("Failed to read from peer standing database"),
+        };
+
+    // Add peer to peer map
+    let new_peer = PeerInfo {
         address: peer_address,
-        banscore: 0,
         inbound: false,
         instance_id: peer_handshake_data.instance_id,
         last_seen: SystemTime::now(),
+        standing,
         version: peer_handshake_data.version,
     };
     state

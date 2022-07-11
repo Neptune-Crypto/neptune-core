@@ -1,9 +1,13 @@
 use crate::config_models::cli_args;
-use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, Peer, PeerState};
+use crate::models::peer::{
+    ConnectionRefusedReason, ConnectionStatus, PeerInfo, PeerStanding, PeerState,
+};
 use crate::models::state::State;
+use crate::peer_loop::PEER_TOLERANCE;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
+use std::net::SocketAddr;
 use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
@@ -11,22 +15,34 @@ use tokio::select;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::{HandshakeData, PeerMessage};
 
-pub fn get_connection_status(
+pub async fn get_connection_status(
     max_peers: u16,
     state: &State,
     own_handshake: &HandshakeData,
     other_handshake: &HandshakeData,
+    peer_address: &SocketAddr,
 ) -> ConnectionStatus {
+    // Disallow connection if peer is in bad standing
+    let standing = state
+        .get_peer_standing_from_database(peer_address.ip())
+        .await;
+    if standing.is_some() && standing.unwrap().standing > PEER_TOLERANCE {
+        return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+    }
+
     let pm = state.peer_map.lock().unwrap();
+
+    // Disallow connection if max number of peers has been attained
     if (max_peers as usize) <= pm.len() {
         return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
     }
 
+    // Disallow connection to already connected peer
     if pm
         .values()
         .any(|peer| peer.instance_id == other_handshake.instance_id)
@@ -34,11 +50,12 @@ pub fn get_connection_status(
         return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
 
+    // Disallow connection to self
     if own_handshake.instance_id == other_handshake.instance_id {
         return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
     }
 
-    println!("ConnectionStatus::Accepted");
+    info!("ConnectionStatus::Accepted");
     ConnectionStatus::Accepted
 }
 
@@ -86,11 +103,13 @@ where
 
             // Check if connection is allowed
             let connection_status =
-                get_connection_status(max_peers, &state, &own_handshake_data, &hsd);
+                get_connection_status(max_peers, &state, &own_handshake_data, &hsd, &peer_address)
+                    .await;
 
             peer.send(PeerMessage::ConnectionStatus(connection_status))
                 .await?;
             if let ConnectionStatus::Refused(refused_reason) = connection_status {
+                warn!("Connection refused: {:?}", refused_reason);
                 bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
             }
 
@@ -102,10 +121,18 @@ where
         }
     };
 
-    // Add peer to peer map if not already there
-    let new_peer = Peer {
+    // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
+    info!("Connection accepted from {}", peer_address);
+    let standing: PeerStanding = match state
+        .get_peer_standing_from_database(peer_address.ip())
+        .await
+    {
+        Some(stnd) => stnd,
+        None => PeerStanding::default(),
+    };
+    let new_peer = PeerInfo {
         address: peer_address,
-        banscore: 0,
+        standing,
         inbound: true,
         instance_id: peer_handshake_data.instance_id,
         last_seen: SystemTime::now(),
@@ -170,7 +197,7 @@ async fn handle_peer_thread_message(
         PeerThreadToMain::NewBlocks(blocks) => {
             let last_block = blocks.last().unwrap().to_owned();
             {
-                let databases = state.databases.lock().await;
+                let databases = state.block_databases.lock().await;
                 let mut block_header = state
                     .latest_block_header
                     .lock()
@@ -231,10 +258,17 @@ pub async fn main_loop(
         select! {
             // The second item contains the IP and port of the new connection.
             Ok((stream, _)) = listener.accept() => {
+
+                // Handle incoming connections from peer
                 let state = state.clone();
                 let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = main_to_peer_broadcast_tx.subscribe();
                 let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = peer_thread_to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();
+                if cli_args.ban.contains(&peer_address.ip()) {
+                    warn!("Banned peer {} attempted to connect. Disallowing.", peer_address.ip());
+                    return Ok(());
+                }
+
                 let own_handshake_data_clone = own_handshake_data.clone();
                 let max_peers = cli_args.max_peers;
                 tokio::spawn(async move {
@@ -253,10 +287,14 @@ pub async fn main_loop(
                 });
 
             }
+
+            // Handle messages from main thread
             Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
                 handle_peer_thread_message(msg, cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx).await?
             }
+
+            // Handle messages from miner thread
             Some(main_message) = miner_to_main_rx.recv() => {
                 handle_miner_thread_message(main_message, &main_to_peer_broadcast_tx, state.clone()).await?
             }

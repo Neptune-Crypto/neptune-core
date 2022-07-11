@@ -10,17 +10,81 @@ use super::{
 };
 use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, time::SystemTime};
+use std::{
+    net::SocketAddr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use twenty_first::amount::u32s::U32s;
 
+const INVALID_BLOCK_SEVERITY: u16 = 10;
+const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
+const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Peer {
+pub struct PeerInfo {
     pub address: SocketAddr,
-    pub banscore: u8,
     pub instance_id: u128,
     pub inbound: bool,
     pub last_seen: SystemTime,
+    pub standing: PeerStanding,
     pub version: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum PeerSanctionReason {
+    InvalidBlock((BlockHeight, Digest)),
+    DifferentGenesis,
+    ForkResolutionError((BlockHeight, u16, Digest)),
+}
+
+impl PeerSanctionReason {
+    pub fn to_severity(self) -> u16 {
+        match self {
+            PeerSanctionReason::InvalidBlock(_) => INVALID_BLOCK_SEVERITY,
+            PeerSanctionReason::DifferentGenesis => DIFFERENT_GENESIS_SEVERITY,
+            PeerSanctionReason::ForkResolutionError((_height, count, _digest)) => {
+                FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK * count
+            }
+        }
+    }
+}
+
+/// This is object that gets stored in the database to record how well a peer
+/// at a certain IP behaves. A lower number is better.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct PeerStanding {
+    pub standing: u16,
+    pub latest_sanction: Option<PeerSanctionReason>,
+    pub timestamp_of_latest_sanction: Option<u64>,
+}
+
+impl PeerStanding {
+    pub fn default() -> Self {
+        Self {
+            standing: 0,
+            latest_sanction: None,
+            timestamp_of_latest_sanction: None,
+        }
+    }
+
+    /// Sanction peer and return latest standing score
+    pub fn sanction(&mut self, reason: PeerSanctionReason) -> u16 {
+        let (mut new_standing, overflow) = self.standing.overflowing_add(reason.to_severity());
+        if overflow {
+            new_standing = u16::MAX;
+        }
+
+        self.standing = new_standing;
+        self.latest_sanction = Some(reason);
+        self.timestamp_of_latest_sanction = Some(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Failed to generate timestamp for peer standing")
+                .as_secs(),
+        );
+
+        self.standing
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -54,6 +118,7 @@ impl From<Block> for PeerBlockNotification {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum ConnectionRefusedReason {
     AlreadyConnected,
+    BadStanding,
     MaxPeerNumberExceeded,
     SelfConnect,
 }

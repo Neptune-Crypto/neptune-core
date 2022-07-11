@@ -4,7 +4,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
 use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
-use crate::models::peer::{PeerMessage, PeerState};
+use crate::models::peer::{PeerInfo, PeerMessage, PeerSanctionReason, PeerState};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
@@ -16,26 +16,28 @@ use std::marker::Unpin;
 use std::net::SocketAddr;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
-const PEER_TOLERANCE: u8 = 50;
-const INVALID_BLOCK_SEVERITY: u8 = 10;
-const DIFFERENT_GENESIS_SEVERITY: u8 = u8::MAX;
+// TODO: Move peer tolerance to a parameter in CLI arguments
+pub const PEER_TOLERANCE: u16 = 50;
 
-pub fn punish(state: &State, peer_address: &SocketAddr, severity: u8) {
-    // (state: State, peer_address: &SocketAddr, severity: u8) => {
+pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReason) -> Result<()> {
+    warn!("Sanctioning peer {} for {:?}", peer_address.ip(), reason);
     let mut peers = state
         .peer_map
         .lock()
         .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+    let new_standing: &mut u16 = &mut 0;
     peers
         .entry(*peer_address)
-        .and_modify(|p| p.banscore += severity);
+        .and_modify(|p| *new_standing = p.standing.sanction(reason));
 
-    if peers[peer_address].banscore > PEER_TOLERANCE {
+    if *new_standing > PEER_TOLERANCE {
         warn!("Banning peer");
-        todo!();
+        bail!("Banning peer");
     }
+
+    Ok(())
 }
 
 /// Function for handling the receiving of a new block from a peer
@@ -88,7 +90,7 @@ where
 
     // We got all the way back to genesis, but disagree about genesis. Ban peer.
     if parent_block.is_none() && parent_height == BlockHeight::genesis() {
-        punish(state, peer_address, DIFFERENT_GENESIS_SEVERITY);
+        punish(state, peer_address, PeerSanctionReason::DifferentGenesis)?;
         return Ok(());
     }
 
@@ -118,7 +120,11 @@ where
                 "Received invalid block of height {} from peer with IP {}",
                 new_block.header.height, peer_address
             );
-            punish(state, peer_address, INVALID_BLOCK_SEVERITY);
+            punish(
+                state,
+                peer_address,
+                PeerSanctionReason::InvalidBlock((new_block.header.height, new_block.hash)),
+            )?;
             return Ok(());
         } else {
             info!("Block with height {} is valid", new_block.header.height);
@@ -152,6 +158,7 @@ where
 }
 
 /// Handle peer messages and returns Ok(true) if connection should be closed.
+/// Connection should also be closed if an error is returned.
 /// Otherwise returns OK(false).
 async fn handle_peer_message<S>(
     msg: PeerMessage,
@@ -222,7 +229,7 @@ where
                 .await?;
             } else {
                 info!(
-                    "Got non canonical block from peer, height: {}, PoW family: {:?}",
+                    "Got non-canonical block from peer, height: {}, PoW family: {:?}",
                     new_block_height, block.header.proof_of_work_family,
                 );
             }
@@ -271,7 +278,7 @@ where
 
             let block_response;
             {
-                let databases = state.databases.lock().await;
+                let databases = state.block_databases.lock().await;
                 let hash_res = databases
                     .block_height_to_hash
                     .get(ReadOptions::new(), block_height)
@@ -376,6 +383,7 @@ where
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
     <S as TryStream>::Error: std::error::Error,
 {
+    let peer_info_writeback: PeerInfo;
     loop {
         select! {
             // Handle peer messages
@@ -385,36 +393,48 @@ where
                         match peer_message {
                             None => {
                                 info!("Peer closed connection.");
-                                state.peer_map
+                                peer_info_writeback = state.peer_map
                                     .lock()
                                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
                                     .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                               peer_address));
+
+
                                 break;
                             }
                             Some(peer_msg) => {
-                                let close_connection: bool = handle_peer_message(peer_msg, &state, peer_address, &mut peer, peer_state_info, &to_main_tx).await?;
+                                let close_connection: bool = match handle_peer_message(peer_msg, &state, peer_address, &mut peer, peer_state_info, &to_main_tx).await {
+                                    Ok(close) => close,
+                                    Err(err) => {
+                                        warn!("{}. Closing connection.", err);
+                                        true
+                                    }
+                                };
+
                                 if close_connection {
-                                    state.peer_map
+                                    peer_info_writeback = state.peer_map
                                     .lock()
                                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                                     .remove(peer_address)
                                     .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                               peer_address));
+
                                     break;
                                 }
                             }
                         }
                     }
                     Err(err) => {
-                        state.peer_map
+                        peer_info_writeback = state.peer_map
                             .lock()
                             .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                             .remove(peer_address)
                             .unwrap_or_else(|| panic!("Failed to remove {} from peer map. Is peer map mangled?",
                                                       peer_address));
-                        bail!("Error when receiving from peer: {}. Closing connection.", err);
+                        error!("Error when receiving from peer: {}. Closing connection.", err);
+
+                        break;
                     }
                 }
             }
@@ -428,6 +448,10 @@ where
             }
         }
     }
+
+    state
+        .write_peer_standing_to_database(peer_address.ip(), peer_info_writeback.standing)
+        .await;
 
     Ok(())
 }
