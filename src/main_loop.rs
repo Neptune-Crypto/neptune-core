@@ -1,9 +1,7 @@
-use crate::config_models::cli_args;
 use crate::models::peer::{
     ConnectionRefusedReason, ConnectionStatus, PeerInfo, PeerStanding, PeerState,
 };
 use crate::models::state::State;
-use crate::peer_loop::PEER_TOLERANCE;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
@@ -31,7 +29,7 @@ pub async fn get_connection_status(
     let standing = state
         .get_peer_standing_from_database(peer_address.ip())
         .await;
-    if standing.is_some() && standing.unwrap().standing > PEER_TOLERANCE {
+    if standing.is_some() && standing.unwrap().standing > state.cli_args.peer_tolerance {
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
@@ -250,7 +248,6 @@ pub async fn main_loop(
     mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
     own_handshake_data: HandshakeData,
     mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
-    cli_args: cli_args::Args,
     main_to_miner_tx: watch::Sender<MainToMiner>,
 ) -> Result<()> {
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
@@ -264,13 +261,13 @@ pub async fn main_loop(
                 let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = main_to_peer_broadcast_tx.subscribe();
                 let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = peer_thread_to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();
-                if cli_args.ban.contains(&peer_address.ip()) {
+                if state.cli_args.ban.contains(&peer_address.ip()) {
                     warn!("Banned peer {} attempted to connect. Disallowing.", peer_address.ip());
                     return Ok(());
                 }
 
                 let own_handshake_data_clone = own_handshake_data.clone();
-                let max_peers = cli_args.max_peers;
+                let max_peers = state.cli_args.max_peers;
                 tokio::spawn(async move {
                     match answer_peer(
                         stream,
@@ -291,7 +288,7 @@ pub async fn main_loop(
             // Handle messages from main thread
             Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
-                handle_peer_thread_message(msg, cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx).await?
+                handle_peer_thread_message(msg, state.cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx).await?
             }
 
             // Handle messages from miner thread

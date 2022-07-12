@@ -30,6 +30,7 @@ use std::env;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::time::UNIX_EPOCH;
+use structopt::StructOpt;
 use tokio_serde::Serializer;
 use tokio_test::io::Builder;
 use tokio_util::codec::Encoder;
@@ -169,12 +170,14 @@ fn get_genesis_setup(
 
     let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let (block_databases, peer_databases) = databases(network)?;
+    let cli_default_args = Arc::new(cli_args::Args::from_args());
     let state = State {
         peer_map: peer_map.clone(),
         block_databases,
         latest_block_header,
         syncing: Arc::new(std::sync::RwLock::new(false)),
         peer_databases,
+        cli_args: cli_default_args,
     };
     Ok((
         peer_broadcast_tx,
