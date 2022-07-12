@@ -25,6 +25,15 @@ pub async fn get_connection_status(
     other_handshake: &HandshakeData,
     peer_address: &SocketAddr,
 ) -> ConnectionStatus {
+    // Disallow connection if peer is banned via CLI arguments
+    if state.cli_args.ban.contains(&peer_address.ip()) {
+        warn!(
+            "Banned peer {} attempted to connect. Disallowing.",
+            peer_address.ip()
+        );
+        return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
+    }
+
     // Disallow connection if peer is in bad standing
     let standing = state
         .get_peer_standing_from_database(peer_address.ip())
@@ -261,11 +270,6 @@ pub async fn main_loop(
                 let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = main_to_peer_broadcast_tx.subscribe();
                 let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = peer_thread_to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();
-                if state.cli_args.ban.contains(&peer_address.ip()) {
-                    warn!("Banned peer {} attempted to connect. Disallowing.", peer_address.ip());
-                    return Ok(());
-                }
-
                 let own_handshake_data_clone = own_handshake_data.clone();
                 let max_peers = state.cli_args.max_peers;
                 tokio::spawn(async move {
