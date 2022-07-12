@@ -1,13 +1,13 @@
-use leveldb::kv::KV;
-use leveldb::options::{ReadOptions, WriteOptions};
-
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::Block;
 use super::blockchain::digest::keyable_digest::KeyableDigest;
 use super::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use super::database::{BlockDatabases, DatabaseUnit, KeyableIpAddress, PeerDatabases};
 use super::peer::{self, PeerStanding};
+use crate::config_models::cli_args;
 use anyhow::Result;
+use leveldb::kv::KV;
+use leveldb::options::{ReadOptions, WriteOptions};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -29,6 +29,8 @@ pub struct State {
     // Since this is a database, we use the tokio Mutex here.
     pub peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>>,
 
+    pub cli_args: Arc<cli_args::Args>,
+
     // This value is only true if instance is running an archival node
     // that is currently downloading blocks to catch up.
     pub syncing: Arc<std::sync::RwLock<bool>>,
@@ -41,12 +43,14 @@ impl Clone for State {
         let databases = Arc::clone(&self.block_databases);
         let peer_databases = Arc::clone(&self.peer_databases);
         let block_head_header = Arc::clone(&self.latest_block_header);
+        let cli_args = Arc::clone(&self.cli_args);
         Self {
             latest_block_header: block_head_header,
             peer_map,
             block_databases: databases,
             peer_databases,
             syncing,
+            cli_args,
         }
     }
 }

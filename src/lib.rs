@@ -293,8 +293,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         latest_block_header: Arc::clone(&latest_block_header),
         syncing: Arc::clone(&syncing),
         peer_databases: Arc::clone(&peer_databases),
+        cli_args: Arc::new(cli_args),
     };
-    for peer in cli_args.peers.clone() {
+    for peer in state.cli_args.peers.clone() {
         let peer_state_var = state.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
@@ -316,7 +317,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Start handling of mining. So far we can only mine on the `RegTest` network.
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
-    if cli_args.mine && cli_args.network == Network::RegTest {
+    if state.cli_args.mine && state.cli_args.network == Network::RegTest {
         tokio::spawn(async move {
             mine_loop::mock_regtest_mine(
                 main_to_miner_rx,
@@ -331,7 +332,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Start RPC server for CLI request and more
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
-        format!("127.0.0.1:{}", cli_args.rpc_port),
+        format!("127.0.0.1:{}", state.cli_args.rpc_port),
         Json::default,
     )
     .await?;
@@ -368,7 +369,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         peer_thread_to_main_rx,
         own_handshake_data,
         miner_to_main_rx,
-        cli_args,
         main_to_miner_tx,
     )
     .await

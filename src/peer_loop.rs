@@ -18,9 +18,6 @@ use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
-// TODO: Move peer tolerance to a parameter in CLI arguments
-pub const PEER_TOLERANCE: u16 = 50;
-
 pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReason) -> Result<()> {
     warn!("Sanctioning peer {} for {:?}", peer_address.ip(), reason);
     let mut peers = state
@@ -32,7 +29,7 @@ pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReas
         .entry(*peer_address)
         .and_modify(|p| *new_standing = p.standing.sanction(reason));
 
-    if *new_standing > PEER_TOLERANCE {
+    if *new_standing > state.cli_args.peer_tolerance {
         warn!("Banning peer");
         bail!("Banning peer");
     }
