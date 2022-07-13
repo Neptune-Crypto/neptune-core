@@ -557,7 +557,6 @@ where
 
 #[cfg(test)]
 mod ms_proof_tests {
-    use std::marker::PhantomData;
 
     use crate::util_types::{
         blake3_wrapper::{self, Blake3Hash},
@@ -618,7 +617,6 @@ mod ms_proof_tests {
             randomness: randomness,
             auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 0,
-                _hasher: PhantomData,
                 authentication_path: vec![],
             },
             target_chunks: ChunkDictionary::default(),
@@ -628,7 +626,6 @@ mod ms_proof_tests {
             randomness: randomness,
             auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 0,
-                _hasher: PhantomData,
                 authentication_path: vec![],
             },
             target_chunks: ChunkDictionary::default(),
@@ -638,7 +635,6 @@ mod ms_proof_tests {
             randomness: randomness,
             auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 100073,
-                _hasher: PhantomData,
                 authentication_path: vec![],
             },
             target_chunks: ChunkDictionary::default(),
@@ -648,7 +644,6 @@ mod ms_proof_tests {
             randomness: other_randomness,
             auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
                 data_index: 0,
-                _hasher: PhantomData,
                 authentication_path: vec![],
             },
             target_chunks: ChunkDictionary::default(),
