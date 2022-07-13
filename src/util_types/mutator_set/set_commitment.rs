@@ -1,6 +1,6 @@
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use serde_derive::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error, fmt, marker::PhantomData};
+use std::{collections::HashMap, error::Error, fmt};
 
 use super::{
     active_window::ActiveWindow,
@@ -40,7 +40,6 @@ pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
     pub swbf_active: ActiveWindow<H>,
-    _hasher: PhantomData<H>,
 }
 
 /// Helper function. Computes the bloom filter bit indices of the
@@ -102,7 +101,6 @@ where
             aocl: M::new(vec![]),
             swbf_inactive: M::new(vec![]),
             swbf_active: ActiveWindow::default(),
-            _hasher: PhantomData,
         }
     }
 
