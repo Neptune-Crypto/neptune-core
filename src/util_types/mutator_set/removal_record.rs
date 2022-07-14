@@ -29,7 +29,7 @@ where
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     H: simple_hasher::Hasher,
 {
-    pub fn validate<M>(&self, mutator_set: &SetCommitment<H, M>) -> bool
+    pub fn validate<M>(&self, mutator_set: &mut SetCommitment<H, M>) -> bool
     where
         M: Mmr<H>,
     {

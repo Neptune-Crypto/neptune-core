@@ -96,19 +96,11 @@ where
     M: Mmr<H>,
     H: Hasher,
 {
-    pub fn default() -> Self {
-        Self {
-            aocl: M::new(vec![]),
-            swbf_inactive: M::new(vec![]),
-            swbf_active: ActiveWindow::default(),
-        }
-    }
-
     /// Generates an addition record from an item and explicit random-
     /// ness. The addition record is itself a commitment to the item,
     /// but tailored to adding the item to the mutator set in its
     /// current state.
-    pub fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
+    pub fn commit(&mut self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
         let hasher = H::new();
         let canonical_commitment = hasher.hash_pair(item, randomness);
 
@@ -122,7 +114,7 @@ where
      * Generates a removal record with which to update the set commitment.
      */
     pub fn drop(
-        &self,
+        &mut self,
         item: &H::Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
@@ -161,13 +153,13 @@ where
 
     /// Helper function. Like `add` but also returns the chunk that was added to the inactive SWBF
     /// since this is needed by the archival version of the mutator set.
-    pub fn add_helper(&mut self, addition_record: &AdditionRecord<H>) -> Option<(u128, Chunk)> {
+    pub fn add_helper(&mut self, addition_record: &mut AdditionRecord<H>) -> Option<(u128, Chunk)> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
         // track of the mutator set.
         // verify aocl snapshot
-        if !addition_record.has_matching_aocl(&self.aocl.to_accumulator()) {
+        if !addition_record.has_matching_aocl(&mut self.aocl.to_accumulator()) {
             panic!("Addition record has aocl snapshot that does not match with the AOCL it is being added to.")
         }
 
@@ -263,7 +255,7 @@ where
      * is added to the mutator set.
      */
     pub fn prove(
-        &self,
+        &mut self,
         item: &H::Digest,
         randomness: &H::Digest,
         store_bits: bool,
@@ -297,7 +289,7 @@ where
         }
     }
 
-    pub fn verify(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    pub fn verify(&mut self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         // If data index does not exist in AOCL, return false
         // This also ensures that no "future" bit indices will be
         // returned from `get_indices`, so we don't have to check for

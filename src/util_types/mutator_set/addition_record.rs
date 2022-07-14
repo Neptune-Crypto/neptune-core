@@ -27,12 +27,12 @@ where
         }
     }
 
-    pub fn has_matching_aocl(&self, aocl_accumulator: &MmrAccumulator<H>) -> bool {
+    pub fn has_matching_aocl(&mut self, aocl_accumulator: &mut MmrAccumulator<H>) -> bool {
         self.aocl_snapshot.count_leaves() == aocl_accumulator.count_leaves()
             && self.aocl_snapshot.get_peaks() == aocl_accumulator.get_peaks()
     }
 
-    pub fn hash(&self) -> H::Digest {
+    pub fn hash(&mut self) -> H::Digest {
         let mmr_digest = self.aocl_snapshot.bag_peaks();
         H::new().hash_pair(&self.commitment, &mmr_digest)
     }

@@ -7,11 +7,25 @@ use crate::{
 };
 
 use super::{
-    addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
-    mutator_set_trait::MutatorSet, removal_record::RemovalRecord, set_commitment::SetCommitment,
+    active_window::ActiveWindow, addition_record::AdditionRecord,
+    ms_membership_proof::MsMembershipProof, mutator_set_trait::MutatorSet,
+    removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
 
 pub type MutatorSetAccumulator<H> = SetCommitment<H, MmrAccumulator<H>>;
+
+impl<H: Hasher> MutatorSetAccumulator<H>
+where
+    u128: ToDigest<<H as Hasher>::Digest>,
+{
+    pub fn default() -> Self {
+        Self {
+            aocl: MmrAccumulator::new(vec![]),
+            swbf_inactive: MmrAccumulator::new(vec![]),
+            swbf_active: ActiveWindow::default(),
+        }
+    }
+}
 
 impl<H: Hasher> MutatorSet<H> for MutatorSetAccumulator<H>
 where
@@ -19,12 +33,8 @@ where
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
     H: Hasher,
 {
-    fn default() -> Self {
-        SetCommitment::default()
-    }
-
     fn prove(
-        &self,
+        &mut self,
         item: &H::Digest,
         randomness: &H::Digest,
         store_bits: bool,
@@ -32,19 +42,23 @@ where
         self.prove(item, randomness, store_bits)
     }
 
-    fn verify(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    fn verify(&mut self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.verify(item, membership_proof)
     }
 
-    fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
+    fn commit(&mut self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
         self.commit(item, randomness)
     }
 
-    fn drop(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
+    fn drop(
+        &mut self,
+        item: &H::Digest,
+        membership_proof: &MsMembershipProof<H>,
+    ) -> RemovalRecord<H> {
         self.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &AdditionRecord<H>) {
+    fn add(&mut self, addition_record: &mut AdditionRecord<H>) {
         self.add_helper(addition_record);
     }
 
@@ -52,7 +66,7 @@ where
         self.remove_helper(removal_record);
     }
 
-    fn get_commitment(&self) -> <H as Hasher>::Digest {
+    fn get_commitment(&mut self) -> <H as Hasher>::Digest {
         let aocl_mmr_bagged = self.aocl.bag_peaks();
         let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
         let active_swbf_bagged = self.swbf_active.hash();

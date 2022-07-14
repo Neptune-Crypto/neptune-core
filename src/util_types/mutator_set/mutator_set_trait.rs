@@ -9,33 +9,35 @@ pub trait MutatorSet<H>
 where
     H: Hasher,
 {
-    /// Returns an empty mutator set
-    fn default() -> Self;
-
     /**
      * prove
      * Generates a membership proof that will the valid when the item
      * is added to the mutator set.
      */
     fn prove(
-        &self,
+        &mut self,
         item: &H::Digest,
         randomness: &H::Digest,
         store_bits: bool,
     ) -> MsMembershipProof<H>;
-    fn verify(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool;
+
+    fn verify(&mut self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool;
 
     /// Generates an addition record from an item and explicit random-
     /// ness. The addition record is itself a commitment to the item,
     /// but tailored to adding the item to the mutator set in its
     /// current state.
-    fn commit(&self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H>;
+    fn commit(&mut self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H>;
 
     /**
      * drop
      * Generates a removal record with which to update the set commitment.
      */
-    fn drop(&self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
+    fn drop(
+        &mut self,
+        item: &H::Digest,
+        membership_proof: &MsMembershipProof<H>,
+    ) -> RemovalRecord<H>;
 
     ///   add
     ///   Updates the set-commitment with an addition record. The new
@@ -43,7 +45,7 @@ where
     ///   where S is the set represented by the old
     ///   commitment and c is the commitment to the new item AKA the
     ///   *addition record*.
-    fn add(&mut self, addition_record: &AdditionRecord<H>);
+    fn add(&mut self, addition_record: &mut AdditionRecord<H>);
 
     /// remove
     /// Updates the mutator set so as to remove the item determined by
@@ -52,5 +54,5 @@ where
 
     /// get_commitment
     /// Return a commitment to the entire mutator set
-    fn get_commitment(&self) -> H::Digest;
+    fn get_commitment(&mut self) -> H::Digest;
 }

@@ -3,15 +3,19 @@ use std::{
     error::Error,
 };
 
+use rusty_leveldb::DB;
+
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
+        database_vector::DatabaseVector,
         mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
         simple_hasher::{Hasher, ToDigest},
     },
 };
 
 use super::{
+    active_window::ActiveWindow,
     addition_record::AdditionRecord,
     chunk::Chunk,
     chunk_dictionary::ChunkDictionary,
@@ -38,15 +42,8 @@ where
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
     H: Hasher,
 {
-    fn default() -> Self {
-        Self {
-            set_commitment: SetCommitment::default(),
-            chunks: HashMap::new(),
-        }
-    }
-
     fn prove(
-        &self,
+        &mut self,
         item: &<H as Hasher>::Digest,
         randomness: &<H as Hasher>::Digest,
         store_bits: bool,
@@ -55,7 +52,7 @@ where
     }
 
     fn verify(
-        &self,
+        &mut self,
         item: &<H as Hasher>::Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> bool {
@@ -63,7 +60,7 @@ where
     }
 
     fn commit(
-        &self,
+        &mut self,
         item: &<H as Hasher>::Digest,
         randomness: &<H as Hasher>::Digest,
     ) -> AdditionRecord<H> {
@@ -71,14 +68,14 @@ where
     }
 
     fn drop(
-        &self,
+        &mut self,
         item: &<H as Hasher>::Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
         self.set_commitment.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &AdditionRecord<H>) {
+    fn add(&mut self, addition_record: &mut AdditionRecord<H>) {
         let new_chunk: Option<(u128, Chunk)> = self.set_commitment.add_helper(addition_record);
         match new_chunk {
             None => (),
@@ -95,7 +92,7 @@ where
         }
     }
 
-    fn get_commitment(&self) -> <H as Hasher>::Digest {
+    fn get_commitment(&mut self) -> <H as Hasher>::Digest {
         let aocl_mmr_bagged = self.set_commitment.aocl.bag_peaks();
         let inactive_swbf_bagged = self.set_commitment.swbf_inactive.bag_peaks();
         let active_swbf_bagged = self.set_commitment.swbf_active.hash();
@@ -111,9 +108,30 @@ where
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
     H: Hasher,
 {
+    pub fn new_empty(aocl_mmr_db: DB, swbf_inactive_mmr_db: DB, chunks_db: DB) -> Self {
+        let aocl: ArchivalMmr<H> = ArchivalMmr::new(aocl_mmr_db);
+        let swbf_inactive: ArchivalMmr<H> = ArchivalMmr::new(swbf_inactive_mmr_db);
+        Self {
+            set_commitment: SetCommitment {
+                aocl,
+                swbf_inactive,
+                swbf_active: ActiveWindow::default(),
+            },
+            // chunks: DatabaseVector::new(chunks_db),
+            chunks: HashMap::new(),
+        }
+        // Self { set_commitment: (), chunks: () }
+    }
+    // fn default() -> Self {
+    //     Self {
+    //         set_commitment: SetCommitment::default(),
+    //         chunks: HashMap::new(),
+    //     }
+    // }
+
     /// Returns an authentication path for an element in the append-only commitment list
     pub fn get_aocl_authentication_path(
-        &self,
+        &mut self,
         index: u128,
     ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<H>, Box<dyn Error>> {
         if self.set_commitment.aocl.count_leaves() <= index {
@@ -130,7 +148,7 @@ where
 
     /// Returns an authentication path for a chunk in the sliding window Bloom filter
     pub fn get_chunk_and_auth_path(
-        &self,
+        &mut self,
         chunk_index: u128,
     ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<H>, Chunk), Box<dyn Error>> {
         if self.set_commitment.swbf_inactive.count_leaves() <= chunk_index {
@@ -166,7 +184,7 @@ where
     /// caller is better off using `get_aocl_authentication_path` and `get_chunk_and_auth_path` for the
     /// relevant indices.
     pub fn restore_membership_proof(
-        &self,
+        &mut self,
         item: &H::Digest,
         randomness: &H::Digest,
         index: u128,
