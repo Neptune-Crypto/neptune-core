@@ -1,5 +1,6 @@
 #![deny(clippy::shadow_unrelated)]
 pub mod config_models;
+mod database;
 mod main_loop;
 mod mine_loop;
 mod models;
@@ -9,30 +10,30 @@ pub mod rpc;
 #[cfg(test)]
 mod tests;
 
+use crate::database::leveldb::LevelDB;
 use crate::models::state::State;
 use crate::rpc::RPC;
 use anyhow::{bail, Context, Result};
 use config_models::cli_args;
 use config_models::network::Network;
+use database::rusty::RustyLevelDB;
 use directories::ProjectDirs;
 use futures::future;
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use futures::StreamExt;
-use leveldb::database::Database;
-use leveldb::kv::KV;
-use leveldb::options::ReadOptions;
+use models::blockchain::block::block_header::BlockHeader;
 use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
-use models::blockchain::digest::keyable_digest::KeyableDigest;
+use models::blockchain::digest::Digest;
 use models::blockchain::wallet::Wallet;
-use models::database::{BlockDatabases, DatabaseUnit, KeyableIpAddress, PeerDatabases};
+use models::database::{BlockDatabases, PeerDatabases};
 use models::peer::PeerInfo;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
 use std::marker::Unpin;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -158,23 +159,8 @@ fn initialize_wallet(root_path: &Path, name: &str, version: u8) -> Wallet {
     wallet
 }
 
-/// Create a database with key type `T`, name `db_name` in directory `path/db_name/`
-/// Returns this database.
-fn initialize_database<T: db_key::Key>(path: &PathBuf, db_name: &str) -> Database<T> {
-    let mut path = path.to_owned();
-    path.push(db_name);
-    let mut options = leveldb::options::Options::new();
-    options.create_if_missing = true;
-    match Database::open(path.as_path(), options) {
-        Ok(db) => db,
-        Err(e) => {
-            panic!("failed to open {} database: {:?}", db_name, e)
-        }
-    }
-}
-
 /// Create databases if they don't already exists. Also return the databases used by the client.
-fn initialize_databases(root_path: &Path) -> (BlockDatabases, PeerDatabases) {
+fn initialize_databases(root_path: &Path) -> Result<(BlockDatabases, PeerDatabases)> {
     let mut path = root_path.to_owned();
     path.push(DATABASE_DIRECTORY_ROOT_NAME);
 
@@ -186,16 +172,14 @@ fn initialize_databases(root_path: &Path) -> (BlockDatabases, PeerDatabases) {
         )
     });
 
-    let block_hash_to_block: Database<KeyableDigest> =
-        initialize_database::<KeyableDigest>(&path, BLOCK_HASH_TO_BLOCK_DB_NAME);
-    let block_height_to_hash: Database<BlockHeight> =
-        initialize_database::<BlockHeight>(&path, BLOCK_HEIGHT_TO_HASH_DB_NAME);
-    let latest_block: Database<DatabaseUnit> =
-        initialize_database::<DatabaseUnit>(&path, LATEST_BLOCK_DB_NAME);
-    let banned_peers: Database<KeyableIpAddress> =
-        initialize_database::<KeyableIpAddress>(&path, BANNED_IPS_DB_NAME);
+    let block_hash_to_block =
+        RustyLevelDB::<Digest, Block>::new(&path, BLOCK_HASH_TO_BLOCK_DB_NAME)?;
+    let block_height_to_hash =
+        RustyLevelDB::<BlockHeight, Digest>::new(&path, BLOCK_HEIGHT_TO_HASH_DB_NAME)?;
+    let latest_block = RustyLevelDB::<(), BlockHeader>::new(&path, LATEST_BLOCK_DB_NAME)?;
+    let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
 
-    (
+    Ok((
         BlockDatabases {
             block_hash_to_block,
             block_height_to_hash,
@@ -204,14 +188,14 @@ fn initialize_databases(root_path: &Path) -> (BlockDatabases, PeerDatabases) {
         PeerDatabases {
             peer_standings: banned_peers,
         },
-    )
+    ))
 }
 
 /// Return the tip of the blockchain, the most canonical block. If no block is stored in the database,
 /// the use the genesis block.
 async fn get_latest_block(databases: Arc<tokio::sync::Mutex<BlockDatabases>>) -> Result<Block> {
-    let dbs = databases.lock().await;
-    let lookup_res_info: Option<Block> = BlockDatabases::get_latest_block(dbs)?;
+    let mut dbs = databases.lock().await;
+    let lookup_res_info: Option<Block> = BlockDatabases::get_latest_block(&mut dbs)?;
 
     match lookup_res_info {
         None => {
@@ -249,7 +233,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         initialize_wallet(root_path, STANDARD_WALLET_NAME, STANDARD_WALLET_VERSION);
 
     // Connect to or create databases for block state, and for peer state
-    let (block_databases, peer_databases) = initialize_databases(root_path);
+    let (block_databases, peer_databases) = initialize_databases(root_path)?;
     let block_databases: Arc<tokio::sync::Mutex<BlockDatabases>> =
         Arc::new(tokio::sync::Mutex::new(block_databases));
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
@@ -466,21 +450,13 @@ where
     }
 
     // Check if peer standing exists in database, return default if it does not.
-    let standing: PeerStanding =
-        match state
-            .peer_databases
-            .lock()
-            .await
-            .peer_standings
-            .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into())
-        {
-            Ok(res) => match res {
-                None => PeerStanding::default(),
-                Some(standing_bytes) => bincode::deserialize(&standing_bytes)
-                    .expect("Failed to deserialize peer standing"),
-            },
-            Err(_) => panic!("Failed to read from peer standing database"),
-        };
+    let standing: PeerStanding = state
+        .peer_databases
+        .lock()
+        .await
+        .peer_standings
+        .get(peer_address.ip())
+        .unwrap_or_else(PeerStanding::default);
 
     // Add peer to peer map
     let new_peer = PeerInfo {

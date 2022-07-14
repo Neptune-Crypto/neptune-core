@@ -11,15 +11,14 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "3237ca0b848366ec7621b06e2375b021a49a52bb" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "4d688d7399abe26aaffd80fc8f083efce8e78844" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"
 chrono = "0.4"
-db-key = "0.0.5" # Should match the one used by `leveldb`
 directories = "4"
 futures = "0.3"
-leveldb = "0.8"
+rusty-leveldb = "1.0.2"
 num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = "0.2"
 paw = "1" # Command-line argument parsing

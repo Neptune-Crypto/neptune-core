@@ -66,7 +66,7 @@ impl Block {
     }
 
     pub fn genesis_block() -> Self {
-        let empty_mutator = MutatorSetAccumulator::default();
+        let mut empty_mutator = MutatorSetAccumulator::default();
         let body: BlockBody = BlockBody {
             transactions: vec![],
             next_mutator_set_accumulator: empty_mutator.clone(),
@@ -127,6 +127,9 @@ impl Block {
 
     /// Verify a block. It is assumed that `previous_block` is valid.
     fn devnet_is_valid(&self, previous_block: &Block) -> bool {
+        // The block value doesn't actually change. Some function calls just require
+        // mutable references because that's how the interface was defined for them.
+        let mut block_copy = self.to_owned();
         // What belongs here are the things that would otherwise
         // be verified by the block validity proof.
 
@@ -146,28 +149,28 @@ impl Block {
         //   f) call: `transaction.devnet_is_valid()`
 
         // `previous_block` is parent of new block
-        if previous_block.header.height.next() != self.header.height {
+        if previous_block.header.height.next() != block_copy.header.height {
             warn!("Height does not match previous height");
             return false;
         }
 
-        if previous_block.hash != self.header.prev_block_digest {
+        if previous_block.hash != block_copy.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }
 
         // `previous_block`'s accumuluator must agree with current block's `parent_accumulator`
         if previous_block.body.next_mutator_set_accumulator
-            != self.body.previous_mutator_set_accumulator
+            != block_copy.body.previous_mutator_set_accumulator
         {
             warn!("Value for previous mutator set does not match previous block");
             return false;
         }
 
-        for tx in self.body.transactions.iter() {
+        for tx in block_copy.body.transactions.iter() {
             for input in tx.inputs.iter() {
                 // 1.a) Verify validity of membership proofs
-                if !self.body.previous_mutator_set_accumulator.verify(
+                if !block_copy.body.previous_mutator_set_accumulator.verify(
                     &input.utxo.hash().into(),
                     &input.membership_proof.clone().into(),
                 ) {
@@ -178,12 +181,12 @@ impl Block {
         }
 
         // 1.c) Verify that transactions and mutator_set_update agree
-        if self.count_inputs() != self.body.mutator_set_update.removals.len() {
+        if block_copy.count_inputs() != block_copy.body.mutator_set_update.removals.len() {
             warn!("Bad removal record count");
             return false;
         }
 
-        if self.count_outputs() != self.body.mutator_set_update.additions.len() {
+        if block_copy.count_outputs() != block_copy.body.mutator_set_update.additions.len() {
             warn!("Bad addition record count");
             return false;
         }
@@ -191,9 +194,9 @@ impl Block {
         // Go over all input UTXOs and verify that the removal record is found at the same index
         // in the `mutator_set_update` data structure
         let mut i = 0;
-        for tx in self.body.transactions.iter() {
+        for tx in block_copy.body.transactions.iter() {
             for input in tx.inputs.iter() {
-                if input.removal_record != self.body.mutator_set_update.removals[i] {
+                if input.removal_record != block_copy.body.mutator_set_update.removals[i] {
                     warn!("Invalid removal record found in block");
                     return false;
                 }
@@ -205,16 +208,17 @@ impl Block {
         // in the `mutator_set_update` data structure
         i = 0;
         let hasher = Hash::new();
-        for tx in self.body.transactions.iter() {
+        for tx in block_copy.body.transactions.iter() {
             for (utxo, randomness) in tx.outputs.iter() {
                 let expected_commitment =
                     hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
-                if self.body.mutator_set_update.additions[i].commitment != expected_commitment {
+                if block_copy.body.mutator_set_update.additions[i].commitment != expected_commitment
+                {
                     warn!("Bad commitment found in addition record");
                     return false;
                 }
-                if !self.body.mutator_set_update.additions[i]
-                    .has_matching_aocl(&self.body.previous_mutator_set_accumulator.aocl)
+                if !block_copy.body.mutator_set_update.additions[i]
+                    .has_matching_aocl(&mut block_copy.body.previous_mutator_set_accumulator.aocl)
                 {
                     warn!("Addition record does not have matching AOCL");
                     return false;
@@ -225,8 +229,8 @@ impl Block {
 
         // 1.d) Verify that the two mutator sets, previous and current, are
         // consistent with the transactions.
-        let mut ms = self.body.previous_mutator_set_accumulator.clone();
-        for tx in self.body.transactions.iter() {
+        let mut ms = block_copy.body.previous_mutator_set_accumulator.clone();
+        for tx in block_copy.body.transactions.iter() {
             for input in tx.inputs.iter() {
                 // TODO: This will probably fail with more than one removal record
                 // in the block, since we are not updating the removal records.
@@ -236,16 +240,22 @@ impl Block {
 
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
-        for tx in self.body.transactions.iter() {
+        for tx in block_copy.body.transactions.iter() {
             for (utxo, randomness) in tx.outputs.iter() {
-                let addition_record = ms.commit(&utxo.hash().into(), &randomness.to_owned().into());
-                ms.add(&addition_record);
+                let mut addition_record =
+                    ms.commit(&utxo.hash().into(), &randomness.to_owned().into());
+                ms.add(&mut addition_record);
             }
         }
 
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.
-        if ms.get_commitment() != self.body.next_mutator_set_accumulator.get_commitment() {
+        if ms.get_commitment()
+            != block_copy
+                .body
+                .next_mutator_set_accumulator
+                .get_commitment()
+        {
             warn!("Mutator set does not match calculated object");
             return false;
         }
@@ -253,7 +263,7 @@ impl Block {
         // Verify that the locally constructed mutator set matches that in the received
         // block's header
         if ms.get_commitment()
-            != Into::<Vec<BFieldElement>>::into(self.header.mutator_set_commitment)
+            != Into::<Vec<BFieldElement>>::into(block_copy.header.mutator_set_commitment)
         {
             warn!("Mutator set commitment does not match calculated object");
             return false;
@@ -261,21 +271,21 @@ impl Block {
 
         // 1.e) verify that all transaction timestamps are less than or equal to
         // the block's timestamp.
-        if self
+        if block_copy
             .body
             .transactions
             .iter()
-            .any(|tx| tx.timestamp.value() > self.header.timestamp.value())
+            .any(|tx| tx.timestamp.value() > block_copy.header.timestamp.value())
         {
             warn!("Transaction with invalid timestamp found");
             return false;
         }
 
         // 1.f) Verify all transactions
-        for (j, tx) in self.body.transactions.iter().enumerate() {
+        for (j, tx) in block_copy.body.transactions.iter().enumerate() {
             let miner_reward = if j == 0 {
                 // The 1st transaction in the block can collect a coinbase transaction
-                Some(Self::get_mining_reward(self.header.height))
+                Some(Self::get_mining_reward(block_copy.header.height))
             } else {
                 None
             };
@@ -302,7 +312,7 @@ impl Block {
         //  4.2. verify that all uncles' hash are below parent's target_difficulty
 
         // 5. `block_body_merkle_root`
-        if self.header.block_body_merkle_root != self.body.hash() {
+        if block_copy.header.block_body_merkle_root != block_copy.body.hash() {
             warn!("Block body does not match referenced block body Merkle root");
             return false;
         }

@@ -1,12 +1,9 @@
-pub mod keyable_digest;
 pub mod ordered_digest;
 
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
-
-use self::keyable_digest::KeyableDigest;
 
 pub const BYTES_PER_BFE: usize = 8;
 pub const RESCUE_PRIME_OUTPUT_SIZE_IN_BFES: usize = 6;
@@ -55,12 +52,6 @@ impl From<Vec<BFieldElement>> for Digest {
 impl From<Digest> for Vec<BFieldElement> {
     fn from(val: Digest) -> Self {
         val.0.to_vec()
-    }
-}
-
-impl From<Digest> for KeyableDigest {
-    fn from(digest: Digest) -> Self {
-        Self::new(digest.values())
     }
 }
 
