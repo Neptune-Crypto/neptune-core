@@ -56,10 +56,9 @@ mod chunk_dict_tests {
             b_field_element::BFieldElement,
             rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH},
         },
+        test_shared::mmr::get_archival_mmr_from_digests,
         util_types::{
-            mmr::{
-                archival_mmr::ArchivalMmr, mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr,
-            },
+            mmr::{archival_mmr::ArchivalMmr, mmr_membership_proof::MmrMembershipProof},
             mutator_set::shared::{BITS_PER_U32, CHUNK_SIZE},
             simple_hasher::Hasher,
         },
@@ -84,10 +83,9 @@ mod chunk_dict_tests {
         let leaf_hashes: Vec<Vec<BFieldElement>> = (1001..1001 + 3)
             .map(|x| rp.hash(&vec![BFieldElement::new(x as u64)], RP_DEFAULT_OUTPUT_SIZE))
             .collect();
-        let archival_mmr =
-            ArchivalMmr::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(leaf_hashes.clone());
-        let mp0: MmrMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-            archival_mmr.prove_membership(1).0;
+        let mut archival_mmr: ArchivalMmr<Hasher> =
+            get_archival_mmr_from_digests(leaf_hashes.clone());
+        let mp0: MmrMembershipProof<Hasher> = archival_mmr.prove_membership(1).0;
         let chunk0 = Chunk {
             bits: [0xFFFFFFFFu32; CHUNK_SIZE / BITS_PER_U32],
         };
@@ -159,8 +157,8 @@ mod chunk_dict_tests {
         let leaf_hashes: Vec<Vec<BFieldElement>> = (1001..1001 + 3)
             .map(|x| rp.hash(&vec![BFieldElement::new(x as u64)], RP_DEFAULT_OUTPUT_SIZE))
             .collect();
-        let archival_mmr =
-            ArchivalMmr::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(leaf_hashes.clone());
+        let mut archival_mmr: ArchivalMmr<Hasher> =
+            get_archival_mmr_from_digests(leaf_hashes.clone());
         let mp: MmrMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
             archival_mmr.prove_membership(1).0;
         let chunk = Chunk {

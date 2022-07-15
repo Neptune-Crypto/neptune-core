@@ -33,7 +33,7 @@ where
     H: Hasher,
 {
     set_commitment: SetCommitment<H, ArchivalMmr<H>>,
-    chunks: HashMap<u128, Chunk>,
+    chunks: DatabaseVector<Chunk>,
 }
 
 impl<H> MutatorSet<H> for ArchivalMutatorSet<H>
@@ -80,7 +80,13 @@ where
         match new_chunk {
             None => (),
             Some((chunk_index, chunk)) => {
-                self.chunks.insert(chunk_index, chunk);
+                // Sanity check to verify that we agree on the index
+                assert_eq!(
+                    chunk_index,
+                    self.chunks.len(),
+                    "Length/index must agree when inserting a chunk into an archival node"
+                );
+                self.chunks.push(chunk);
             }
         }
     }
@@ -88,7 +94,7 @@ where
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
         let new_chunks: HashMap<u128, Chunk> = self.set_commitment.remove_helper(removal_record);
         for (chunk_index, chunk) in new_chunks {
-            self.chunks.insert(chunk_index, chunk);
+            self.chunks.set(chunk_index, chunk);
         }
     }
 
@@ -117,17 +123,9 @@ where
                 swbf_inactive,
                 swbf_active: ActiveWindow::default(),
             },
-            // chunks: DatabaseVector::new(chunks_db),
-            chunks: HashMap::new(),
+            chunks: DatabaseVector::new(chunks_db),
         }
-        // Self { set_commitment: (), chunks: () }
     }
-    // fn default() -> Self {
-    //     Self {
-    //         set_commitment: SetCommitment::default(),
-    //         chunks: HashMap::new(),
-    //     }
-    // }
 
     /// Returns an authentication path for an element in the append-only commitment list
     pub fn get_aocl_authentication_path(
@@ -165,17 +163,14 @@ where
             .swbf_inactive
             .prove_membership(chunk_index)
             .0;
-        let chunk: Chunk = match self.chunks.get(&chunk_index) {
-            Some(chnk) => *chnk,
-            None => {
-                // This should never happen. It would mean that chunks are missing but that the
-                // archival MMR has the membership proof for the chunk. That would be a programming
-                // error.
-                return Err(Box::new(
-                    SetCommitmentError::RestoreMembershipProofDidNotFindChunkForChunkIndex,
-                ));
-            }
-        };
+        // This check should never fail. It would mean that chunks are missing but that the
+        // archival MMR has the membership proof for the chunk. That would be a programming
+        // error.
+        assert!(
+            self.chunks.len() > chunk_index,
+            "Chunks must be known if its authentication path is known."
+        );
+        let chunk = self.chunks.get(chunk_index);
 
         Ok((chunk_auth_path, chunk))
     }
@@ -206,14 +201,11 @@ where
             .collect();
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
         for chunk_index in chunk_indices {
-            let chunk: &Chunk = match self.chunks.get(&chunk_index) {
-                Some(chnk) => chnk,
-                None => {
-                    return Err(Box::new(
-                        SetCommitmentError::RestoreMembershipProofDidNotFindChunkForChunkIndex,
-                    ))
-                }
-            };
+            assert!(
+                self.chunks.len() > chunk_index,
+                "Chunks must be known if its authentication path is known."
+            );
+            let chunk = self.chunks.get(chunk_index);
             let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<H> = self
                 .set_commitment
                 .swbf_inactive
@@ -235,7 +227,10 @@ where
 
 #[cfg(test)]
 mod archival_mutator_set_tests {
-    use crate::util_types::{blake3_wrapper, simple_hasher::Hasher};
+    use crate::{
+        test_shared::mutator_set::empty_archival_ms,
+        util_types::{blake3_wrapper, simple_hasher::Hasher},
+    };
     use rand::prelude::*;
     use rand_core::RngCore;
 
@@ -246,7 +241,7 @@ mod archival_mutator_set_tests {
         type Hasher = blake3::Hasher;
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = Hasher::new();
-        let mut archival_mutator_set = ArchivalMutatorSet::<Hasher>::default();
+        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> = empty_archival_ms();
 
         let num_additions = 65;
 
@@ -266,18 +261,18 @@ mod archival_mutator_set_tests {
                     .collect::<Vec<_>>(),
             );
 
-            let addition_record = archival_mutator_set.commit(&item, &randomness);
+            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &archival_mutator_set.set_commitment,
+                &mut archival_mutator_set.set_commitment,
                 &addition_record,
             );
             assert!(res.is_ok());
 
-            archival_mutator_set.add(&addition_record);
+            archival_mutator_set.add(&mut addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
 
             // Verify that we can just read out the same membership proofs from the

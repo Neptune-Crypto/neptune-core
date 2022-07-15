@@ -102,7 +102,7 @@ mod removal_record_tests {
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = H::new();
         let mut prng = thread_rng();
-        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let mp = accumulator.prove(&item, &randomness, true);
@@ -119,7 +119,7 @@ mod removal_record_tests {
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = H::new();
         let mut prng = thread_rng();
-        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let mp = accumulator.prove(&item, &randomness, true);
@@ -146,7 +146,7 @@ mod removal_record_tests {
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = H::new();
         let mut prng = thread_rng();
-        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let mp = accumulator.prove(&item, &randomness, true);
@@ -178,7 +178,7 @@ mod removal_record_tests {
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = H::new();
         let mut prng = thread_rng();
-        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let mp = accumulator.prove(&item, &randomness, true);
@@ -211,7 +211,7 @@ mod removal_record_tests {
         type H = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
         let hasher = H::new();
         let mut prng = thread_rng();
-        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = hasher.hash(
             &BFieldElement::random_elements(3, &mut prng),
             RP_DEFAULT_OUTPUT_SIZE,

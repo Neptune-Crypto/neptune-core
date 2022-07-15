@@ -77,9 +77,12 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
-    use crate::util_types::{
-        blake3_wrapper, mutator_set::archival_mutator_set::ArchivalMutatorSet,
-        simple_hasher::Hasher,
+    use crate::{
+        test_shared::mutator_set::empty_archival_ms,
+        util_types::{
+            blake3_wrapper, mutator_set::archival_mutator_set::ArchivalMutatorSet,
+            simple_hasher::Hasher,
+        },
     };
     use rand::prelude::*;
     use rand_core::RngCore;
@@ -100,7 +103,7 @@ mod accumulation_scheme_tests {
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = Hasher::new();
         let mut accumulator: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
-        let mut archival: ArchivalMutatorSet<Hasher> = ArchivalMutatorSet::default();
+        let mut archival: ArchivalMutatorSet<Hasher> = empty_archival_ms();
         let number_of_interactions = 100;
         let mut prng = thread_rng();
 
@@ -135,7 +138,7 @@ mod accumulation_scheme_tests {
                     // Add a new item to the mutator set and update all membership proofs
                     let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
                     let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-                    let addition_record: AdditionRecord<Hasher> =
+                    let mut addition_record: AdditionRecord<Hasher> =
                         accumulator.commit(&item, &randomness);
                     let membership_proof_acc = accumulator.prove(&item, &randomness, true);
 
@@ -145,7 +148,7 @@ mod accumulation_scheme_tests {
                     let update_result = MsMembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
-                        &accumulator,
+                        &mut accumulator,
                         &addition_record,
                     );
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
@@ -154,12 +157,12 @@ mod accumulation_scheme_tests {
                     for (mp, own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
                     {
                         let update_res_seq =
-                            mp.update_from_addition(own_item, &accumulator, &addition_record);
+                            mp.update_from_addition(own_item, &mut accumulator, &addition_record);
                         assert!(update_res_seq.is_ok());
                     }
 
-                    accumulator.add(&addition_record);
-                    archival.add(&addition_record);
+                    accumulator.add(&mut addition_record);
+                    archival.add(&mut addition_record);
 
                     let updated_mp_indices = update_result.unwrap();
                     println!("{}: Inserted", i);
@@ -208,7 +211,7 @@ mod accumulation_scheme_tests {
                     // generate removal record
                     let mut removal_record: RemovalRecord<Hasher> =
                         accumulator.drop(&removal_item.into(), &removal_mp);
-                    assert!(removal_record.validate(&accumulator));
+                    assert!(removal_record.validate(&mut accumulator));
 
                     // update membership proofs
                     // Uppdate membership proofs in batch

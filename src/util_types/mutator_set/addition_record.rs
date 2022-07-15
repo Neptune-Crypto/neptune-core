@@ -53,11 +53,11 @@ mod addition_record_tests {
     fn hash_test() {
         type Hasher = blake3::Hasher;
 
-        let msa0: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
-        let msa1: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
-        let addition_record_0: AdditionRecord<Hasher> =
+        let mut msa0: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let mut msa1: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let mut addition_record_0: AdditionRecord<Hasher> =
             msa0.commit(&1492u128.into(), &1522u128.into());
-        let addition_record_1: AdditionRecord<Hasher> =
+        let mut addition_record_1: AdditionRecord<Hasher> =
             msa1.commit(&1492u128.into(), &1522u128.into());
         assert_eq!(
             addition_record_0.hash(),
@@ -70,20 +70,21 @@ mod addition_record_tests {
     fn has_matching_aocl_test() {
         type Hasher = blake3::Hasher;
 
+        // let mut msa0: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
         let mut msa0: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
         let mut msa1: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
-        let addition_record_0: AdditionRecord<Hasher> =
+        let mut addition_record_0: AdditionRecord<Hasher> =
             msa0.commit(&1492u128.into(), &1522u128.into());
-        let addition_record_1: AdditionRecord<Hasher> =
+        let mut addition_record_1: AdditionRecord<Hasher> =
             msa1.commit(&1451u128.into(), &1480u128.into());
 
         // Verify behavior with empty mutator sets. All empty MS' are the same.
         assert!(
-            addition_record_0.has_matching_aocl(&msa0.aocl),
+            addition_record_0.has_matching_aocl(&mut msa0.aocl),
             "Addition record made from MS accumulator must match"
         );
         assert!(
-            addition_record_0.has_matching_aocl(&msa1.aocl),
+            addition_record_0.has_matching_aocl(&mut msa1.aocl),
             "Addition record made from equivalent MS accumulator must match (1)"
         );
         assert_ne!(
@@ -93,29 +94,31 @@ mod addition_record_tests {
         );
 
         // Verify behavior with two different mutator sets, with different leaf count.
-        msa0.add(&addition_record_0);
+        msa0.add(&mut addition_record_0);
         assert!(
-            !addition_record_1.has_matching_aocl(&msa0.aocl),
+            !addition_record_1.has_matching_aocl(&mut msa0.aocl),
             "Addition record made from MS accumulator must match"
         );
         assert!(
-            addition_record_1.has_matching_aocl(&msa1.aocl),
+            addition_record_1.has_matching_aocl(&mut msa1.aocl),
             "Addition record made from equivalent MS accumulator must match (2)"
         );
 
         // Verify behavior with two different mutator sets, with same leaf count.
-        msa1.add(&addition_record_1);
-        let new_addition_record_1: AdditionRecord<Hasher> =
+        msa1.add(&mut addition_record_1);
+        let mut new_addition_record_1: AdditionRecord<Hasher> =
             msa1.commit(&1957u128.into(), &1969u128.into());
-        let new_addition_record_0: AdditionRecord<blake3::Hasher> =
+        let mut new_addition_record_0: AdditionRecord<blake3::Hasher> =
             msa0.commit(&1957u128.into(), &1969u128.into());
-        assert!(new_addition_record_1.has_matching_aocl(&new_addition_record_1.aocl_snapshot));
-        assert!(!new_addition_record_1.has_matching_aocl(&new_addition_record_0.aocl_snapshot));
-        assert!(!new_addition_record_1.has_matching_aocl(&msa0.aocl));
-        assert!(new_addition_record_1.has_matching_aocl(&msa1.aocl));
+        let mut nar1_snapshot = new_addition_record_1.aocl_snapshot.clone();
+        assert!(new_addition_record_1.has_matching_aocl(&mut nar1_snapshot));
+        assert!(!new_addition_record_1.has_matching_aocl(&mut new_addition_record_0.aocl_snapshot));
+        assert!(!new_addition_record_1.has_matching_aocl(&mut msa0.aocl));
+        assert!(new_addition_record_1.has_matching_aocl(&mut msa1.aocl));
 
-        assert!(new_addition_record_0.has_matching_aocl(&new_addition_record_0.aocl_snapshot));
-        assert!(!new_addition_record_0.has_matching_aocl(&new_addition_record_1.aocl_snapshot));
+        let mut nar0_snapshow = new_addition_record_0.aocl_snapshot.clone();
+        assert!(new_addition_record_0.has_matching_aocl(&mut nar0_snapshow));
+        assert!(!new_addition_record_0.has_matching_aocl(&mut new_addition_record_1.aocl_snapshot));
 
         assert_ne!(
             new_addition_record_0.hash(),
@@ -127,12 +130,12 @@ mod addition_record_tests {
     #[test]
     fn serialization_test() {
         type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
-        let msa: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
-        let addition_record: AdditionRecord<Hasher> =
+        let mut msa: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
+        let mut addition_record: AdditionRecord<Hasher> =
             msa.commit(&1492u128.to_digest(), &1522u128.to_digest());
         let json = serde_json::to_string(&addition_record).unwrap();
-        let s_back = serde_json::from_str::<AdditionRecord<Hasher>>(&json).unwrap();
+        let mut s_back = serde_json::from_str::<AdditionRecord<Hasher>>(&json).unwrap();
         assert_eq!(addition_record.commitment, s_back.commitment);
-        assert!(addition_record.has_matching_aocl(&s_back.aocl_snapshot));
+        assert!(addition_record.has_matching_aocl(&mut s_back.aocl_snapshot));
     }
 }
