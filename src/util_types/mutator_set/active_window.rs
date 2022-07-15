@@ -1,14 +1,19 @@
 use std::marker::PhantomData;
 
+use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
-use crate::util_types::simple_hasher::{self, Hasher, ToDigest};
+use crate::util_types::{
+    database_array::DatabaseArray,
+    simple_hasher::{self, Hasher, ToDigest},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActiveWindow<H: simple_hasher::Hasher> {
     // Consider using the `bit_vec` crate here instead
+    // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     #[serde(with = "BigArray")]
     pub bits: [u32; WINDOW_SIZE / BITS_PER_U32],
     _hasher: PhantomData<H>,
@@ -28,6 +33,34 @@ where
 
     pub fn get_sliding_chunk_bits(&self) -> [u32; CHUNK_SIZE / BITS_PER_U32] {
         self.bits[0..CHUNK_SIZE / BITS_PER_U32].try_into().unwrap()
+    }
+
+    /// Populate an empty database with the values in this active window.
+    /// This is used to persist the state of an archival mutator set
+    pub fn store_to_database(&self, db: DB) -> DB {
+        let mut database_array: DatabaseArray<{ WINDOW_SIZE as u128 / BITS_PER_U32 as u128 }, u32> =
+            DatabaseArray::new(db);
+        database_array.batch_set(
+            &self
+                .bits
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| (i as u128, v))
+                .collect::<Vec<_>>(),
+        );
+        database_array.extract_db()
+    }
+
+    /// Given a database object that has been stored on disk, return an ActiveWindow object
+    pub fn restore_from_database(db: DB) -> Self {
+        let mut database_array: DatabaseArray<{ WINDOW_SIZE as u128 / BITS_PER_U32 as u128 }, u32> =
+            DatabaseArray::restore(db);
+        let mut ret = Self::default();
+        for i in 0..({ WINDOW_SIZE / BITS_PER_U32 }) {
+            ret.bits[i] = database_array.get(i as u128);
+        }
+
+        ret
     }
 
     pub fn slide_window(&mut self) {
@@ -163,6 +196,22 @@ mod active_window_tests {
         for i in 0..WINDOW_SIZE {
             assert!(aw.get_bit(i));
         }
+    }
+
+    #[test]
+    /// Verify that we can store an active window to the database, and that we can recreate it again from the database
+    fn db_store_and_recover() {
+        let mut init_array = [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32];
+        init_array[2] = 42u32;
+        let aw = ActiveWindow::<blake3::Hasher>::new(init_array);
+        let opt = rusty_leveldb::in_memory();
+        let db = DB::open("mydatabase", opt).unwrap();
+        let aw_as_db = aw.store_to_database(db);
+        let restored_aw = ActiveWindow::<blake3::Hasher>::restore_from_database(aw_as_db);
+        assert_eq!(aw.bits, restored_aw.bits);
+        assert_eq!(0xFFFFFFFFu32, restored_aw.bits[0]);
+        assert_eq!(0xFFFFFFFFu32, restored_aw.bits[1]);
+        assert_eq!(42u32, restored_aw.bits[2]);
     }
 
     #[test]
