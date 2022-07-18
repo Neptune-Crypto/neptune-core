@@ -23,7 +23,6 @@ use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::thread_rng;
 use rand::{distributions::Alphanumeric, Rng};
-use secp256k1::rand::rngs::OsRng;
 use secp256k1::Secp256k1;
 use std::collections::hash_map::RandomState;
 use std::env;
@@ -170,7 +169,7 @@ fn get_genesis_setup(
 
     let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let (block_databases, peer_databases) = databases(network)?;
-    let cli_default_args = Arc::new(cli_args::Args::from_args());
+    let cli_default_args = Arc::new(cli_args::Args::from_iter::<Vec<String>>(vec![]));
     let state = State {
         peer_map: peer_map.clone(),
         block_databases,
@@ -543,7 +542,7 @@ fn make_mock_block(
     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
 ) -> Block {
     let secp = Secp256k1::new();
-    let mut rng = OsRng::new().expect("OsRng");
+    let mut rng = thread_rng();
     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
         secp.generate_keypair(&mut rng);
 
