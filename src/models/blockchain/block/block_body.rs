@@ -25,13 +25,18 @@ impl Hashable for BlockBody {
     fn hash(&self) -> Digest {
         // It's not necessary to hash `previous_mutator_set_accumulator` and `ms_update_digest` here,
         // as they are fully determined by `next_ms_acc_digest` assuming a good hash function.
+        let mut block_body_copy: BlockBody = self.to_owned();
 
         let mut all_digests: Vec<Vec<BFieldElement>> = self
             .transactions
             .iter()
             .map(|tx| Into::<Vec<BFieldElement>>::into(tx.hash()))
             .collect();
-        all_digests.push(self.next_mutator_set_accumulator.get_commitment());
+        all_digests.push(
+            block_body_copy
+                .next_mutator_set_accumulator
+                .get_commitment(),
+        );
         let hasher = Hash::new();
         let stark_proof_digest: Vec<BFieldElement> =
             hasher.hash(&self.stark_proof, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);

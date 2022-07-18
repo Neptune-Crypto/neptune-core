@@ -62,13 +62,13 @@ async fn make_devnet_block(
     let mut new_ms: MutatorSetAccumulator<Hash> =
         previous_block.body.next_mutator_set_accumulator.clone();
     let coinbase_digest: Digest = coinbase_utxo.hash();
-    let coinbase_addition_record: AdditionRecord<Hash> =
+    let mut coinbase_addition_record: AdditionRecord<Hash> =
         new_ms.commit(&coinbase_digest.into(), &output_randomness);
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
     };
-    new_ms.add(&coinbase_addition_record);
+    new_ms.add(&mut coinbase_addition_record);
 
     let block_body: BlockBody = BlockBody {
         transactions: vec![coinbase_transaction],
