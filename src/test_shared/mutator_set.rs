@@ -1,16 +1,29 @@
 use rand::{thread_rng, RngCore};
+use rusty_leveldb::DB;
 
 use crate::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::mmr_trait::Mmr,
         mutator_set::{
-            ms_membership_proof::MsMembershipProof, removal_record::RemovalRecord,
-            set_commitment::SetCommitment,
+            archival_mutator_set::ArchivalMutatorSet, ms_membership_proof::MsMembershipProof,
+            removal_record::RemovalRecord, set_commitment::SetCommitment,
         },
         simple_hasher::{self, ToDigest},
     },
 };
+
+pub fn empty_archival_ms<H: simple_hasher::Hasher>() -> ArchivalMutatorSet<H>
+where
+    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+{
+    let opt = rusty_leveldb::in_memory();
+    let chunks_db = DB::open("chunks", opt.clone()).unwrap();
+    let aocl_db = DB::open("aocl", opt.clone()).unwrap();
+    let swbf_db = DB::open("swbf", opt).unwrap();
+    ArchivalMutatorSet::new_empty(aocl_db, swbf_db, chunks_db)
+}
 
 pub fn insert_item<H: simple_hasher::Hasher, M: Mmr<H>>(
     mutator_set: &mut SetCommitment<H, M>,
@@ -32,9 +45,9 @@ where
             .collect::<Vec<_>>(),
     );
 
-    let addition_record = mutator_set.commit(&new_item, &randomness);
+    let mut addition_record = mutator_set.commit(&new_item, &randomness);
     let membership_proof = mutator_set.prove(&new_item, &randomness, true);
-    mutator_set.add_helper(&addition_record);
+    mutator_set.add_helper(&mut addition_record);
 
     (membership_proof, new_item)
 }

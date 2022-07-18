@@ -186,7 +186,7 @@ where
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
         own_items: &[H::Digest],
-        mutator_set: &SetCommitment<H, MMR>,
+        mutator_set: &mut SetCommitment<H, MMR>,
         addition_record: &AdditionRecord<H>,
     ) -> Result<Vec<usize>, Box<dyn Error>> {
         assert!(
@@ -362,7 +362,7 @@ where
     pub fn update_from_addition<MMR: Mmr<H>>(
         &mut self,
         own_item: &H::Digest,
-        mutator_set: &SetCommitment<H, MMR>,
+        mutator_set: &mut SetCommitment<H, MMR>,
         addition_record: &AdditionRecord<H>,
     ) -> Result<bool, Box<dyn Error>> {
         assert!(self.auth_path_aocl.data_index < mutator_set.aocl.count_leaves());
@@ -576,7 +576,7 @@ mod ms_proof_tests {
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = H::new();
         let mut prng = thread_rng();
-        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
         let mut mp = accumulator.prove(&item, &randomness, false);
