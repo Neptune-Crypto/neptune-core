@@ -490,3 +490,60 @@ where
 
     Ok(())
 }
+
+#[cfg(test)]
+mod lib_tests {
+    use anyhow::{bail, Result};
+    use tokio_test::io::Builder;
+    use tracing_test::traced_test;
+
+    use crate::{
+        call_peer,
+        config_models::network::Network,
+        models::peer::{ConnectionStatus, PeerMessage},
+        tests::shared::{get_dummy_address, get_dummy_handshake_data, get_genesis_setup, to_bytes},
+        MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
+    };
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_outgoing_connection_succeed() -> Result<()> {
+        let network = Network::Main;
+        let other_handshake = get_dummy_handshake_data(network);
+        let own_handshake = get_dummy_handshake_data(network);
+        let mock = Builder::new()
+            .write(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_REQUEST.to_vec(),
+                own_handshake.clone(),
+            )))?)
+            .read(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                other_handshake,
+            )))?)
+            .read(&to_bytes(&PeerMessage::ConnectionStatus(
+                ConnectionStatus::Accepted,
+            ))?)
+            .read(&to_bytes(&PeerMessage::Bye)?)
+            .build();
+
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+            get_genesis_setup(Network::Main, 0)?;
+        call_peer(
+            mock,
+            state,
+            get_dummy_address(),
+            from_main_rx_clone,
+            to_main_tx,
+            &own_handshake,
+        )
+        .await?;
+
+        // Verify that peer map is empty after connection has been closed
+        match peer_map.lock().unwrap().keys().len() {
+            0 => (),
+            _ => bail!("Incorrect number of maps in peer map"),
+        };
+
+        Ok(())
+    }
+}

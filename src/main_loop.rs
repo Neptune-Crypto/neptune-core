@@ -303,3 +303,319 @@ pub async fn main_loop(
         }
     }
 }
+
+#[cfg(test)]
+mod main_loop_tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use anyhow::{bail, Result};
+    use tokio_test::io::Builder;
+    use tracing_test::traced_test;
+
+    use crate::{
+        config_models::network::Network,
+        main_loop,
+        models::{
+            blockchain::digest::Digest,
+            peer::{
+                ConnectionRefusedReason, ConnectionStatus, PeerMessage, PeerSanctionReason,
+                PeerStanding,
+            },
+        },
+        tests::shared::{
+            get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block, get_genesis_setup,
+            to_bytes,
+        },
+        MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
+    };
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_incoming_connection_succeed() -> Result<()> {
+        // This builds a mock object which expects to have a certain
+        // sequence of methods called on it: First it expects to have
+        // the `MAGIC_STRING_REQUEST` and then the `MAGIC_STRING_RESPONSE`
+        // value written. This is followed by a read of the bye message,
+        // as this is a way to close the connection by the peer initiating
+        // the connection. If this sequence is not followed, the `mock`
+        // object will panic, and the `await` operator will evaluate
+        // to Error.
+        let network = Network::Main;
+        let other_handshake = get_dummy_handshake_data(network);
+        let own_handshake = get_dummy_handshake_data(network);
+        let mock = Builder::new()
+            .read(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_REQUEST.to_vec(),
+                other_handshake,
+            )))?)
+            .write(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                own_handshake.clone(),
+            )))?)
+            .write(&to_bytes(&PeerMessage::ConnectionStatus(
+                ConnectionStatus::Accepted,
+            ))?)
+            .read(&to_bytes(&PeerMessage::Bye)?)
+            .build();
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+            get_genesis_setup(network, 0)?;
+        main_loop::answer_peer(
+            mock,
+            state,
+            get_dummy_address(),
+            from_main_rx_clone,
+            to_main_tx,
+            own_handshake,
+            8,
+        )
+        .await?;
+
+        // Verify that peer map is empty after connection has been closed
+        match peer_map.lock().unwrap().keys().len() {
+            0 => (),
+            _ => bail!("Incorrect number of maps in peer map"),
+        };
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
+        let network = Network::Main;
+        let other_handshake = get_dummy_handshake_data(network);
+        let own_handshake = get_dummy_handshake_data(network);
+        let mock = Builder::new()
+            .read(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                other_handshake,
+            )))?)
+            .build();
+
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+            get_genesis_setup(network, 0)?;
+        if let Err(_) = main_loop::answer_peer(
+            mock,
+            state,
+            get_dummy_address(),
+            from_main_rx_clone,
+            to_main_tx,
+            own_handshake,
+            8,
+        )
+        .await
+        {
+            Ok(())
+        } else {
+            bail!("Expected error from run")
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_incoming_connection_fail_bad_network() -> Result<()> {
+        let other_handshake = get_dummy_handshake_data(Network::Testnet);
+        let own_handshake = get_dummy_handshake_data(Network::Main);
+        let mock = Builder::new()
+            .read(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_REQUEST.to_vec(),
+                other_handshake,
+            )))?)
+            .write(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                own_handshake.clone(),
+            )))?)
+            .build();
+
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+            get_genesis_setup(Network::Main, 0)?;
+        if let Err(_) = main_loop::answer_peer(
+            mock,
+            state,
+            get_dummy_address(),
+            from_main_rx_clone,
+            to_main_tx,
+            own_handshake,
+            8,
+        )
+        .await
+        {
+            Ok(())
+        } else {
+            bail!("Expected error from run")
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
+        let network = Network::Main;
+        let other_handshake = get_dummy_handshake_data(network);
+        let own_handshake = get_dummy_handshake_data(network);
+        let mock = Builder::new()
+            .read(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_REQUEST.to_vec(),
+                other_handshake,
+            )))?)
+            .write(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                own_handshake.clone(),
+            )))?)
+            .build();
+
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _peer_map) =
+            get_genesis_setup(Network::Main, 2)?;
+        let (_, _, _latest_block_header) = get_dummy_latest_block(None);
+
+        if let Err(_) = main_loop::answer_peer(
+            mock,
+            state,
+            get_dummy_address(),
+            from_main_rx_clone,
+            to_main_tx,
+            own_handshake,
+            2,
+        )
+        .await
+        {
+            Ok(())
+        } else {
+            bail!("Expected error from run")
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn disallow_ingoing_connections_from_banned_peers_test() -> Result<()> {
+        // In this scenario a peer has been banned, and is attempting to make an ingoing
+        // connection. This should not be possible.
+        let network = Network::Main;
+        let other_handshake = get_dummy_handshake_data(network);
+        let own_handshake = get_dummy_handshake_data(network);
+        let mock = Builder::new()
+            .read(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_REQUEST.to_vec(),
+                other_handshake,
+            )))?)
+            .write(&to_bytes(&PeerMessage::Handshake((
+                MAGIC_STRING_RESPONSE.to_vec(),
+                own_handshake.clone(),
+            )))?)
+            .write(&to_bytes(&PeerMessage::ConnectionStatus(
+                ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding),
+            ))?)
+            .build();
+
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+            get_genesis_setup(Network::Main, 0)?;
+        let bad_standing: PeerStanding = PeerStanding {
+            standing: u16::MAX,
+            latest_sanction: Some(PeerSanctionReason::InvalidBlock((
+                7u64.into(),
+                Digest::default(),
+            ))),
+            timestamp_of_latest_sanction: Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Failed to generate timestamp for peer standing")
+                    .as_secs(),
+            ),
+        };
+        let peer_address = get_dummy_address();
+        state
+            .write_peer_standing_to_database(peer_address.ip(), bad_standing)
+            .await;
+
+        if let Err(_) = main_loop::answer_peer(
+            mock,
+            state,
+            peer_address,
+            from_main_rx_clone,
+            to_main_tx,
+            own_handshake,
+            42,
+        )
+        .await
+        {
+        } else {
+            bail!("Expected error from run")
+        }
+
+        // Verify that peer map is empty after connection has been refused
+        match peer_map.lock().unwrap().keys().len() {
+            0 => (),
+            _ => bail!("Incorrect number of maps in peer map"),
+        };
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_get_connection_status() -> Result<()> {
+        let network = Network::Main;
+        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+            get_genesis_setup(network, 1)?;
+        let peer = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].clone();
+        let peer_id = peer.instance_id;
+
+        let own_handshake = get_dummy_handshake_data(network);
+        let mut other_handshake = get_dummy_handshake_data(network);
+
+        let mut status = main_loop::get_connection_status(
+            4,
+            &state,
+            &own_handshake,
+            &other_handshake,
+            &peer.address,
+        )
+        .await;
+        if status != ConnectionStatus::Accepted {
+            bail!("Must return ConnectionStatus::Accepted");
+        }
+
+        status = main_loop::get_connection_status(
+            4,
+            &state,
+            &own_handshake,
+            &own_handshake,
+            &peer.address,
+        )
+        .await;
+        if status != ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
+            bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
+        }
+
+        status = main_loop::get_connection_status(
+            1,
+            &state,
+            &own_handshake,
+            &other_handshake,
+            &peer.address,
+        )
+        .await;
+        if status != ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded) {
+            bail!(
+            "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
+        );
+        }
+
+        // Attempt to connect to already connected peer
+        other_handshake.instance_id = peer_id;
+        status = main_loop::get_connection_status(
+            100,
+            &state,
+            &own_handshake,
+            &other_handshake,
+            &peer.address,
+        )
+        .await;
+        if status != ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
+            bail!(
+                "Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))"
+            );
+        }
+
+        Ok(())
+    }
+}
