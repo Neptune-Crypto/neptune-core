@@ -9,6 +9,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 enum Command {
     BlockHeight,
     GetPeerInfo,
+    Head,
 }
 
 #[derive(Debug, Parser)]
@@ -48,6 +49,10 @@ async fn main() -> Result<()> {
             let peers = client.get_peer_info(context::current()).await?;
             tracing::info!("{} connected peers", peers.len());
             tracing::info!("{}", serde_json::to_string(&peers)?);
+        }
+        Command::Head => {
+            let head_hash = client.head(context::current()).await?;
+            tracing::info!("{}", head_hash);
         }
     }
 
