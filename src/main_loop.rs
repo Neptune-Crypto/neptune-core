@@ -523,7 +523,7 @@ mod main_loop_tests {
         };
         let peer_address = get_dummy_address();
         state
-            .write_peer_standing_to_database(peer_address.ip(), bad_standing)
+            .write_peer_standing_on_increase(peer_address.ip(), bad_standing)
             .await;
 
         if let Err(_) = main_loop::answer_peer(

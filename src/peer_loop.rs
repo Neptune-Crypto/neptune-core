@@ -449,7 +449,7 @@ where
     }
 
     state
-        .write_peer_standing_to_database(peer_address.ip(), peer_info_writeback.standing)
+        .write_peer_standing_on_increase(peer_address.ip(), peer_info_writeback.standing)
         .await;
 
     Ok(())

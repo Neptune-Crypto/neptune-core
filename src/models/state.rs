@@ -133,9 +133,13 @@ impl State {
     // Storing IP addresses is, according to this answer, not a violation of GDPR:
     // https://law.stackexchange.com/a/28609/45846
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
-    pub async fn write_peer_standing_to_database(&self, ip: IpAddr, standing: PeerStanding) {
+    pub async fn write_peer_standing_on_increase(&self, ip: IpAddr, standing: PeerStanding) {
         let mut peer_databases = self.peer_databases.lock().await;
-        peer_databases.peer_standings.put(ip, standing)
+        let old_standing = peer_databases.peer_standings.get(ip);
+
+        if old_standing.is_none() || old_standing.unwrap().standing < standing.standing {
+            peer_databases.peer_standings.put(ip, standing)
+        }
     }
 
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
