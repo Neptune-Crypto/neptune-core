@@ -204,7 +204,7 @@ async fn handle_peer_thread_message(
         PeerThreadToMain::NewBlocks(blocks) => {
             let last_block = blocks.last().unwrap().to_owned();
             {
-                let databases = state.block_databases.lock().await;
+                let mut databases = state.block_databases.lock().await;
                 let mut block_header = state
                     .latest_block_header
                     .lock()
@@ -230,7 +230,7 @@ async fn handle_peer_thread_message(
                     debug!("Storing block {:?} in database", block.hash);
                     state.update_latest_block_with_block_header_mutexguard(
                         Box::new(block),
-                        &databases,
+                        &mut databases,
                         &mut block_header,
                     )?;
                 }

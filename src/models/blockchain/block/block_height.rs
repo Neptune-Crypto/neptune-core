@@ -1,4 +1,3 @@
-use db_key::Key;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Display};
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -49,24 +48,6 @@ impl From<u64> for BlockHeight {
 impl From<BlockHeight> for u64 {
     fn from(bh: BlockHeight) -> Self {
         bh.0.value()
-    }
-}
-
-impl Key for BlockHeight {
-    fn from_u8(key: &[u8]) -> Self {
-        // First convert the slice to an array and verify that the length is correct
-        let array: [u8; 8] = key
-            .to_vec()
-            .try_into()
-            .expect("slice with incorrect length used as block height");
-
-        // Then convert the array to a B field element and wrap in type constructore
-        Self(array.into())
-    }
-
-    fn as_slice<T, F: Fn(&[u8]) -> T>(&self, f: F) -> T {
-        let array: [u8; 8] = self.0.into();
-        f(&array)
     }
 }
 

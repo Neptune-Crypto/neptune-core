@@ -16,10 +16,9 @@ anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"
 chrono = "0.4"
-db-key = "0.0.5" # Should match the one used by `leveldb`
 directories = "4"
 futures = "0.3"
-leveldb = "0.8"
+rusty-leveldb = "1.0.2"
 num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = "0.2"
 paw = "1" # Command-line argument parsing

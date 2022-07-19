@@ -179,7 +179,7 @@ mod ordered_digest_tests {
 
         let mut two_pow_351: BigUint = (1u128 << 70).into();
         two_pow_351 = two_pow_351.pow(5);
-        two_pow_351 = two_pow_351 * 2u32;
+        two_pow_351 *= 2u32;
         // Result calculated on Wolfram alpha
         let two_pow_351_converted_expected = OrderedDigest([
             BFieldElement::new(9223372032559808513),

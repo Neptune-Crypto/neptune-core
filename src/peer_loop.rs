@@ -1,17 +1,13 @@
+use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::digest::keyable_digest::KeyableDigest;
-use crate::models::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{PeerInfo, PeerMessage, PeerSanctionReason, PeerState};
 use crate::models::state::State;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
-use leveldb::kv::KV;
-use leveldb::options::ReadOptions;
-use std::convert::TryInto;
 use std::marker::Unpin;
 use std::net::SocketAddr;
 use tokio::select;
@@ -275,11 +271,8 @@ where
 
             let block_response;
             {
-                let databases = state.block_databases.lock().await;
-                let hash_res = databases
-                    .block_height_to_hash
-                    .get(ReadOptions::new(), block_height)
-                    .expect("Failed to read from database");
+                let mut databases = state.block_databases.lock().await;
+                let hash_res = databases.block_height_to_hash.get(block_height);
                 match hash_res {
                     None => {
                         warn!("Got block request by height for unknown block");
@@ -287,29 +280,20 @@ where
                         return Ok(false);
                     }
                     Some(digest) => {
-                        let read_opts_block = ReadOptions::new();
-                        let hash_array: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] =
-                            digest.try_into().unwrap_or_else(|v: Vec<u8>| {
-                                panic!(
-                                    "Expected a Vec of length {} but it was {}",
-                                    RESCUE_PRIME_DIGEST_SIZE_IN_BYTES,
-                                    v.len()
-                                )
-                            });
+                        // let hash_array: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] =
+                        // digest.try_into().unwrap_or_else(|v: Vec<u8>| {
+                        // panic!(
+                        // "Expected a Vec of length {} but it was {}",
+                        // RESCUE_PRIME_DIGEST_SIZE_IN_BYTES,
+                        // v.len()
+                        // )
+                        // });
 
-                        let block_digest: Digest = hash_array.into();
-                        block_response = match databases
-                            .block_hash_to_block
-                            .get::<KeyableDigest>(read_opts_block, block_digest.into())
-                            .expect("Failed to read from database")
-                        {
+                        block_response = match databases.block_hash_to_block.get(digest) {
                             // I think it makes sense to panic here since we found the block in the height to digest
                             // database. So it should be in the hash to block database.
-                            None => panic!("Failed to find block with hash {:?}", hash_array),
-                            Some(block_bytes) => {
-                                let deserialized: Block = bincode::deserialize(&block_bytes)?;
-                                PeerMessage::Block(Box::new(deserialized.into()))
-                            }
+                            None => panic!("Failed to find block with hash {:?}", digest),
+                            Some(block) => PeerMessage::Block(Box::new(block.into())),
                         };
                     }
                 }

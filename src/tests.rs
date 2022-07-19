@@ -57,7 +57,7 @@ fn databases(
     // For now, we use databases on disk, but it would be nicer to use
     // something that is in-memory only.
     let temp_dir = env::temp_dir();
-    let mut path = temp_dir.to_owned();
+    let mut path = temp_dir;
     path.push(UNIT_TEST_DB_DIRECTORY);
     path.push(network.to_string());
 
@@ -71,7 +71,7 @@ fn databases(
         .collect();
     path.push(random_directory);
 
-    let (block_dbs, peer_dbs) = initialize_databases(&path);
+    let (block_dbs, peer_dbs) = initialize_databases(&path)?;
 
     Ok((
         Arc::new(tokio::sync::Mutex::new(block_dbs)),
@@ -130,10 +130,7 @@ fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     let mut transport = LengthDelimitedCodec::new();
     let mut formating = SymmetricalBincode::<PeerMessage>::default();
     let mut buf = BytesMut::new();
-    let () = transport.encode(
-        Bytes::from(Pin::new(&mut formating).serialize(message)?),
-        &mut buf,
-    )?;
+    transport.encode(Pin::new(&mut formating).serialize(message)?, &mut buf)?;
     Ok(buf.freeze())
 }
 
@@ -438,7 +435,6 @@ async fn disallow_ingoing_connections_from_banned_peers_test() -> Result<()> {
     )
     .await
     {
-        ()
     } else {
         bail!("Expected error from run")
     }
@@ -571,7 +567,7 @@ fn make_mock_block(
     let coinbase_digest: Digest = coinbase_utxo.hash();
 
     let mut coinbase_addition_record: AdditionRecord<Hash> =
-        new_ms.commit(&coinbase_digest.into(), &output_randomness.into());
+        new_ms.commit(&coinbase_digest.into(), &output_randomness);
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
@@ -692,7 +688,7 @@ async fn different_genesis_test() -> Result<()> {
     // In this scenario a peer provides another genesis block than what has been
     // hardcoded. This should lead to the closing of the connection to this peer
     // and a ban.
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
 
@@ -734,7 +730,7 @@ async fn different_genesis_test() -> Result<()> {
 async fn bad_block_test() -> Result<()> {
     // In this scenario, a block without a valid PoW is received. This block should be rejected
     // by the peer loop and a notification should never reach the main loop.
-    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;
@@ -787,14 +783,13 @@ async fn bad_block_test() -> Result<()> {
     }
 
     // Verify that peer standing was stored in database
-    let standing_bytes = state
+    let standing = state
         .peer_databases
         .lock()
         .await
         .peer_standings
-        .get::<KeyableIpAddress>(ReadOptions::new(), peer_address.ip().into());
-    assert!(standing_bytes.is_ok());
-    let standing: PeerStanding = bincode::deserialize(&standing_bytes.unwrap().unwrap())?;
+        .get(peer_address.ip())
+        .unwrap();
     assert!(
         standing.standing > 0,
         "Peer must be sanctioned for sending a bad block"
@@ -809,7 +804,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
     // The scenario tested here is that a client receives a block that is already
     // in the database. The expected behavior is to ignore the block and not send
     // a message to the main thread.
-    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;
@@ -864,7 +859,7 @@ async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
 #[tokio::test]
 async fn test_peer_loop_receival_of_first_block() -> Result<()> {
     // Scenario: client only knows genesis block. Then receives block 1.
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;
@@ -909,7 +904,7 @@ async fn test_peer_loop_receival_of_first_block() -> Result<()> {
 async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
     // In this scenario, the client only knows the genesis block (block 0) and then
     // receives block 2, meaning that block 1 will have to be requested.
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;
@@ -962,7 +957,7 @@ async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()>
 async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
     // In this scenario, the client know the genesis block (block 0) and block 1, it
     // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;
@@ -1023,7 +1018,7 @@ async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()>
 async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
     // In this scenario, the client only knows the genesis block (block 0) and then
     // receives block 3, meaning that block 2 and 1 will have to be requested.
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;
@@ -1084,7 +1079,7 @@ async fn test_block_reconciliation_interrupted_by_block_notification() -> Result
     // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
     // But the requests are interrupted by the peer sending another message: a new block
     // notification.
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;
@@ -1161,7 +1156,7 @@ async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<
     // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
     // But the requests are interrupted by the peer sending another message: a request
     // for a list of peers.
-    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, peer_map) =
+    let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, peer_map) =
         get_genesis_setup(Network::Main, 1)?;
     let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
     let genesis_block: Block = state.get_latest_block().await;

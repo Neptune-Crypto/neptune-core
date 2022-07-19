@@ -1,13 +1,11 @@
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::Block;
-use super::blockchain::digest::keyable_digest::KeyableDigest;
 use super::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
-use super::database::{BlockDatabases, DatabaseUnit, KeyableIpAddress, PeerDatabases};
+use super::database::{BlockDatabases, PeerDatabases};
 use super::peer::{self, PeerStanding};
 use crate::config_models::cli_args;
+use crate::database::leveldb::LevelDB;
 use anyhow::Result;
-use leveldb::kv::KV;
-use leveldb::options::{ReadOptions, WriteOptions};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -58,10 +56,10 @@ impl Clone for State {
 impl State {
     /// Return latest block from database, or genesis block if no other block
     /// is known.
-    pub async fn get_latest_block(&self) -> Block {
-        let dbs = self.block_databases.lock().await;
+    pub async fn get_latest_block(&mut self) -> Block {
+        let mut dbs = self.block_databases.lock().await;
         let lookup_res_info: Option<Block> =
-            BlockDatabases::get_latest_block(dbs).expect("Failed to read from DB");
+            BlockDatabases::get_latest_block(&mut dbs).expect("Failed to read from DB");
 
         match lookup_res_info {
             None => Block::genesis_block(),
@@ -71,21 +69,21 @@ impl State {
 
     // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
-        // First see if we can get block from database
-        let block_bytes: Option<Vec<u8>> =
-            self.block_databases
-                .lock()
-                .await
-                .block_hash_to_block
-                .get::<KeyableDigest>(ReadOptions::new(), block_digest.into())?;
-        let mut block: Option<Block> = block_bytes
-            .map(|bytes| bincode::deserialize(&bytes).expect("Deserialization of block failed"));
-
-        // If block was not found in database, check if the digest matches the genesis block
-        let genesis = Block::genesis_block();
-        if genesis.hash == block_digest {
-            block = Some(genesis);
-        }
+        let block = self
+            .block_databases
+            .lock()
+            .await
+            .block_hash_to_block
+            .get(block_digest)
+            .or_else(move || {
+                // If block was not found in database, check if the digest matches the genesis block
+                let genesis = Block::genesis_block();
+                if genesis.hash == block_digest {
+                    Some(genesis)
+                } else {
+                    None
+                }
+            });
 
         Ok(block)
     }
@@ -95,28 +93,22 @@ impl State {
     pub fn update_latest_block_with_block_header_mutexguard(
         &self,
         new_block: Box<Block>,
-        databases: &tokio::sync::MutexGuard<BlockDatabases>,
+        databases: &mut tokio::sync::MutexGuard<BlockDatabases>,
         block_header: &mut std::sync::MutexGuard<BlockHeader>,
     ) -> Result<()> {
         let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = new_block.hash.into();
 
         // TODO: Mutliple blocks can have the same height: fix!
-        databases.block_height_to_hash.put(
-            WriteOptions::new(),
-            new_block.header.height,
-            &block_hash_raw,
-        )?;
-        databases.block_hash_to_block.put::<KeyableDigest>(
-            WriteOptions::new(),
-            new_block.hash.into(),
-            &bincode::serialize(&new_block).expect("Failed to serialize block"),
-        )?;
+        databases
+            .block_height_to_hash
+            .put(new_block.header.height, block_hash_raw.into());
+        databases
+            .block_hash_to_block
+            .put(new_block.hash, *new_block.clone());
 
-        databases.latest_block_header.put(
-            WriteOptions::new(),
-            DatabaseUnit(),
-            &bincode::serialize(&new_block.header).expect("Failed to serialize block"),
-        )?;
+        databases
+            .latest_block_header
+            .put((), new_block.header.clone());
 
         **block_header = new_block.header;
 
@@ -124,14 +116,14 @@ impl State {
     }
 
     pub async fn update_latest_block(&self, new_block: Box<Block>) -> Result<()> {
-        let databases = self.block_databases.lock().await;
+        let mut databases = self.block_databases.lock().await;
         let mut block_head_header = self
             .latest_block_header
             .lock()
             .expect("Locking block header must succeed");
         self.update_latest_block_with_block_header_mutexguard(
             new_block.clone(),
-            &databases,
+            &mut databases,
             &mut block_head_header,
         )?;
 
@@ -142,24 +134,12 @@ impl State {
     // https://law.stackexchange.com/a/28609/45846
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
     pub async fn write_peer_standing_to_database(&self, ip: IpAddr, standing: PeerStanding) {
-        let peer_databases = self.peer_databases.lock().await;
-        peer_databases
-            .peer_standings
-            .put::<KeyableIpAddress>(
-                WriteOptions::new(),
-                ip.into(),
-                &bincode::serialize(&standing).expect("Failed to serialize peer standing"),
-            )
-            .expect("Failed to write to database");
+        let mut peer_databases = self.peer_databases.lock().await;
+        peer_databases.peer_standings.put(ip, standing)
     }
 
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        let peer_databases = self.peer_databases.lock().await;
-        let peer_info_bytes = peer_databases
-            .peer_standings
-            .get::<KeyableIpAddress>(ReadOptions::new(), ip.into())
-            .expect("Failed to read from peer info db");
-        peer_info_bytes
-            .map(|bytes| bincode::deserialize(&bytes).expect("Failed to deserialize peer info"))
+        let mut peer_databases = self.peer_databases.lock().await;
+        peer_databases.peer_standings.get(ip)
     }
 }

@@ -1,12 +1,9 @@
+use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::database::DatabaseUnit;
 use crate::models::peer::PeerInfo;
-use crate::models::shared::LatestBlockInfo;
 use crate::models::state::State;
 use futures::executor;
 use futures::future::{self, Ready};
-use leveldb::kv::KV;
-use leveldb::options::ReadOptions;
 use std::net::SocketAddr;
 use tarpc::context;
 
@@ -30,15 +27,10 @@ impl RPC for NeptuneRPCServer {
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
-        let databases = executor::block_on(self.state.block_databases.lock());
-        let lookup_res = databases
-            .latest_block_header
-            .get(ReadOptions::new(), DatabaseUnit())
-            .expect("Failed to get latest block info on init");
-        let block_info: Option<LatestBlockInfo> = lookup_res.map(|bytes| {
-            bincode::deserialize(&bytes).expect("Failed to deserialize latest block info")
-        });
-        match block_info {
+        let mut databases = executor::block_on(self.state.block_databases.lock());
+        let lookup_res = databases.latest_block_header.get(());
+
+        match lookup_res {
             Some(bh) => future::ready(bh.height),
             None => future::ready(0.into()),
         }
