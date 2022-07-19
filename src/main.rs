@@ -1,9 +1,13 @@
 use anyhow::Result;
+use clap::Parser;
+use neptune_core::config_models::cli_args;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-#[paw::main]
 #[tokio::main]
-pub async fn main(args: neptune_core::config_models::cli_args::Args) -> Result<()> {
+pub async fn main() -> Result<()> {
+    // Fetch the CLI arguments
+    let args: cli_args::Args = cli_args::Args::from_args();
+
     // Configure logger to use ISO-8601, of which rfc3339 is a subset.
     // install global collector configured based on RUST_LOG env var.
     // Accepted `RUST_LOG` values are `trace`, `debug`, `info`, `warn`,

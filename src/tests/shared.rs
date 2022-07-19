@@ -1,5 +1,6 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
+use clap::Parser;
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
@@ -17,7 +18,6 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use structopt::StructOpt;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
@@ -180,7 +180,7 @@ pub fn get_genesis_setup(
 
     let (_, _, latest_block_header) = get_dummy_latest_block(None);
     let (block_databases, peer_databases) = databases(network)?;
-    let cli_default_args = Arc::new(cli_args::Args::from_iter::<Vec<String>>(vec![]));
+    let cli_default_args = Arc::new(cli_args::Args::from_iter::<Vec<String>, _>(vec![]));
     let state = State {
         peer_map: peer_map.clone(),
         block_databases,

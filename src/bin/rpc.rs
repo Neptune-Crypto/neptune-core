@@ -1,29 +1,29 @@
 use anyhow::Result;
+use clap::Parser;
 use neptune_core::rpc::RPCClient;
 use std::net::SocketAddr;
-use structopt::StructOpt;
 use tarpc::{client, context, tokio_serde::formats::Json};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 enum Command {
     BlockHeight,
     GetPeerInfo,
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "neptune-core-rpc", about = "An RPC client")]
+#[derive(Debug, Parser)]
+#[clap(name = "neptune-core-rpc", about = "An RPC client")]
 struct Config {
     /// Sets the server address to connect to.
-    #[structopt(long)]
+    #[clap(long)]
     server_addr: SocketAddr,
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     command: Command,
 }
 
-#[paw::main]
 #[tokio::main]
-async fn main(args: Config) -> Result<()> {
+async fn main() -> Result<()> {
+    let args: Config = Config::from_args();
     let subscriber = FmtSubscriber::builder()
         .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
         .with_env_filter(
