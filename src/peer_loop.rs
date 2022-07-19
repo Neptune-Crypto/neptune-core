@@ -57,6 +57,9 @@ where
             "Parent not know: Requesting previous block with height {} from peer",
             parent_height
         );
+
+        // If the received block matches the block reconciliation state
+        // push it there and request its parent
         if peer_state.fork_reconciliation_blocks.is_empty()
             || peer_state
                 .fork_reconciliation_blocks
@@ -66,11 +69,26 @@ where
                 .height
                 .previous()
                 == received_block.header.height
+                && peer_state.fork_reconciliation_blocks.len() + 1
+                    < state.cli_args.max_number_of_blocks_before_syncing
         {
             peer_state.fork_reconciliation_blocks.push(*received_block);
         } else {
-            // Blocks received out of order. Give up on block resolution attempt.
-            // TODO: Consider punishing here
+            // Blocks received out of order. Or more than allowed received without
+            // going into sync mode. Give up on block resolution attempt.
+            punish(
+                state,
+                peer_address,
+                PeerSanctionReason::ForkResolutionError((
+                    received_block.header.height,
+                    peer_state.fork_reconciliation_blocks.len() as u16,
+                    received_block.hash,
+                )),
+            )?;
+            warn!(
+                "Fork reconciliation failed after receiving {} blocks",
+                peer_state.fork_reconciliation_blocks.len() + 1
+            );
             peer_state.fork_reconciliation_blocks = vec![];
             return Ok(());
         }
@@ -439,13 +457,16 @@ where
 
 #[cfg(test)]
 mod peer_loop_tests {
+    use std::sync::Arc;
+
     use anyhow::{bail, Result};
+    use clap::Parser;
     use tokio::sync::{broadcast, mpsc};
     use tracing_test::traced_test;
     use twenty_first::amount::u32s::U32s;
 
     use crate::{
-        config_models::network::Network,
+        config_models::{cli_args, network::Network},
         database::leveldb::LevelDB,
         models::{
             blockchain::{
@@ -822,6 +843,71 @@ mod peer_loop_tests {
         if !peer_state.fork_reconciliation_blocks.is_empty() {
             bail!("fork reconciliation block list must be empty after two-depth reconciliation");
         }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn prevent_ram_exhaustion_test() -> Result<()> {
+        // In this scenario the peer sends more blocks than the client allows to store in the
+        // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
+        // process as the alternative is that the program will crash because it runs out of RAM.
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            mut to_main_rx1,
+            mut state,
+            peer_map,
+        ) = get_genesis_setup(Network::Main, 1)?;
+
+        // Restrict max number of blocks held in memory to 2.
+        let mut a = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
+        a.max_number_of_blocks_before_syncing = 2;
+        state.cli_args = Arc::new(a);
+
+        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let genesis_block: Block = state.get_latest_block().await;
+        let block_1 = make_mock_block(genesis_block.clone(), None);
+        let block_2 = make_mock_block(block_1.clone(), None);
+        let block_3 = make_mock_block(block_2.clone(), None);
+        let block_4 = make_mock_block(block_3.clone(), None);
+        state.update_latest_block(Box::new(block_1)).await?;
+
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let mut peer_state = PeerState::default();
+        peer_loop::peer_loop(
+            mock,
+            from_main_rx_clone,
+            to_main_tx,
+            state.clone(),
+            &peer_address,
+            &mut peer_state,
+        )
+        .await?;
+
+        // Verify that nothing is sent to main loop.
+        match to_main_rx1.recv().await {
+            None => (),
+            _ => bail!("Peer must not handle more fork-reconciliation blocks than specified in CLI arguments"),
+        };
+
+        // Verify that peer is sanctioned for failed fork reconciliation attempt
+        assert!(
+            state
+                .get_peer_standing_from_database(peer_address.ip())
+                .await
+                .unwrap()
+                .standing
+                > 0
+        );
 
         Ok(())
     }
