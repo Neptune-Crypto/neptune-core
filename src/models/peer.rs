@@ -156,4 +156,11 @@ impl PeerState {
             fork_reconciliation_blocks: vec![],
         }
     }
+
+    pub fn new(block_height: BlockHeight) -> Self {
+        Self {
+            highest_shared_block_height: block_height,
+            fork_reconciliation_blocks: vec![],
+        }
+    }
 }

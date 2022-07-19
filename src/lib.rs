@@ -473,18 +473,20 @@ where
         .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
         .entry(peer_address)
         .or_insert(new_peer);
+    let peer_block_height = peer_handshake_data.latest_block_info.height;
 
     // Do we want to set the "syncing" status here, and do something different if we are
     // syncing?
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
+    let mut peer_state = PeerState::new(peer_block_height);
     peer_loop::peer_loop(
         peer,
         main_to_peer_thread_rx,
         peer_thread_to_main_tx,
         state,
         &peer_address,
-        &mut PeerState::default(),
+        &mut peer_state,
     )
     .await?;
 
