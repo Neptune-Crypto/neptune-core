@@ -5,3 +5,4 @@ pub mod database;
 pub mod peer;
 pub mod shared;
 pub mod state;
+pub mod utils;

@@ -5,11 +5,19 @@ use crate::models::blockchain::block::Block;
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{PeerInfo, PeerMessage, PeerSanctionReason, PeerState};
 use crate::models::state::State;
+use crate::models::utils::BoolFuture;
 use anyhow::{bail, Result};
+use core::time;
+use futures::future::MaybeDone;
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
+use futures::{future, stream};
+use futures::{pin_mut, Future};
 use std::marker::Unpin;
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::thread;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
@@ -384,7 +392,14 @@ where
 {
     let peer_info_writeback: PeerInfo;
     loop {
+        let syncing_action = BoolFuture(state.syncing.read().unwrap().to_owned());
+        let two_secs = time::Duration::from_millis(2000);
+
         select! {
+            _val = syncing_action => {
+                info!("Syncing!");
+                thread::sleep(two_secs);
+            }
             // Handle peer messages
             peer_message = peer.try_next() => {
                 match peer_message {

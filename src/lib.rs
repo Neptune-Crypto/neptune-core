@@ -477,6 +477,21 @@ where
 
     // Do we want to set the "syncing" status here, and do something different if we are
     // syncing?
+    let block_difference_in_favor_of_peer =
+        peer_block_height - own_handshake_data.latest_block_info.height;
+    let syncing_required = block_difference_in_favor_of_peer
+        > state.cli_args.max_number_of_blocks_before_syncing as i128;
+    if syncing_required {
+        info!(
+            "Peer {} reports a block height of {}. Our block height is {}. The difference exceeds the syncing threshold of {}. Entering syncing mode.",
+            peer_address,
+            peer_handshake_data.latest_block_info.height,
+            own_handshake_data.latest_block_info.height,
+            state.cli_args.max_number_of_blocks_before_syncing
+        );
+        let mut sync = state.syncing.write().unwrap();
+        *sync = true;
+    }
 
     // Enter `peer_loop` to handle incoming peer messages/messages from main thread
     let mut peer_state = PeerState::new(peer_block_height);
