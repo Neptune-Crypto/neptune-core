@@ -31,12 +31,13 @@ pub struct State {
 
     // This value is only true if instance is running an archival node
     // that is currently downloading blocks to catch up.
+    // pub sync_state: Arc<std::sync::Mutex<Option<SyncState>>>,
     pub syncing: Arc<std::sync::RwLock<bool>>,
 }
 
 impl Clone for State {
     fn clone(&self) -> Self {
-        let syncing = Arc::new(std::sync::RwLock::new(false));
+        let syncing = Arc::clone(&self.syncing);
         let peer_map = Arc::clone(&self.peer_map);
         let databases = Arc::clone(&self.block_databases);
         let peer_databases = Arc::clone(&self.peer_databases);

@@ -267,7 +267,7 @@ pub async fn main_loop(
 
             }
 
-            // Handle messages from main thread
+            // Handle messages from peer threads
             Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
                 handle_peer_thread_message(msg, state.cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx).await?
@@ -277,6 +277,10 @@ pub async fn main_loop(
             Some(main_message) = miner_to_main_rx.recv() => {
                 handle_miner_thread_message(main_message, &main_to_peer_broadcast_tx, state.clone()).await?
             }
+
+            // TODO: Add timer to request peer information from connected peers iff
+            // we are currently connected to less than `max_peers`. This should be mesage-based to/from
+            // peer thread and main thread.
             // TODO: Add signal::ctrl_c/shutdown handling here
         }
     }
