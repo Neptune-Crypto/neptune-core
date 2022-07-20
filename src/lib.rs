@@ -12,6 +12,7 @@ mod tests;
 
 use crate::database::leveldb::LevelDB;
 use crate::models::state::State;
+use crate::peer_loop::peer_loop_wrapper;
 use crate::rpc::RPC;
 use anyhow::{bail, Context, Result};
 use config_models::cli_args;
@@ -449,59 +450,13 @@ where
         }
     }
 
-    // Check if peer standing exists in database, return default if it does not.
-    let standing: PeerStanding = state
-        .peer_databases
-        .lock()
-        .await
-        .peer_standings
-        .get(peer_address.ip())
-        .unwrap_or_else(PeerStanding::default);
-
-    // Add peer to peer map
-    let new_peer = PeerInfo {
-        address: peer_address,
-        inbound: false,
-        instance_id: peer_handshake_data.instance_id,
-        last_seen: SystemTime::now(),
-        standing,
-        version: peer_handshake_data.version,
-    };
-    state
-        .peer_map
-        .lock()
-        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
-        .entry(peer_address)
-        .or_insert(new_peer);
-    let peer_block_height = peer_handshake_data.latest_block_info.height;
-
-    // Do we want to set the "syncing" status here, and do something different if we are
-    // syncing?
-    let block_difference_in_favor_of_peer =
-        peer_block_height - own_handshake_data.latest_block_info.height;
-    let syncing_required = block_difference_in_favor_of_peer
-        > state.cli_args.max_number_of_blocks_before_syncing as i128;
-    if syncing_required {
-        info!(
-            "Peer {} reports a block height of {}. Our block height is {}. The difference exceeds the syncing threshold of {}. Entering syncing mode.",
-            peer_address,
-            peer_handshake_data.latest_block_info.height,
-            own_handshake_data.latest_block_info.height,
-            state.cli_args.max_number_of_blocks_before_syncing
-        );
-        let mut sync = state.syncing.write().unwrap();
-        *sync = true;
-    }
-
-    // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    let mut peer_state = PeerState::new(peer_block_height);
-    peer_loop::peer_loop(
+    peer_loop_wrapper(
         peer,
         main_to_peer_thread_rx,
         peer_thread_to_main_tx,
         state,
-        &peer_address,
-        &mut peer_state,
+        peer_address,
+        peer_handshake_data,
     )
     .await?;
 
@@ -543,8 +498,15 @@ mod lib_tests {
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-            get_genesis_setup(Network::Main, 0)?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            state,
+            peer_map,
+            _hsd,
+        ) = get_genesis_setup(Network::Main, 0)?;
         call_peer(
             mock,
             state,

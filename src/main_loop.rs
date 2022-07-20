@@ -2,6 +2,7 @@ use crate::models::peer::{
     ConnectionRefusedReason, ConnectionStatus, PeerInfo, PeerStanding, PeerState,
 };
 use crate::models::state::State;
+use crate::peer_loop::peer_loop_wrapper;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
@@ -130,36 +131,13 @@ where
 
     // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
     info!("Connection accepted from {}", peer_address);
-    let standing: PeerStanding = match state
-        .get_peer_standing_from_database(peer_address.ip())
-        .await
-    {
-        Some(stnd) => stnd,
-        None => PeerStanding::default(),
-    };
-    let new_peer = PeerInfo {
-        address: peer_address,
-        standing,
-        inbound: true,
-        instance_id: peer_handshake_data.instance_id,
-        last_seen: SystemTime::now(),
-        version: peer_handshake_data.version,
-    };
-    state
-        .peer_map
-        .lock()
-        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
-        .entry(peer_address)
-        .or_insert(new_peer);
-
-    // Enter `peer_loop` to handle incoming peer messages/messages from main thread
-    crate::peer_loop::peer_loop(
+    peer_loop_wrapper(
         peer,
         main_to_peer_thread_rx,
         peer_thread_to_main_tx,
         state,
-        &peer_address,
-        &mut PeerState::default(),
+        peer_address,
+        peer_handshake_data,
     )
     .await?;
 
@@ -357,8 +335,15 @@ mod main_loop_tests {
             ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-            get_genesis_setup(network, 0)?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            state,
+            peer_map,
+            hsd,
+        ) = get_genesis_setup(network, 0)?;
         main_loop::answer_peer(
             mock,
             state,
@@ -392,7 +377,7 @@ mod main_loop_tests {
             )))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _, _hsd) =
             get_genesis_setup(network, 0)?;
         if let Err(_) = main_loop::answer_peer(
             mock,
@@ -427,7 +412,7 @@ mod main_loop_tests {
             )))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _, _hsd) =
             get_genesis_setup(Network::Main, 0)?;
         if let Err(_) = main_loop::answer_peer(
             mock,
@@ -463,8 +448,15 @@ mod main_loop_tests {
             )))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _peer_map) =
-            get_genesis_setup(Network::Main, 2)?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            state,
+            _peer_map,
+            _hsd,
+        ) = get_genesis_setup(Network::Main, 2)?;
         let (_, _, _latest_block_header) = get_dummy_latest_block(None);
 
         if let Err(_) = main_loop::answer_peer(
@@ -506,8 +498,15 @@ mod main_loop_tests {
             ))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, peer_map) =
-            get_genesis_setup(Network::Main, 0)?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            state,
+            peer_map,
+            _hsd,
+        ) = get_genesis_setup(Network::Main, 0)?;
         let bad_standing: PeerStanding = PeerStanding {
             standing: u16::MAX,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
@@ -554,8 +553,15 @@ mod main_loop_tests {
     #[tokio::test]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Main;
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, peer_map) =
-            get_genesis_setup(network, 1)?;
+        let (
+            _peer_broadcast_tx,
+            _from_main_rx_clone,
+            _to_main_tx,
+            _to_main_rx1,
+            state,
+            peer_map,
+            _hsd,
+        ) = get_genesis_setup(network, 1)?;
         let peer = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].clone();
         let peer_id = peer.instance_id;
 

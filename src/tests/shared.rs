@@ -162,6 +162,7 @@ pub fn get_genesis_setup(
     mpsc::Receiver<PeerThreadToMain>,
     State,
     Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo, RandomState>>>,
+    HandshakeData,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =
         broadcast::channel::<MainToPeerThread>(PEER_CHANNEL_CAPACITY);
@@ -196,6 +197,7 @@ pub fn get_genesis_setup(
         _to_main_rx1,
         state,
         peer_map,
+        get_dummy_handshake_data(network),
     ))
 }
 
