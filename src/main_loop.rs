@@ -1,10 +1,14 @@
-use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus};
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus, PeerSynchronizationState};
 use crate::models::state::State;
 use crate::peer_loop::peer_loop_wrapper;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::select;
@@ -15,6 +19,20 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::{HandshakeData, PeerMessage};
+
+struct SynchronizationState {
+    peer_sync_states: HashMap<SocketAddr, PeerSynchronizationState>,
+    last_sync_request: Option<(SystemTime, BlockHeight)>,
+}
+
+impl SynchronizationState {
+    fn default() -> Self {
+        Self {
+            peer_sync_states: HashMap::new(),
+            last_sync_request: None,
+        }
+    }
+}
 
 pub async fn get_connection_status(
     max_peers: u16,
@@ -167,12 +185,42 @@ async fn handle_miner_thread_message(
     Ok(())
 }
 
+fn enter_sync_mode(
+    own_block_tip_header: BlockHeader,
+    peer_synchronization_state: PeerSynchronizationState,
+    max_number_of_blocks_before_syncing: usize,
+) -> bool {
+    own_block_tip_header.proof_of_work_family < peer_synchronization_state.claimed_max_pow_family
+        && peer_synchronization_state.claimed_max_height - own_block_tip_header.height
+            > max_number_of_blocks_before_syncing as i128
+}
+
+fn stay_in_sync_mode(
+    own_block_tip_header: BlockHeader,
+    sync_state: &SynchronizationState,
+    max_number_of_blocks_before_syncing: usize,
+) -> bool {
+    let max_claimed_pow = sync_state
+        .peer_sync_states
+        .values()
+        .max_by_key(|x| x.claimed_max_pow_family);
+    match max_claimed_pow {
+        None => false, // we lost all connections. Can't sync.
+        Some(max_claim) => {
+            own_block_tip_header.proof_of_work_family < max_claim.claimed_max_pow_family
+                && max_claim.claimed_max_height - own_block_tip_header.height
+                    > max_number_of_blocks_before_syncing as i128
+        }
+    }
+}
+
 async fn handle_peer_thread_message(
     msg: PeerThreadToMain,
     mine: bool,
     main_to_miner_tx: &watch::Sender<MainToMiner>,
     state: State,
     main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
+    synchronization_state: &mut SynchronizationState,
 ) -> Result<()> {
     debug!("Received message sent to main thread.");
     match msg {
@@ -180,7 +228,7 @@ async fn handle_peer_thread_message(
             let last_block = blocks.last().unwrap().to_owned();
             {
                 let mut databases = state.block_databases.lock().await;
-                let mut block_header = state
+                let mut previous_block_header = state
                     .latest_block_header
                     .lock()
                     .expect("Lock on block header must succeed");
@@ -188,10 +236,19 @@ async fn handle_peer_thread_message(
                 // The peer threads also check this condition, if block is more canonical than current
                 // tip, but we have to check it again since the block update might have already been applied
                 // through a message from another peer.
-                let block_is_new =
-                    block_header.proof_of_work_family < last_block.header.proof_of_work_family;
+                let block_is_new = previous_block_header.proof_of_work_family
+                    < last_block.header.proof_of_work_family;
                 if !block_is_new {
                     return Ok(());
+                }
+
+                // Get out of sync mode if needed
+                if state.syncing.read().unwrap().to_owned() {
+                    *state.syncing.write().unwrap() = stay_in_sync_mode(
+                        last_block.header.clone(),
+                        synchronization_state,
+                        state.cli_args.max_number_of_blocks_before_syncing,
+                    );
                 }
 
                 // When receiving a block from a peer thread, we assume it is verified.
@@ -200,13 +257,13 @@ async fn handle_peer_thread_message(
                     main_to_miner_tx.send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                 }
 
-                // Store block in database
+                // Store blocks in database
                 for block in blocks {
                     debug!("Storing block {:?} in database", block.hash);
                     state.update_latest_block_with_block_header_mutexguard(
                         Box::new(block),
                         &mut databases,
-                        &mut block_header,
+                        &mut previous_block_header,
                     )?;
                 }
             }
@@ -217,6 +274,35 @@ async fn handle_peer_thread_message(
         }
         PeerThreadToMain::NewTransaction(_txs) => {
             error!("Unimplemented txs msg received");
+        }
+        PeerThreadToMain::PeerMaxBlockHeight((
+            socket_addr,
+            claimed_max_height,
+            claimed_max_pow_family,
+        )) => {
+            let claimed_state =
+                PeerSynchronizationState::new(claimed_max_height, claimed_max_pow_family);
+            synchronization_state
+                .peer_sync_states
+                .insert(socket_addr, claimed_state);
+
+            // Check if synchronization mode should be activated. Synchronization mode is entered if
+            // PoW family exceeds our tip and if the height difference is beyond a threshold value.
+            // TODO: If we are not checking the PoW claims of the tip this can be abused by forcing
+            // the client into synchronization mode.
+            let our_block_tip_header: BlockHeader =
+                state.latest_block_header.lock().unwrap().to_owned();
+            if enter_sync_mode(
+                our_block_tip_header,
+                claimed_state,
+                state.cli_args.max_number_of_blocks_before_syncing,
+            ) {
+                info!(
+                    "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
+                    socket_addr, claimed_max_height, claimed_max_pow_family
+                );
+                *state.syncing.write().unwrap() = true;
+            }
         }
     }
 
@@ -235,6 +321,7 @@ pub async fn main_loop(
     main_to_miner_tx: watch::Sender<MainToMiner>,
 ) -> Result<()> {
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
+    let mut sync_state = SynchronizationState::default();
     loop {
         select! {
             // The second item contains the IP and port of the new connection.
@@ -267,7 +354,7 @@ pub async fn main_loop(
             // Handle messages from peer threads
             Some(msg) = peer_thread_to_main_rx.recv() => {
                 info!("Received message sent to main thread.");
-                handle_peer_thread_message(msg, state.cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx).await?
+                handle_peer_thread_message(msg, state.cli_args.mine, &main_to_miner_tx, state.clone(), &main_to_peer_broadcast_tx, &mut sync_state).await?
             }
 
             // Handle messages from miner thread

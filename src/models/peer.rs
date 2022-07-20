@@ -1,12 +1,11 @@
-use super::{
-    blockchain::{
-        block::{
-            block_header::PROOF_OF_WORK_COUNT_U32_SIZE, block_height::BlockHeight,
-            transfer_block::TransferBlock, Block,
-        },
-        digest::Digest,
+use super::blockchain::{
+    block::{
+        block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE},
+        block_height::BlockHeight,
+        transfer_block::TransferBlock,
+        Block,
     },
-    shared::LatestBlockInfo,
+    digest::Digest,
 };
 use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
@@ -18,6 +17,7 @@ use twenty_first::amount::u32s::U32s;
 
 const INVALID_BLOCK_SEVERITY: u16 = 10;
 const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
+const SYNCHRONIZATION_TIMEOUT_SEVERITY: u16 = u16::MAX;
 const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,6 +35,32 @@ pub enum PeerSanctionReason {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
     ForkResolutionError((BlockHeight, u16, Digest)),
+    SynchronizationTimeout,
+}
+
+/// Used by main thread to manage synchronizations/catch-up. Main thread has
+/// a value of this type for each connected peer.
+
+#[derive(Debug, Clone, Copy)]
+pub struct PeerSynchronizationState {
+    pub claimed_max_height: BlockHeight,
+    pub claimed_max_pow_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    pub synchronization_start: SystemTime,
+    pub last_request_received: Option<SystemTime>,
+}
+
+impl PeerSynchronizationState {
+    pub fn new(
+        claimed_max_height: BlockHeight,
+        claimed_max_pow_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    ) -> Self {
+        Self {
+            claimed_max_height,
+            claimed_max_pow_family,
+            synchronization_start: SystemTime::now(),
+            last_request_received: None,
+        }
+    }
 }
 
 impl PeerSanctionReason {
@@ -45,6 +71,7 @@ impl PeerSanctionReason {
             PeerSanctionReason::ForkResolutionError((_height, count, _digest)) => {
                 FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK * count
             }
+            PeerSanctionReason::SynchronizationTimeout => SYNCHRONIZATION_TIMEOUT_SEVERITY,
         }
     }
 }
@@ -136,6 +163,8 @@ pub enum PeerMessage {
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
+    BlockRequestBatch(BlockHeight, usize),
+    BlockResponseBatch(Vec<Box<TransferBlock>>),
     NewTransaction(i32),
     PeerListRequest,
     PeerListResponse(Vec<SocketAddr>),

@@ -251,6 +251,18 @@ where
             }
             Ok(false)
         }
+        PeerMessage::BlockResponseBatch(t_blocks) => {
+            debug!("Got block response batch");
+
+            // Verify that we are in fact in syncing mode
+            if !state.syncing.read().unwrap().to_owned() {
+                warn!("Received a batch of blocks without being in syncing mode");
+                // TODO: consider punishing here
+                return Ok(false);
+            }
+
+            Ok(false)
+        }
         PeerMessage::BlockNotification(block_notification) => {
             debug!(
                 "Got BlockNotification of height {}",
@@ -332,11 +344,15 @@ where
     }
 }
 
+/// Handle message from main thread. The boolean return value indicates if
+/// the connection should be closed.
 async fn handle_main_thread_message<S>(
     msg: MainToPeerThread,
+    state: &State,
+    peer_address: &SocketAddr,
     peer: &mut S,
     peer_state_info: &mut PeerState,
-) -> Result<()>
+) -> Result<bool>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
     <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
@@ -347,14 +363,15 @@ where
             // If this client found a block, we need to share it immediately
             // to reduce the risk that someone else finds another one and shares
             // it faster.
-            info!("peer_loop got NewBlockFromMiner message from main");
+            debug!("peer_loop got NewBlockFromMiner message from main");
             let new_block_height = block.header.height;
             let t_block: Box<TransferBlock> = Box::new((*block).into());
             peer.send(PeerMessage::Block(t_block)).await?;
             peer_state_info.highest_shared_block_height = new_block_height;
+            Ok(false)
         }
         MainToPeerThread::Block(block) => {
-            info!("NewBlock message from main");
+            debug!("NewBlock message from main");
             let new_block_height = block.header.height;
             if new_block_height > peer_state_info.highest_shared_block_height {
                 debug!("Sending PeerMessage::BlockNotification");
@@ -362,41 +379,50 @@ where
                 peer.send(PeerMessage::BlockNotification((*block).into()))
                     .await?;
             }
+            Ok(false)
         }
         MainToPeerThread::Transaction(nt) => {
-            info!("peer_loop got NetTransaction message from main");
+            debug!("peer_loop got Transaction message from main");
             peer.send(PeerMessage::NewTransaction(nt)).await?;
+            Ok(false)
+        }
+        MainToPeerThread::RequestBlockBatch(block_height, peer_addr_target) => {
+            // Only ask one of the peers about the batch of blocks
+            if peer_addr_target != *peer_address {
+                return Ok(false);
+            }
+
+            debug!("peer_loop got RequestBlockBatch message from main");
+
+            let request_batch_size = std::cmp::min(
+                STANDARD_BLOCK_BATCH_SIZE,
+                state.cli_args.max_number_of_blocks_before_syncing,
+            );
+
+            peer.send(PeerMessage::BlockRequestBatch(
+                block_height,
+                request_batch_size,
+            ))
+            .await?;
+
+            Ok(false)
+        }
+        MainToPeerThread::PeerSynchronizationTimeout(ip_address) => {
+            if peer_address.ip() != ip_address {
+                return Ok(false);
+            }
+
+            punish(
+                state,
+                peer_address,
+                PeerSanctionReason::SynchronizationTimeout,
+            )?;
+
+            // if the synchronization attempt failed with this peer, then we close the
+            // connection
+            Ok(true)
         }
     }
-
-    Ok(())
-}
-
-async fn request_a_batch_of_blocks<S>(peer: &mut S, state: &State) -> Result<()>
-where
-    S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
-    <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
-    <S as TryStream>::Error: std::error::Error,
-{
-    // I'm afraid locking the block header value in state could lead to a deadlock
-    // as we're already holding a lock on the sync value in state. Therefore we instead
-    // request a lock on this in a non-blocking manner. If we can't get that lock we just
-    // exit this function and try again later.
-    let latest_bh: BlockHeight = match state.latest_block_header.try_lock() {
-        Ok(lock) => lock.height,
-        Err(_) => return Ok(()),
-    };
-    let request_batch_size = std::cmp::min(
-        STANDARD_BLOCK_BATCH_SIZE,
-        state.cli_args.max_number_of_blocks_before_syncing,
-    );
-    peer.send(PeerMessage::BlockRequestBatch(
-        latest_bh,
-        request_batch_size,
-    ))
-    .await?;
-
-    Ok(())
 }
 
 /// Loop for the peer threads. Awaits either a message from the peer over TCP,
@@ -450,9 +476,23 @@ where
 
             // Handle messages from main thread
             main_msg_res = from_main_rx.recv() => {
-                match main_msg_res {
-                    Ok(main_msg) => handle_main_thread_message(main_msg, &mut peer, peer_state_info).await?,
+                let close_connection = match main_msg_res {
+                    Ok(main_msg) => match handle_main_thread_message(main_msg, state, peer_address, &mut peer, peer_state_info).await {
+                        Ok(close) => close,
+
+                        // If the handler of main-thread messages returns error, the connection is closed.
+                        // This might indicate that the peer got banned.
+                        Err(err) => {
+                            warn!("handle_main_thread_message returned an eror: {}", err);
+                            true
+                        },
+                    }
                     Err(e) => panic!("Failed to read from main loop: {}", e),
+                };
+
+                if close_connection {
+                    warn!("handle_main_thread_message is closing the connection to {}", peer_address);
+                    break;
                 }
             }
         }
@@ -504,10 +544,16 @@ where
         .entry(peer_address)
         .or_insert(new_peer);
 
-    // TODO: Send message to main about peers claimed max block height
     // This message is used to determine if we are to enter synchronization mode.
+    to_main_tx
+        .send(PeerThreadToMain::PeerMaxBlockHeight((
+            peer_address,
+            peer_handshake_data.tip_header.height,
+            peer_handshake_data.tip_header.proof_of_work_family,
+        )))
+        .await?;
 
-    let mut peer_state = PeerState::new(peer_handshake_data.latest_block_info.height);
+    let mut peer_state = PeerState::new(peer_handshake_data.tip_header.height);
     let _res = peer_loop(
         peer,
         from_main_rx,
@@ -680,7 +726,13 @@ mod peer_loop_tests {
         )
         .await?;
 
-        // Verify that no message was sent to main loop
+        // Verify that max peer height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
+
+        // Verify that no futher message was sent to main loop
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
             _ => bail!("Block notification must not be sent for block with invalid PoW"),
@@ -747,7 +799,13 @@ mod peer_loop_tests {
         )
         .await?;
 
-        // Verify that no message was sent to main loop
+        // Verify that max peer height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
+
+        // Verify that no futher message was sent to main loop
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
             _ => bail!("Block notification must not be sent for block with invalid PoW"),
@@ -815,7 +873,11 @@ mod peer_loop_tests {
         )
         .await?;
 
-        // Verify that no message was sent to main loop
+        // Verify that no block was sent to main loop
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
             _ => bail!("Block notification must not be sent for block with invalid PoW"),
@@ -862,7 +924,13 @@ mod peer_loop_tests {
         )
         .await?;
 
-        // Verify that a message was sent to `main_loop`?
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
+
+        // Verify that a block was sent to `main_loop`
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(_block)) => (),
             _ => bail!("Did not find msg sent to main thread"),
@@ -910,6 +978,12 @@ mod peer_loop_tests {
             hsd,
         )
         .await?;
+
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
@@ -976,7 +1050,13 @@ mod peer_loop_tests {
         )
         .await?;
 
-        // Verify that nothing is sent to main loop.
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
+
+        // Verify that no block is sent to main loop.
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
             _ => bail!("Peer must not handle more fork-reconciliation blocks than specified in CLI arguments"),
@@ -1036,6 +1116,12 @@ mod peer_loop_tests {
             hsd,
         )
         .await?;
+
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
@@ -1097,6 +1183,12 @@ mod peer_loop_tests {
             hsd,
         )
         .await?;
+
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
@@ -1177,6 +1269,12 @@ mod peer_loop_tests {
         )
         .await?;
 
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
+
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
                 if blocks[0].hash != block_2.hash {
@@ -1250,6 +1348,12 @@ mod peer_loop_tests {
             hsd,
         )
         .await?;
+
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::PeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
