@@ -37,7 +37,6 @@ use std::marker::Unpin;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
@@ -50,7 +49,7 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
-use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerStanding, PeerState};
+use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerStanding};
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";

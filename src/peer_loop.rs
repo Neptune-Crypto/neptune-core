@@ -6,20 +6,12 @@ use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding, PeerState,
 };
-use crate::models::state::{State, SyncState};
-use crate::models::utils::BoolFuture;
+use crate::models::state::State;
 use anyhow::{bail, Result};
-use core::time;
-use futures::future::MaybeDone;
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
-use futures::{future, stream};
-use futures::{pin_mut, Future};
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::thread;
 use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
@@ -434,7 +426,7 @@ where
                                 break;
                             }
                             Some(peer_msg) => {
-                                let close_connection: bool = match handle_peer_message(peer_msg, &state, peer_address, &mut peer, peer_state_info, &to_main_tx).await {
+                                let close_connection: bool = match handle_peer_message(peer_msg, state, peer_address, &mut peer, peer_state_info, &to_main_tx).await {
                                     Ok(close) => close,
                                     Err(err) => {
                                         warn!("{}. Closing connection.", err);
@@ -553,7 +545,7 @@ mod peer_loop_tests {
     use anyhow::{bail, Result};
     use clap::Parser;
     use tokio::sync::{
-        broadcast::{self, error::TryRecvError},
+        broadcast::{self},
         mpsc,
     };
     use tracing_test::traced_test;
@@ -568,7 +560,7 @@ mod peer_loop_tests {
                 digest::Hashable,
             },
             channel::{MainToPeerThread, PeerThreadToMain},
-            peer::{PeerMessage, PeerSanctionReason, PeerState},
+            peer::{PeerMessage, PeerSanctionReason},
         },
         peer_loop,
         tests::shared::{get_genesis_setup, make_mock_block, Action, Mock},

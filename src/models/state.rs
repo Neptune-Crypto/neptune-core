@@ -31,7 +31,6 @@ pub struct State {
 
     // This value is only true if instance is running an archival node
     // that is currently downloading blocks to catch up.
-    // pub sync_state: Arc<std::sync::Mutex<Option<SyncState>>>,
     pub syncing: Arc<std::sync::RwLock<bool>>,
 }
 

@@ -1,13 +1,10 @@
-use crate::models::peer::{
-    ConnectionRefusedReason, ConnectionStatus, PeerInfo, PeerStanding, PeerState,
-};
+use crate::models::peer::{ConnectionRefusedReason, ConnectionStatus};
 use crate::models::state::State;
 use crate::peer_loop::peer_loop_wrapper;
 use anyhow::{bail, Result};
 use futures::sink::SinkExt;
 use futures::stream::TryStreamExt;
 use std::net::SocketAddr;
-use std::time::SystemTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::select;
@@ -346,7 +343,7 @@ mod main_loop_tests {
             _to_main_rx1,
             state,
             peer_map,
-            hsd,
+            _hsd,
         ) = get_genesis_setup(network, 0)?;
         main_loop::answer_peer(
             mock,

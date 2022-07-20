@@ -150,13 +150,6 @@ pub struct PeerState {
 }
 
 impl PeerState {
-    pub fn default() -> Self {
-        Self {
-            highest_shared_block_height: 0.into(),
-            fork_reconciliation_blocks: vec![],
-        }
-    }
-
     pub fn new(block_height: BlockHeight) -> Self {
         Self {
             highest_shared_block_height: block_height,
