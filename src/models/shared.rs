@@ -28,9 +28,3 @@ impl From<Block> for LatestBlockInfo {
         }
     }
 }
-
-impl LatestBlockInfo {
-    pub fn new(hash: Digest, height: BlockHeight) -> Self {
-        LatestBlockInfo { hash, height }
-    }
-}

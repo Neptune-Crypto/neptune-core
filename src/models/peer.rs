@@ -89,7 +89,7 @@ impl PeerStanding {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HandshakeData {
-    pub latest_block_info: LatestBlockInfo,
+    pub tip_header: BlockHeader,
     pub listen_address: Option<SocketAddr>,
     pub network: Network,
     pub instance_id: u128,

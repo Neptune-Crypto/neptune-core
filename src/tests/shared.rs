@@ -133,7 +133,7 @@ pub fn get_dummy_latest_block(
 pub fn get_dummy_handshake_data(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
-        latest_block_info: get_dummy_latest_block(None).1,
+        tip_header: get_dummy_latest_block(None).2.lock().unwrap().to_owned(),
         listen_address: Some(get_dummy_address()),
         network,
         version: get_dummy_version(),

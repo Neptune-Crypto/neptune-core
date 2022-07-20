@@ -261,7 +261,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Create handshake data which is used when connecting to peers
     let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.peer_port);
     let own_handshake_data = HandshakeData {
-        latest_block_info: (&latest_block).into(),
+        tip_header: latest_block.header.clone(),
         listen_address: Some(listen_addr_socket),
         network: cli_args.network,
         instance_id: rand::random(),
