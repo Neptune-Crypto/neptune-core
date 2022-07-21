@@ -18,11 +18,13 @@ use twenty_first::amount::u32s::U32s;
 const INVALID_BLOCK_SEVERITY: u16 = 10;
 const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
 const SYNCHRONIZATION_TIMEOUT_SEVERITY: u16 = u16::MAX;
+const FLOODED_PEER_LIST_RESPONSE_SEVERITY: u16 = 2;
 const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerInfo {
-    pub address: SocketAddr,
+    pub address_for_incoming_connections: Option<SocketAddr>,
+    pub connected_address: SocketAddr,
     pub instance_id: u128,
     pub inbound: bool,
     pub last_seen: SystemTime,
@@ -36,6 +38,7 @@ pub enum PeerSanctionReason {
     DifferentGenesis,
     ForkResolutionError((BlockHeight, u16, Digest)),
     SynchronizationTimeout,
+    FloodPeerListResponse,
 }
 
 /// Used by main thread to manage synchronizations/catch-up. Main thread has
@@ -72,6 +75,7 @@ impl PeerSanctionReason {
                 FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK * count
             }
             PeerSanctionReason::SynchronizationTimeout => SYNCHRONIZATION_TIMEOUT_SEVERITY,
+            PeerSanctionReason::FloodPeerListResponse => FLOODED_PEER_LIST_RESPONSE_SEVERITY,
         }
     }
 }

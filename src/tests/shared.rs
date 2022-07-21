@@ -99,12 +99,13 @@ pub fn get_dummy_address() -> SocketAddr {
 
 pub fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
     PeerInfo {
-        address,
+        connected_address: address,
         inbound: false,
         instance_id: rand::random(),
         last_seen: SystemTime::now(),
         standing: PeerStanding::default(),
         version: get_dummy_version(),
+        address_for_incoming_connections: Some(address),
     }
 }
 

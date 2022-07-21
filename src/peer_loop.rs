@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
+const MAX_PEER_LIST_LENGTH: usize = 1000;
 
 pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReason) -> Result<()> {
     warn!("Sanctioning peer {} for {:?}", peer_address.ip(), reason);
@@ -198,14 +199,36 @@ where
         }
         PeerMessage::PeerListRequest => {
             debug!("Got PeerListRequest");
-            let peer_addresses = state
+
+            // We are interested in the address on which peers accept ingoing connections,
+            // not in the address in which they are connected to us. We are only interested in
+            // peers that accept incoming connections.
+            let peer_addresses: Vec<SocketAddr> = state
                 .peer_map
                 .lock()
                 .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
-                .keys()
-                .cloned()
+                .values()
+                .filter(|peer_info| peer_info.address_for_incoming_connections.is_some())
+                .take(MAX_PEER_LIST_LENGTH) // limit length of response
+                .map(|peer_info| peer_info.address_for_incoming_connections.unwrap())
                 .collect();
             peer.send(PeerMessage::PeerListResponse(peer_addresses))
+                .await?;
+            Ok(false)
+        }
+        PeerMessage::PeerListResponse(peers) => {
+            if peers.len() > MAX_PEER_LIST_LENGTH {
+                punish(
+                    state,
+                    peer_address,
+                    PeerSanctionReason::FloodPeerListResponse,
+                )?;
+            }
+            to_main_tx
+                .send(PeerThreadToMain::PeerDiscoveryAnswer((
+                    peers,
+                    *peer_address,
+                )))
                 .await?;
             Ok(false)
         }
@@ -422,6 +445,15 @@ where
             // connection
             Ok(true)
         }
+        MainToPeerThread::MakePeerDiscoveryRequest => {
+            peer.send(PeerMessage::PeerListRequest).await?;
+            Ok(false)
+        }
+        MainToPeerThread::Disconnect(socket_addr) => {
+            // Disconnect from this peer if its address matches that which the main
+            // thread requested to disconnected from.
+            Ok(socket_addr == *peer_address)
+        }
     }
 }
 
@@ -513,6 +545,7 @@ pub async fn peer_loop_wrapper<S>(
     state: State,
     peer_address: SocketAddr,
     peer_handshake_data: HandshakeData,
+    inbound_connection: bool,
 ) -> Result<()>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
@@ -530,17 +563,21 @@ where
 
     // Add peer to peer map
     let new_peer = PeerInfo {
-        address: peer_address,
-        inbound: false,
+        address_for_incoming_connections: peer_handshake_data.listen_address,
+        connected_address: peer_address,
+        inbound: inbound_connection,
         instance_id: peer_handshake_data.instance_id,
         last_seen: SystemTime::now(),
         standing,
         version: peer_handshake_data.version,
     };
+
+    // There is potential for a race-condition in the peer_map here, as we've previously
+    // counted the number of entries but
     state
         .peer_map
         .lock()
-        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
+        .unwrap()
         .entry(peer_address)
         .or_insert(new_peer);
 
@@ -629,7 +666,8 @@ mod peer_loop_tests {
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
 
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
         peer_loop::peer_loop_wrapper(
             mock,
@@ -638,6 +676,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -660,7 +699,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::PeerListRequest),
@@ -679,6 +719,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -704,7 +745,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
         // since that block is hardcoded.
@@ -723,6 +765,7 @@ mod peer_loop_tests {
             state.clone(),
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -766,7 +809,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
 
         // Make a with hash above what the implied threshold from
@@ -796,6 +840,7 @@ mod peer_loop_tests {
             state.clone(),
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -848,7 +893,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
 
         let block_1 = make_mock_block(genesis_block, None);
@@ -870,6 +916,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            false,
         )
         .await?;
 
@@ -904,7 +951,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
 
         let mock = Mock::new(vec![
@@ -921,6 +969,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            false,
         )
         .await?;
 
@@ -957,7 +1006,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
@@ -976,6 +1026,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -1025,7 +1076,8 @@ mod peer_loop_tests {
         a.max_number_of_blocks_before_syncing = 2;
         state.cli_args = Arc::new(a);
 
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
@@ -1047,6 +1099,7 @@ mod peer_loop_tests {
             state.clone(),
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -1090,7 +1143,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
@@ -1114,6 +1168,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -1159,7 +1214,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
@@ -1181,6 +1237,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
@@ -1228,7 +1285,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
@@ -1266,6 +1324,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            false,
         )
         .await?;
 
@@ -1313,7 +1372,8 @@ mod peer_loop_tests {
             peer_map,
             hsd,
         ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].address;
+        let peer_address =
+            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
         let genesis_block: Block = state.get_latest_block().await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
@@ -1346,6 +1406,7 @@ mod peer_loop_tests {
             state,
             peer_address,
             hsd,
+            true,
         )
         .await?;
 
