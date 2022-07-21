@@ -1,5 +1,6 @@
 #![deny(clippy::shadow_unrelated)]
 pub mod config_models;
+mod connect_to_peers;
 mod database;
 mod main_loop;
 mod mine_loop;
@@ -10,9 +11,9 @@ pub mod rpc;
 #[cfg(test)]
 mod tests;
 
+use crate::connect_to_peers::call_peer_wrapper;
 use crate::database::leveldb::LevelDB;
 use crate::models::state::State;
-use crate::peer_loop::peer_loop_wrapper;
 use crate::rpc::RPC;
 use anyhow::{bail, Context, Result};
 use config_models::cli_args;
@@ -20,8 +21,6 @@ use config_models::network::Network;
 use database::rusty::RustyLevelDB;
 use directories::ProjectDirs;
 use futures::future;
-use futures::sink::SinkExt;
-use futures::stream::TryStreamExt;
 use futures::StreamExt;
 use models::blockchain::block::block_header::BlockHeader;
 use models::blockchain::block::block_height::BlockHeight;
@@ -31,25 +30,20 @@ use models::blockchain::wallet::Wallet;
 use models::database::{BlockDatabases, PeerDatabases};
 use models::peer::PeerInfo;
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::fs;
-use std::marker::Unpin;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
-use tokio_serde::SymmetricallyFramed;
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, info, instrument};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
-use crate::models::peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerStanding};
+use crate::models::peer::{HandshakeData, PeerStanding};
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -356,172 +350,4 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         main_to_miner_tx,
     )
     .await
-}
-
-#[instrument]
-pub async fn call_peer_wrapper(
-    peer_address: std::net::SocketAddr,
-    state: State,
-    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
-    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    own_handshake_data: &HandshakeData,
-) {
-    debug!("Attempting to initiate connection");
-    match tokio::net::TcpStream::connect(peer_address).await {
-        Err(e) => {
-            warn!("Failed to establish connection: {}", e);
-        }
-        Ok(stream) => {
-            match call_peer(
-                stream,
-                state,
-                peer_address,
-                main_to_peer_thread_rx,
-                peer_thread_to_main_tx,
-                own_handshake_data,
-            )
-            .await
-            {
-                Ok(()) => (),
-                Err(e) => error!("An error occurred: {}. Connection closing", e),
-            }
-        }
-    };
-
-    info!("Connection closing");
-}
-
-#[instrument]
-pub async fn call_peer<S>(
-    stream: S,
-    state: State,
-    peer_address: std::net::SocketAddr,
-    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
-    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    own_handshake_data: &HandshakeData,
-) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Debug + Unpin,
-{
-    info!("Established connection");
-
-    // Delimit frames using a length header
-    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
-
-    // Serialize frames with bincode
-    let mut peer: SymmetricallyFramed<
-        Framed<S, LengthDelimitedCodec>,
-        PeerMessage,
-        Bincode<PeerMessage, PeerMessage>,
-    > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
-
-    // Make Neptune handshake
-    peer.send(PeerMessage::Handshake((
-        Vec::from(MAGIC_STRING_REQUEST),
-        own_handshake_data.to_owned(),
-    )))
-    .await?;
-    let peer_handshake_data: HandshakeData = match peer.try_next().await? {
-        Some(PeerMessage::Handshake((v, hsd))) if &v[..] == MAGIC_STRING_RESPONSE => {
-            if hsd.network != own_handshake_data.network {
-                bail!(
-                    "Cannot connect with {}: Peer runs {}, this client runs {}.",
-                    peer_address,
-                    hsd.network,
-                    own_handshake_data.network,
-                );
-            }
-            debug!("Got correct magic value response!");
-            hsd
-        }
-        v => {
-            bail!("Expected magic value, got {:?}", v);
-        }
-    };
-
-    match peer.try_next().await? {
-        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => (),
-        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(reason))) => {
-            bail!("Connection attempt refused. Reason: {:?}", reason);
-        }
-        _ => {
-            bail!("Got invalid connection status response");
-        }
-    }
-
-    peer_loop_wrapper(
-        peer,
-        main_to_peer_thread_rx,
-        peer_thread_to_main_tx,
-        state,
-        peer_address,
-        peer_handshake_data,
-    )
-    .await?;
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod lib_tests {
-    use anyhow::{bail, Result};
-    use tokio_test::io::Builder;
-    use tracing_test::traced_test;
-
-    use crate::{
-        call_peer,
-        config_models::network::Network,
-        models::peer::{ConnectionStatus, PeerMessage},
-        tests::shared::{get_dummy_address, get_dummy_handshake_data, get_genesis_setup, to_bytes},
-        MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
-    };
-
-    #[traced_test]
-    #[tokio::test]
-    async fn test_outgoing_connection_succeed() -> Result<()> {
-        let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data(network);
-        let own_handshake = get_dummy_handshake_data(network);
-        let mock = Builder::new()
-            .write(&to_bytes(&PeerMessage::Handshake((
-                MAGIC_STRING_REQUEST.to_vec(),
-                own_handshake.clone(),
-            )))?)
-            .read(&to_bytes(&PeerMessage::Handshake((
-                MAGIC_STRING_RESPONSE.to_vec(),
-                other_handshake,
-            )))?)
-            .read(&to_bytes(&PeerMessage::ConnectionStatus(
-                ConnectionStatus::Accepted,
-            ))?)
-            .read(&to_bytes(&PeerMessage::Bye)?)
-            .build();
-
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            _to_main_rx1,
-            state,
-            peer_map,
-            _hsd,
-        ) = get_genesis_setup(Network::Main, 0)?;
-        call_peer(
-            mock,
-            state,
-            get_dummy_address(),
-            from_main_rx_clone,
-            to_main_tx,
-            &own_handshake,
-        )
-        .await?;
-
-        // Verify that peer map is empty after connection has been closed
-        match peer_map.lock().unwrap().keys().len() {
-            0 => (),
-            _ => bail!("Incorrect number of maps in peer map"),
-        };
-
-        Ok(())
-    }
 }
