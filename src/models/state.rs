@@ -84,8 +84,8 @@ impl ArchivalState {
 
 #[derive(Debug, Clone)]
 pub struct BlockchainState {
-    pub light_state: LightState,
     pub archival_state: Option<ArchivalState>,
+    pub light_state: LightState,
 }
 
 type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;

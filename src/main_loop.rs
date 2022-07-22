@@ -165,12 +165,6 @@ async fn handle_peer_thread_message(
             let last_block = blocks.last().unwrap().to_owned();
             {
                 // Acquire locks for blockchain state in correct order to avoid deadlocks
-                let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = state
-                    .chain
-                    .light_state
-                    .latest_block_header
-                    .lock()
-                    .expect("Lock on block header must succeed");
                 let mut databases: tokio::sync::MutexGuard<BlockDatabases> = state
                     .chain
                     .archival_state
@@ -179,6 +173,12 @@ async fn handle_peer_thread_message(
                     .block_databases
                     .lock()
                     .await;
+                let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = state
+                    .chain
+                    .light_state
+                    .latest_block_header
+                    .lock()
+                    .expect("Lock on block header must succeed");
 
                 // The peer threads also check this condition, if block is more canonical than current
                 // tip, but we have to check it again since the block update might have already been applied
