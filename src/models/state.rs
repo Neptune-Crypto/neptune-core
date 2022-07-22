@@ -1,62 +1,55 @@
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::Block;
-use super::blockchain::digest::{Digest, RESCUE_PRIME_DIGEST_SIZE_IN_BYTES};
+use super::blockchain::digest::Digest;
 use super::database::{BlockDatabases, PeerDatabases};
-use super::peer::{self, PeerStanding};
+use super::peer::{self, HandshakeData, PeerStanding};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
+use crate::VERSION;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use tokio::sync::Mutex as TokioMutex;
 
-/// State handles all state of the client that is shared across threads.
-/// The policy used here is that only the main thread should update the
-/// state, all other threads are only allowed to read from the state.
-#[derive(Debug)]
-pub struct State {
+#[derive(Debug, Clone)]
+pub struct LightState {
     // From the documentation of `tokio::sync::Mutex`:
     // "If the value behind the mutex is just data, it's usually appropriate to use a blocking mutex
     // such as the one in the standard library or (...)"
-    pub latest_block_header: Arc<std::sync::Mutex<BlockHeader>>,
-    pub peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, peer::PeerInfo>>>,
-
-    // Since this is a database, we use the tokio Mutex here.
-    pub block_databases: Arc<tokio::sync::Mutex<BlockDatabases>>,
-
-    // Since this is a database, we use the tokio Mutex here.
-    pub peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>>,
-
-    pub cli_args: Arc<cli_args::Args>,
-
-    // This value is only true if instance is running an archival node
-    // that is currently downloading blocks to catch up.
-    pub syncing: Arc<std::sync::RwLock<bool>>,
+    pub latest_block_header: Arc<StdMutex<BlockHeader>>,
 }
 
-impl Clone for State {
-    fn clone(&self) -> Self {
-        let syncing = Arc::clone(&self.syncing);
-        let peer_map = Arc::clone(&self.peer_map);
-        let databases = Arc::clone(&self.block_databases);
-        let peer_databases = Arc::clone(&self.peer_databases);
-        let block_head_header = Arc::clone(&self.latest_block_header);
-        let cli_args = Arc::clone(&self.cli_args);
+impl LightState {
+    // TODO: Consider renaming to `new_threadsafe()` to reflect it does not return a `Self`.
+    pub fn new(initial_latest_block_header: BlockHeader) -> Self {
         Self {
-            latest_block_header: block_head_header,
-            peer_map,
-            block_databases: databases,
-            peer_databases,
-            syncing,
-            cli_args,
+            latest_block_header: Arc::new(StdMutex::new(initial_latest_block_header)),
         }
+    }
+
+    pub fn get_latest_block_header(&self) -> BlockHeader {
+        self.latest_block_header.lock().unwrap().clone()
     }
 }
 
-impl State {
+#[derive(Clone, Debug)]
+pub struct ArchivalState {
+    // Since this is a database, we use the tokio Mutex here.
+    pub block_databases: Arc<TokioMutex<BlockDatabases>>,
+}
+
+impl ArchivalState {
+    pub fn new(initial_block_databases: Arc<TokioMutex<BlockDatabases>>) -> Self {
+        Self {
+            block_databases: initial_block_databases,
+        }
+    }
+
     /// Return latest block from database, or genesis block if no other block
     /// is known.
-    pub async fn get_latest_block(&mut self) -> Block {
+    pub async fn get_latest_block(&self) -> Block {
         let mut dbs = self.block_databases.lock().await;
         let lookup_res_info: Option<Block> =
             BlockDatabases::get_latest_block(&mut dbs).expect("Failed to read from DB");
@@ -69,7 +62,7 @@ impl State {
 
     // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
-        let block = self
+        let maybe_block = self
             .block_databases
             .lock()
             .await
@@ -85,56 +78,65 @@ impl State {
                 }
             });
 
-        Ok(block)
+        Ok(maybe_block)
     }
+}
 
-    // Method for updating state's block header and database entry. A lock must be held on bloc
-    // header by the caller
-    pub fn update_latest_block_with_block_header_mutexguard(
-        &self,
-        new_block: Box<Block>,
-        databases: &mut tokio::sync::MutexGuard<BlockDatabases>,
-        block_header: &mut std::sync::MutexGuard<BlockHeader>,
-    ) -> Result<()> {
-        let block_hash_raw: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] = new_block.hash.into();
+#[derive(Debug, Clone)]
+pub struct BlockchainState {
+    pub light_state: LightState,
+    pub archival_state: Option<ArchivalState>,
+}
 
-        // TODO: Mutliple blocks can have the same height: fix!
-        databases
-            .block_height_to_hash
-            .put(new_block.header.height, block_hash_raw.into());
-        databases
-            .block_hash_to_block
-            .put(new_block.hash, *new_block.clone());
+type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
 
-        databases
-            .latest_block_header
-            .put((), new_block.header.clone());
+#[derive(Debug, Clone)]
+pub struct NetworkingState {
+    // Stores info about the peers that the client is connected to
+    pub peer_map: Arc<StdMutex<PeerMap>>,
 
-        **block_header = new_block.header;
+    // Since this is a database, we use the tokio Mutex here.
+    // `peer_databases` are used to persist IPs with their standing.
+    pub peer_databases: Arc<TokioMutex<PeerDatabases>>,
 
-        Ok(())
+    // This value is only true if instance is running an archival node
+    // that is currently downloading blocks to catch up.
+    pub syncing: Arc<std::sync::RwLock<bool>>,
+
+    pub instance_id: u128,
+}
+
+impl NetworkingState {
+    pub fn new(
+        peer_map: Arc<StdMutex<PeerMap>>,
+        peer_databases: Arc<TokioMutex<PeerDatabases>>,
+        syncing: Arc<std::sync::RwLock<bool>>,
+    ) -> Self {
+        Self {
+            peer_map,
+            peer_databases,
+            syncing,
+            instance_id: rand::random(),
+        }
     }
+}
 
-    pub async fn update_latest_block(&self, new_block: Box<Block>) -> Result<()> {
-        let mut databases = self.block_databases.lock().await;
-        let mut block_head_header = self
-            .latest_block_header
-            .lock()
-            .expect("Locking block header must succeed");
-        self.update_latest_block_with_block_header_mutexguard(
-            new_block.clone(),
-            &mut databases,
-            &mut block_head_header,
-        )?;
+/// State handles all state of the client that is shared across threads.
+/// The policy used here is that only the main thread should update the
+/// state, all other threads are only allowed to read from the state.
+#[derive(Debug, Clone)]
+pub struct State {
+    pub chain: BlockchainState,
+    pub net: NetworkingState,
+    pub cli: cli_args::Args,
+}
 
-        Ok(())
-    }
-
+impl State {
     // Storing IP addresses is, according to this answer, not a violation of GDPR:
     // https://law.stackexchange.com/a/28609/45846
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
     pub async fn write_peer_standing_on_increase(&self, ip: IpAddr, standing: PeerStanding) {
-        let mut peer_databases = self.peer_databases.lock().await;
+        let mut peer_databases = self.net.peer_databases.lock().await;
         let old_standing = peer_databases.peer_standings.get(ip);
 
         if old_standing.is_none() || old_standing.unwrap().standing < standing.standing {
@@ -143,7 +145,52 @@ impl State {
     }
 
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        let mut peer_databases = self.peer_databases.lock().await;
+        let mut peer_databases = self.net.peer_databases.lock().await;
         peer_databases.peer_standings.get(ip)
+    }
+
+    pub async fn update_latest_block(&self, new_block: Box<Block>) -> Result<()> {
+        // Acquire both locks before updating
+        let mut databases_locked = self
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .block_databases
+            .lock()
+            .await;
+        let mut light_state_locked = self.chain.light_state.latest_block_header.lock().unwrap();
+
+        // Perform the updates while holding both locks
+        *light_state_locked = new_block.header.clone();
+
+        // TODO: Multiple blocks can have the same height: fix!
+        databases_locked
+            .block_height_to_hash
+            .put(new_block.header.height, new_block.hash);
+        databases_locked
+            .block_hash_to_block
+            .put(new_block.hash, *new_block.clone());
+        databases_locked
+            .latest_block_header
+            .put((), new_block.header.clone());
+
+        // Release both locks
+
+        Ok(())
+    }
+
+    pub async fn get_handshakedata(&self) -> HandshakeData {
+        let listen_addr_socket = SocketAddr::new(self.cli.listen_addr, self.cli.peer_port);
+        // let latest_block = self.chain.archival_state.as_ref().unwrap().get_latest_block().await;
+        let latest_block_header = self.chain.light_state.get_latest_block_header();
+
+        HandshakeData {
+            tip_header: latest_block_header,
+            listen_address: Some(listen_addr_socket),
+            network: self.cli.network,
+            instance_id: rand::random(),
+            version: VERSION.to_string(),
+        }
     }
 }

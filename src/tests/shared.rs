@@ -10,7 +10,7 @@ use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use secp256k1::Secp256k1;
 use std::{
-    collections::{hash_map::RandomState, HashMap},
+    collections::HashMap,
     env,
     net::SocketAddr,
     pin::Pin,
@@ -31,6 +31,10 @@ use twenty_first::{
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
+use crate::models::state::ArchivalState;
+use crate::models::state::BlockchainState;
+use crate::models::state::LightState;
+use crate::models::state::NetworkingState;
 use crate::{
     config_models::{cli_args, network::Network},
     initialize_databases,
@@ -162,7 +166,6 @@ pub fn get_genesis_setup(
     mpsc::Sender<PeerThreadToMain>,
     mpsc::Receiver<PeerThreadToMain>,
     State,
-    Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo, RandomState>>>,
     HandshakeData,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =
@@ -180,16 +183,20 @@ pub fn get_genesis_setup(
             .insert(peer_address, get_dummy_peer(peer_address));
     }
 
-    let (_, _, latest_block_header) = get_dummy_latest_block(None);
+    let (block, _, _) = get_dummy_latest_block(None);
     let (block_databases, peer_databases) = databases(network)?;
-    let cli_default_args = Arc::new(cli_args::Args::from_iter::<Vec<String>, _>(vec![]));
+    let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
+    let syncing = Arc::new(std::sync::RwLock::new(false));
+    let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
+    let light_state: LightState = LightState::new(block.header);
+    let blockchain_state = BlockchainState {
+        light_state,
+        archival_state: Some(ArchivalState::new(block_databases)),
+    };
     let state = State {
-        peer_map: peer_map.clone(),
-        block_databases,
-        latest_block_header,
-        syncing: Arc::new(std::sync::RwLock::new(false)),
-        peer_databases,
-        cli_args: cli_default_args,
+        chain: blockchain_state,
+        cli: cli_default_args,
+        net: networking_state,
     };
     Ok((
         peer_broadcast_tx,
@@ -197,7 +204,6 @@ pub fn get_genesis_setup(
         to_main_tx,
         _to_main_rx1,
         state,
-        peer_map,
         get_dummy_handshake_data(network),
     ))
 }

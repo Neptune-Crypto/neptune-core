@@ -30,7 +30,7 @@ async fn get_connection_status(
     peer_address: &SocketAddr,
 ) -> ConnectionStatus {
     // Disallow connection if peer is banned via CLI arguments
-    if state.cli_args.ban.contains(&peer_address.ip()) {
+    if state.cli.ban.contains(&peer_address.ip()) {
         warn!(
             "Banned peer {} attempted to connect. Disallowing.",
             peer_address.ip()
@@ -42,11 +42,11 @@ async fn get_connection_status(
     let standing = state
         .get_peer_standing_from_database(peer_address.ip())
         .await;
-    if standing.is_some() && standing.unwrap().standing > state.cli_args.peer_tolerance {
+    if standing.is_some() && standing.unwrap().standing > state.cli.peer_tolerance {
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
-    let pm = state.peer_map.lock().unwrap();
+    let pm = state.net.peer_map.lock().unwrap();
 
     // Disallow connection if max number of &peers has been attained
     if (max_peers as usize) <= pm.len() {
@@ -297,18 +297,11 @@ mod connect_tests {
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
 
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            _to_main_rx1,
-            state,
-            peer_map,
-            _hsd,
-        ) = get_genesis_setup(Network::Main, 0)?;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+            get_genesis_setup(Network::Main, 0)?;
         call_peer(
             mock,
-            state,
+            state.clone(),
             get_dummy_address(),
             from_main_rx_clone,
             to_main_tx,
@@ -317,7 +310,7 @@ mod connect_tests {
         .await?;
 
         // Verify that peer map is empty after connection has been closed
-        match peer_map.lock().unwrap().keys().len() {
+        match state.net.peer_map.lock().unwrap().keys().len() {
             0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
@@ -329,16 +322,16 @@ mod connect_tests {
     #[tokio::test]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Main;
-        let (
-            _peer_broadcast_tx,
-            _from_main_rx_clone,
-            _to_main_tx,
-            _to_main_rx1,
-            state,
-            peer_map,
-            _hsd,
-        ) = get_genesis_setup(network, 1)?;
-        let peer = peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].clone();
+        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, _hsd) =
+            get_genesis_setup(network, 1)?;
+        let peer = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .clone();
         let peer_id = peer.instance_id;
 
         let own_handshake = get_dummy_handshake_data(network);
@@ -429,18 +422,11 @@ mod connect_tests {
             ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            _to_main_rx1,
-            state,
-            peer_map,
-            _hsd,
-        ) = get_genesis_setup(network, 0)?;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+            get_genesis_setup(network, 0)?;
         answer_peer(
             mock,
-            state,
+            state.clone(),
             get_dummy_address(),
             from_main_rx_clone,
             to_main_tx,
@@ -450,7 +436,7 @@ mod connect_tests {
         .await?;
 
         // Verify that peer map is empty after connection has been closed
-        match peer_map.lock().unwrap().keys().len() {
+        match state.net.peer_map.lock().unwrap().keys().len() {
             0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
@@ -471,7 +457,7 @@ mod connect_tests {
             )))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
             get_genesis_setup(network, 0)?;
         if let Err(_) = answer_peer(
             mock,
@@ -506,7 +492,7 @@ mod connect_tests {
             )))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
             get_genesis_setup(Network::Main, 0)?;
         if let Err(_) = answer_peer(
             mock,
@@ -542,15 +528,8 @@ mod connect_tests {
             )))?)
             .build();
 
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            _to_main_rx1,
-            state,
-            _peer_map,
-            _hsd,
-        ) = get_genesis_setup(Network::Main, 2)?;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+            get_genesis_setup(Network::Main, 2)?;
         let (_, _, _latest_block_header) = get_dummy_latest_block(None);
 
         if let Err(_) = answer_peer(
@@ -592,15 +571,8 @@ mod connect_tests {
             ))?)
             .build();
 
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            _to_main_rx1,
-            state,
-            peer_map,
-            _hsd,
-        ) = get_genesis_setup(Network::Main, 0)?;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+            get_genesis_setup(Network::Main, 0)?;
         let bad_standing: PeerStanding = PeerStanding {
             standing: u16::MAX,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
@@ -621,7 +593,7 @@ mod connect_tests {
 
         if let Err(_) = answer_peer(
             mock,
-            state,
+            state.clone(),
             peer_address,
             from_main_rx_clone,
             to_main_tx,
@@ -635,7 +607,7 @@ mod connect_tests {
         }
 
         // Verify that peer map is empty after connection has been refused
-        match peer_map.lock().unwrap().keys().len() {
+        match state.net.peer_map.lock().unwrap().keys().len() {
             0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };

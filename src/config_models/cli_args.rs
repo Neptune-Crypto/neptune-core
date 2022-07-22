@@ -4,7 +4,7 @@ use clap::Parser;
 use std::net::IpAddr;
 
 /// Decalarative specification of command-line arguments
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[clap(author, version, about)]
 pub struct Args {
     /// List IP addresses to ban connections from. You can still make outgoing connections to these IPs by setting the `peers` argument.

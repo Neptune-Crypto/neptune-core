@@ -13,6 +13,10 @@ mod tests;
 
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::database::leveldb::LevelDB;
+use crate::models::state::ArchivalState;
+use crate::models::state::BlockchainState;
+use crate::models::state::LightState;
+use crate::models::state::NetworkingState;
 use crate::models::state::State;
 use crate::rpc::RPC;
 use anyhow::{bail, Context, Result};
@@ -252,7 +256,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (peer_thread_to_main_tx, peer_thread_to_main_rx) =
         mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
 
-    // Create handshake data which is used when connecting to peers
+    // Create handshake data which is used when connecting to outgoing peers specified in the
+    // CLI arguments
     let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.peer_port);
     let own_handshake_data = HandshakeData {
         tip_header: latest_block.header.clone(),
@@ -263,17 +268,20 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
-    let latest_block_header = Arc::new(std::sync::Mutex::new(latest_block.header.clone()));
     let syncing = Arc::new(std::sync::RwLock::new(false));
-    let state = State {
-        peer_map: Arc::clone(&peer_map),
-        block_databases: Arc::clone(&block_databases),
-        latest_block_header: Arc::clone(&latest_block_header),
-        syncing: Arc::clone(&syncing),
-        peer_databases: Arc::clone(&peer_databases),
-        cli_args: Arc::new(cli_args),
+    let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
+    let light_state: LightState = LightState::new(latest_block.header.clone());
+    let blockchain_state = BlockchainState {
+        light_state,
+        archival_state: Some(ArchivalState::new(block_databases)),
     };
-    for peer in state.cli_args.peers.clone() {
+    let state = State {
+        chain: blockchain_state,
+        cli: cli_args,
+        net: networking_state,
+    };
+
+    for peer in state.cli.peers.clone() {
         let peer_state_var = state.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
@@ -295,7 +303,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Start handling of mining. So far we can only mine on the `RegTest` network.
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
-    if state.cli_args.mine && state.cli_args.network == Network::RegTest {
+    if state.cli.mine && state.cli.network == Network::RegTest {
         tokio::spawn(async move {
             mine_loop::mock_regtest_mine(
                 main_to_miner_rx,
@@ -310,7 +318,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Start RPC server for CLI request and more
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
-        format!("127.0.0.1:{}", state.cli_args.rpc_port),
+        format!("127.0.0.1:{}", state.cli.rpc_port),
         Json::default,
     )
     .await?;

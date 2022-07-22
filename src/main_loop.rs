@@ -1,6 +1,8 @@
 use crate::connect_to_peers::answer_peer;
+use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::database::BlockDatabases;
 use crate::models::peer::PeerSynchronizationState;
 use crate::models::state::State;
 use anyhow::Result;
@@ -17,7 +19,7 @@ use tracing::{debug, error, info, warn};
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
 
-const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 60;
+const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 10;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 
 struct SynchronizationState {
@@ -162,11 +164,21 @@ async fn handle_peer_thread_message(
         PeerThreadToMain::NewBlocks(blocks) => {
             let last_block = blocks.last().unwrap().to_owned();
             {
-                let mut databases = state.block_databases.lock().await;
-                let mut previous_block_header = state
+                // Acquire locks for blockchain state in correct order to avoid deadlocks
+                let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = state
+                    .chain
+                    .light_state
                     .latest_block_header
                     .lock()
                     .expect("Lock on block header must succeed");
+                let mut databases: tokio::sync::MutexGuard<BlockDatabases> = state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_databases
+                    .lock()
+                    .await;
 
                 // The peer threads also check this condition, if block is more canonical than current
                 // tip, but we have to check it again since the block update might have already been applied
@@ -178,11 +190,11 @@ async fn handle_peer_thread_message(
                 }
 
                 // Get out of sync mode if needed
-                if state.syncing.read().unwrap().to_owned() {
-                    *state.syncing.write().unwrap() = stay_in_sync_mode(
+                if state.net.syncing.read().unwrap().to_owned() {
+                    *state.net.syncing.write().unwrap() = stay_in_sync_mode(
                         last_block.header.clone(),
                         synchronization_state,
-                        state.cli_args.max_number_of_blocks_before_syncing,
+                        state.cli.max_number_of_blocks_before_syncing,
                     );
                 }
 
@@ -195,14 +207,20 @@ async fn handle_peer_thread_message(
                 // Store blocks in database
                 for block in blocks {
                     debug!("Storing block {:?} in database", block.hash);
-                    state.update_latest_block_with_block_header_mutexguard(
-                        Box::new(block),
-                        &mut databases,
-                        &mut previous_block_header,
-                    )?;
+                    databases
+                        .block_height_to_hash
+                        .put(block.header.height, block.hash);
+                    databases.block_hash_to_block.put(block.hash, block);
                 }
+
+                // Update information about latest header
+                *previous_block_header = last_block.header.clone();
+                databases
+                    .latest_block_header
+                    .put((), last_block.header.clone());
             }
 
+            // Inform all peers about new block
             main_to_peer_broadcast_tx
                 .send(MainToPeerThread::Block(Box::new(last_block)))
                 .expect("Peer handler broadcast was closed. This should never happen");
@@ -226,21 +244,21 @@ async fn handle_peer_thread_message(
             // TODO: If we are not checking the PoW claims of the tip this can be abused by forcing
             // the client into synchronization mode.
             let our_block_tip_header: BlockHeader =
-                state.latest_block_header.lock().unwrap().to_owned();
+                state.chain.light_state.get_latest_block_header();
             if enter_sync_mode(
                 our_block_tip_header,
                 claimed_state,
-                state.cli_args.max_number_of_blocks_before_syncing,
+                state.cli.max_number_of_blocks_before_syncing,
             ) {
                 info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
-                *state.syncing.write().unwrap() = true;
+                *state.net.syncing.write().unwrap() = true;
             }
         }
         PeerThreadToMain::PeerDiscoveryAnswer((peers, reported_by)) => {
-            let max_peers = state.cli_args.max_peers;
+            let max_peers = state.cli.max_peers;
             for potential_peer in peers {
                 potential_peers.add(reported_by, potential_peer, max_peers as usize);
             }
@@ -255,20 +273,24 @@ async fn peer_count_handler(
     main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
     potential_peers: &PotentialPeersState,
 ) -> Result<()> {
-    let connected_peers: Vec<SocketAddr> = match state.peer_map.try_lock() {
+    let connected_peers: Vec<SocketAddr> = match state.net.peer_map.try_lock() {
         Ok(pm) => pm.keys().map(|sa| *sa).collect(),
         Err(_) => return Ok(()),
     };
 
-    if connected_peers.len() > state.cli_args.max_peers as usize {
+    if connected_peers.len() > state.cli.max_peers as usize {
         // This would indicate a race-condition on the peer map field in the state which
         // we unfortunately cannot exclude. So we just disconnect from a peer that the user
         // didn't request a connection to.
-        warn!("Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.", connected_peers.len(), state.cli_args.max_peers );
+        warn!(
+            "Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.",
+            connected_peers.len(),
+            state.cli.max_peers
+        );
         let mut rng = thread_rng();
         let peer_to_disconnect = connected_peers
             .iter()
-            .filter(|peer| !state.cli_args.peers.contains(peer))
+            .filter(|peer| !state.cli.peers.contains(peer))
             .choose(&mut rng);
         match peer_to_disconnect {
             Some(peer) => {
@@ -280,7 +302,7 @@ async fn peer_count_handler(
         return Ok(());
     }
 
-    if connected_peers.len() == state.cli_args.max_peers as usize {
+    if connected_peers.len() == state.cli.max_peers as usize {
         return Ok(());
     }
 
@@ -333,6 +355,8 @@ pub async fn main_loop(
     let mut sync_state = SynchronizationState::default();
     let mut potential_peers_state = PotentialPeersState::default();
     loop {
+        // This timer might have to sleep a random number of seconds for it to be guaranteed to be
+        // hit without being interrupted by other processes.
         let peer_discovery_timer =
             time::sleep(Duration::from_secs(PEER_DISCOVERY_INTERVAL_IN_SECONDS));
         tokio::pin!(peer_discovery_timer);
@@ -349,7 +373,7 @@ pub async fn main_loop(
                 let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = peer_thread_to_main_tx.clone();
                 let peer_address = stream.peer_addr().unwrap();
                 let own_handshake_data_clone = own_handshake_data.clone();
-                let max_peers = state.cli_args.max_peers;
+                let max_peers = state.cli.max_peers;
                 tokio::spawn(async move {
                     match answer_peer(
                         stream,
@@ -372,7 +396,7 @@ pub async fn main_loop(
                 info!("Received message sent to main thread.");
                 handle_peer_thread_message(
                     msg,
-                    state.cli_args.mine,
+                    state.cli.mine,
                     &main_to_miner_tx,
                     state.clone(),
                     &main_to_peer_broadcast_tx,

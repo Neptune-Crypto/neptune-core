@@ -23,6 +23,7 @@ const MAX_PEER_LIST_LENGTH: usize = 1000;
 pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReason) -> Result<()> {
     warn!("Sanctioning peer {} for {:?}", peer_address.ip(), reason);
     let mut peers = state
+        .net
         .peer_map
         .lock()
         .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
@@ -31,7 +32,7 @@ pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReas
         .entry(*peer_address)
         .and_modify(|p| *new_standing = p.standing.sanction(reason));
 
-    if *new_standing > state.cli_args.peer_tolerance {
+    if *new_standing > state.cli.peer_tolerance {
         warn!("Banning peer");
         bail!("Banning peer");
     }
@@ -54,7 +55,13 @@ where
     <S as TryStream>::Error: std::error::Error,
 {
     let parent_digest = received_block.header.prev_block_digest;
-    let parent_block = state.get_block(parent_digest).await?;
+    let parent_block = state
+        .chain
+        .archival_state
+        .as_ref()
+        .unwrap()
+        .get_block(parent_digest)
+        .await?;
     let parent_height = received_block.header.height.previous();
 
     // If parent is not known, request the parent, and add the current to the peer fork resolution list
@@ -76,7 +83,7 @@ where
                 .previous()
                 == received_block.header.height
                 && peer_state.fork_reconciliation_blocks.len() + 1
-                    < state.cli_args.max_number_of_blocks_before_syncing
+                    < state.cli.max_number_of_blocks_before_syncing
         {
             peer_state.fork_reconciliation_blocks.push(*received_block);
         } else {
@@ -204,6 +211,7 @@ where
             // not in the address in which they are connected to us. We are only interested in
             // peers that accept incoming connections.
             let peer_addresses: Vec<SocketAddr> = state
+                .net
                 .peer_map
                 .lock()
                 .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
@@ -249,9 +257,9 @@ where
 
             // TODO: Handle the situation where peer_state_info.fork_resolution_blocks is not empty better.
             let block_is_new = state
-                .latest_block_header
-                .lock()
-                .unwrap()
+                .chain
+                .light_state
+                .get_latest_block_header()
                 .proof_of_work_family
                 < block.header.proof_of_work_family
                 || !peer_state_info.fork_reconciliation_blocks.is_empty();
@@ -278,7 +286,9 @@ where
             debug!("Got block response batch");
 
             // Verify that we are in fact in syncing mode
-            if !state.syncing.read().unwrap().to_owned() {
+            // TODO: Seperate peer messages into those allowed under syncing
+            // and those that are not
+            if !state.net.syncing.read().unwrap().to_owned() {
                 warn!("Received a batch of blocks without being in syncing mode");
                 // TODO: consider punishing here
                 return Ok(false);
@@ -294,6 +304,8 @@ where
             peer_state_info.highest_shared_block_height = block_notification.height;
             {
                 let block_is_new = state
+                    .chain
+                    .light_state
                     .latest_block_header
                     .lock()
                     .unwrap()
@@ -312,7 +324,14 @@ where
             Ok(false)
         }
         PeerMessage::BlockRequestByHash(block_digest) => {
-            match state.get_block(block_digest).await? {
+            match state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .get_block(block_digest)
+                .await?
+            {
                 None => {
                     // TODO: Consider punishing here
                     warn!("Peer requested unkown block with hash {}", block_digest);
@@ -329,7 +348,14 @@ where
 
             let block_response;
             {
-                let mut databases = state.block_databases.lock().await;
+                let mut databases = state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_databases
+                    .lock()
+                    .await;
                 let hash_res = databases.block_height_to_hash.get(block_height);
                 match hash_res {
                     None => {
@@ -338,15 +364,6 @@ where
                         return Ok(false);
                     }
                     Some(digest) => {
-                        // let hash_array: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] =
-                        // digest.try_into().unwrap_or_else(|v: Vec<u8>| {
-                        // panic!(
-                        // "Expected a Vec of length {} but it was {}",
-                        // RESCUE_PRIME_DIGEST_SIZE_IN_BYTES,
-                        // v.len()
-                        // )
-                        // });
-
                         block_response = match databases.block_hash_to_block.get(digest) {
                             // I think it makes sense to panic here since we found the block in the height to digest
                             // database. So it should be in the hash to block database.
@@ -419,7 +436,7 @@ where
 
             let request_batch_size = std::cmp::min(
                 STANDARD_BLOCK_BATCH_SIZE,
-                state.cli_args.max_number_of_blocks_before_syncing,
+                state.cli.max_number_of_blocks_before_syncing,
             );
 
             peer.send(PeerMessage::BlockRequestBatch(
@@ -554,6 +571,7 @@ where
 {
     // Check if peer standing exists in database, return default if it does not.
     let standing: PeerStanding = state
+        .net
         .peer_databases
         .lock()
         .await
@@ -573,8 +591,9 @@ where
     };
 
     // There is potential for a race-condition in the peer_map here, as we've previously
-    // counted the number of entries but
+    // counted the number of entries. That should be fixed.
     state
+        .net
         .peer_map
         .lock()
         .unwrap()
@@ -604,6 +623,7 @@ where
     // TODO: Send message to main removing claimed max block height in case we are
     // syncing and we banned the peer for sending us bad blocks.
     let peer_info_writeback = state
+        .net
         .peer_map
         .lock()
         .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
@@ -623,8 +643,6 @@ where
 
 #[cfg(test)]
 mod peer_loop_tests {
-    use std::sync::Arc;
-
     use anyhow::{bail, Result};
     use clap::Parser;
     use tokio::sync::{
@@ -656,31 +674,30 @@ mod peer_loop_tests {
 
         let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
         let (_to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
-        let (
-            _peer_broadcast_tx,
-            _from_main_rx_clone,
-            to_main_tx,
-            _to_main_rx1,
-            state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
+        let (_peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
 
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
         peer_loop::peer_loop_wrapper(
             mock,
             from_main_rx_clone,
             to_main_tx,
-            state,
+            state.clone(),
             peer_address,
             hsd,
             true,
         )
         .await?;
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -690,17 +707,16 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_peer_list() -> Result<()> {
-        let (
-            _peer_broadcast_tx,
-            _from_main_rx_clone,
-            _to_main_tx,
-            _to_main_rx1,
-            state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
+        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::PeerListRequest),
@@ -716,14 +732,14 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx,
-            state,
+            state.clone(),
             peer_address,
             hsd,
             true,
         )
         .await?;
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -736,21 +752,26 @@ mod peer_loop_tests {
         // In this scenario a peer provides another genesis block than what has been
         // hardcoded. This should lead to the closing of the connection to this peer
         // and a ban.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
         // since that block is hardcoded.
-        let mut different_genesis_block: Block = state.get_latest_block().await;
+        let mut different_genesis_block: Block = state
+            .clone()
+            .chain
+            .archival_state
+            .unwrap()
+            .get_latest_block()
+            .await;
         different_genesis_block.header.nonce[2].increment();
         different_genesis_block.hash = different_genesis_block.header.hash();
         let block_1_with_different_genesis = make_mock_block(different_genesis_block, None);
@@ -800,18 +821,23 @@ mod peer_loop_tests {
     async fn bad_block_test() -> Result<()> {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
-        let (
-            _peer_broadcast_tx,
-            _from_main_rx_clone,
-            _to_main_tx,
-            _to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
 
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
@@ -864,6 +890,7 @@ mod peer_loop_tests {
 
         // Verify that peer standing was stored in database
         let standing = state
+            .net
             .peer_databases
             .lock()
             .await
@@ -884,18 +911,23 @@ mod peer_loop_tests {
         // The scenario tested here is that a client receives a block that is already
         // in the database. The expected behavior is to ignore the block and not send
         // a message to the main thread.
-        let (
-            _peer_broadcast_tx,
-            _from_main_rx_clone,
-            _to_main_tx,
-            _to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
 
         let block_1 = make_mock_block(genesis_block, None);
         state.update_latest_block(Box::new(block_1.clone())).await?;
@@ -913,7 +945,7 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx.clone(),
-            state,
+            state.clone(),
             peer_address,
             hsd,
             false,
@@ -931,7 +963,7 @@ mod peer_loop_tests {
         };
         drop(to_main_tx);
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -942,18 +974,23 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
@@ -966,7 +1003,7 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx.clone(),
-            state,
+            state.clone(),
             peer_address,
             hsd,
             false,
@@ -985,7 +1022,7 @@ mod peer_loop_tests {
             _ => bail!("Did not find msg sent to main thread"),
         };
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -997,18 +1034,23 @@ mod peer_loop_tests {
     async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 2, meaning that block 1 will have to be requested.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
 
@@ -1023,7 +1065,7 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx,
-            state,
+            state.clone(),
             peer_address,
             hsd,
             true,
@@ -1048,7 +1090,7 @@ mod peer_loop_tests {
             _ => bail!("Did not find msg sent to main thread 1"),
         };
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1061,24 +1103,29 @@ mod peer_loop_tests {
         // In this scenario the peer sends more blocks than the client allows to store in the
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
         // process as the alternative is that the program will crash because it runs out of RAM.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
 
         // Restrict max number of blocks held in memory to 2.
         let mut a = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
         a.max_number_of_blocks_before_syncing = 2;
-        state.cli_args = Arc::new(a);
+        state.cli = a;
 
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
@@ -1134,18 +1181,23 @@ mod peer_loop_tests {
     async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
@@ -1165,7 +1217,7 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx,
-            state,
+            state.clone(),
             peer_address,
             hsd,
             true,
@@ -1193,7 +1245,7 @@ mod peer_loop_tests {
             _ => bail!("Did not find msg sent to main thread"),
         };
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1205,18 +1257,23 @@ mod peer_loop_tests {
     async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 3, meaning that block 2 and 1 will have to be requested.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
@@ -1234,7 +1291,7 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx,
-            state,
+            state.clone(),
             peer_address,
             hsd,
             true,
@@ -1262,7 +1319,7 @@ mod peer_loop_tests {
             _ => bail!("Did not find msg sent to main thread"),
         };
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1276,18 +1333,23 @@ mod peer_loop_tests {
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         // But the requests are interrupted by the peer sending another message: a new block
         // notification.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
@@ -1321,7 +1383,7 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx,
-            state,
+            state.clone(),
             peer_address,
             hsd,
             false,
@@ -1349,7 +1411,7 @@ mod peer_loop_tests {
             _ => bail!("Did not find msg sent to main thread"),
         };
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1363,18 +1425,23 @@ mod peer_loop_tests {
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         // But the requests are interrupted by the peer sending another message: a request
         // for a list of peers.
-        let (
-            _peer_broadcast_tx,
-            from_main_rx_clone,
-            to_main_tx,
-            mut to_main_rx1,
-            mut state,
-            peer_map,
-            hsd,
-        ) = get_genesis_setup(Network::Main, 1)?;
-        let peer_address =
-            peer_map.lock().unwrap().values().collect::<Vec<_>>()[0].connected_address;
-        let genesis_block: Block = state.get_latest_block().await;
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
         let block_1 = make_mock_block(genesis_block.clone(), None);
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
@@ -1403,7 +1470,7 @@ mod peer_loop_tests {
             mock,
             from_main_rx_clone,
             to_main_tx,
-            state,
+            state.clone(),
             peer_address,
             hsd,
             true,
@@ -1431,7 +1498,7 @@ mod peer_loop_tests {
             _ => bail!("Did not find msg sent to main thread"),
         };
 
-        if !peer_map.lock().unwrap().is_empty() {
+        if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
