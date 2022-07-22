@@ -182,14 +182,13 @@ impl State {
 
     pub async fn get_handshakedata(&self) -> HandshakeData {
         let listen_addr_socket = SocketAddr::new(self.cli.listen_addr, self.cli.peer_port);
-        // let latest_block = self.chain.archival_state.as_ref().unwrap().get_latest_block().await;
         let latest_block_header = self.chain.light_state.get_latest_block_header();
 
         HandshakeData {
             tip_header: latest_block_header,
             listen_address: Some(listen_addr_socket),
             network: self.cli.network,
-            instance_id: rand::random(),
+            instance_id: self.net.instance_id,
             version: VERSION.to_string(),
         }
     }

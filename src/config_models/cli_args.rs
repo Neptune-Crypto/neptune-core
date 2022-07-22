@@ -1,7 +1,7 @@
 use super::network::Network;
 use clap::builder::RangedI64ValueParser;
 use clap::Parser;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 /// Decalarative specification of command-line arguments
 #[derive(Parser, Debug, Clone)]
@@ -32,6 +32,7 @@ pub struct Args {
     #[clap(long, default_value = "9799")]
     pub rpc_port: u16,
 
+    // TODO: Should this value be Option<IpAddr> instead?
     /// IP on which to listen for peer connections.
     #[clap(short, long, default_value = "127.0.0.1")]
     pub listen_addr: IpAddr,
@@ -51,4 +52,11 @@ pub struct Args {
     /// Specify network, `main`, `testnet`, or `regtest`
     #[structopt(long, short, default_value = "main")]
     pub network: Network,
+}
+
+impl Args {
+    pub fn get_own_listen_address(&self) -> Option<SocketAddr> {
+        // TODO: Should this function return Option<SocketAddr> or SocketAddr?
+        Some(SocketAddr::new(self.listen_addr, self.peer_port))
+    }
 }

@@ -1,4 +1,4 @@
-use crate::connect_to_peers::answer_peer;
+use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -85,10 +85,20 @@ impl PotentialPeersState {
     }
 
     /// Return a random peer from the potential peer list that we aren't connected to
-    fn get_random_peer_candidate(&self, connected_clients: &[SocketAddr]) -> Option<SocketAddr> {
+    /// and that isn't our own address.
+    fn get_random_peer_candidate(
+        &self,
+        connected_clients: &[SocketAddr],
+        own_listen_socket: Option<SocketAddr>,
+    ) -> Option<SocketAddr> {
         let not_connected_peers = self
             .potential_peers
             .keys()
+            // Prevent connecting to self
+            .filter(|potential_peer| {
+                own_listen_socket.is_none() || **potential_peer != own_listen_socket.unwrap()
+            })
+            // Prevent connecting to peer we already
             .filter(|potential_peer| !connected_clients.contains(potential_peer));
         let mut rng = rand::thread_rng();
         not_connected_peers.choose(&mut rng).map(|x| x.to_owned())
@@ -269,9 +279,10 @@ async fn handle_peer_thread_message(
 }
 
 async fn peer_count_handler(
-    state: &State,
-    main_to_peer_broadcast_tx: &broadcast::Sender<MainToPeerThread>,
+    state: State,
+    main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
     potential_peers: &PotentialPeersState,
+    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
 ) -> Result<()> {
     let connected_peers: Vec<SocketAddr> = match state.net.peer_map.try_lock() {
         Ok(pm) => pm.keys().map(|sa| *sa).collect(),
@@ -302,7 +313,11 @@ async fn peer_count_handler(
         return Ok(());
     }
 
-    if connected_peers.len() == state.cli.max_peers as usize {
+    // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
+    // one below the peer limit as we reserve this last slot for an ingoing connection.
+    if connected_peers.len() == state.cli.max_peers as usize
+        || connected_peers.len() > 2 && connected_peers.len() - 1 == state.cli.max_peers as usize
+    {
         return Ok(());
     }
 
@@ -319,23 +334,26 @@ async fn peer_count_handler(
     main_to_peer_broadcast_tx.send(MainToPeerThread::MakePeerDiscoveryRequest)?;
 
     // 1)
-    let peer_candidate = match potential_peers.get_random_peer_candidate(&connected_peers) {
+    let peer_candidate = match potential_peers
+        .get_random_peer_candidate(&connected_peers, state.cli.get_own_listen_address())
+    {
         Some(candidate) => candidate,
         None => return Ok(()),
     };
 
     // 2)
     info!("Connecting to peer {}", peer_candidate);
-    // tokio::spawn(async move {
-    //     call_peer::call_peer_wrapper(
-    //         peer_candidate,
-    //         state.clone(),
-    //         main_to_peer_thread_rx,
-    //         peer_thread_to_main_tx,
-    //         own_handshake_data,
-    //     )
-    //     .await;
-    // });
+    let own_handshake_data = state.get_handshakedata().await;
+    tokio::spawn(async move {
+        call_peer_wrapper(
+            peer_candidate,
+            state.to_owned(),
+            main_to_peer_broadcast_tx.subscribe(),
+            peer_thread_to_main_tx.to_owned(),
+            &own_handshake_data,
+        )
+        .await;
+    });
 
     Ok(())
 }
@@ -414,7 +432,7 @@ pub async fn main_loop(
             // Start peer discovery in case we
             _ = &mut peer_discovery_timer => {
                 // Check number of peers we are connected to
-                peer_count_handler(&state, &main_to_peer_broadcast_tx, &potential_peers_state).await?
+                peer_count_handler(state.clone(), main_to_peer_broadcast_tx.clone(), &potential_peers_state, peer_thread_to_main_tx.clone()).await?
             }
             // TODO: Add signal::ctrl_c/shutdown handling here
         }
