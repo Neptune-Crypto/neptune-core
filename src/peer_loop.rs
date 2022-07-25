@@ -18,7 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
-const MAX_PEER_LIST_LENGTH: usize = 1000;
+const MAX_PEER_LIST_LENGTH: usize = 10;
 
 pub fn punish(state: &State, peer_address: &SocketAddr, reason: PeerSanctionReason) -> Result<()> {
     warn!("Sanctioning peer {} for {:?}", peer_address.ip(), reason);
@@ -191,6 +191,7 @@ async fn handle_peer_message<S>(
     peer: &mut S,
     peer_state_info: &mut PeerState,
     to_main_tx: &mpsc::Sender<PeerThreadToMain>,
+    distance: u8,
 ) -> Result<bool>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
@@ -210,7 +211,7 @@ where
             // We are interested in the address on which peers accept ingoing connections,
             // not in the address in which they are connected to us. We are only interested in
             // peers that accept incoming connections.
-            let peer_addresses: Vec<(SocketAddr, u128)> = state
+            let peer_info = state
                 .net
                 .peer_map
                 .lock()
@@ -225,8 +226,7 @@ where
                     )
                 })
                 .collect();
-            peer.send(PeerMessage::PeerListResponse(peer_addresses))
-                .await?;
+            peer.send(PeerMessage::PeerListResponse(peer_info)).await?;
             Ok(false)
         }
         PeerMessage::PeerListResponse(peers) => {
@@ -241,6 +241,8 @@ where
                 .send(PeerThreadToMain::PeerDiscoveryAnswer((
                     peers,
                     *peer_address,
+                    // The distance to the revealed peers is 1 + this peer's distance
+                    distance + 1,
                 )))
                 .await?;
             Ok(false)
@@ -471,14 +473,22 @@ where
             peer.send(PeerMessage::PeerListRequest).await?;
             Ok(false)
         }
-        MainToPeerThread::Disconnect(socket_addr) => {
+        MainToPeerThread::Disconnect(target_socket_addr) => {
             // Disconnect from this peer if its address matches that which the main
             // thread requested to disconnected from.
-            Ok(socket_addr == *peer_address)
+            Ok(target_socket_addr == *peer_address)
+        }
+        MainToPeerThread::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
+            if target_socket_addr == *peer_address {
+                peer.send(PeerMessage::PeerListRequest).await?;
+            }
+            Ok(false)
         }
     }
 }
 
+// TODO: Create a struct for the peer loop info and call `run` on that, so
+// we don't have to carry everything around between function calls.
 /// Loop for the peer threads. Awaits either a message from the peer over TCP,
 /// or a message from main over the main-to-peer-threads broadcast channel.
 pub async fn peer_loop<S>(
@@ -488,6 +498,7 @@ pub async fn peer_loop<S>(
     state: &State,
     peer_address: &SocketAddr,
     peer_state_info: &mut PeerState,
+    distance: u8,
 ) -> Result<()>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
@@ -506,7 +517,7 @@ where
                                 break;
                             }
                             Some(peer_msg) => {
-                                let close_connection: bool = match handle_peer_message(peer_msg, state, peer_address, &mut peer, peer_state_info, &to_main_tx).await {
+                                let close_connection: bool = match handle_peer_message(peer_msg, state, peer_address, &mut peer, peer_state_info, &to_main_tx, distance).await {
                                     Ok(close) => close,
                                     Err(err) => {
                                         warn!("{}. Closing connection.", err);
@@ -568,6 +579,7 @@ pub async fn peer_loop_wrapper<S>(
     peer_address: SocketAddr,
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
+    distance: u8,
 ) -> Result<()>
 where
     S: Sink<PeerMessage> + TryStream<Ok = PeerMessage> + Unpin,
@@ -622,6 +634,7 @@ where
         &state,
         &peer_address,
         &mut peer_state,
+        distance,
     )
     .await;
 
@@ -699,6 +712,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -746,6 +760,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -797,6 +812,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -877,6 +893,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -959,6 +976,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             false,
+            1,
         )
         .await?;
 
@@ -1017,6 +1035,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             false,
+            1,
         )
         .await?;
 
@@ -1079,6 +1098,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -1157,6 +1177,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -1231,6 +1252,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -1305,6 +1327,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             true,
+            1,
         )
         .await?;
 
@@ -1397,6 +1420,7 @@ mod peer_loop_tests {
             peer_address,
             hsd,
             false,
+            1,
         )
         .await?;
 
@@ -1491,6 +1515,7 @@ mod peer_loop_tests {
             peer_address.unwrap(),
             hsd,
             true,
+            1,
         )
         .await?;
 

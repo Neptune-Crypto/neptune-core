@@ -28,7 +28,8 @@ pub enum MainToPeerThread {
     RequestBlockBatch(BlockHeight, SocketAddr), // (start_block_height, peer_socket_to_request)
     PeerSynchronizationTimeout(IpAddr), // Abort a synchronization attempt that has timed out
     MakePeerDiscoveryRequest,           // Request peer list from connected peers
-    Disconnect(SocketAddr),             // Disconnect the connection to a specific peer
+    MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
+    Disconnect(SocketAddr),                       // Disconnect the connection to a specific peer
 }
 
 #[derive(Clone, Debug)]
@@ -36,5 +37,5 @@ pub enum PeerThreadToMain {
     NewBlocks(Vec<Block>),
     NewTransaction(i32),
     PeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
-    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr)), // ([(peer_listen_address, instance_id)], reported_by)
+    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
 }

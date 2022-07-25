@@ -40,14 +40,16 @@ struct PotentialPeerInfo {
     reported: SystemTime,
     reported_by: SocketAddr,
     instance_id: u128,
+    distance: u8,
 }
 
 impl PotentialPeerInfo {
-    fn new(reported_by: SocketAddr, instance_id: u128) -> Self {
+    fn new(reported_by: SocketAddr, instance_id: u128, distance: u8) -> Self {
         Self {
             reported: SystemTime::now(),
             reported_by,
             instance_id,
+            distance,
         }
     }
 }
@@ -68,6 +70,7 @@ impl PotentialPeersState {
         reported_by: SocketAddr,
         potential_peer: (SocketAddr, u128),
         max_peers: usize,
+        distance: u8,
     ) {
         let potential_peer_socket_address = potential_peer.0;
         let potential_peer_instance_id = potential_peer.1;
@@ -93,20 +96,21 @@ impl PotentialPeersState {
             self.potential_peers.remove(&random_potential_peer);
         }
 
-        let insert_value = PotentialPeerInfo::new(reported_by, potential_peer_instance_id);
+        let insert_value =
+            PotentialPeerInfo::new(reported_by, potential_peer_instance_id, distance);
         self.potential_peers
             .insert(potential_peer_socket_address, insert_value);
     }
 
     /// Return a random peer from the potential peer list that we aren't connected to
-    /// and that isn't our own address.
-    fn get_random_peer_candidate(
+    /// and that isn't our own address. Returns (socket address, peer distance)
+    fn get_distant_candidate(
         &self,
         // connected_clients: &[(SocketAddr, u128)],
         connected_clients: &[PeerInfo],
         own_listen_socket: Option<SocketAddr>,
         own_instance_id: u128,
-    ) -> Option<SocketAddr> {
+    ) -> Option<(SocketAddr, u8)> {
         let peers_instance_ids: Vec<u128> =
             connected_clients.iter().map(|x| x.instance_id).collect();
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
@@ -127,12 +131,15 @@ impl PotentialPeersState {
             .filter(|potential_peer| !peers_listen_addresses.contains(&potential_peer.0))
             .collect::<Vec<_>>();
 
+        // Get the candidate list with the highest distance
+        let max_distance_candidates = not_connected_peers.iter().max_by_key(|pp| pp.1.distance);
+
         // Pick a random candidate from the appropriate candidates
         let mut rng = rand::thread_rng();
-        not_connected_peers
+        max_distance_candidates
             .iter()
             .choose(&mut rng)
-            .map(|x| x.0.to_owned())
+            .map(|x| (x.0.to_owned(), x.1.distance))
     }
 }
 
@@ -298,10 +305,10 @@ async fn handle_peer_thread_message(
                 *state.net.syncing.write().unwrap() = true;
             }
         }
-        PeerThreadToMain::PeerDiscoveryAnswer((pot_peers, reported_by)) => {
+        PeerThreadToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
             let max_peers = state.cli.max_peers;
             for pot_peer in pot_peers {
-                potential_peers.add(reported_by, pot_peer, max_peers as usize);
+                potential_peers.add(reported_by, pot_peer, max_peers as usize, distance);
             }
         }
     }
@@ -364,13 +371,13 @@ async fn peer_discovery_handler(
     // 2) Connect to one of those peers, A.
     // 3) Ask this newly connected peer, A, for its peers.
     // 4) Connect to one of those peers
-    // 5) Disconnect from A.
+    // 5) Disconnect from A. (not yet implemented)
 
     // 0)
     main_to_peer_broadcast_tx.send(MainToPeerThread::MakePeerDiscoveryRequest)?;
 
     // 1)
-    let peer_candidate = match potential_peers.get_random_peer_candidate(
+    let (peer_candidate, candidate_distance) = match potential_peers.get_distant_candidate(
         &connected_peers,
         state.cli.get_own_listen_address(),
         state.net.instance_id,
@@ -380,18 +387,31 @@ async fn peer_discovery_handler(
     };
 
     // 2)
-    info!("Connecting to peer {}", peer_candidate);
+    info!(
+        "Connecting to peer {} with distance {}",
+        peer_candidate, candidate_distance
+    );
     let own_handshake_data = state.get_handshakedata().await;
+    let main_to_peer_broadcast_rx = main_to_peer_broadcast_tx.subscribe();
     tokio::spawn(async move {
         call_peer_wrapper(
             peer_candidate,
             state.to_owned(),
-            main_to_peer_broadcast_tx.subscribe(),
+            main_to_peer_broadcast_rx,
             peer_thread_to_main_tx.to_owned(),
             &own_handshake_data,
+            candidate_distance,
         )
         .await;
     });
+
+    // 3
+    main_to_peer_broadcast_tx.send(MainToPeerThread::MakeSpecificPeerDiscoveryRequest(
+        peer_candidate,
+    ))?;
+
+    // 4 is completed in the next call to this function provided that the in (3) connected
+    // peer responded to the peer list request.
 
     Ok(())
 }

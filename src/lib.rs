@@ -295,6 +295,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                 main_to_peer_broadcast_rx_clone,
                 peer_thread_to_main_tx_clone,
                 &own_handshake_data_clone,
+                1, // All outgoing connections have distance 1
             )
             .await;
         });

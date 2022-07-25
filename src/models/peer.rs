@@ -170,7 +170,7 @@ pub enum PeerMessage {
     BlockRequestBatch(BlockHeight, usize),
     BlockResponseBatch(Vec<Box<TransferBlock>>),
     NewTransaction(i32),
-    PeerListRequest,
+    PeerListRequest, // Argument indicates distance in graph.
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
     Bye,
     ConnectionStatus(ConnectionStatus),

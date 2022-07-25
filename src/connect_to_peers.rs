@@ -142,6 +142,7 @@ where
         peer_address,
         peer_handshake_data,
         true,
+        1, // All incoming connections have distance 1
     )
     .await?;
 
@@ -155,6 +156,7 @@ pub async fn call_peer_wrapper(
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: &HandshakeData,
+    distance: u8,
 ) {
     debug!("Attempting to initiate connection");
     match tokio::net::TcpStream::connect(peer_address).await {
@@ -169,6 +171,7 @@ pub async fn call_peer_wrapper(
                 main_to_peer_thread_rx,
                 peer_thread_to_main_tx,
                 own_handshake_data,
+                distance,
             )
             .await
             {
@@ -189,6 +192,7 @@ async fn call_peer<S>(
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: &HandshakeData,
+    distance: u8,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
@@ -247,6 +251,7 @@ where
         peer_address,
         peer_handshake_data,
         false,
+        distance,
     )
     .await?;
 
@@ -306,6 +311,7 @@ mod connect_tests {
             from_main_rx_clone,
             to_main_tx,
             &own_handshake,
+            1,
         )
         .await?;
 
