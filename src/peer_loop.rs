@@ -210,7 +210,7 @@ where
             // We are interested in the address on which peers accept ingoing connections,
             // not in the address in which they are connected to us. We are only interested in
             // peers that accept incoming connections.
-            let peer_addresses: Vec<SocketAddr> = state
+            let peer_addresses: Vec<(SocketAddr, u128)> = state
                 .net
                 .peer_map
                 .lock()
@@ -218,7 +218,12 @@ where
                 .values()
                 .filter(|peer_info| peer_info.address_for_incoming_connections.is_some())
                 .take(MAX_PEER_LIST_LENGTH) // limit length of response
-                .map(|peer_info| peer_info.address_for_incoming_connections.unwrap())
+                .map(|peer_info| {
+                    (
+                        peer_info.address_for_incoming_connections.unwrap(),
+                        peer_info.instance_id,
+                    )
+                })
                 .collect();
             peer.send(PeerMessage::PeerListResponse(peer_addresses))
                 .await?;
@@ -282,7 +287,7 @@ where
             }
             Ok(false)
         }
-        PeerMessage::BlockResponseBatch(t_blocks) => {
+        PeerMessage::BlockResponseBatch(_t_blocks) => {
             debug!("Got block response batch");
 
             // Verify that we are in fact in syncing mode
@@ -709,18 +714,23 @@ mod peer_loop_tests {
     async fn test_peer_loop_peer_list() -> Result<()> {
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_address = state
+        let peer_infos = state
             .net
             .peer_map
             .lock()
             .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .connected_address;
+            .clone()
+            .into_values()
+            .collect::<Vec<_>>();
+        let (peer_address, instance_id) =
+            (peer_infos[0].connected_address, peer_infos[0].instance_id);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::PeerListRequest),
-            Action::Write(PeerMessage::PeerListResponse(vec![peer_address])),
+            Action::Write(PeerMessage::PeerListResponse(vec![(
+                peer_address,
+                instance_id,
+            )])),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -1427,14 +1437,18 @@ mod peer_loop_tests {
         // for a list of peers.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_address = state
+        let peer_infos = state
             .net
             .peer_map
             .lock()
             .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .connected_address;
+            .clone()
+            .into_values()
+            .collect::<Vec<_>>();
+        let (peer_address, peer_instance_id) = (
+            peer_infos[0].address_for_incoming_connections,
+            peer_infos[0].instance_id,
+        );
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1458,7 +1472,10 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::PeerListRequest),
             //
             // Answer the request for a peer list
-            Action::Write(PeerMessage::PeerListResponse(vec![peer_address])),
+            Action::Write(PeerMessage::PeerListResponse(vec![(
+                peer_address.unwrap(),
+                peer_instance_id,
+            )])),
             //
             // Complete the block reconciliation process by requesting the last block
             // in this process, to get back to a mutually known block.
@@ -1471,7 +1488,7 @@ mod peer_loop_tests {
             from_main_rx_clone,
             to_main_tx,
             state.clone(),
-            peer_address,
+            peer_address.unwrap(),
             hsd,
             true,
         )

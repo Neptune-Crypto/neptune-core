@@ -36,5 +36,5 @@ pub enum PeerThreadToMain {
     NewBlocks(Vec<Block>),
     NewTransaction(i32),
     PeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
-    PeerDiscoveryAnswer((Vec<SocketAddr>, SocketAddr)), // (response, reported_by)
+    PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr)), // ([(peer_listen_address, instance_id)], reported_by)
 }

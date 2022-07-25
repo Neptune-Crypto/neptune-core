@@ -3,7 +3,7 @@ use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::database::BlockDatabases;
-use crate::models::peer::PeerSynchronizationState;
+use crate::models::peer::{PeerInfo, PeerSynchronizationState};
 use crate::models::state::State;
 use anyhow::Result;
 use rand::prelude::IteratorRandom;
@@ -39,13 +39,15 @@ impl SynchronizationState {
 struct PotentialPeerInfo {
     reported: SystemTime,
     reported_by: SocketAddr,
+    instance_id: u128,
 }
 
 impl PotentialPeerInfo {
-    fn new(reported_by: SocketAddr) -> Self {
+    fn new(reported_by: SocketAddr, instance_id: u128) -> Self {
         Self {
             reported: SystemTime::now(),
             reported_by,
+            instance_id,
         }
     }
 }
@@ -61,8 +63,19 @@ impl PotentialPeersState {
         }
     }
 
-    fn add(&mut self, reported_by: SocketAddr, potential_peer: SocketAddr, max_peers: usize) {
-        if self.potential_peers.contains_key(&potential_peer) {
+    fn add(
+        &mut self,
+        reported_by: SocketAddr,
+        potential_peer: (SocketAddr, u128),
+        max_peers: usize,
+    ) {
+        let potential_peer_socket_address = potential_peer.0;
+        let potential_peer_instance_id = potential_peer.1;
+
+        if self
+            .potential_peers
+            .contains_key(&potential_peer_socket_address)
+        {
             return;
         }
 
@@ -80,28 +93,46 @@ impl PotentialPeersState {
             self.potential_peers.remove(&random_potential_peer);
         }
 
-        let insert_value = PotentialPeerInfo::new(reported_by);
-        self.potential_peers.insert(potential_peer, insert_value);
+        let insert_value = PotentialPeerInfo::new(reported_by, potential_peer_instance_id);
+        self.potential_peers
+            .insert(potential_peer_socket_address, insert_value);
     }
 
     /// Return a random peer from the potential peer list that we aren't connected to
     /// and that isn't our own address.
     fn get_random_peer_candidate(
         &self,
-        connected_clients: &[SocketAddr],
+        // connected_clients: &[(SocketAddr, u128)],
+        connected_clients: &[PeerInfo],
         own_listen_socket: Option<SocketAddr>,
+        own_instance_id: u128,
     ) -> Option<SocketAddr> {
+        let peers_instance_ids: Vec<u128> =
+            connected_clients.iter().map(|x| x.instance_id).collect();
+        let peers_listen_addresses: Vec<SocketAddr> = connected_clients
+            .into_iter()
+            .map(|x| x.address_for_incoming_connections)
+            .filter_map(|x| x)
+            .collect();
+
+        // Find the appropriate candidates
         let not_connected_peers = self
             .potential_peers
-            .keys()
+            .iter()
             // Prevent connecting to self
-            .filter(|potential_peer| {
-                own_listen_socket.is_none() || **potential_peer != own_listen_socket.unwrap()
-            })
-            // Prevent connecting to peer we already
-            .filter(|potential_peer| !connected_clients.contains(potential_peer));
+            .filter(|pp| pp.1.instance_id != own_instance_id)
+            .filter(|pp| own_listen_socket.is_some() && *pp.0 != own_listen_socket.unwrap())
+            // Prevent connecting to peer we already are connected to
+            .filter(|potential_peer| !peers_instance_ids.contains(&potential_peer.1.instance_id))
+            .filter(|potential_peer| !peers_listen_addresses.contains(&potential_peer.0))
+            .collect::<Vec<_>>();
+
+        // Pick a random candidate from the appropriate candidates
         let mut rng = rand::thread_rng();
-        not_connected_peers.choose(&mut rng).map(|x| x.to_owned())
+        not_connected_peers
+            .iter()
+            .choose(&mut rng)
+            .map(|x| x.0.to_owned())
     }
 }
 
@@ -267,10 +298,10 @@ async fn handle_peer_thread_message(
                 *state.net.syncing.write().unwrap() = true;
             }
         }
-        PeerThreadToMain::PeerDiscoveryAnswer((peers, reported_by)) => {
+        PeerThreadToMain::PeerDiscoveryAnswer((pot_peers, reported_by)) => {
             let max_peers = state.cli.max_peers;
-            for potential_peer in peers {
-                potential_peers.add(reported_by, potential_peer, max_peers as usize);
+            for pot_peer in pot_peers {
+                potential_peers.add(reported_by, pot_peer, max_peers as usize);
             }
         }
     }
@@ -278,14 +309,16 @@ async fn handle_peer_thread_message(
     Ok(())
 }
 
-async fn peer_count_handler(
+/// Function to perform peer discovery: Finds potential peers from connected peers and attempts
+/// to establish connections with one of those potential peers.
+async fn peer_discovery_handler(
     state: State,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
     potential_peers: &PotentialPeersState,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
 ) -> Result<()> {
-    let connected_peers: Vec<SocketAddr> = match state.net.peer_map.try_lock() {
-        Ok(pm) => pm.keys().map(|sa| *sa).collect(),
+    let connected_peers: Vec<PeerInfo> = match state.net.peer_map.try_lock() {
+        Ok(pm) => pm.values().cloned().collect(),
         Err(_) => return Ok(()),
     };
 
@@ -299,13 +332,16 @@ async fn peer_count_handler(
             state.cli.max_peers
         );
         let mut rng = thread_rng();
+
+        // pick a peer that was not specified in the CLI arguments to disconnect from
         let peer_to_disconnect = connected_peers
             .iter()
-            .filter(|peer| !state.cli.peers.contains(peer))
+            .filter(|peer| !state.cli.peers.contains(&peer.connected_address))
             .choose(&mut rng);
         match peer_to_disconnect {
             Some(peer) => {
-                main_to_peer_broadcast_tx.send(MainToPeerThread::Disconnect(*peer))?;
+                main_to_peer_broadcast_tx
+                    .send(MainToPeerThread::Disconnect(peer.connected_address))?;
             }
             None => warn!("Unable to resolve max peer constraint due to manual override."),
         };
@@ -334,9 +370,11 @@ async fn peer_count_handler(
     main_to_peer_broadcast_tx.send(MainToPeerThread::MakePeerDiscoveryRequest)?;
 
     // 1)
-    let peer_candidate = match potential_peers
-        .get_random_peer_candidate(&connected_peers, state.cli.get_own_listen_address())
-    {
+    let peer_candidate = match potential_peers.get_random_peer_candidate(
+        &connected_peers,
+        state.cli.get_own_listen_address(),
+        state.net.instance_id,
+    ) {
         Some(candidate) => candidate,
         None => return Ok(()),
     };
@@ -432,7 +470,7 @@ pub async fn main_loop(
             // Start peer discovery in case we
             _ = &mut peer_discovery_timer => {
                 // Check number of peers we are connected to
-                peer_count_handler(state.clone(), main_to_peer_broadcast_tx.clone(), &potential_peers_state, peer_thread_to_main_tx.clone()).await?
+                peer_discovery_handler(state.clone(), main_to_peer_broadcast_tx.clone(), &potential_peers_state, peer_thread_to_main_tx.clone()).await?
             }
             // TODO: Add signal::ctrl_c/shutdown handling here
         }

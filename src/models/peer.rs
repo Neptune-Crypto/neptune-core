@@ -171,7 +171,7 @@ pub enum PeerMessage {
     BlockResponseBatch(Vec<Box<TransferBlock>>),
     NewTransaction(i32),
     PeerListRequest,
-    PeerListResponse(Vec<SocketAddr>),
+    PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
     Bye,
     ConnectionStatus(ConnectionStatus),
 }
