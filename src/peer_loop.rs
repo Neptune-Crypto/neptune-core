@@ -290,8 +290,10 @@ impl PeerLoopHandler {
             }
             PeerMessage::Block(t_block) => {
                 debug!(
-                    "Got new block from peer {}, block height {}",
-                    self.peer_address, t_block.header.height
+                    "Got new block from peer {} (listen: {:?}), block height {}",
+                    self.peer_address,
+                    self.peer_handshake_data.listen_address,
+                    t_block.header.height
                 );
                 let new_block_height = t_block.header.height;
 
@@ -443,10 +445,22 @@ impl PeerLoopHandler {
 
                     // Only request block if it is new, and if we are not currently reconciling
                     // a fork. If we are reconciling, that is handled later, and the information
-                    // about that is stored in `highest_shared_block_height`.
-                    if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty() {
-                        peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
-                            .await?;
+                    // about that is stored in `highest_shared_block_height`. If we are syncing
+                    // we are also not requesting the block but instead updating the sync state.
+                    if self.state.net.syncing.read().unwrap().to_owned() {
+                        self.to_main_tx
+                            .send(PeerThreadToMain::AddPeerMaxBlockHeight((
+                                self.peer_address,
+                                block_notification.height,
+                                block_notification.proof_of_work_family,
+                            )))
+                            .await
+                            .expect("Sending to main thread must succeed");
+                    } else {
+                        if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty() {
+                            peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
+                                .await?;
+                        }
                     }
                 }
 
@@ -509,15 +523,15 @@ impl PeerLoopHandler {
                 Ok(false)
             }
             PeerMessage::Handshake(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage);
+                self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
             }
             PeerMessage::NewTransaction(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage);
+                self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
             }
             PeerMessage::ConnectionStatus(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage);
+                self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
             }
         }
@@ -639,6 +653,10 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
+                                    if peer_msg.ignore_during_sync() && self.state.net.syncing.read().unwrap().to_owned() {
+                                        debug!("Ignoring message during syncing");
+                                        continue;
+                                    }
                                     let close_connection: bool = match self.handle_peer_message(peer_msg, &mut peer, peer_state_info).await {
                                         Ok(close) => close,
                                         Err(err) => {

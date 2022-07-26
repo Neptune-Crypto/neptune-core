@@ -186,6 +186,26 @@ pub enum PeerMessage {
     ConnectionStatus(ConnectionStatus),
 }
 
+impl PeerMessage {
+    /// Function to filter out messages that should not be handled while the client is syncing
+    pub fn ignore_during_sync(&self) -> bool {
+        match self {
+            PeerMessage::Handshake(_) => false,
+            PeerMessage::Block(_) => true,
+            PeerMessage::BlockNotification(_) => false,
+            PeerMessage::BlockRequestByHeight(_) => false,
+            PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::BlockRequestBatch(_, _) => false,
+            PeerMessage::BlockResponseBatch(_) => false,
+            PeerMessage::NewTransaction(_) => true,
+            PeerMessage::PeerListRequest => false,
+            PeerMessage::PeerListResponse(_) => false,
+            PeerMessage::Bye => false,
+            PeerMessage::ConnectionStatus(_) => false,
+        }
+    }
+}
+
 /// `MutablePeerState` contains the part of the peer-loop's state that is mutable
 #[derive(Clone, Debug)]
 pub struct MutablePeerState {
