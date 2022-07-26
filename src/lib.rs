@@ -13,6 +13,7 @@ mod tests;
 
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::database::leveldb::LevelDB;
+use crate::main_loop::MainLoopHandler;
 use crate::models::state::ArchivalState;
 use crate::models::state::BlockchainState;
 use crate::models::state::LightState;
@@ -294,7 +295,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                 peer_state_var.clone(),
                 main_to_peer_broadcast_rx_clone,
                 peer_thread_to_main_tx_clone,
-                &own_handshake_data_clone,
+                own_handshake_data_clone,
                 1, // All outgoing connections have distance 1
             )
             .await;
@@ -348,15 +349,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     });
 
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
-    main_loop::main_loop(
+    let main_loop_handler = MainLoopHandler::new(
         listener,
         state,
         main_to_peer_broadcast_tx,
         peer_thread_to_main_tx,
-        peer_thread_to_main_rx,
-        own_handshake_data,
-        miner_to_main_rx,
         main_to_miner_tx,
-    )
-    .await
+    );
+    main_loop_handler
+        .run(peer_thread_to_main_rx, miner_to_main_rx)
+        .await
 }

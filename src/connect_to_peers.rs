@@ -155,7 +155,7 @@ pub async fn call_peer_wrapper(
     state: State,
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    own_handshake_data: &HandshakeData,
+    own_handshake_data: HandshakeData,
     distance: u8,
 ) {
     debug!("Attempting to initiate connection");
@@ -170,7 +170,7 @@ pub async fn call_peer_wrapper(
                 peer_address,
                 main_to_peer_thread_rx,
                 peer_thread_to_main_tx,
-                own_handshake_data,
+                &own_handshake_data,
                 distance,
             )
             .await
