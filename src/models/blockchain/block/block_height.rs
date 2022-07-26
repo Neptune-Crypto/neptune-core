@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt::Display, ops::Sub};
+use std::{
+    cmp::Ordering,
+    fmt::Display,
+    ops::{Add, Sub},
+};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +58,14 @@ impl From<BlockHeight> for u64 {
 impl Ord for BlockHeight {
     fn cmp(&self, other: &Self) -> Ordering {
         (self.0.value()).cmp(&(other.0.value()))
+    }
+}
+
+impl Add<usize> for BlockHeight {
+    type Output = BlockHeight;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        Self(BFieldElement::new(self.0.value() + rhs as u64))
     }
 }
 

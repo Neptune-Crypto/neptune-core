@@ -20,6 +20,7 @@ const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
 const SYNCHRONIZATION_TIMEOUT_SEVERITY: u16 = u16::MAX;
 const FLOODED_PEER_LIST_RESPONSE_SEVERITY: u16 = 2;
 const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
+const INVALID_MESSAGE_SEVERITY: u16 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -39,6 +40,11 @@ pub enum PeerSanctionReason {
     ForkResolutionError((BlockHeight, u16, Digest)),
     SynchronizationTimeout,
     FloodPeerListResponse,
+    // Be careful about using this too much as it's bad for log opportunities
+    InvalidMessage,
+    TooShortBlockBatch,
+    ReceivedBatchBlocksOutsideOfSync,
+    BatchBlocksInvalidStartHeight,
 }
 
 /// Used by main thread to manage synchronizations/catch-up. Main thread has
@@ -76,6 +82,10 @@ impl PeerSanctionReason {
             }
             PeerSanctionReason::SynchronizationTimeout => SYNCHRONIZATION_TIMEOUT_SEVERITY,
             PeerSanctionReason::FloodPeerListResponse => FLOODED_PEER_LIST_RESPONSE_SEVERITY,
+            PeerSanctionReason::InvalidMessage => INVALID_MESSAGE_SEVERITY,
+            PeerSanctionReason::TooShortBlockBatch => INVALID_MESSAGE_SEVERITY,
+            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => INVALID_MESSAGE_SEVERITY,
+            PeerSanctionReason::BatchBlocksInvalidStartHeight => INVALID_MESSAGE_SEVERITY,
         }
     }
 }
@@ -168,7 +178,7 @@ pub enum PeerMessage {
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
     BlockRequestBatch(BlockHeight, usize),
-    BlockResponseBatch(Vec<Box<TransferBlock>>),
+    BlockResponseBatch(Vec<TransferBlock>),
     NewTransaction(i32),
     PeerListRequest, // Argument indicates distance in graph.
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
