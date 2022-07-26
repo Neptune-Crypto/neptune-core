@@ -472,7 +472,6 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn run(
         &self,
         mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,

@@ -18,7 +18,7 @@ use crate::{
         peer::{ConnectionRefusedReason, ConnectionStatus, HandshakeData, PeerMessage},
         state::State,
     },
-    peer_loop::peer_loop_wrapper,
+    peer_loop::PeerLoopHandler,
     MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
 };
 
@@ -134,17 +134,17 @@ where
 
     // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
     info!("Connection accepted from {}", peer_address);
-    peer_loop_wrapper(
-        peer,
-        main_to_peer_thread_rx,
+    let peer_loop_handler = PeerLoopHandler::new(
         peer_thread_to_main_tx,
         state,
         peer_address,
         peer_handshake_data,
         true,
         1, // All incoming connections have distance 1
-    )
-    .await?;
+    );
+    peer_loop_handler
+        .run_wrapper(peer, main_to_peer_thread_rx)
+        .await?;
 
     Ok(())
 }
@@ -243,17 +243,17 @@ where
         }
     }
 
-    peer_loop_wrapper(
-        peer,
-        main_to_peer_thread_rx,
+    let peer_loop_handler = PeerLoopHandler::new(
         peer_thread_to_main_tx,
         state,
         peer_address,
         peer_handshake_data,
         false,
         distance,
-    )
-    .await?;
+    );
+    peer_loop_handler
+        .run_wrapper(peer, main_to_peer_thread_rx)
+        .await?;
 
     Ok(())
 }

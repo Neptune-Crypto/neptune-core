@@ -176,13 +176,14 @@ pub enum PeerMessage {
     ConnectionStatus(ConnectionStatus),
 }
 
+/// `MutablePeerState` contains the part of the peer-loop's state that is mutable
 #[derive(Clone, Debug)]
-pub struct PeerState {
+pub struct MutablePeerState {
     pub highest_shared_block_height: BlockHeight,
     pub fork_reconciliation_blocks: Vec<Block>,
 }
 
-impl PeerState {
+impl MutablePeerState {
     pub fn new(block_height: BlockHeight) -> Self {
         Self {
             highest_shared_block_height: block_height,
