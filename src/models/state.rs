@@ -38,12 +38,14 @@ impl LightState {
 pub struct ArchivalState {
     // Since this is a database, we use the tokio Mutex here.
     pub block_databases: Arc<TokioMutex<BlockDatabases>>,
+    genesis_block: Block,
 }
 
 impl ArchivalState {
     pub fn new(initial_block_databases: Arc<TokioMutex<BlockDatabases>>) -> Self {
         Self {
             block_databases: initial_block_databases,
+            genesis_block: Block::genesis_block(),
         }
     }
 
@@ -55,7 +57,7 @@ impl ArchivalState {
             BlockDatabases::get_latest_block(&mut dbs).expect("Failed to read from DB");
 
         match lookup_res_info {
-            None => Block::genesis_block(),
+            None => self.genesis_block.clone(),
             Some(block) => block,
         }
     }
@@ -70,9 +72,8 @@ impl ArchivalState {
             .get(block_digest)
             .or_else(move || {
                 // If block was not found in database, check if the digest matches the genesis block
-                let genesis = Block::genesis_block();
-                if genesis.hash == block_digest {
-                    Some(genesis)
+                if self.genesis_block.hash == block_digest {
+                    Some(self.genesis_block.clone())
                 } else {
                     None
                 }
