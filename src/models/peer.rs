@@ -172,14 +172,14 @@ pub enum ConnectionStatus {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum PeerMessage {
-    Handshake((Vec<u8>, HandshakeData)),
+    Handshake(Box<(Vec<u8>, HandshakeData)>),
     Block(Box<TransferBlock>),
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
     BlockRequestBatch(BlockHeight, usize),
     BlockResponseBatch(Vec<TransferBlock>),
-    NewTransaction(i32),
+    // NewTransaction(i32),
     PeerListRequest, // Argument indicates distance in graph.
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
     Bye,
@@ -197,7 +197,7 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHash(_) => false,
             PeerMessage::BlockRequestBatch(_, _) => false,
             PeerMessage::BlockResponseBatch(_) => false,
-            PeerMessage::NewTransaction(_) => true,
+            // PeerMessage::NewTransaction(_) => true,
             PeerMessage::PeerListRequest => false,
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,

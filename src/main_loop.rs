@@ -1,6 +1,5 @@
 use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::leveldb::LevelDB;
-use crate::main_loop;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::database::BlockDatabases;
@@ -111,17 +110,15 @@ impl SyncState {
             Some((req_time, requested_height, peer_sa)) => {
                 if requested_height < current_block_height {
                     (None, true)
+                } else if req_time
+                    + Duration::from_secs(
+                        SANCTION_PEER_TIMEOUT_FACTOR * SYNC_REQUEST_INTERVAL_IN_SECONDS,
+                    )
+                    < SystemTime::now()
+                {
+                    (Some(peer_sa), true)
                 } else {
-                    if req_time
-                        + Duration::from_secs(
-                            SANCTION_PEER_TIMEOUT_FACTOR * SYNC_REQUEST_INTERVAL_IN_SECONDS,
-                        )
-                        < SystemTime::now()
-                    {
-                        (Some(peer_sa), true)
-                    } else {
-                        (None, false)
-                    }
+                    (None, false)
                 }
             }
         }
@@ -129,8 +126,8 @@ impl SyncState {
 }
 
 struct PotentialPeerInfo {
-    reported: SystemTime,
-    reported_by: SocketAddr,
+    _reported: SystemTime,
+    _reported_by: SocketAddr,
     instance_id: u128,
     distance: u8,
 }
@@ -138,8 +135,8 @@ struct PotentialPeerInfo {
 impl PotentialPeerInfo {
     fn new(reported_by: SocketAddr, instance_id: u128, distance: u8) -> Self {
         Self {
-            reported: SystemTime::now(),
-            reported_by,
+            _reported: SystemTime::now(),
+            _reported_by: reported_by,
             instance_id,
             distance,
         }
@@ -206,10 +203,11 @@ impl PotentialPeersState {
     ) -> Option<(SocketAddr, u8)> {
         let peers_instance_ids: Vec<u128> =
             connected_clients.iter().map(|x| x.instance_id).collect();
+
+        // Only pick those peers that report a listening port
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
-            .into_iter()
-            .map(|x| x.address_for_incoming_connections)
-            .filter_map(|x| x)
+            .iter()
+            .filter_map(|x| x.address_for_incoming_connections)
             .collect();
 
         // Find the appropriate candidates
@@ -221,7 +219,7 @@ impl PotentialPeersState {
             .filter(|pp| own_listen_socket.is_some() && *pp.0 != own_listen_socket.unwrap())
             // Prevent connecting to peer we already are connected to
             .filter(|potential_peer| !peers_instance_ids.contains(&potential_peer.1.instance_id))
-            .filter(|potential_peer| !peers_listen_addresses.contains(&potential_peer.0))
+            .filter(|potential_peer| !peers_listen_addresses.contains(potential_peer.0))
             .collect::<Vec<_>>();
 
         // Get the candidate list with the highest distance
@@ -367,9 +365,9 @@ impl MainLoopHandler {
                     .send(MainToPeerThread::Block(Box::new(last_block)))
                     .expect("Peer handler broadcast was closed. This should never happen");
             }
-            PeerThreadToMain::NewTransaction(_txs) => {
-                error!("Unimplemented txs msg received");
-            }
+            // PeerThreadToMain::NewTransaction(_txs) => {
+            //     error!("Unimplemented txs msg received");
+            // }
             PeerThreadToMain::AddPeerMaxBlockHeight((
                 socket_addr,
                 claimed_max_height,

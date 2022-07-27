@@ -456,11 +456,10 @@ impl PeerLoopHandler {
                             )))
                             .await
                             .expect("Sending to main thread must succeed");
-                    } else {
-                        if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty() {
-                            peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
-                                .await?;
-                        }
+                    } else if block_is_new && peer_state_info.fork_reconciliation_blocks.is_empty()
+                    {
+                        peer.send(PeerMessage::BlockRequestByHeight(block_notification.height))
+                            .await?;
                     }
                 }
 
@@ -526,10 +525,10 @@ impl PeerLoopHandler {
                 self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
             }
-            PeerMessage::NewTransaction(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage)?;
-                Ok(false)
-            }
+            // PeerMessage::NewTransaction(_) => {
+            //     self.punish(PeerSanctionReason::InvalidMessage)?;
+            //     Ok(false)
+            // }
             PeerMessage::ConnectionStatus(_) => {
                 self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
@@ -573,11 +572,11 @@ impl PeerLoopHandler {
                 }
                 Ok(false)
             }
-            MainToPeerThread::Transaction(nt) => {
-                debug!("peer_loop got Transaction message from main");
-                peer.send(PeerMessage::NewTransaction(nt)).await?;
-                Ok(false)
-            }
+            // MainToPeerThread::Transaction(nt) => {
+            //     debug!("peer_loop got Transaction message from main");
+            //     peer.send(PeerMessage::NewTransaction(nt)).await?;
+            //     Ok(false)
+            // }
             MainToPeerThread::RequestBlockBatch(block_height, peer_addr_target) => {
                 // Only ask one of the peers about the batch of blocks
                 if peer_addr_target != self.peer_address {
@@ -666,6 +665,7 @@ impl PeerLoopHandler {
                                     };
 
                                     if close_connection {
+                                        info!("Closing connection to {}", self.peer_address);
                                         break;
                                     }
                                 }
@@ -765,6 +765,7 @@ impl PeerLoopHandler {
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
         let _res = self.run(peer, from_main_rx, &mut peer_state).await;
+        debug!("Exited peer loop for {}", self.peer_address);
 
         // TODO: Send message to main removing claimed max block height in case we are
         // syncing and we banned the peer for sending us bad blocks.
@@ -781,9 +782,11 @@ impl PeerLoopHandler {
                     self.peer_address
                 )
             });
+        debug!("Fetched peer info standing for {}", self.peer_address);
         self.state
             .write_peer_standing_on_increase(self.peer_address.ip(), peer_info_writeback.standing)
             .await;
+        debug!("Stored peer info standing for {}", self.peer_address);
 
         // This message is used to determine if we are to exit synchronization mode
         self.to_main_tx
@@ -792,6 +795,7 @@ impl PeerLoopHandler {
             ))
             .await?;
 
+        debug!("Ending peer loop for {}", self.peer_address);
         Ok(())
     }
 }
@@ -815,9 +819,7 @@ mod peer_loop_tests {
     async fn test_peer_loop_bye() -> Result<()> {
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
-        let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
-        let (_to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
-        let (_peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
 
         let peer_address = state
@@ -845,8 +847,9 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_peer_list() -> Result<()> {
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
+
         let peer_infos = state
             .net
             .peer_map
@@ -867,8 +870,6 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
-        let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
         let peer_loop_handler =
@@ -932,7 +933,12 @@ mod peer_loop_tests {
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
+        }
+
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
         }
 
         // Verify that no futher message was sent to main loop
@@ -960,7 +966,7 @@ mod peer_loop_tests {
     async fn bad_block_test() -> Result<()> {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
         let peer_address = state
             .net
@@ -994,8 +1000,6 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
-        let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
         let peer_loop_handler = PeerLoopHandler::new(
@@ -1013,7 +1017,12 @@ mod peer_loop_tests {
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
+        }
+
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
         }
 
         // Verify that no futher message was sent to main loop
@@ -1051,7 +1060,7 @@ mod peer_loop_tests {
         // The scenario tested here is that a client receives a block that is already
         // in the database. The expected behavior is to ignore the block and not send
         // a message to the main thread.
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
         let peer_address = state
             .net
@@ -1077,8 +1086,6 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (peer_broadcast_tx, mut _from_main_rx1) = broadcast::channel::<MainToPeerThread>(1);
-        let (to_main_tx, mut to_main_rx1) = mpsc::channel::<PeerThreadToMain>(1);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
         let peer_loop_handler = PeerLoopHandler::new(
@@ -1096,7 +1103,11 @@ mod peer_loop_tests {
         // Verify that no block was sent to main loop
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
+        }
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
         }
         match to_main_rx1.try_recv() {
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => (),
@@ -1155,7 +1166,7 @@ mod peer_loop_tests {
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
         }
 
         // Verify that a block was sent to `main_loop`
@@ -1163,6 +1174,11 @@ mod peer_loop_tests {
             Some(PeerThreadToMain::NewBlocks(_block)) => (),
             _ => bail!("Did not find msg sent to main thread"),
         };
+
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
         if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
@@ -1232,6 +1248,10 @@ mod peer_loop_tests {
             }
             _ => bail!("Did not find msg sent to main thread 1"),
         };
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
         if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
@@ -1297,7 +1317,11 @@ mod peer_loop_tests {
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
+        }
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
         }
 
         // Verify that no block is sent to main loop.
@@ -1372,7 +1396,7 @@ mod peer_loop_tests {
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
@@ -1389,6 +1413,10 @@ mod peer_loop_tests {
             }
             _ => bail!("Did not find msg sent to main thread"),
         };
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
         if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
@@ -1447,7 +1475,7 @@ mod peer_loop_tests {
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
@@ -1464,6 +1492,10 @@ mod peer_loop_tests {
             }
             _ => bail!("Did not find msg sent to main thread"),
         };
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
         if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
@@ -1540,7 +1572,7 @@ mod peer_loop_tests {
         // Verify that peer max block height was sent
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-            _ => bail!("Must receive peer block max height"),
+            _ => bail!("Must receive add of peer block max height"),
         }
 
         match to_main_rx1.recv().await {
@@ -1557,6 +1589,10 @@ mod peer_loop_tests {
             }
             _ => bail!("Did not find msg sent to main thread"),
         };
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
         if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
@@ -1646,6 +1682,11 @@ mod peer_loop_tests {
             }
             _ => bail!("Did not find msg sent to main thread"),
         };
+
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
         if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
