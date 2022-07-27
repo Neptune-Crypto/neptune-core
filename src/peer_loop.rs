@@ -651,8 +651,13 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
-                                    if peer_msg.ignore_during_sync() && self.state.net.syncing.read().unwrap().to_owned() {
-                                        debug!("Ignoring message during syncing");
+                                    let syncing = self.state.net.syncing.read().unwrap().to_owned();
+                                    if peer_msg.ignore_during_sync() && syncing {
+                                        debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
+                                        continue;
+                                    }
+                                    if peer_msg.ignore_when_not_sync() && !syncing {
+                                        debug!("Ignoring {} message because we are not syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;
                                     }
                                     let close_connection: bool = match self.handle_peer_message(peer_msg, &mut peer, peer_state_info).await {

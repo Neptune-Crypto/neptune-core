@@ -204,6 +204,23 @@ impl PeerMessage {
         }
     }
 
+    pub fn ignore_when_not_sync(&self) -> bool {
+        match self {
+            PeerMessage::Handshake(_) => false,
+            PeerMessage::Block(_) => false,
+            PeerMessage::BlockNotification(_) => false,
+            PeerMessage::BlockRequestByHeight(_) => false,
+            PeerMessage::BlockRequestByHash(_) => false,
+            PeerMessage::BlockRequestBatch(_, _) => false,
+            PeerMessage::BlockResponseBatch(_) => true,
+            // PeerMessage::NewTransaction(_) => false,
+            PeerMessage::PeerListRequest => false,
+            PeerMessage::PeerListResponse(_) => false,
+            PeerMessage::Bye => false,
+            PeerMessage::ConnectionStatus(_) => false,
+        }
+    }
+
     /// Function to filter out messages that should not be handled while the client is syncing
     pub fn ignore_during_sync(&self) -> bool {
         match self {
