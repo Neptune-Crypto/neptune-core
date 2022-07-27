@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 
 use twenty_first::amount::u32s::U32s;
 
@@ -24,10 +24,10 @@ pub enum MinerToMain {
 pub enum MainToPeerThread {
     Block(Box<Block>),
     BlockFromMiner(Box<Block>),
-    Transaction(i32),
+    // Transaction(i32),
     RequestBlockBatch(BlockHeight, SocketAddr), // (start_block_height, peer_socket_to_request)
-    PeerSynchronizationTimeout(IpAddr), // Abort a synchronization attempt that has timed out
-    MakePeerDiscoveryRequest,           // Request peer list from connected peers
+    PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
+    MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
     Disconnect(SocketAddr),                       // Disconnect the connection to a specific peer
 }
@@ -35,7 +35,8 @@ pub enum MainToPeerThread {
 #[derive(Clone, Debug)]
 pub enum PeerThreadToMain {
     NewBlocks(Vec<Block>),
-    NewTransaction(i32),
-    PeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
+    // NewTransaction(i32),
+    AddPeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
+    RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
 }

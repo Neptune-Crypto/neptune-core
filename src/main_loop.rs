@@ -1,12 +1,12 @@
 use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::leveldb::LevelDB;
-use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::database::BlockDatabases;
 use crate::models::peer::{PeerInfo, PeerSynchronizationState};
 use crate::models::state::State;
 use anyhow::Result;
-use rand::prelude::IteratorRandom;
+use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -15,10 +15,13 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::{select, time};
 use tracing::{debug, error, info, warn};
+use twenty_first::amount::u32s::U32s;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 
-const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 10;
+const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
+const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 30;
+const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 
 /// MainLoop is the immutable part of the input for the main loop function
@@ -48,7 +51,7 @@ impl MainLoopHandler {
     }
 }
 
-/// Main loop state is the mutable part of the main loop function
+/// The mutable part of the main loop function
 struct MutableMainLoopState {
     sync_state: SyncState,
     potential_peers: PotentialPeersState,
@@ -65,7 +68,7 @@ impl MutableMainLoopState {
 
 struct SyncState {
     peer_sync_states: HashMap<SocketAddr, PeerSynchronizationState>,
-    last_sync_request: Option<(SystemTime, BlockHeight)>,
+    last_sync_request: Option<(SystemTime, BlockHeight, SocketAddr)>,
 }
 
 impl SyncState {
@@ -75,11 +78,56 @@ impl SyncState {
             last_sync_request: None,
         }
     }
+
+    fn record_request(&mut self, requested_block_height: BlockHeight, peer: SocketAddr) {
+        self.last_sync_request = Some((SystemTime::now(), requested_block_height, peer));
+    }
+
+    /// Return a list of peers that have reported to be in possession of blocks with a PoW family
+    /// above a threshold.
+    fn get_potential_peers_for_sync_request(
+        &self,
+        threshold_pow_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+    ) -> Vec<SocketAddr> {
+        self.peer_sync_states
+            .iter()
+            .filter(|(_sa, sync_state)| sync_state.claimed_max_pow_family > threshold_pow_family)
+            .map(|(sa, _)| *sa)
+            .collect()
+    }
+
+    /// Determine if a peer should be sanctioned for failing to respond to a synchronization
+    /// request. Also determine if a new request should be made or the previous one should be
+    /// allowed to run for longer.
+    fn get_status_of_last_request(
+        &self,
+        current_block_height: BlockHeight,
+    ) -> (Option<SocketAddr>, bool) {
+        // A peer is sanctioned if no answer has been received after N times the sync request
+        // interval.
+        match self.last_sync_request {
+            None => (None, true),
+            Some((req_time, requested_height, peer_sa)) => {
+                if requested_height < current_block_height {
+                    (None, true)
+                } else if req_time
+                    + Duration::from_secs(
+                        SANCTION_PEER_TIMEOUT_FACTOR * SYNC_REQUEST_INTERVAL_IN_SECONDS,
+                    )
+                    < SystemTime::now()
+                {
+                    (Some(peer_sa), true)
+                } else {
+                    (None, false)
+                }
+            }
+        }
+    }
 }
 
 struct PotentialPeerInfo {
-    reported: SystemTime,
-    reported_by: SocketAddr,
+    _reported: SystemTime,
+    _reported_by: SocketAddr,
     instance_id: u128,
     distance: u8,
 }
@@ -87,8 +135,8 @@ struct PotentialPeerInfo {
 impl PotentialPeerInfo {
     fn new(reported_by: SocketAddr, instance_id: u128, distance: u8) -> Self {
         Self {
-            reported: SystemTime::now(),
-            reported_by,
+            _reported: SystemTime::now(),
+            _reported_by: reported_by,
             instance_id,
             distance,
         }
@@ -116,6 +164,8 @@ impl PotentialPeersState {
         let potential_peer_socket_address = potential_peer.0;
         let potential_peer_instance_id = potential_peer.1;
 
+        // This check *should* make it likely that a potential peer is always
+        // registered with the lowest observed distance.
         if self
             .potential_peers
             .contains_key(&potential_peer_socket_address)
@@ -153,10 +203,11 @@ impl PotentialPeersState {
     ) -> Option<(SocketAddr, u8)> {
         let peers_instance_ids: Vec<u128> =
             connected_clients.iter().map(|x| x.instance_id).collect();
+
+        // Only pick those peers that report a listening port
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
-            .into_iter()
-            .map(|x| x.address_for_incoming_connections)
-            .filter_map(|x| x)
+            .iter()
+            .filter_map(|x| x.address_for_incoming_connections)
             .collect();
 
         // Find the appropriate candidates
@@ -168,7 +219,7 @@ impl PotentialPeersState {
             .filter(|pp| own_listen_socket.is_some() && *pp.0 != own_listen_socket.unwrap())
             // Prevent connecting to peer we already are connected to
             .filter(|potential_peer| !peers_instance_ids.contains(&potential_peer.1.instance_id))
-            .filter(|potential_peer| !peers_listen_addresses.contains(&potential_peer.0))
+            .filter(|potential_peer| !peers_listen_addresses.contains(potential_peer.0))
             .collect::<Vec<_>>();
 
         // Get the candidate list with the highest distance
@@ -275,11 +326,15 @@ impl MainLoopHandler {
 
                     // Get out of sync mode if needed
                     if self.global_state.net.syncing.read().unwrap().to_owned() {
-                        *self.global_state.net.syncing.write().unwrap() = stay_in_sync_mode(
+                        let stay_in_sync_mode = stay_in_sync_mode(
                             last_block.header.clone(),
                             &main_loop_state.sync_state,
                             self.global_state.cli.max_number_of_blocks_before_syncing,
                         );
+                        if !stay_in_sync_mode {
+                            info!("Exiting sync mode");
+                            *self.global_state.net.syncing.write().unwrap() = false;
+                        }
                     }
 
                     // When receiving a block from a peer thread, we assume it is verified.
@@ -310,10 +365,10 @@ impl MainLoopHandler {
                     .send(MainToPeerThread::Block(Box::new(last_block)))
                     .expect("Peer handler broadcast was closed. This should never happen");
             }
-            PeerThreadToMain::NewTransaction(_txs) => {
-                error!("Unimplemented txs msg received");
-            }
-            PeerThreadToMain::PeerMaxBlockHeight((
+            // PeerThreadToMain::NewTransaction(_txs) => {
+            //     error!("Unimplemented txs msg received");
+            // }
+            PeerThreadToMain::AddPeerMaxBlockHeight((
                 socket_addr,
                 claimed_max_height,
                 claimed_max_pow_family,
@@ -344,6 +399,38 @@ impl MainLoopHandler {
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
                     *self.global_state.net.syncing.write().unwrap() = true;
+                }
+            }
+            PeerThreadToMain::RemovePeerMaxBlockHeight(socket_addr) => {
+                debug!(
+                    "Removing max block height from sync data structure for peer {}",
+                    socket_addr
+                );
+                main_loop_state
+                    .sync_state
+                    .peer_sync_states
+                    .remove(&socket_addr);
+
+                // Get out of sync mode if needed
+                let tip_header: BlockHeader = self
+                    .global_state
+                    .chain
+                    .light_state
+                    .latest_block_header
+                    .lock()
+                    .expect("Lock on block header must succeed")
+                    .to_owned();
+
+                if self.global_state.net.syncing.read().unwrap().to_owned() {
+                    let stay_in_sync_mode = stay_in_sync_mode(
+                        tip_header,
+                        &main_loop_state.sync_state,
+                        self.global_state.cli.max_number_of_blocks_before_syncing,
+                    );
+                    if !stay_in_sync_mode {
+                        info!("Exiting sync mode");
+                        *self.global_state.net.syncing.write().unwrap() = false;
+                    }
                 }
             }
             PeerThreadToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
@@ -472,6 +559,73 @@ impl MainLoopHandler {
         Ok(())
     }
 
+    async fn sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
+        // Check if we are in sync mode
+        if !self.global_state.net.syncing.read().unwrap().to_owned() {
+            return Ok(());
+        }
+
+        info!("Running sync");
+
+        // Check when latest batch of blocks was requested
+        let (current_block_height, current_pow_family) = match self
+            .global_state
+            .chain
+            .light_state
+            .latest_block_header
+            .try_lock()
+        {
+            Ok(lock) => (lock.height, lock.proof_of_work_family),
+
+            // If we can't acquire lock on latest block header, don't block. Just exit and try again next
+            // time.
+            Err(_) => return Ok(()),
+        };
+
+        let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
+            .sync_state
+            .get_status_of_last_request(current_block_height);
+
+        // Sanction peer if they failed to respond
+        if let Some(peer) = peer_to_sanction {
+            self.main_to_peer_broadcast_tx
+                .send(MainToPeerThread::PeerSynchronizationTimeout(peer))?;
+        }
+
+        if !try_new_request {
+            return Ok(());
+        }
+
+        // Create the next request from the reported
+
+        // Pick a random peer that has reported to have relevant blocks
+        let candidate_peers = main_loop_state
+            .sync_state
+            .get_potential_peers_for_sync_request(current_pow_family);
+        let mut rng = thread_rng();
+        let chosen_peer = candidate_peers.choose(&mut rng);
+        assert!(
+            chosen_peer.is_some(),
+            "A synchronization candidate must be available for a request. Otherwise the data structure is in an invalid state and syncing should not be active"
+        );
+
+        let requested_block_height = current_block_height.next();
+        let chosen_peer = chosen_peer.unwrap();
+        self.main_to_peer_broadcast_tx
+            .send(MainToPeerThread::RequestBlockBatch(
+                current_block_height.next(),
+                *chosen_peer,
+            ))
+            .expect("Sending message to peers must succeed");
+
+        // Record that this request was sent to the peer
+        main_loop_state
+            .sync_state
+            .record_request(requested_block_height, *chosen_peer);
+
+        Ok(())
+    }
+
     pub async fn run(
         &self,
         mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
@@ -479,17 +633,25 @@ impl MainLoopHandler {
     ) -> Result<()> {
         // Handle incoming connections, messages from peer threads, and messages from the mining thread
         let mut main_loop_state = MutableMainLoopState::default();
-        loop {
-            // This timer might have to sleep a random number of seconds for it to be guaranteed to be
-            // hit without being interrupted by other processes.
-            let peer_discovery_timer =
-                time::sleep(Duration::from_secs(PEER_DISCOVERY_INTERVAL_IN_SECONDS));
-            tokio::pin!(peer_discovery_timer);
-            select! {
-                // The second item contains the IP and port of the new connection.
-                Ok((stream, _)) = self.tcp_listener.accept() => {
 
-                    // Handle incoming connections from peer
+        // Set peer discovery to run every N seconds. The timer must be reset every time it has run.
+        let peer_discovery_timer_interval = Duration::from_secs(PEER_DISCOVERY_INTERVAL_IN_SECONDS);
+        let peer_discovery_timer = time::sleep(peer_discovery_timer_interval);
+        tokio::pin!(peer_discovery_timer);
+
+        // Set synchronization to run every M seconds. The timer must be reset every time it has run.
+        let sync_timer_interval = Duration::from_secs(SYNC_REQUEST_INTERVAL_IN_SECONDS);
+        let synchronization_timer = time::sleep(sync_timer_interval);
+        tokio::pin!(synchronization_timer);
+
+        loop {
+            // Set a timer to run peer discovery process every N seconds
+
+            // Set a timer for synchronization handling, but only if we are in synchronization mod
+
+            select! {
+                // Handle incoming connections from peer
+                Ok((stream, _)) = self.tcp_listener.accept() => {
                     let state = self.global_state.clone();
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
@@ -528,12 +690,25 @@ impl MainLoopHandler {
                     self.handle_miner_thread_message(main_message).await?
                 }
 
-                // Start peer discovery in case we
+                // Handle peer discovery
                 _ = &mut peer_discovery_timer => {
                     // Check number of peers we are connected to and connect to more peers
                     // if needed.
-                    self.peer_discovery_handler(&mut main_loop_state).await?
+                    self.peer_discovery_handler(&mut main_loop_state).await?;
+
+                    // Reset the timer to run this branch again in N seconds
+                    peer_discovery_timer.as_mut().reset(tokio::time::Instant::now() + peer_discovery_timer_interval);
                 }
+
+                // Handle synchronization
+                _ = &mut synchronization_timer => {
+                    self.sync(&mut main_loop_state).await?;
+
+                    // Reset the timer to run this branch again in M seconds
+                    synchronization_timer.as_mut().reset(tokio::time::Instant::now() + sync_timer_interval);
+                }
+
+
                 // TODO: Add signal::ctrl_c/shutdown handling here
             }
         }
