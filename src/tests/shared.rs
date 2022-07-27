@@ -65,7 +65,7 @@ pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
 }
 
 /// Return empty database objects
-fn databases(
+pub fn databases(
     network: Network,
 ) -> Result<(
     Arc<tokio::sync::Mutex<BlockDatabases>>,
