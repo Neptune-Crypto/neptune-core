@@ -35,7 +35,7 @@ pub enum MainToPeerThread {
 impl MainToPeerThread {
     pub fn get_type(&self) -> String {
         match self {
-            MainToPeerThread::Block(_) => "blocks".to_string(),
+            MainToPeerThread::Block(_) => "block".to_string(),
             MainToPeerThread::BlockFromMiner(_) => "block from miner".to_string(),
             // MainToPeerThread::Transaction(_) => "tx".to_string(),
             MainToPeerThread::RequestBlockBatch(_, _) => "req block batch".to_string(),

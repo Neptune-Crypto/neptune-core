@@ -132,6 +132,7 @@ impl PeerLoopHandler {
         <S as TryStream>::Error: std::error::Error,
     {
         let parent_digest = received_block.header.prev_block_digest;
+        debug!("Fetching parent block");
         let parent_block = self
             .state
             .chain
@@ -140,6 +141,14 @@ impl PeerLoopHandler {
             .unwrap()
             .get_block(parent_digest)
             .await?;
+        debug!(
+            "Completed parent block fetching from DB: {}",
+            if parent_block.is_some() {
+                "found".to_string()
+            } else {
+                "not found".to_string()
+            }
+        );
         let parent_height = received_block.header.height.previous();
 
         // If parent is not known, request the parent, and add the current to the peer fork resolution list
@@ -319,6 +328,7 @@ impl PeerLoopHandler {
                     || !peer_state_info.fork_reconciliation_blocks.is_empty();
 
                 if block_is_new {
+                    debug!("block is new");
                     self.handle_new_block(block, peer, peer_state_info).await?;
                 } else {
                     info!(
@@ -502,6 +512,7 @@ impl PeerLoopHandler {
                         .block_databases
                         .lock()
                         .await;
+                    debug!("Locked block database object");
                     let hash_res = databases.block_height_to_hash.get(block_height);
                     match hash_res {
                         None => {
@@ -510,17 +521,23 @@ impl PeerLoopHandler {
                             return Ok(false);
                         }
                         Some(digest) => {
+                            debug!("Found digest for height");
                             block_response = match databases.block_hash_to_block.get(digest) {
                                 // I think it makes sense to panic here since we found the block in the height to digest
                                 // database. So it should be in the hash to block database.
                                 None => panic!("Failed to find block with hash {:?}", digest),
-                                Some(block) => PeerMessage::Block(Box::new(block.into())),
+                                Some(block) => {
+                                    debug!("Found block for digest");
+                                    PeerMessage::Block(Box::new(block.into()))
+                                }
                             };
                         }
                     }
                 }
 
+                debug!("Sending block");
                 peer.send(block_response).await?;
+                debug!("Sent block");
                 Ok(false)
             }
             PeerMessage::Handshake(_) => {
@@ -570,6 +587,7 @@ impl PeerLoopHandler {
                     peer_state_info.highest_shared_block_height = new_block_height;
                     peer.send(PeerMessage::BlockNotification((*block).into()))
                         .await?;
+                    debug!("Sent PeerMessage::BlockNotification");
                 }
                 Ok(false)
             }
