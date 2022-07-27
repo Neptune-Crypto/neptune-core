@@ -187,6 +187,23 @@ pub enum PeerMessage {
 }
 
 impl PeerMessage {
+    pub fn get_type(&self) -> String {
+        match self {
+            PeerMessage::Handshake(_) => "handshake".to_string(),
+            PeerMessage::Block(_) => "block".to_string(),
+            PeerMessage::BlockNotification(_) => "block notification".to_string(),
+            PeerMessage::BlockRequestByHeight(_) => "block req by height".to_string(),
+            PeerMessage::BlockRequestByHash(_) => "block req by hash".to_string(),
+            PeerMessage::BlockRequestBatch(_, _) => "block req batch".to_string(),
+            PeerMessage::BlockResponseBatch(_) => "block resp batch".to_string(),
+            // PeerMessage::NewTransaction(_) => "new tx".to_string(),
+            PeerMessage::PeerListRequest => "peer list req".to_string(),
+            PeerMessage::PeerListResponse(_) => "peer list resp".to_string(),
+            PeerMessage::Bye => "byt".to_string(),
+            PeerMessage::ConnectionStatus(_) => "connection status".to_string(),
+        }
+    }
+
     /// Function to filter out messages that should not be handled while the client is syncing
     pub fn ignore_during_sync(&self) -> bool {
         match self {

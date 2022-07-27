@@ -242,6 +242,11 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        debug!(
+            "Received {} from peer {}",
+            msg.get_type(),
+            self.peer_address
+        );
         match msg {
             PeerMessage::Bye => {
                 // Note that the current peer is not removed from the state.peer_map here
@@ -250,8 +255,6 @@ impl PeerLoopHandler {
                 Ok(true)
             }
             PeerMessage::PeerListRequest => {
-                debug!("Got PeerListRequest");
-
                 // We are interested in the address on which peers accept ingoing connections,
                 // not in the address in which they are connected to us. We are only interested in
                 // peers that accept incoming connections.
@@ -289,7 +292,7 @@ impl PeerLoopHandler {
                 Ok(false)
             }
             PeerMessage::Block(t_block) => {
-                debug!(
+                info!(
                     "Got new block from peer {} (listen: {:?}), block height {}",
                     self.peer_address,
                     self.peer_handshake_data.listen_address,
@@ -384,7 +387,6 @@ impl PeerLoopHandler {
                 Ok(false)
             }
             PeerMessage::BlockResponseBatch(t_blocks) => {
-                debug!("Got block response batch");
                 if t_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
                     self.punish(PeerSanctionReason::TooShortBlockBatch)?;
@@ -487,7 +489,7 @@ impl PeerLoopHandler {
                 }
             }
             PeerMessage::BlockRequestByHeight(block_height) => {
-                debug!("Got BlockRequestByHeight");
+                debug!("Got BlockRequestByHeight of height {}", block_height);
 
                 let block_response;
                 {
@@ -549,12 +551,12 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        debug!("Handling {} message from main in peer loop", msg.get_type());
         match msg {
             MainToPeerThread::BlockFromMiner(block) => {
                 // If this client found a block, we need to share it immediately
                 // to reduce the risk that someone else finds another one and shares
                 // it faster.
-                debug!("peer_loop got NewBlockFromMiner message from main");
                 let new_block_height = block.header.height;
                 let t_block: Box<TransferBlock> = Box::new((*block).into());
                 peer.send(PeerMessage::Block(t_block)).await?;
@@ -562,7 +564,6 @@ impl PeerLoopHandler {
                 Ok(false)
             }
             MainToPeerThread::Block(block) => {
-                debug!("NewBlock message from main");
                 let new_block_height = block.header.height;
                 if new_block_height > peer_state_info.highest_shared_block_height {
                     debug!("Sending PeerMessage::BlockNotification");
@@ -582,8 +583,6 @@ impl PeerLoopHandler {
                 if peer_addr_target != self.peer_address {
                     return Ok(false);
                 }
-
-                debug!("peer_loop got RequestBlockBatch message from main");
 
                 let request_batch_size = std::cmp::min(
                     STANDARD_BLOCK_BATCH_SIZE,

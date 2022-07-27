@@ -292,7 +292,7 @@ impl MainLoopHandler {
         msg: PeerThreadToMain,
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<()> {
-        debug!("Received message sent to main thread.");
+        debug!("Received {} from a peer thread", msg.get_type());
         match msg {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();

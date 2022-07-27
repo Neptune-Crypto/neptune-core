@@ -219,6 +219,8 @@ where
         own_handshake_data.to_owned(),
     ))))
     .await?;
+    debug!("Awaiting connection status response from {}", peer_address);
+
     let peer_handshake_data: HandshakeData = match peer.try_next().await? {
         Some(PeerMessage::Handshake(payload)) => {
             let (v, hsd) = *payload;
