@@ -6,7 +6,6 @@ use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
 };
-use tracing::debug;
 
 pub struct RustyLevelDB<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> {
     database: DB,

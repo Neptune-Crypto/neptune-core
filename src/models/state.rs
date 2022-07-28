@@ -38,14 +38,17 @@ impl LightState {
 pub struct ArchivalState {
     // Since this is a database, we use the tokio Mutex here.
     pub block_databases: Arc<TokioMutex<BlockDatabases>>,
-    genesis_block: Block,
+
+    // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
+    // this object in a spawned worker thread.
+    genesis_block: Box<Block>,
 }
 
 impl ArchivalState {
     pub fn new(initial_block_databases: Arc<TokioMutex<BlockDatabases>>) -> Self {
         Self {
             block_databases: initial_block_databases,
-            genesis_block: Block::genesis_block(),
+            genesis_block: Box::new(Block::genesis_block()),
         }
     }
 
@@ -57,7 +60,7 @@ impl ArchivalState {
             BlockDatabases::get_latest_block(&mut dbs).expect("Failed to read from DB");
 
         match lookup_res_info {
-            None => self.genesis_block.clone(),
+            None => *self.genesis_block.clone(),
             Some(block) => block,
         }
     }
@@ -73,7 +76,7 @@ impl ArchivalState {
             .or_else(move || {
                 // If block was not found in database, check if the digest matches the genesis block
                 if self.genesis_block.hash == block_digest {
-                    Some(self.genesis_block.clone())
+                    Some(*self.genesis_block.clone())
                 } else {
                     None
                 }
@@ -241,6 +244,50 @@ mod archival_state_tests {
         tests::shared::{databases, make_mock_block},
     };
 
+    #[traced_test]
+    #[tokio::test]
+    async fn initialize_archival_state_test() -> Result<()> {
+        // Ensure that the archival state can be initialized without overflowing the stack
+        tokio::spawn(async move {
+            let (block_databases, _) = databases(Network::Main).unwrap();
+            let _archival_state0 = ArchivalState::new(block_databases);
+            let (block_databases, _) = databases(Network::Main).unwrap();
+            let _archival_state1 = ArchivalState::new(block_databases);
+            let (block_databases, _) = databases(Network::Main).unwrap();
+            let _archival_state2 = ArchivalState::new(block_databases);
+            let b = Block::genesis_block();
+            let blockchain_state = BlockchainState {
+                archival_state: Some(_archival_state2),
+                light_state: LightState::new(_archival_state1.genesis_block.header),
+            };
+            let block_1 = make_mock_block(b, None);
+            let mut lock0 = blockchain_state
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_databases
+                .lock()
+                .await;
+            lock0.block_hash_to_block.put(block_1.hash, block_1.clone());
+            let c = lock0.block_hash_to_block.get(block_1.hash).unwrap();
+            println!("genesis digest = {}", c.hash);
+            drop(lock0);
+
+            let mut lock1 = blockchain_state
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_databases
+                .lock()
+                .await;
+            let c = lock1.block_hash_to_block.get(block_1.hash).unwrap();
+            println!("genesis digest = {}", c.hash);
+        })
+        .await?;
+
+        Ok(())
+    }
+
     #[should_panic]
     #[traced_test]
     #[tokio::test]
@@ -258,7 +305,7 @@ mod archival_state_tests {
     async fn digest_of_ancestors_test() -> Result<()> {
         let (block_databases, _) = databases(Network::Main).unwrap();
         let archival_state = ArchivalState::new(block_databases);
-        let genesis = archival_state.genesis_block.clone();
+        let genesis = *archival_state.genesis_block.clone();
 
         assert!(archival_state
             .get_ancestor_block_digests(genesis.hash, 10)
