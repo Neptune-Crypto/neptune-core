@@ -5,7 +5,8 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::Digest;
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
-    HandshakeData, MutablePeerState, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
+    HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
+    PeerSanctionReason, PeerStanding,
 };
 use crate::models::state::State;
 use anyhow::{bail, Result};
@@ -618,8 +619,11 @@ impl PeerLoopHandler {
                 // to reduce the risk that someone else finds another one and shares
                 // it faster.
                 let new_block_height = block.header.height;
+                let block_notification: PeerBlockNotification = (&(*block)).into();
                 let t_block: Box<TransferBlock> = Box::new((*block).into());
                 peer.send(PeerMessage::Block(t_block)).await?;
+                peer.send(PeerMessage::BlockNotification(block_notification))
+                    .await?;
                 peer_state_info.highest_shared_block_height = new_block_height;
                 Ok(false)
             }

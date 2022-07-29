@@ -149,6 +149,16 @@ pub struct PeerBlockNotification {
     pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 }
 
+impl From<&Block> for PeerBlockNotification {
+    fn from(block: &Block) -> Self {
+        PeerBlockNotification {
+            hash: block.hash,
+            height: block.header.height,
+            proof_of_work_family: block.header.proof_of_work_family,
+        }
+    }
+}
+
 impl From<Block> for PeerBlockNotification {
     fn from(block: Block) -> Self {
         PeerBlockNotification {
