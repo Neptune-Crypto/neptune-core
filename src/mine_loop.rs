@@ -9,6 +9,7 @@ use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
+use crate::models::state::State;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
@@ -16,6 +17,7 @@ use rand::thread_rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -32,6 +34,7 @@ async fn make_devnet_block(
     previous_block: Block,
     sender: oneshot::Sender<Block>,
     public_key: secp256k1::PublicKey,
+    state: State,
 ) {
     let next_block_height: BlockHeight = previous_block.header.height.next();
     let coinbase_utxo = Utxo {
@@ -112,6 +115,12 @@ async fn make_devnet_block(
             return;
         }
 
+        // Don't mine if we are syncing
+        if block_header.nonce[2].value() % 100 == 0 && state.net.syncing.read().unwrap().to_owned()
+        {
+            return;
+        }
+
         if block_header.nonce[2].value() == BFieldElement::MAX {
             block_header.nonce[2] = BFieldElement::ring_zero();
             if block_header.nonce[1].value() == BFieldElement::MAX {
@@ -140,14 +149,22 @@ pub async fn mock_regtest_mine(
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block: Block,
     own_public_key: secp256k1::PublicKey,
+    state: State,
 ) -> Result<()> {
     loop {
         let (sender, receiver) = oneshot::channel::<Block>();
-        let miner_thread = tokio::spawn(make_devnet_block(
-            latest_block.clone(),
-            sender,
-            own_public_key,
-        ));
+        let state_clone = state.clone();
+        let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
+            info!("Not mining because we are syncing");
+            None
+        } else {
+            Some(tokio::spawn(make_devnet_block(
+                latest_block.clone(),
+                sender,
+                own_public_key,
+                state_clone,
+            )))
+        };
 
         select! {
             changed = from_main.changed() => {
@@ -159,7 +176,9 @@ pub async fn mock_regtest_mine(
                 let main_message: MainToMiner = from_main.borrow_and_update().clone();
                 match main_message {
                     MainToMiner::NewBlock(block) => {
-                        miner_thread.abort();
+                        if let Some(mt) = miner_thread {
+                            mt.abort();
+                        }
                         latest_block = *block;
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }

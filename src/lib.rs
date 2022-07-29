@@ -305,6 +305,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Start handling of mining. So far we can only mine on the `RegTest` network.
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
+    let state_clone_for_miner = state.clone();
     if state.cli.mine && state.cli.network == Network::RegTest {
         tokio::spawn(async move {
             mine_loop::mock_regtest_mine(
@@ -312,6 +313,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                 miner_to_main_tx,
                 latest_block,
                 wallet.get_public_key(),
+                state_clone_for_miner,
             )
             .await
             .expect("Error in mining thread");
