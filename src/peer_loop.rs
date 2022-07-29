@@ -643,7 +643,7 @@ impl PeerLoopHandler {
             //     peer.send(PeerMessage::NewTransaction(nt)).await?;
             //     Ok(false)
             // }
-            MainToPeerThread::RequestBlockBatch(block_height, peer_addr_target) => {
+            MainToPeerThread::RequestBlockBatch(most_canonical_block_digests, peer_addr_target) => {
                 // Only ask one of the peers about the batch of blocks
                 if peer_addr_target != self.peer_address {
                     return Ok(false);
@@ -655,7 +655,7 @@ impl PeerLoopHandler {
                 );
 
                 peer.send(PeerMessage::BlockRequestBatch(
-                    block_height,
+                    most_canonical_block_digests,
                     request_batch_size,
                 ))
                 .await?;
