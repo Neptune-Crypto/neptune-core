@@ -15,6 +15,7 @@ use std::{
 };
 use twenty_first::amount::u32s::U32s;
 
+const BAD_BLOCK_BATCH_REQUEST_SEVERITY: u16 = 10;
 const INVALID_BLOCK_SEVERITY: u16 = 10;
 const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
 const SYNCHRONIZATION_TIMEOUT_SEVERITY: u16 = u16::MAX;
@@ -45,6 +46,7 @@ pub enum PeerSanctionReason {
     TooShortBlockBatch,
     ReceivedBatchBlocksOutsideOfSync,
     BatchBlocksInvalidStartHeight,
+    BatchBlocksUnknownRequest,
 }
 
 /// Used by main thread to manage synchronizations/catch-up. Main thread has
@@ -86,6 +88,7 @@ impl PeerSanctionReason {
             PeerSanctionReason::TooShortBlockBatch => INVALID_MESSAGE_SEVERITY,
             PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => INVALID_MESSAGE_SEVERITY,
             PeerSanctionReason::BatchBlocksInvalidStartHeight => INVALID_MESSAGE_SEVERITY,
+            PeerSanctionReason::BatchBlocksUnknownRequest => BAD_BLOCK_BATCH_REQUEST_SEVERITY,
         }
     }
 }
@@ -177,8 +180,8 @@ pub enum PeerMessage {
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
-    BlockRequestBatch(BlockHeight, usize),
-    BlockResponseBatch(Vec<TransferBlock>),
+    BlockRequestBatch(Vec<Digest>, usize), // TODO: Consider restricting this in size
+    BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
     // NewTransaction(i32),
     PeerListRequest, // Argument indicates distance in graph.
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
@@ -199,7 +202,7 @@ impl PeerMessage {
             // PeerMessage::NewTransaction(_) => "new tx".to_string(),
             PeerMessage::PeerListRequest => "peer list req".to_string(),
             PeerMessage::PeerListResponse(_) => "peer list resp".to_string(),
-            PeerMessage::Bye => "byt".to_string(),
+            PeerMessage::Bye => "bye".to_string(),
             PeerMessage::ConnectionStatus(_) => "connection status".to_string(),
         }
     }

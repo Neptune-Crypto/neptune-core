@@ -2,6 +2,7 @@ use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::digest::Hashable;
 use crate::models::database::BlockDatabases;
 use crate::models::peer::{PeerInfo, PeerSynchronizationState};
 use crate::models::state::State;
@@ -20,9 +21,10 @@ use twenty_first::amount::u32s::U32s;
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
-const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 30;
+const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 15;
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
+const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 5;
 
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
@@ -106,9 +108,13 @@ impl SyncState {
         // A peer is sanctioned if no answer has been received after N times the sync request
         // interval.
         match self.last_sync_request {
-            None => (None, true),
+            None => {
+                // No sync request has been made since startup of program
+                (None, true)
+            }
             Some((req_time, requested_height, peer_sa)) => {
                 if requested_height < current_block_height {
+                    // The last sync request updated the state
                     (None, true)
                 } else if req_time
                     + Duration::from_secs(
@@ -116,8 +122,12 @@ impl SyncState {
                     )
                     < SystemTime::now()
                 {
+                    // The last sync request was not answered, sanction peer
+                    // and make a new sync request.
                     (Some(peer_sa), true)
                 } else {
+                    // The last sync request has not yet been answered. But it has
+                    // not timed out yet.
                     (None, false)
                 }
             }
@@ -318,6 +328,9 @@ impl MainLoopHandler {
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer.
+                    // TODO: Is this check right. We might still want to store the blocks even though
+                    // they are not more canonical than what we currently have, in the case of deep reorganizations
+                    // that is.
                     let block_is_new = previous_block_header.proof_of_work_family
                         < last_block.header.proof_of_work_family;
                     if !block_is_new {
@@ -568,14 +581,14 @@ impl MainLoopHandler {
         info!("Running sync");
 
         // Check when latest batch of blocks was requested
-        let (current_block_height, current_pow_family) = match self
+        let current_block_header = match self
             .global_state
             .chain
             .light_state
             .latest_block_header
             .try_lock()
         {
-            Ok(lock) => (lock.height, lock.proof_of_work_family),
+            Ok(lock) => lock.to_owned(),
 
             // If we can't acquire lock on latest block header, don't block. Just exit and try again next
             // time.
@@ -584,7 +597,7 @@ impl MainLoopHandler {
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
-            .get_status_of_last_request(current_block_height);
+            .get_status_of_last_request(current_block_header.height);
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
@@ -601,7 +614,7 @@ impl MainLoopHandler {
         // Pick a random peer that has reported to have relevant blocks
         let candidate_peers = main_loop_state
             .sync_state
-            .get_potential_peers_for_sync_request(current_pow_family);
+            .get_potential_peers_for_sync_request(current_block_header.proof_of_work_family);
         let mut rng = thread_rng();
         let chosen_peer = candidate_peers.choose(&mut rng);
         assert!(
@@ -609,16 +622,32 @@ impl MainLoopHandler {
             "A synchronization candidate must be available for a request. Otherwise the data structure is in an invalid state and syncing should not be active"
         );
 
-        let requested_block_height = current_block_height.next();
+        // Find the blocks to request
+        let tip_digest = current_block_header.hash();
+        let most_canonical_digests = self
+            .global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_ancestor_block_digests(
+                current_block_header.hash(),
+                STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE,
+            )
+            .await;
+        let most_canonical_digests = vec![vec![tip_digest], most_canonical_digests].concat();
+
+        // Send message to the relevant peer loop to request the blocks
         let chosen_peer = chosen_peer.unwrap();
         self.main_to_peer_broadcast_tx
             .send(MainToPeerThread::RequestBlockBatch(
-                current_block_height.next(),
+                most_canonical_digests,
                 *chosen_peer,
             ))
             .expect("Sending message to peers must succeed");
 
         // Record that this request was sent to the peer
+        let requested_block_height = current_block_header.height.next();
         main_loop_state
             .sync_state
             .record_request(requested_block_height, *chosen_peer);

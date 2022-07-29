@@ -2,8 +2,9 @@ use std::net::SocketAddr;
 
 use twenty_first::amount::u32s::U32s;
 
-use super::blockchain::block::{
-    block_header::PROOF_OF_WORK_COUNT_U32_SIZE, block_height::BlockHeight, Block,
+use super::blockchain::{
+    block::{block_header::PROOF_OF_WORK_COUNT_U32_SIZE, block_height::BlockHeight, Block},
+    digest::Digest,
 };
 
 #[derive(Clone, Debug)]
@@ -25,7 +26,7 @@ pub enum MainToPeerThread {
     Block(Box<Block>),
     BlockFromMiner(Box<Block>),
     // Transaction(i32),
-    RequestBlockBatch(BlockHeight, SocketAddr), // (start_block_height, peer_socket_to_request)
+    RequestBlockBatch(Vec<Digest>, SocketAddr), // (most canonical known digests, peer_socket_to_request)
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away

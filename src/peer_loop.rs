@@ -86,6 +86,15 @@ impl PeerLoopHandler {
         received_blocks: Vec<Block>,
         parent_block: Block,
     ) -> Result<BlockHeight> {
+        debug!(
+            "attempting to validate {} {}",
+            received_blocks.len(),
+            if received_blocks.len() == 1 {
+                "block"
+            } else {
+                "blocks"
+            }
+        );
         let mut previous_block = parent_block;
         for new_block in received_blocks.iter() {
             if !new_block.archival_is_valid(&previous_block) {
@@ -338,54 +347,75 @@ impl PeerLoopHandler {
                 }
                 Ok(false)
             }
-            PeerMessage::BlockRequestBatch(block_start, requested_batch_size) => {
-                // Verify that we know all request blocks, if not sanction.
-                let tip_height = self
-                    .state
-                    .chain
-                    .light_state
-                    .latest_block_header
-                    .lock()
-                    .unwrap()
-                    .height;
-                if tip_height < block_start + requested_batch_size {
-                    self.punish(PeerSanctionReason::InvalidMessage)?;
+            PeerMessage::BlockRequestBatch(most_canonical_digests, requested_batch_size) => {
+                // Find the block that the peer is requesting to start from
+                let mut peers_most_canonical_block: Option<Block> = None;
+                for digest in most_canonical_digests {
+                    debug!("Looking up block {} in batch request", digest);
+                    peers_most_canonical_block = self
+                        .state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .block_databases
+                        .lock()
+                        .await
+                        .block_hash_to_block
+                        .get(digest);
+                    if peers_most_canonical_block.is_some() {
+                        debug!("Found block {} in database", digest);
+                        break;
+                    }
+                }
+
+                if peers_most_canonical_block.is_none() {
+                    self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)?;
                     return Ok(false);
                 }
 
-                // Get the relevant blocks
+                let peers_most_canonical_block = peers_most_canonical_block.unwrap();
+
+                // Get the relevant blocks, from the descendant of the peer's most canonical block
+                // to that height plus the batch size.
                 let responded_batch_size = cmp::min(
                     requested_batch_size,
                     self.state.cli.max_number_of_blocks_before_syncing / 2,
                 );
                 let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
-                let mut db_lock = self
-                    .state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .block_databases
-                    .lock()
-                    .await;
-                let mut returned_blocks: Vec<TransferBlock> = vec![];
-                for i in 0..responded_batch_size {
-                    let bh = block_start + i;
-                    let block_digest: Option<Digest> = db_lock.block_height_to_hash.get(bh);
-                    assert!(
-                        block_digest.is_some(),
-                        "Requested block height {} not found in block_height_to_hash database",
-                        bh
-                    );
-                    db_lock.block_height_to_hash.get(bh);
-                    let block: Option<Block> =
-                        db_lock.block_hash_to_block.get(block_digest.unwrap());
-                    assert!(
-                        block.is_some(),
-                        "Requested block height {} not found in block_height_to_hash database",
-                        bh
-                    );
-                    returned_blocks.push(block.unwrap().into());
+                let mut returned_blocks: Vec<TransferBlock> =
+                    Vec::with_capacity(responded_batch_size);
+
+                // Create a local scope for the DB lock, so it gets released when it goes out of scope
+                {
+                    let mut db_lock = self
+                        .state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .block_databases
+                        .lock()
+                        .await;
+                    for i in 1..=responded_batch_size {
+                        let bh = peers_most_canonical_block.header.height + i;
+                        let block_digest: Option<Digest> = db_lock.block_height_to_hash.get(bh);
+                        assert!(
+                            block_digest.is_some(),
+                            "Requested block height {} not found in block_height_to_hash database",
+                            bh
+                        );
+                        db_lock.block_height_to_hash.get(bh);
+                        let block: Option<Block> =
+                            db_lock.block_hash_to_block.get(block_digest.unwrap());
+                        assert!(
+                            block.is_some(),
+                            "Requested block height {} not found in block_height_to_hash database",
+                            bh
+                        );
+                        returned_blocks.push(block.unwrap().into());
+                        debug!("Adding block with height {} to response", bh);
+                    }
                 }
 
                 // TODO: Consider sanctioning or increasing some counter to disallow the
@@ -397,6 +427,10 @@ impl PeerLoopHandler {
                 Ok(false)
             }
             PeerMessage::BlockResponseBatch(t_blocks) => {
+                debug!(
+                    "handling block response batch with {} blocks",
+                    t_blocks.len()
+                );
                 if t_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
                     self.punish(PeerSanctionReason::TooShortBlockBatch)?;
@@ -415,26 +449,35 @@ impl PeerLoopHandler {
                 // Verify that the response matches the current state
                 // We get the latest block from the DB here since this message is
                 // only valid for archival nodes.
-                let latest_block = self
+                let first_blocks_parent_digest: Digest = t_blocks[0].header.prev_block_digest;
+                let most_canonical_own_block_match: Option<Block> = self
                     .state
                     .chain
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .get_latest_block()
-                    .await;
-                let first_block_in_batch = t_blocks[0].clone();
-                if latest_block.header.height != first_block_in_batch.header.height.next() {
-                    warn!("Got batch reponse with invalid start height");
-                    self.punish(PeerSanctionReason::BatchBlocksInvalidStartHeight)?;
-                    return Ok(false);
-                }
+                    .get_block(first_blocks_parent_digest)
+                    .await
+                    .expect("Block lookup must succeed");
+                let most_canonical_own_block_match: Block = match most_canonical_own_block_match {
+                    Some(block) => block,
+                    None => {
+                        warn!("Got batch reponse with invalid start height");
+                        self.punish(PeerSanctionReason::BatchBlocksInvalidStartHeight)?;
+                        return Ok(false);
+                    }
+                };
 
                 // Convert all blocks to Block objects
+                debug!(
+                    "Found own block of height {} to match received batch",
+                    most_canonical_own_block_match.header.height
+                );
                 let received_blocks: Vec<Block> = t_blocks.into_iter().map(|x| x.into()).collect();
 
                 // Get the latest block that we know of and handle all received blocks
-                self.handle_blocks(received_blocks, latest_block).await?;
+                self.handle_blocks(received_blocks, most_canonical_own_block_match)
+                    .await?;
 
                 Ok(false)
             }
