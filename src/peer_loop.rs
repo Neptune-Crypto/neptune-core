@@ -353,20 +353,36 @@ impl PeerLoopHandler {
                 let mut peers_most_canonical_block: Option<Block> = None;
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
-                    peers_most_canonical_block = self
+                    let block_candidate = self
                         .state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .block_databases
-                        .lock()
+                        .get_block(digest)
                         .await
-                        .block_hash_to_block
-                        .get(digest);
-                    if peers_most_canonical_block.is_some() {
-                        debug!("Found block {} in database", digest);
-                        break;
+                        .expect("Lookup must work");
+                    if let Some(block_candidate) = block_candidate {
+                        // Verify that this block is not only know but also belongs to the canonical
+                        // chain. Also check if it's the genesis block.
+                        if self
+                            .state
+                            .chain
+                            .archival_state
+                            .as_ref()
+                            .unwrap()
+                            .block_databases
+                            .lock()
+                            .await
+                            .block_height_to_hash
+                            .get(block_candidate.header.height)
+                            .is_some()
+                            || block_candidate.header.height == BlockHeight::genesis()
+                        {
+                            peers_most_canonical_block = Some(block_candidate);
+                            debug!("Found block {} in database", digest);
+                            break;
+                        }
                     }
                 }
 
@@ -398,24 +414,20 @@ impl PeerLoopHandler {
                         .block_databases
                         .lock()
                         .await;
+                    let mut previous_digest = peers_most_canonical_block.hash;
                     for i in 1..=responded_batch_size {
                         let bh = peers_most_canonical_block.header.height + i;
-                        let block_digest: Option<Digest> = db_lock.block_height_to_hash.get(bh);
-                        assert!(
-                            block_digest.is_some(),
-                            "Requested block height {} not found in block_height_to_hash database",
-                            bh
+                        let digest = match db_lock.block_height_to_hash.get(bh) {
+                            Some(digest) => digest,
+                            None => panic!("Failed to find block for height {}", bh),
+                        };
+                        let block = db_lock.block_hash_to_block.get(digest).unwrap();
+                        assert_eq!(
+                            previous_digest, block.header.prev_block_digest,
+                            "Current block prev_digest must match previous block's digest"
                         );
-                        db_lock.block_height_to_hash.get(bh);
-                        let block: Option<Block> =
-                            db_lock.block_hash_to_block.get(block_digest.unwrap());
-                        assert!(
-                            block.is_some(),
-                            "Requested block height {} not found in block_height_to_hash database",
-                            bh
-                        );
-                        returned_blocks.push(block.unwrap().into());
-                        debug!("Adding block with height {} to response", bh);
+                        previous_digest = block.hash;
+                        returned_blocks.push(block.into());
                     }
                 }
 

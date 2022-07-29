@@ -24,7 +24,7 @@ const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 15;
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
-const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 5;
+const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 20;
 
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
