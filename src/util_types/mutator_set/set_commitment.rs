@@ -388,9 +388,8 @@ mod accumulation_scheme_tests {
     use crate::test_shared::mutator_set::{empty_archival_ms, insert_item, remove_item};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
-    use rand::prelude::*;
-    use rand_chacha::ChaCha20Rng;
-    use rand_core::{RngCore, SeedableRng};
+    use rand::Rng;
+    use rand::{prelude::*, RngCore};
     use twenty_first::{
         shared_math::{
             rescue_prime_xlix::{
@@ -413,7 +412,7 @@ mod accumulation_scheme_tests {
 
         // Add one element to append-only commitment list
         let mut one_in_aocl = empty.clone();
-        let mut prng = thread_rng();
+        let mut prng = rand::thread_rng();
         let item0 = hasher.hash(&BFieldElement::random_elements(3, &mut prng));
         one_in_aocl.aocl.append(item0.clone());
         let commitment_to_one_aocl = one_in_aocl.get_commitment();
@@ -458,7 +457,7 @@ mod accumulation_scheme_tests {
         // Test that `get_indices` behaves as expected. I.e. that it does not return any
         // duplicates, and always returns something of length `NUM_TRIALS`.
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
-        let mut prng = thread_rng();
+        let mut prng = rand::thread_rng();
         let item: Vec<BFieldElement> = hasher.hash(
             &BFieldElement::random_elements(3, &mut prng),
             RP_DEFAULT_OUTPUT_SIZE,
@@ -495,7 +494,7 @@ mod accumulation_scheme_tests {
             MmrAccumulator<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
         >::default();
         let hasher: RescuePrimeXlix<RP_DEFAULT_WIDTH> = neptune_params();
-        let mut prng = thread_rng();
+        let mut prng = rand::thread_rng();
         for _ in 0..2 * BATCH_SIZE + 2 {
             let item: Vec<BFieldElement> = hasher.hash(
                 &BFieldElement::random_elements(3, &mut prng),
@@ -586,12 +585,7 @@ mod accumulation_scheme_tests {
     #[test]
     fn membership_proof_updating_from_add_pbt() {
         type Hasher = blake3::Hasher;
-        let mut rng = ChaCha20Rng::from_seed(
-            vec![vec![0, 1, 4, 33], vec![0; 28]]
-                .concat()
-                .try_into()
-                .unwrap(),
-        );
+        let mut rng = thread_rng();
 
         let mut mutator_set = SetCommitment::<Hasher, MmrAccumulator<Hasher>>::default();
         let hasher: Hasher = blake3::Hasher::new();
@@ -702,12 +696,7 @@ mod accumulation_scheme_tests {
     #[test]
     fn batch_update_from_addition_and_removal_test() {
         // set up rng
-        let mut rng = ChaCha20Rng::from_seed(
-            vec![vec![0, 1, 4, 33], vec![0; 28]]
-                .concat()
-                .try_into()
-                .unwrap(),
-        );
+        let mut rng = thread_rng();
 
         type Hasher = blake3::Hasher;
         type Digest = blake3_wrapper::Blake3Hash;
@@ -798,12 +787,7 @@ mod accumulation_scheme_tests {
     #[test]
     fn test_multiple_adds() {
         // set up rng
-        let mut rng = ChaCha20Rng::from_seed(
-            vec![vec![0, 1, 4, 33], vec![0; 28]]
-                .concat()
-                .try_into()
-                .unwrap(),
-        );
+        let mut rng = thread_rng();
 
         type Hasher = blake3::Hasher;
         type Digest = blake3_wrapper::Blake3Hash;

@@ -4,10 +4,6 @@ use std::{
     fmt,
     ops::IndexMut,
 };
-
-use crate::util_types::mutator_set::{
-    chunk::Chunk, set_commitment::get_swbf_indices, shared::BATCH_SIZE,
-};
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
@@ -23,6 +19,9 @@ use super::{
     set_commitment::SetCommitment,
     shared::{CHUNK_SIZE, NUM_TRIALS},
     transfer_ms_membership_proof::TransferMsMembershipProof,
+};
+use crate::util_types::mutator_set::{
+    chunk::Chunk, set_commitment::get_swbf_indices, shared::BATCH_SIZE,
 };
 
 impl Error for MembershipProofError {}
@@ -564,8 +563,7 @@ mod ms_proof_tests {
         mutator_set_accumulator::MutatorSetAccumulator, shared::BITS_PER_U32,
     };
     use rand::thread_rng;
-    use rand_chacha::ChaCha20Rng;
-    use rand_core::{RngCore, SeedableRng};
+    use rand_core::RngCore;
     use twenty_first::util_types::{
         blake3_wrapper::{self, Blake3Hash},
         mmr,
@@ -581,8 +579,9 @@ mod ms_proof_tests {
         let hasher = H::new();
         let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
+        let item = hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
+        let randomness =
+            hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
         let mut mp = accumulator.prove(&item, &randomness, false);
 
         // Verify that bits are not cached, then cache them with the helper function
@@ -601,12 +600,7 @@ mod ms_proof_tests {
         type Hasher = blake3::Hasher;
         type Digest = Blake3Hash;
         let hasher: Hasher = blake3::Hasher::new();
-        let mut rng = ChaCha20Rng::from_seed(
-            vec![vec![0, 1, 4, 33], vec![0; 28]]
-                .concat()
-                .try_into()
-                .unwrap(),
-        );
+        let mut rng = thread_rng();
         let randomness = hasher.hash(
             &(0..3)
                 .map(|_| BFieldElement::new(rng.next_u64()))

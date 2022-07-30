@@ -1,14 +1,13 @@
-use std::marker::PhantomData;
-
 use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
-
-use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
+use std::marker::PhantomData;
 use twenty_first::util_types::{
     database_array::DatabaseArray,
     simple_hasher::{self, Hasher, ToDigest},
 };
+
+use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActiveWindow<H: simple_hasher::Hasher> {

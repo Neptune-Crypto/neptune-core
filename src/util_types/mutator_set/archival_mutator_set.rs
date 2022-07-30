@@ -1,10 +1,8 @@
+use rusty_leveldb::DB;
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
 };
-
-use rusty_leveldb::DB;
-
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
@@ -229,7 +227,6 @@ where
 mod archival_mutator_set_tests {
     use crate::test_shared::mutator_set::empty_archival_ms;
     use rand::prelude::*;
-    use rand_core::RngCore;
     use twenty_first::util_types::{blake3_wrapper, simple_hasher::Hasher};
 
     use super::*;

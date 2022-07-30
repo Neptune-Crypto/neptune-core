@@ -79,8 +79,7 @@ where
 mod accumulation_scheme_tests {
     use crate::test_shared::mutator_set::empty_archival_ms;
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
-    use rand::prelude::*;
-    use rand_core::RngCore;
+    use rand::{prelude::*, RngCore};
     use twenty_first::util_types::{blake3_wrapper, simple_hasher::Hasher};
 
     use super::*;
