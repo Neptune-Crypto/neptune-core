@@ -1,6 +1,5 @@
 use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
 use std::marker::PhantomData;
 use twenty_first::util_types::{
     database_array::DatabaseArray,
@@ -8,13 +7,15 @@ use twenty_first::util_types::{
 };
 
 use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
+use crate::util_types::mutator_set::boxed_big_array::BoxedBigArray;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ActiveWindow<H: simple_hasher::Hasher> {
-    // Consider using the `bit_vec` crate here instead
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
-    #[serde(with = "BigArray")]
-    pub bits: [u32; WINDOW_SIZE / BITS_PER_U32],
+    // The byte array is boxed to prevent stack-overflows when deserializing this data
+    // structure. Cf. https://neptune.builders/core-team/neptune-core/issues/32
+    #[serde(with = "BoxedBigArray")]
+    pub bits: Box<[u32; WINDOW_SIZE / BITS_PER_U32]>,
     _hasher: PhantomData<H>,
 }
 
@@ -25,7 +26,7 @@ where
     /// The default instance has no bits set in the active window
     pub fn default() -> Self {
         Self {
-            bits: [0u32; WINDOW_SIZE / BITS_PER_U32],
+            bits: Box::new([0u32; WINDOW_SIZE / BITS_PER_U32]),
             _hasher: PhantomData,
         }
     }
@@ -148,7 +149,7 @@ mod active_window_tests {
     use super::*;
 
     impl<H: Hasher> ActiveWindow<H> {
-        fn new(bits: [u32; WINDOW_SIZE / BITS_PER_U32]) -> Self {
+        fn new(bits: Box<[u32; WINDOW_SIZE / BITS_PER_U32]>) -> Self {
             Self {
                 bits,
                 _hasher: PhantomData,
@@ -202,7 +203,7 @@ mod active_window_tests {
     fn db_store_and_recover() {
         let mut init_array = [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32];
         init_array[2] = 42u32;
-        let aw = ActiveWindow::<blake3::Hasher>::new(init_array);
+        let aw = ActiveWindow::<blake3::Hasher>::new(Box::new(init_array));
         let opt = rusty_leveldb::in_memory();
         let db = DB::open("mydatabase", opt).unwrap();
         let aw_as_db = aw.store_to_database(db);
@@ -218,7 +219,7 @@ mod active_window_tests {
         // This test assumes that element with index 2 is part of the active window that slides when window slides
         let mut init_array = [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32];
         init_array[2] = 42u32;
-        let mut aw = ActiveWindow::<blake3::Hasher>::new(init_array);
+        let mut aw = ActiveWindow::<blake3::Hasher>::new(Box::new(init_array));
         let new_chunk_array: [u32; CHUNK_SIZE / BITS_PER_U32] = aw.get_sliding_chunk_bits();
         for (i, elem) in new_chunk_array.into_iter().enumerate() {
             if i == 2 {
@@ -251,7 +252,7 @@ mod active_window_tests {
         bytes[0] = 124 + 125 * (1u32 << 8) + 127 * (1u32 << 16);
         bytes[3] = 144 * (1u32 << 16) + 65 * (1u32 << 24);
         bytes[5] = 98 * (1u32 << 8);
-        let aw = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(bytes);
+        let aw = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(Box::new(bytes));
         let u128s = aw.get_u128s();
         assert_eq!(250, u128s.len());
         assert_eq!(98 * (1 << (5 * 8)), u128s[1]);
@@ -266,13 +267,15 @@ mod active_window_tests {
         // This is just a test to ensure that the hashing of the active part of the SWBF
         // works in the runtime, for relevant hash functions
         let hash_0 = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default().hash();
-        let hash_1 = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(
+        let hash_1 = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(Box::new(
             [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32],
-        )
+        ))
         .hash();
         let hash_2 = ActiveWindow::<blake3::Hasher>::default().hash();
-        let hash_3 =
-            ActiveWindow::<blake3::Hasher>::new([0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32]).hash();
+        let hash_3 = ActiveWindow::<blake3::Hasher>::new(Box::new(
+            [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32],
+        ))
+        .hash();
 
         assert_ne!(hash_0, hash_1);
         assert_ne!(hash_2, hash_3);
