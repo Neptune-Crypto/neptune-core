@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::util_types::{
+use twenty_first::util_types::{
     mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
     simple_hasher::{self, ToDigest},
 };
@@ -40,12 +40,10 @@ where
 
 #[cfg(test)]
 mod addition_record_tests {
-    use crate::{
-        shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH},
-        util_types::mutator_set::{
-            mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
-        },
+    use crate::util_types::mutator_set::{
+        mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
     };
+    use twenty_first::shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH};
 
     use super::*;
 

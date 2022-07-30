@@ -8,7 +8,7 @@ use super::{
     set_commitment::SetCommitment,
     shared::{bit_indices_to_hash_map, NUM_TRIALS},
 };
-use crate::{
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::mmr_trait::Mmr,
@@ -78,21 +78,18 @@ mod removal_record_tests {
     use itertools::Itertools;
     use rand::{thread_rng, RngCore};
 
-    use crate::{
+    use crate::util_types::mutator_set::{
+        mutator_set_accumulator::MutatorSetAccumulator,
+        removal_record::RemovalRecord,
+        shared::{CHUNK_SIZE, NUM_TRIALS},
+    };
+    use twenty_first::{
         shared_math::{
             b_field_element::BFieldElement,
             rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH},
             traits::GetRandomElements,
         },
-        util_types::{
-            blake3_wrapper,
-            mutator_set::{
-                mutator_set_accumulator::MutatorSetAccumulator,
-                removal_record::RemovalRecord,
-                shared::{CHUNK_SIZE, NUM_TRIALS},
-            },
-            simple_hasher::Hasher,
-        },
+        util_types::{blake3_wrapper, simple_hasher::Hasher},
         utils::{self, has_unique_elements},
     };
 

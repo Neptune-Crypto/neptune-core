@@ -1,14 +1,14 @@
 use rand::{thread_rng, RngCore};
 use rusty_leveldb::DB;
 
-use crate::{
+use crate::util_types::mutator_set::{
+    archival_mutator_set::ArchivalMutatorSet, ms_membership_proof::MsMembershipProof,
+    removal_record::RemovalRecord, set_commitment::SetCommitment,
+};
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::mmr_trait::Mmr,
-        mutator_set::{
-            archival_mutator_set::ArchivalMutatorSet, ms_membership_proof::MsMembershipProof,
-            removal_record::RemovalRecord, set_commitment::SetCommitment,
-        },
         simple_hasher::{self, ToDigest},
     },
 };

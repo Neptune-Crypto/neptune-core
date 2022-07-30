@@ -1,4 +1,4 @@
-use crate::{
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
@@ -77,15 +77,11 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
-    use crate::{
-        test_shared::mutator_set::empty_archival_ms,
-        util_types::{
-            blake3_wrapper, mutator_set::archival_mutator_set::ArchivalMutatorSet,
-            simple_hasher::Hasher,
-        },
-    };
+    use crate::test_shared::mutator_set::empty_archival_ms;
+    use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use rand::prelude::*;
     use rand_core::RngCore;
+    use twenty_first::util_types::{blake3_wrapper, simple_hasher::Hasher};
 
     use super::*;
 

@@ -1,7 +1,7 @@
 use super::chunk_dictionary::ChunkDictionary;
 use serde::{Deserialize, Serialize};
 
-use crate::util_types::{mmr, simple_hasher};
+use twenty_first::util_types::{mmr, simple_hasher};
 
 /// Type to transfer membership proof without risking that `cached_bits` are shared between
 /// peers.
@@ -14,16 +14,16 @@ pub struct TransferMsMembershipProof<H: simple_hasher::Hasher> {
 
 #[cfg(test)]
 mod transfer_ms_membership_proof_tests {
-    use crate::{
+    use crate::test_shared::mutator_set::insert_item;
+    use crate::util_types::mutator_set::{
+        ms_membership_proof::MsMembershipProof, set_commitment::SetCommitment,
+    };
+    use twenty_first::{
         shared_math::{
             b_field_element::BFieldElement,
             rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH},
         },
-        test_shared::mutator_set::insert_item,
-        util_types::{
-            mmr::mmr_accumulator::MmrAccumulator,
-            mutator_set::{ms_membership_proof::MsMembershipProof, set_commitment::SetCommitment},
-        },
+        util_types::mmr::mmr_accumulator::MmrAccumulator,
     };
 
     use super::*;

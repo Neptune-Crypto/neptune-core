@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::chunk::Chunk;
-use crate::{
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr,
@@ -51,7 +51,8 @@ where
 
 #[cfg(test)]
 mod chunk_dict_tests {
-    use crate::{
+    use crate::util_types::mutator_set::shared::{BITS_PER_U32, CHUNK_SIZE};
+    use twenty_first::{
         shared_math::{
             b_field_element::BFieldElement,
             rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH},
@@ -59,7 +60,6 @@ mod chunk_dict_tests {
         test_shared::mmr::get_archival_mmr_from_digests,
         util_types::{
             mmr::{archival_mmr::ArchivalMmr, mmr_membership_proof::MmrMembershipProof},
-            mutator_set::shared::{BITS_PER_U32, CHUNK_SIZE},
             simple_hasher::Hasher,
         },
     };

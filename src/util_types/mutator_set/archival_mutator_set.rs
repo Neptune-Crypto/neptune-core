@@ -5,7 +5,7 @@ use std::{
 
 use rusty_leveldb::DB;
 
-use crate::{
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         database_vector::DatabaseVector,
@@ -227,12 +227,10 @@ where
 
 #[cfg(test)]
 mod archival_mutator_set_tests {
-    use crate::{
-        test_shared::mutator_set::empty_archival_ms,
-        util_types::{blake3_wrapper, simple_hasher::Hasher},
-    };
+    use crate::test_shared::mutator_set::empty_archival_ms;
     use rand::prelude::*;
     use rand_core::RngCore;
+    use twenty_first::util_types::{blake3_wrapper, simple_hasher::Hasher};
 
     use super::*;
 

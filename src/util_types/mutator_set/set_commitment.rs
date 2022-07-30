@@ -10,11 +10,11 @@ use super::{
     removal_record::RemovalRecord,
     shared::{bit_indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
 };
-use crate::{
+use crate::util_types::mutator_set::chunk::Chunk;
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::{self, mmr_trait::Mmr},
-        mutator_set::chunk::Chunk,
         simple_hasher::{Hasher, ToDigest},
     },
 };
@@ -385,27 +385,22 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
-    use crate::{
+    use crate::test_shared::mutator_set::{empty_archival_ms, insert_item, remove_item};
+    use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use rand::prelude::*;
+    use rand_chacha::ChaCha20Rng;
+    use rand_core::{RngCore, SeedableRng};
+    use twenty_first::{
         shared_math::{
             rescue_prime_xlix::{
                 neptune_params, RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH,
             },
             traits::GetRandomElements,
         },
-        test_shared::mutator_set::{empty_archival_ms, insert_item, remove_item},
-        util_types::{
-            blake3_wrapper,
-            mmr::mmr_accumulator::MmrAccumulator,
-            mutator_set::{
-                archival_mutator_set::ArchivalMutatorSet, mutator_set_trait::MutatorSet,
-            },
-            simple_hasher::Hasher,
-        },
+        util_types::{blake3_wrapper, mmr::mmr_accumulator::MmrAccumulator, simple_hasher::Hasher},
         utils::has_unique_elements,
     };
-    use rand::prelude::*;
-    use rand_chacha::ChaCha20Rng;
-    use rand_core::{RngCore, SeedableRng};
 
     use super::*;
 

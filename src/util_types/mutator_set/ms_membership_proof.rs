@@ -5,11 +5,13 @@ use std::{
     ops::IndexMut,
 };
 
-use crate::{
+use crate::util_types::mutator_set::{
+    chunk::Chunk, set_commitment::get_swbf_indices, shared::BATCH_SIZE,
+};
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        mutator_set::{chunk::Chunk, set_commitment::get_swbf_indices, shared::BATCH_SIZE},
         simple_hasher::{self, ToDigest},
     },
 };
@@ -558,15 +560,17 @@ where
 #[cfg(test)]
 mod ms_proof_tests {
 
-    use crate::util_types::{
-        blake3_wrapper::{self, Blake3Hash},
-        mmr,
-        mutator_set::{mutator_set_accumulator::MutatorSetAccumulator, shared::BITS_PER_U32},
-        simple_hasher::Hasher,
+    use crate::util_types::mutator_set::{
+        mutator_set_accumulator::MutatorSetAccumulator, shared::BITS_PER_U32,
     };
     use rand::thread_rng;
     use rand_chacha::ChaCha20Rng;
     use rand_core::{RngCore, SeedableRng};
+    use twenty_first::util_types::{
+        blake3_wrapper::{self, Blake3Hash},
+        mmr,
+        simple_hasher::Hasher,
+    };
 
     use super::*;
 

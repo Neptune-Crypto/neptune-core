@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
-use crate::util_types::{
+use twenty_first::util_types::{
     database_array::DatabaseArray,
     simple_hasher::{self, Hasher, ToDigest},
 };
@@ -144,7 +144,7 @@ where
 mod active_window_tests {
     use rand::{thread_rng, RngCore};
 
-    use crate::shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH};
+    use twenty_first::shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH};
 
     use super::*;
 

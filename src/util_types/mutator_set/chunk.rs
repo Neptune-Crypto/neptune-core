@@ -2,7 +2,7 @@ use serde_big_array;
 use serde_big_array::BigArray;
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{
+use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::simple_hasher::{self, ToDigest},
 };
@@ -66,7 +66,7 @@ impl Chunk {
 mod chunk_tests {
     use rand::{thread_rng, RngCore};
 
-    use crate::shared_math::traits::IdentityValues;
+    use twenty_first::shared_math::traits::IdentityValues;
 
     use super::*;
 

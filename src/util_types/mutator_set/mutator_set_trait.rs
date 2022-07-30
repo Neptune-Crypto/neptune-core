@@ -1,4 +1,4 @@
-use crate::util_types::simple_hasher::Hasher;
+use twenty_first::util_types::simple_hasher::Hasher;
 
 use super::{
     addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
