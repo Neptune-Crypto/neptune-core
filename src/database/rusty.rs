@@ -9,7 +9,6 @@ use std::{
 
 pub struct RustyLevelDB<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> {
     database: DB,
-    _name: String, // helper field for debugging purposes
     _key: PhantomData<Key>,
     _value: PhantomData<Value>,
 }
@@ -43,35 +42,18 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Lev
             database: db,
             _key: PhantomData,
             _value: PhantomData,
-            _name: db_name.to_string(),
         })
     }
 
     fn get(&mut self, key: Key) -> Option<Value> {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
         let value_bytes: Option<Vec<u8>> = self.database.get(&key_bytes);
-        match value_bytes {
-            Some(bytes) => {
-                let options = bincode::DefaultOptions::new();
-                let mut deserializer = bincode::Deserializer::from_slice(&bytes, options);
-                let deserializer = serde_stacker::Deserializer::new(&mut deserializer);
-                let a = Value::deserialize(deserializer);
-                match a {
-                    Ok(res) => Some(res),
-                    Err(err) => panic!("Failed to deserialize: {}", err),
-                }
-            }
-            None => None,
-        }
+        value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap())
     }
 
     fn put(&mut self, key: Key, value: Value) {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
-        let mut value_bytes: Vec<u8> = vec![];
-        let options = bincode::DefaultOptions::new();
-        let mut serializer = bincode::Serializer::new(&mut value_bytes, options);
-        let serializer = serde_stacker::Serializer::new(&mut serializer);
-        let _result = value.serialize(serializer);
+        let value_bytes: Vec<u8> = bincode::serialize(&value).unwrap();
         self.database.put(&key_bytes, &value_bytes).unwrap();
 
         // TODO: We probably don't have to flush after each writing mutation. But then we would have
