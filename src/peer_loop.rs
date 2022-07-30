@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
-const MINIMUM_BLOCK_BATCH_SIZE: usize = 5;
+const MINIMUM_BLOCK_BATCH_SIZE: usize = 10;
 
 /// Contains the immutable data that this peer-loop needs. Does not contain the `peer` variable
 /// since this needs to be a mutable variable in most methods.

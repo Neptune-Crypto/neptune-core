@@ -21,10 +21,10 @@ use twenty_first::amount::u32s::U32s;
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
-const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 15;
+const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
-const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 20;
+const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
 
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
@@ -328,9 +328,10 @@ impl MainLoopHandler {
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer.
-                    // TODO: Is this check right. We might still want to store the blocks even though
+                    // TODO: Is this check right? We might still want to store the blocks even though
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
-                    // that is.
+                    // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
+                    // or should deep reorganizations simply be fixed by clearing the database?
                     let block_is_new = previous_block_header.proof_of_work_family
                         < last_block.header.proof_of_work_family;
                     if !block_is_new {
@@ -405,7 +406,7 @@ impl MainLoopHandler {
                 if enter_sync_mode(
                     our_block_tip_header,
                     claimed_state,
-                    self.global_state.cli.max_number_of_blocks_before_syncing,
+                    self.global_state.cli.max_number_of_blocks_before_syncing / 3,
                 ) {
                     info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
