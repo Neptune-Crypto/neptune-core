@@ -836,6 +836,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "mutator-set-tf"
+version = "0.1.0"
+source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=89e71a813a1f1bcff5998033dbe957c53df33360#89e71a813a1f1bcff5998033dbe957c53df33360"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "blake3",
+ "byteorder",
+ "colored",
+ "console",
+ "hashbrown",
+ "itertools",
+ "nom",
+ "num-bigint",
+ "num-traits",
+ "parity-scale-codec",
+ "paw",
+ "phf",
+ "primitive-types",
+ "rand 0.8.5",
+ "rand_chacha 0.2.2",
+ "rand_core 0.5.1",
+ "rand_distr",
+ "rand_pcg",
+ "rayon",
+ "ring",
+ "rusty-leveldb",
+ "serde",
+ "serde-big-array",
+ "serde_derive",
+ "serde_json",
+ "serde_with",
+ "structopt",
+ "twenty-first",
+]
+
+[[package]]
 name = "neptune-core"
 version = "0.1.0"
 dependencies = [
@@ -847,6 +884,7 @@ dependencies = [
  "clap 3.2.12",
  "directories",
  "futures",
+ "mutator-set-tf",
  "num-bigint",
  "num-traits",
  "pin-project-lite",
@@ -1991,7 +2029,7 @@ dependencies = [
 [[package]]
 name = "twenty-first"
 version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=4d688d7399abe26aaffd80fc8f083efce8e78844#4d688d7399abe26aaffd80fc8f083efce8e78844"
+source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=af2754ea8d911f13967ca935939190ae25a4085c#af2754ea8d911f13967ca935939190ae25a4085c"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2009,8 +2047,8 @@ dependencies = [
  "phf",
  "primitive-types",
  "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rand_core 0.6.3",
+ "rand_chacha 0.2.2",
+ "rand_core 0.5.1",
  "rand_distr",
  "rand_pcg",
  "rayon",

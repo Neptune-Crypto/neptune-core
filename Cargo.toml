@@ -1,18 +1,23 @@
 [package]
 about = "A sea of freedom"
-authors = ["sword-smith <thor@neptune.cash>", "Alan Szepieniec <alan@neptune.cash>", "Philip Munksgaard <philip@munksgaard.me>"]
+authors = [
+    "sword-smith <thor@neptune.cash>",
+    "Alan Szepieniec <alan@neptune.cash>",
+    "Philip Munksgaard <philip@munksgaard.me>",
+]
 edition = "2021"
 name = "neptune-core"
 version = "0.1.0"
 default-run = "neptune-core"
 
 [dev-dependencies.cargo-husky]
-default-features = false # Disable features which are enabled by default
+default-features = false                                           # Disable features which are enabled by default
 features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "4d688d7399abe26aaffd80fc8f083efce8e78844" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "af2754ea8d911f13967ca935939190ae25a4085c" }
+mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", rev = "89e71a813a1f1bcff5998033dbe957c53df33360" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"
@@ -24,7 +29,11 @@ rusty-leveldb = "1.0.2"
 num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = "0.2"
 rand = "0.8"
-secp256k1 = { version = "0", features = ["rand-std", "serde", "global-context"] }
+secp256k1 = { version = "0", features = [
+    "rand-std",
+    "serde",
+    "global-context",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
@@ -33,7 +42,11 @@ tokio = { version = "1", features = ["full"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["std", "env-filter", "time"] }
+tracing-subscriber = { version = "0.3", features = [
+    "std",
+    "env-filter",
+    "time",
+] }
 tracing-test = "0"
 tarpc = { version = "0.29", features = ["tokio1", "serde-transport", "tcp"] }
 

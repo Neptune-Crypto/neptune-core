@@ -1,15 +1,12 @@
+use mutator_set_tf::util_types::mutator_set::{
+    mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+};
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use twenty_first::{
-    amount::u32s::U32s,
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mutator_set::{
-            mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
-        },
-        simple_hasher::Hasher,
-    },
+    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
+    util_types::simple_hasher::Hasher,
 };
 
 pub mod block_body;

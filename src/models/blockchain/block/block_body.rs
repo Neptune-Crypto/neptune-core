@@ -1,8 +1,8 @@
+use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::merkle_tree::MerkleTree;
-use twenty_first::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use twenty_first::util_types::simple_hasher::Hasher;
 
 use crate::models::blockchain::digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};

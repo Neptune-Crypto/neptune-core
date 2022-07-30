@@ -4,6 +4,8 @@ use clap::Parser;
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
+use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
@@ -22,11 +24,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::traits::GetRandomElements;
-use twenty_first::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
-    util_types::mutator_set::addition_record::AdditionRecord,
-};
+use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;

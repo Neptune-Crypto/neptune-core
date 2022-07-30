@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
-use twenty_first::util_types::{
-    merkle_tree::MerkleTree,
-    mutator_set::{addition_record::AdditionRecord, removal_record::RemovalRecord},
-    simple_hasher::Hasher,
+use mutator_set_tf::util_types::mutator_set::{
+    addition_record::AdditionRecord, removal_record::RemovalRecord,
 };
+use serde::{Deserialize, Serialize};
+use twenty_first::util_types::{merkle_tree::MerkleTree, simple_hasher::Hasher};
 
 use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::blockchain::shared::Hash;
