@@ -129,6 +129,13 @@ impl PeerStanding {
 
         self.standing
     }
+
+    /// Clear peer standing record
+    pub fn clear_standing(&mut self) {
+        self.standing = PeerStanding::default().standing;
+        self.latest_sanction = PeerStanding::default().latest_sanction;
+        self.timestamp_of_latest_sanction = PeerStanding::default().timestamp_of_latest_sanction;
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
