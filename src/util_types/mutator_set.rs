@@ -1,6 +1,7 @@
 pub mod active_window;
 pub mod addition_record;
 pub mod archival_mutator_set;
+pub mod boxed_big_array;
 pub mod chunk;
 pub mod chunk_dictionary;
 pub mod ms_membership_proof;
