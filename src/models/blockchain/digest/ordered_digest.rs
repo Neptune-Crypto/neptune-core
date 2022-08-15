@@ -9,7 +9,7 @@ use super::{Digest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
 // database keys out of rescue prime digests.
 /// Type for ordered digests. The digest is considered a big-endian unsigned integer
 /// written in base BFieldElement::QUOTIENT.
-#[derive(Clone, Copy, Debug, Serialize, serde::Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct OrderedDigest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
 
 // Digest needs a partial ordering for the mining/PoW process, to check if

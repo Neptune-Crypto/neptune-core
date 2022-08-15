@@ -34,7 +34,7 @@ pub struct PeerInfo {
     pub version: String,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PeerSanctionReason {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
@@ -136,7 +136,7 @@ impl PeerStanding {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HandshakeData {
     pub tip_header: BlockHeader,
     pub listen_address: Option<SocketAddr>,
@@ -147,7 +147,7 @@ pub struct HandshakeData {
 
 /// Used to tell peers that a new block has been found without having toPeerMessage
 /// send the entire block
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerBlockNotification {
     pub hash: Digest,
     pub height: BlockHeight,
@@ -174,7 +174,7 @@ impl From<Block> for PeerBlockNotification {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConnectionRefusedReason {
     AlreadyConnected,
     BadStanding,
@@ -182,7 +182,7 @@ pub enum ConnectionRefusedReason {
     SelfConnect,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConnectionStatus {
     Refused(ConnectionRefusedReason),
     Accepted,

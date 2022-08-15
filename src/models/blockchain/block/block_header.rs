@@ -14,7 +14,7 @@ use super::block_height::BlockHeight;
 pub const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
 pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,

@@ -14,7 +14,7 @@ use super::AMOUNT_SIZE_FOR_U32;
 pub const PUBLIC_KEY_LENGTH_IN_BYTES: usize = 33;
 pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Utxo {
     pub amount: U32s<AMOUNT_SIZE_FOR_U32>,
     pub public_key: secp256k1::PublicKey,

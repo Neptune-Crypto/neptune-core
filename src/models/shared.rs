@@ -5,7 +5,7 @@ use super::blockchain::{
     digest::Digest,
 };
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LatestBlockInfo {
     pub height: BlockHeight,
     pub hash: Digest,
