@@ -244,6 +244,7 @@ impl PotentialPeersState {
     }
 }
 
+/// Return a boolean indicating if synchronization mode should be entered
 fn enter_sync_mode(
     own_block_tip_header: BlockHeader,
     peer_synchronization_state: PeerSynchronizationState,
@@ -254,6 +255,7 @@ fn enter_sync_mode(
             > max_number_of_blocks_before_syncing as i128
 }
 
+/// Return a boolean indicating if synchronization mode should be left
 fn stay_in_sync_mode(
     own_block_tip_header: BlockHeader,
     sync_state: &SyncState,
@@ -265,10 +267,13 @@ fn stay_in_sync_mode(
         .max_by_key(|x| x.claimed_max_pow_family);
     match max_claimed_pow {
         None => false, // we lost all connections. Can't sync.
+
+        // Synchronization is left when the remaining number of block is half of what has
+        // been indicated to fit into RAM
         Some(max_claim) => {
             own_block_tip_header.proof_of_work_family < max_claim.claimed_max_pow_family
                 && max_claim.claimed_max_height - own_block_tip_header.height
-                    > max_number_of_blocks_before_syncing as i128
+                    > max_number_of_blocks_before_syncing as i128 / 2
         }
     }
 }

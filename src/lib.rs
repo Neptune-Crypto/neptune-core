@@ -32,6 +32,8 @@ use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
 use models::blockchain::digest::Digest;
 use models::blockchain::wallet::Wallet;
+use models::database::BlockIndexKey;
+use models::database::BlockIndexValue;
 use models::database::{BlockDatabases, PeerDatabases};
 use models::peer::PeerInfo;
 use std::collections::HashMap;
@@ -59,21 +61,12 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
 const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
 const LATEST_BLOCK_DB_NAME: &str = "latest";
+const BLOCK_INDEX_DB_NAME: &str = "block_index";
 const BANNED_IPS_DB_NAME: &str = "banned_ips";
 const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard";
 const STANDARD_WALLET_VERSION: u8 = 0;
-
-fn get_data_directory(network: Network) -> Result<PathBuf> {
-    if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
-        let mut path = proj_dirs.data_dir().to_path_buf();
-        path.push(network.to_string());
-        Ok(path)
-    } else {
-        bail!("Could not determine data directory")
-    }
-}
 
 /// Create a wallet file, and set restrictive permissions
 #[cfg(target_family = "unix")]
@@ -176,6 +169,8 @@ fn initialize_databases(root_path: &Path) -> Result<(BlockDatabases, PeerDatabas
     let block_height_to_hash =
         RustyLevelDB::<BlockHeight, Digest>::new(&path, BLOCK_HEIGHT_TO_HASH_DB_NAME)?;
     let latest_block = RustyLevelDB::<(), BlockHeader>::new(&path, LATEST_BLOCK_DB_NAME)?;
+    let block_index =
+        RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(&path, BLOCK_INDEX_DB_NAME)?;
     let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
 
     Ok((
@@ -183,6 +178,7 @@ fn initialize_databases(root_path: &Path) -> Result<(BlockDatabases, PeerDatabas
             block_hash_to_block,
             block_height_to_hash,
             latest_block_header: latest_block,
+            block_index,
         },
         PeerDatabases {
             peer_standings: banned_peers,
@@ -213,7 +209,7 @@ async fn get_latest_block(databases: Arc<tokio::sync::Mutex<BlockDatabases>>) ->
 
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    let path_buf = get_data_directory(cli_args.network)?;
+    let path_buf = cli_args.get_data_directory().unwrap();
 
     // The root path is where both the wallet and all databases are stored
     let root_path = path_buf.as_path();

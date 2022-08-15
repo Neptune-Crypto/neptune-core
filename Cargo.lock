@@ -809,6 +809,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
+name = "memmap2"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95af15f345b17af2efc8ead6080fb8bc376f8cec1b35277b935637595fe77498"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "memoffset"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -842,8 +851,8 @@ source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=0
 dependencies = [
  "blake3",
  "itertools",
- "rand 0.7.3",
- "rand_core 0.5.1",
+ "rand 0.8.5",
+ "rand_core 0.6.3",
  "rayon",
  "rusty-leveldb",
  "serde",
@@ -865,6 +874,7 @@ dependencies = [
  "clap 3.2.12",
  "directories",
  "futures",
+ "memmap2",
  "mutator-set-tf",
  "num-bigint",
  "num-traits",
@@ -1995,8 +2005,8 @@ dependencies = [
  "phf",
  "primitive-types",
  "rand 0.8.5",
- "rand_chacha 0.2.2",
- "rand_core 0.5.1",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.3",
  "rand_distr",
  "rand_pcg",
  "rayon",

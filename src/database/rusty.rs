@@ -1,6 +1,6 @@
 use super::leveldb::LevelDB;
 use anyhow::Result;
-use rusty_leveldb::{DBIterator, LdbIterator, DB};
+use rusty_leveldb::{DBIterator, LdbIterator, WriteBatch, DB};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     marker::PhantomData,
@@ -61,6 +61,17 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Lev
         self.database
             .flush()
             .expect("Database flushing to disk must succeed");
+    }
+
+    fn batch_write(&mut self, entries: &[(Key, Value)]) {
+        let mut batch = WriteBatch::new();
+        for (key, value) in entries.iter() {
+            let key_bytes: Vec<u8> = bincode::serialize(key).unwrap();
+            let value_bytes: Vec<u8> = bincode::serialize(value).unwrap();
+            batch.put(&key_bytes, &value_bytes);
+        }
+
+        self.database.write(batch, true).unwrap();
     }
 
     fn delete(&mut self, key: Key) -> Option<Value> {
