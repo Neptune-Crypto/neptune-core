@@ -1,6 +1,6 @@
 use super::leveldb::LevelDB;
 use anyhow::Result;
-use rusty_leveldb::DB;
+use rusty_leveldb::{DBIterator, LdbIterator, DB};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     marker::PhantomData,
@@ -77,6 +77,54 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Lev
         match status {
             Ok(_) => value_object, // could be None, if record is not present
             Err(err) => panic!("database failure: {}", err),
+        }
+    }
+}
+
+impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
+    RustyLevelDB<Key, Value>
+{
+    pub fn new_iter(&mut self) -> RustyLevelDBIterator<Key, Value> {
+        RustyLevelDBIterator::new(self)
+    }
+}
+
+pub struct RustyLevelDBIterator<
+    Key: Serialize + DeserializeOwned,
+    Value: Serialize + DeserializeOwned,
+> {
+    iterator: DBIterator,
+    _key: PhantomData<Key>,
+    _value: PhantomData<Value>,
+}
+
+impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Iterator
+    for RustyLevelDBIterator<Key, Value>
+{
+    type Item = (Key, Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iterator.next().map(|(sk, sv)| {
+            (
+                bincode::deserialize(&sk).unwrap(),
+                bincode::deserialize(&sv).unwrap(),
+            )
+        })
+    }
+}
+
+impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
+    RustyLevelDBIterator<Key, Value>
+{
+    fn new(database: &mut RustyLevelDB<Key, Value>) -> Self {
+        let iterator = database
+            .database
+            .new_iter()
+            .expect("Iterator should be constructed.");
+        Self {
+            iterator,
+            _key: PhantomData,
+            _value: PhantomData,
         }
     }
 }

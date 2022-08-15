@@ -5,6 +5,7 @@ use super::database::{BlockDatabases, PeerDatabases};
 use super::peer::{self, HandshakeData, PeerStanding};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
+use crate::database::rusty::RustyLevelDBIterator;
 use crate::VERSION;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -229,6 +230,35 @@ impl State {
             network: self.cli.network,
             instance_id: self.net.instance_id,
             version: VERSION.to_string(),
+        }
+    }
+
+    pub async fn clear_ip_standing_in_database(&self, ip: IpAddr) {
+        let mut peer_databases = self.net.peer_databases.lock().await;
+
+        let old_standing = peer_databases.peer_standings.get(ip);
+
+        if old_standing.is_some() {
+            peer_databases
+                .peer_standings
+                .put(ip, PeerStanding::default())
+        }
+    }
+
+    pub async fn clear_all_standings_in_database(&self) {
+        let mut peer_databases = self.net.peer_databases.lock().await;
+
+        let mut dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
+            peer_databases.peer_standings.new_iter();
+
+        for (ip, _v) in dbiterator.by_ref() {
+            let old_standing = peer_databases.peer_standings.get(ip);
+
+            if old_standing.is_some() {
+                peer_databases
+                    .peer_standings
+                    .put(ip, PeerStanding::default())
+            }
         }
     }
 }

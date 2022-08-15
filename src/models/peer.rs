@@ -129,6 +129,11 @@ impl PeerStanding {
 
         self.standing
     }
+
+    /// Clear peer standing record
+    pub fn clear_standing(&mut self) {
+        *self = PeerStanding::default();
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

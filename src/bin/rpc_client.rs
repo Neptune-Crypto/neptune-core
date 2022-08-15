@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use neptune_core::rpc::RPCClient;
+use neptune_core::rpc_server::RPCClient;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -10,6 +11,8 @@ enum Command {
     BlockHeight,
     GetPeerInfo,
     Head,
+    ClearAllStandings,
+    ClearIpStanding { ip: IpAddr },
 }
 
 #[derive(Debug, Parser)]
@@ -53,6 +56,14 @@ async fn main() -> Result<()> {
         Command::Head => {
             let head_hash = client.head(context::current()).await?;
             tracing::info!("{}", head_hash);
+        }
+        Command::ClearAllStandings => {
+            client.clear_all_standings(context::current()).await?;
+            tracing::info!("Cleared all standings.");
+        }
+        Command::ClearIpStanding { ip } => {
+            client.clear_ip_standing(context::current(), ip).await?;
+            tracing::info!("Cleared standing of {}", ip);
         }
     }
 
