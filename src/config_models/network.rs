@@ -27,7 +27,7 @@ impl FromStr for Network {
             "main" => Ok(Network::Main),
             "testnet" => Ok(Network::Testnet),
             "regtest" => Ok(Network::RegTest),
-            _ => Err("Failed to parse".to_string()),
+            _ => Err(format!("Failed to parse {} as network", input)),
         }
     }
 }
