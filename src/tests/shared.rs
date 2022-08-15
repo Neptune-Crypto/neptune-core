@@ -29,10 +29,11 @@ use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldEleme
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
-use crate::models::state::ArchivalState;
-use crate::models::state::BlockchainState;
-use crate::models::state::LightState;
-use crate::models::state::NetworkingState;
+use crate::models::state::archival_state::ArchivalState;
+use crate::models::state::blockchain_state::BlockchainState;
+use crate::models::state::light_state::LightState;
+use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::State;
 use crate::{
     config_models::{cli_args, network::Network},
     initialize_databases,
@@ -51,7 +52,6 @@ use crate::{
         database::{BlockDatabases, PeerDatabases},
         peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding},
         shared::LatestBlockInfo,
-        state::State,
     },
     PEER_CHANNEL_CAPACITY,
 };
