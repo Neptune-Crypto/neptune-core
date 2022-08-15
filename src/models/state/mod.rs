@@ -22,8 +22,13 @@ pub mod networking_state;
 /// state, all other threads are only allowed to read from the state.
 #[derive(Debug, Clone)]
 pub struct State {
+    // Only the main thread may update these values.
     pub chain: BlockchainState,
+
+    // This contains values that both the peer threads and main thread may update
     pub net: NetworkingState,
+
+    // This field is read-only as it's set at launch
     pub cli: cli_args::Args,
 }
 
