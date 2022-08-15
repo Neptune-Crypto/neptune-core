@@ -60,7 +60,8 @@ impl RPC for NeptuneRPCServer {
             .peer_map
             .lock()
             .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-        // iterates and modifies, and accumulates whether any one was modified
+
+        // iterates and modifies standing field for all connected peers
         peers.iter_mut().for_each(|(_, peerinfo)| {
             peerinfo.standing.clear_standing();
         });
@@ -94,6 +95,7 @@ mod rpc_server_tests {
     use anyhow::Result;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tracing_test::traced_test;
+
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
@@ -116,6 +118,7 @@ mod rpc_server_tests {
             .values()
             .collect::<Vec<_>>()[1]
             .connected_address;
+
         // sanction both
         {
             let mut peers = state
@@ -142,6 +145,7 @@ mod rpc_server_tests {
                 )
                 .await;
         };
+
         // Verify expected initial conditions
         let peer_standing_0 = state
             .get_peer_standing_from_database(peer_address_0.ip())
@@ -153,6 +157,7 @@ mod rpc_server_tests {
             .await;
         assert_ne!(0, peer_standing_1.unwrap().standing);
         assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
+
         // Clear standing of #0
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
@@ -161,7 +166,8 @@ mod rpc_server_tests {
         rpc_server
             .clear_ip_standing(context::current(), peer_address_0.ip())
             .await;
-        // Verify expected resulting conditions
+
+        // Verify expected resulting conditions in database
         let peer_standing_0 = state
             .get_peer_standing_from_database(peer_address_0.ip())
             .await;
@@ -172,6 +178,15 @@ mod rpc_server_tests {
             .await;
         assert_ne!(0, peer_standing_1.unwrap().standing);
         assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
+
+        // Verify expected resulting conditions in peer map
+        let peer_standing_0_from_memory =
+            state.net.peer_map.lock().unwrap()[&peer_address_0].clone();
+        assert_eq!(0, peer_standing_0_from_memory.standing.standing);
+        let peer_standing_1_from_memory =
+            state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
+        assert_ne!(0, peer_standing_1_from_memory.standing.standing);
+
         Ok(())
     }
     #[traced_test]
@@ -196,7 +211,8 @@ mod rpc_server_tests {
             .values()
             .collect::<Vec<_>>()[1]
             .connected_address;
-        // sanction both
+
+        // sanction both peers
         {
             let mut peers = state
                 .net
@@ -222,6 +238,7 @@ mod rpc_server_tests {
                 )
                 .await;
         };
+
         // Verify expected initial conditions
         let peer_standing_0 = state
             .get_peer_standing_from_database(peer_address_0.ip())
@@ -233,13 +250,15 @@ mod rpc_server_tests {
             .await;
         assert_ne!(0, peer_standing_1.unwrap().standing);
         assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
-        // Clear standing of both
+
+        // Clear standing of both by clearing all standings
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
             state: state.clone(),
         };
         rpc_server.clear_all_standings(context::current()).await;
-        // Verify expected resulting conditions
+
+        // Verify expected resulting conditions in database
         let peer_standing_0 = state
             .get_peer_standing_from_database(peer_address_0.ip())
             .await;
@@ -250,6 +269,15 @@ mod rpc_server_tests {
             .await;
         assert_eq!(0, peer_standing_1.unwrap().standing);
         assert_eq!(None, peer_standing_1.unwrap().latest_sanction);
+
+        // Verify expected resulting conditions in peer map
+        let peer_standing_0_from_memory =
+            state.net.peer_map.lock().unwrap()[&peer_address_0].clone();
+        assert_eq!(0, peer_standing_0_from_memory.standing.standing);
+        let peer_standing_1_from_memory =
+            state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
+        assert_eq!(0, peer_standing_1_from_memory.standing.standing);
+
         Ok(())
     }
 }
