@@ -174,17 +174,23 @@ impl BlockDatabases {
     pub fn get_latest_block(
         databases: &mut tokio::sync::MutexGuard<BlockDatabases>,
     ) -> Result<Option<Block>> {
-        let block_header_res = databases.latest_block_header.get(());
-        let block_header = match block_header_res {
+        let block_header_res = databases.block_index.get(BlockIndexKey::Last);
+        let last_file_used: LastRecord = match block_header_res {
+            Some(last) => last,
             None => return Ok(None),
-            Some(bh) => bh,
-        };
+        }
+        .as_last_record();
+        // let block_header_res = databases.latest_block_header.get(());
+        // let block_header = match block_header_res {
+        //     None => return Ok(None),
+        //     Some(bh) => bh,
+        // };
 
-        let block = databases
-            .block_hash_to_block
-            .get(block_header.hash())
-            .context("Database entry for block_hash_to_block must be set for block header found in latest_block_header")?;
+        // let block = databases
+        //     .block_hash_to_block
+        //     .get(block_header.hash())
+        //     .context("Database entry for block_hash_to_block must be set for block header found in latest_block_header")?;
 
-        Ok(Some(block))
+        // Ok(Some(block))
     }
 }
