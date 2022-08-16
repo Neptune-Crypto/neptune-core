@@ -1,6 +1,5 @@
 use anyhow::Result;
 use memmap2::Mmap;
-use serde::Serialize;
 use std::{
     fs,
     io::{Seek, SeekFrom, Write},
@@ -22,7 +21,10 @@ use crate::{
 
 use super::{
     blockchain::digest::Digest,
-    database::{BlockIndexKey, BlockIndexValue, BlockRecord, FileLocation, FileRecord, LastRecord},
+    database::{
+        BlockDatabases, BlockIndexKey, BlockIndexValue, BlockRecord, FileLocation, FileRecord,
+        LastRecord,
+    },
 };
 
 pub mod archival_state;
@@ -73,8 +75,8 @@ impl State {
         let index = last_record.last_file;
         filename.push_str(&index.to_string());
         let path = Path::new(&filename);
-        let path = path.with_extension(BLOCK_FILENAME_EXTENSION);
-        path.to_path_buf()
+
+        path.with_extension(BLOCK_FILENAME_EXTENSION)
     }
 
     fn new_block_file_is_needed(file: &fs::File, bytes_to_store: u64) -> bool {
@@ -83,7 +85,7 @@ impl State {
 
     /// Return the file path of the file, and create any missing directories
     fn block_file_path(data_dir: PathBuf, last_record: LastRecord) -> PathBuf {
-        let mut file_path = data_dir.clone();
+        let mut file_path = data_dir;
         file_path.push(DIR_NAME_FOR_BLOCKS);
 
         // Create directory for blocks if it does not exist already
@@ -102,36 +104,26 @@ impl State {
     }
 
     /// Write a newly found block to database
-    pub async fn update_latest_block(&self, new_block: Box<Block>) -> Result<()> {
-        // Acquire both locks before updating
-        let mut databases_locked = self
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .block_databases
-            .lock()
-            .await;
-        let mut light_state_locked = self.chain.light_state.latest_block_header.lock().unwrap();
-
-        // Perform the updates while holding both locks
-        *light_state_locked = new_block.header.clone();
-
+    pub fn write_block(
+        &self,
+        new_block: Box<Block>,
+        db_lock: &mut tokio::sync::MutexGuard<'_, BlockDatabases>,
+    ) -> Result<()> {
         // TODO: Multiple blocks can have the same height: fix!
-        databases_locked
+        db_lock
             .block_height_to_hash
             .put(new_block.header.height, new_block.hash);
-        databases_locked
+        db_lock
             .block_hash_to_block
             .put(new_block.hash, *new_block.clone());
-        databases_locked
+        db_lock
             .latest_block_header
             .put((), new_block.header.clone());
 
         // Write block to disk
-        let mut last_rec: LastRecord = match databases_locked
+        let mut last_rec: LastRecord = match db_lock
             .block_index
-            .get(BlockIndexKey::LastRecord)
+            .get(BlockIndexKey::Last)
             .map(|x| x.as_last_record())
         {
             Some(rec) => rec,
@@ -163,10 +155,10 @@ impl State {
         }
 
         // Get associated file record from database, otherwise create it
-        let file_record_key: BlockIndexKey = BlockIndexKey::FileRecord(last_rec.last_file);
-        let file_record_value: Option<FileRecord> = databases_locked
+        let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
+        let file_record_value: Option<FileRecord> = db_lock
             .block_index
-            .get(file_record_key)
+            .get(file_record_key.clone())
             .map(|x| x.as_file_record());
         let file_record_value: FileRecord = match file_record_value {
             Some(record) => record.add(serialized_block_size, &new_block.header),
@@ -182,9 +174,9 @@ impl State {
             .seek(SeekFrom::Current(-(serialized_block_size as i64)))
             .unwrap();
 
-        let height_record_key = BlockIndexKey::HeightRecord(new_block.header.height);
+        let height_record_key = BlockIndexKey::Height(new_block.header.height);
         let mut blocks_at_same_height: Vec<Digest> =
-            match databases_locked.block_index.get(height_record_key.clone()) {
+            match db_lock.block_index.get(height_record_key.clone()) {
                 Some(rec) => rec.as_height_record(),
                 None => vec![],
             };
@@ -196,36 +188,27 @@ impl State {
 
         // Update block index database with newly stored block
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
-        let file_record_key: BlockIndexKey = BlockIndexKey::FileRecord(last_rec.last_file);
-        let block_record_key: BlockIndexKey = BlockIndexKey::BlockRecord(new_block.hash);
-        let block_record_value: BlockIndexValue = BlockIndexValue::BlockRecord(BlockRecord {
+        let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash);
+        let block_record_value: BlockIndexValue = BlockIndexValue::Block(Box::new(BlockRecord {
             block_header: new_block.header.clone(),
             file_location: FileLocation {
                 file_index: last_rec.last_file,
                 offset: file_offset,
             },
             tx_count: new_block.body.transactions.len() as u32,
-        });
+        }));
 
-        block_index_entries.push((
-            file_record_key,
-            BlockIndexValue::FileRecord(file_record_value),
-        ));
+        block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
         block_index_entries.push((block_record_key, block_record_value));
 
         // Missing: height record and last record
-        block_index_entries.push((
-            BlockIndexKey::LastRecord,
-            BlockIndexValue::LastRecord(last_rec),
-        ));
+        block_index_entries.push((BlockIndexKey::Last, BlockIndexValue::Last(last_rec)));
         blocks_at_same_height.push(new_block.hash);
         block_index_entries.push((
             height_record_key,
-            BlockIndexValue::HeightRecord(blocks_at_same_height),
+            BlockIndexValue::Height(blocks_at_same_height),
         ));
-        databases_locked
-            .block_index
-            .batch_write(&block_index_entries);
+        db_lock.block_index.batch_write(&block_index_entries);
 
         // Release both locks
         Ok(())

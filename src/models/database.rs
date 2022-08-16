@@ -80,62 +80,62 @@ pub struct LastRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BlockIndexKey {
-    BlockRecord(Digest),       // points to block headers and file locations
-    FileRecord(u32),           // points to file information
-    HeightRecord(BlockHeight), // Maps from block height to list of blocks
-    LastRecord,                // points to last file used
+    Block(Digest),       // points to block headers and file locations
+    File(u32),           // points to file information
+    Height(BlockHeight), // Maps from block height to list of blocks
+    Last,                // points to last file used
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BlockIndexValue {
-    BlockRecord(BlockRecord),
-    FileRecord(FileRecord),
-    HeightRecord(Vec<Digest>),
-    LastRecord(LastRecord),
+    Block(Box<BlockRecord>),
+    File(FileRecord),
+    Height(Vec<Digest>),
+    Last(LastRecord),
 }
 
 impl BlockIndexValue {
     pub fn as_block_record(&self) -> BlockRecord {
         match self {
-            BlockIndexValue::BlockRecord(rec) => rec.to_owned(),
-            BlockIndexValue::FileRecord(_) => panic!("Requested block record, found FileRecord"),
-            BlockIndexValue::HeightRecord(_) => {
+            BlockIndexValue::Block(rec) => *rec.to_owned(),
+            BlockIndexValue::File(_) => panic!("Requested block record, found FileRecord"),
+            BlockIndexValue::Height(_) => {
                 panic!("Requested block record, found HeightRecord")
             }
-            BlockIndexValue::LastRecord(_) => panic!("Requested block record, found LastRecord"),
+            BlockIndexValue::Last(_) => panic!("Requested block record, found LastRecord"),
         }
     }
 
     pub fn as_file_record(&self) -> FileRecord {
         match self {
-            BlockIndexValue::BlockRecord(_) => panic!("Requested file record, found BlockRecord"),
-            BlockIndexValue::FileRecord(rec) => rec.to_owned(),
-            BlockIndexValue::HeightRecord(_) => {
+            BlockIndexValue::Block(_) => panic!("Requested file record, found BlockRecord"),
+            BlockIndexValue::File(rec) => rec.to_owned(),
+            BlockIndexValue::Height(_) => {
                 panic!("Requested file record, found HeightRecord")
             }
-            BlockIndexValue::LastRecord(_) => panic!("Requested file record, found LastRecord"),
+            BlockIndexValue::Last(_) => panic!("Requested file record, found LastRecord"),
         }
     }
 
     pub fn as_height_record(&self) -> Vec<Digest> {
         match self {
-            BlockIndexValue::BlockRecord(_) => {
+            BlockIndexValue::Block(_) => {
                 panic!("Requested height record, found BlockRecord")
             }
-            BlockIndexValue::FileRecord(_) => panic!("Requested height record, found FileRecord"),
-            BlockIndexValue::HeightRecord(rec) => rec.to_owned(),
-            BlockIndexValue::LastRecord(_) => panic!("Requested height record, found LastRecord"),
+            BlockIndexValue::File(_) => panic!("Requested height record, found FileRecord"),
+            BlockIndexValue::Height(rec) => rec.to_owned(),
+            BlockIndexValue::Last(_) => panic!("Requested height record, found LastRecord"),
         }
     }
 
     pub fn as_last_record(&self) -> LastRecord {
         match self {
-            BlockIndexValue::BlockRecord(_) => panic!("Requested last record, found BlockRecord"),
-            BlockIndexValue::FileRecord(_) => panic!("Requested last record, found FileRecord"),
-            BlockIndexValue::HeightRecord(_) => {
+            BlockIndexValue::Block(_) => panic!("Requested last record, found BlockRecord"),
+            BlockIndexValue::File(_) => panic!("Requested last record, found FileRecord"),
+            BlockIndexValue::Height(_) => {
                 panic!("Requested last record, found HeightRecord")
             }
-            BlockIndexValue::LastRecord(rec) => rec.to_owned(),
+            BlockIndexValue::Last(rec) => rec.to_owned(),
         }
     }
 }

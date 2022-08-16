@@ -293,7 +293,25 @@ impl MainLoopHandler {
                 );
 
                 // Store block in database
-                self.global_state.update_latest_block(block).await?;
+                // Acquire both locks before updating
+                let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
+                    .global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_databases
+                    .lock()
+                    .await;
+                let mut light_state_locked = self
+                    .global_state
+                    .chain
+                    .light_state
+                    .latest_block_header
+                    .lock()
+                    .unwrap();
+                self.global_state.write_block(block.clone(), &mut db_lock)?;
+                *light_state_locked = block.header.clone();
             }
         }
 
@@ -312,8 +330,7 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    // Acquire locks for blockchain state in correct order to avoid deadlocks
-                    let mut databases: tokio::sync::MutexGuard<BlockDatabases> = self
+                    let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain
                         .archival_state
@@ -328,7 +345,7 @@ impl MainLoopHandler {
                         .light_state
                         .latest_block_header
                         .lock()
-                        .expect("Lock on block header must succeed");
+                        .unwrap();
 
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
@@ -366,15 +383,13 @@ impl MainLoopHandler {
                     // Store blocks in database
                     for block in blocks {
                         debug!("Storing block {:?} in database", block.hash);
-                        databases
-                            .block_height_to_hash
-                            .put(block.header.height, block.hash);
-                        databases.block_hash_to_block.put(block.hash, block);
+                        self.global_state
+                            .write_block(Box::new(block), &mut db_lock)?;
                     }
 
                     // Update information about latest header
                     *previous_block_header = last_block.header.clone();
-                    databases
+                    db_lock
                         .latest_block_header
                         .put((), last_block.header.clone());
                 }

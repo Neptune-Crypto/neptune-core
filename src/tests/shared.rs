@@ -206,6 +206,24 @@ pub fn get_genesis_setup(
     ))
 }
 
+/// Helper function for tests to update state with a new block
+pub async fn add_block(state: &State, new_block: Block) -> Result<()> {
+    let mut db_lock = state
+        .chain
+        .archival_state
+        .as_ref()
+        .unwrap()
+        .block_databases
+        .lock()
+        .await;
+    let mut light_state_locked: std::sync::MutexGuard<BlockHeader> =
+        state.chain.light_state.latest_block_header.lock().unwrap();
+    state.write_block(Box::new(new_block.clone()), &mut db_lock)?;
+    *light_state_locked = new_block.header.clone();
+
+    Ok(())
+}
+
 pin_project! {
 #[derive(Debug)]
 pub struct Mock<Item> {

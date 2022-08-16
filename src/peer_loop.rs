@@ -890,7 +890,7 @@ mod peer_loop_tests {
     use crate::{
         config_models::{cli_args, network::Network},
         models::blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
-        tests::shared::{get_genesis_setup, make_mock_block, Action, Mock},
+        tests::shared::{add_block, get_genesis_setup, make_mock_block, Action, Mock},
     };
 
     use super::*;
@@ -1160,7 +1160,7 @@ mod peer_loop_tests {
             .await;
 
         let block_1 = make_mock_block(genesis_block, None);
-        state.update_latest_block(Box::new(block_1.clone())).await?;
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
@@ -1374,7 +1374,7 @@ mod peer_loop_tests {
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
         let block_4 = make_mock_block(block_3.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1432,7 +1432,7 @@ mod peer_loop_tests {
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_address = state
+        let peer_address: SocketAddr = state
             .net
             .peer_map
             .lock()
@@ -1451,7 +1451,7 @@ mod peer_loop_tests {
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
         let block_4 = make_mock_block(block_3.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1594,7 +1594,7 @@ mod peer_loop_tests {
         // notification.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_address = state
+        let peer_address: SocketAddr = state
             .net
             .peer_map
             .lock()
@@ -1614,7 +1614,7 @@ mod peer_loop_tests {
         let block_3 = make_mock_block(block_2.clone(), None);
         let block_4 = make_mock_block(block_3.clone(), None);
         let block_5 = make_mock_block(block_4.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1691,7 +1691,7 @@ mod peer_loop_tests {
         // for a list of peers.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_infos = state
+        let peer_infos: Vec<PeerInfo> = state
             .net
             .peer_map
             .lock()
@@ -1714,7 +1714,7 @@ mod peer_loop_tests {
         let block_2 = make_mock_block(block_1.clone(), None);
         let block_3 = make_mock_block(block_2.clone(), None);
         let block_4 = make_mock_block(block_3.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
