@@ -310,7 +310,16 @@ impl MainLoopHandler {
                     .latest_block_header
                     .lock()
                     .unwrap();
-                self.global_state.write_block(block.clone(), &mut db_lock)?;
+                self.global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .write_block(
+                        block.clone(),
+                        &mut db_lock,
+                        self.global_state.cli.get_data_directory().unwrap(),
+                    )?;
                 *light_state_locked = block.header.clone();
             }
         }
@@ -384,7 +393,15 @@ impl MainLoopHandler {
                     for block in blocks {
                         debug!("Storing block {:?} in database", block.hash);
                         self.global_state
-                            .write_block(Box::new(block), &mut db_lock)?;
+                            .chain
+                            .archival_state
+                            .as_ref()
+                            .unwrap()
+                            .write_block(
+                                Box::new(block),
+                                &mut db_lock,
+                                self.global_state.cli.get_data_directory().unwrap(),
+                            )?;
                     }
 
                     // Update information about latest header

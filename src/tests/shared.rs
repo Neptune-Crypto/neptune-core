@@ -218,7 +218,11 @@ pub async fn add_block(state: &State, new_block: Block) -> Result<()> {
         .await;
     let mut light_state_locked: std::sync::MutexGuard<BlockHeader> =
         state.chain.light_state.latest_block_header.lock().unwrap();
-    state.write_block(Box::new(new_block.clone()), &mut db_lock)?;
+    state.chain.archival_state.as_ref().unwrap().write_block(
+        Box::new(new_block.clone()),
+        &mut db_lock,
+        state.cli.get_data_directory().unwrap(),
+    )?;
     *light_state_locked = new_block.header.clone();
 
     Ok(())
@@ -232,7 +236,7 @@ pub struct Mock<Item> {
 }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MockError {
     WrongSend,
     UnexpectedSend,
