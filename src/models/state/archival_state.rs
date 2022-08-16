@@ -4,31 +4,33 @@ use std::{
     fs,
     io::{Seek, SeekFrom, Write},
     ops::DerefMut,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 use tokio::sync::Mutex as TokioMutex;
+use twenty_first::amount::u32s::U32s;
 
+use super::shared::{block_file_path, new_block_file_is_needed};
 use crate::{
     database::leveldb::LevelDB,
     models::{
-        blockchain::{block::Block, digest::Digest},
+        blockchain::{
+            block::{block_header::PROOF_OF_WORK_COUNT_U32_SIZE, Block},
+            digest::Digest,
+        },
         database::{
             BlockDatabases, BlockIndexKey, BlockIndexValue, BlockRecord, FileLocation, FileRecord,
-            LastRecord,
+            LastFileRecord,
         },
     },
 };
-
-pub const MAX_BLOCK_FILE_SIZE: u64 = 1024 * 1024 * 128; // 128 Mebibyte
-pub const BLOCK_FILENAME_PREFIX: &str = "blk";
-pub const BLOCK_FILENAME_EXTENSION: &str = "dat";
-pub const DIR_NAME_FOR_BLOCKS: &str = "blocks";
 
 #[derive(Clone, Debug)]
 pub struct ArchivalState {
     // Since this is a database, we use the tokio Mutex here.
     pub block_databases: Arc<TokioMutex<BlockDatabases>>,
+
+    root_data_dir: PathBuf,
 
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker thread.
@@ -36,44 +38,15 @@ pub struct ArchivalState {
 }
 
 impl ArchivalState {
-    pub fn new(initial_block_databases: Arc<TokioMutex<BlockDatabases>>) -> Self {
+    pub fn new(
+        initial_block_databases: Arc<TokioMutex<BlockDatabases>>,
+        root_data_dir: PathBuf,
+    ) -> Self {
         Self {
             block_databases: initial_block_databases,
+            root_data_dir,
             genesis_block: Box::new(Block::genesis_block()),
         }
-    }
-
-    fn get_block_filename(last_record: LastRecord) -> PathBuf {
-        let mut filename: String = BLOCK_FILENAME_PREFIX.to_owned();
-        let index = last_record.last_file;
-        filename.push_str(&index.to_string());
-        let path = Path::new(&filename);
-
-        path.with_extension(BLOCK_FILENAME_EXTENSION)
-    }
-
-    fn new_block_file_is_needed(file: &fs::File, bytes_to_store: u64) -> bool {
-        file.metadata().unwrap().len() + bytes_to_store > MAX_BLOCK_FILE_SIZE
-    }
-
-    /// Return the file path of the file, and create any missing directories
-    fn block_file_path(data_dir: PathBuf, last_record: LastRecord) -> PathBuf {
-        let mut file_path = data_dir;
-        file_path.push(DIR_NAME_FOR_BLOCKS);
-
-        // Create directory for blocks if it does not exist already
-        std::fs::create_dir_all(file_path.clone()).unwrap_or_else(|_| {
-            panic!(
-                "Failed to create blocks directory in {}",
-                file_path.to_string_lossy()
-            )
-        });
-
-        // Create directory if it does not exist
-        let block_fn = Self::get_block_filename(last_record);
-        file_path.push(block_fn);
-
-        file_path
     }
 
     /// Write a newly found block to database and to disk. A lock should be held over light state
@@ -82,7 +55,7 @@ impl ArchivalState {
         &self,
         new_block: Box<Block>,
         db_lock: &mut tokio::sync::MutexGuard<'_, BlockDatabases>,
-        data_dir: PathBuf,
+        current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
         // TODO: Multiple blocks can have the same height: fix!
         db_lock
@@ -96,18 +69,18 @@ impl ArchivalState {
             .put((), new_block.header.clone());
 
         // Write block to disk
-        let mut last_rec: LastRecord = match db_lock
+        let mut last_rec: LastFileRecord = match db_lock
             .block_index
-            .get(BlockIndexKey::Last)
-            .map(|x| x.as_last_record())
+            .get(BlockIndexKey::LastFile)
+            .map(|x| x.as_last_file_record())
         {
             Some(rec) => rec,
-            None => LastRecord::default(),
+            None => LastFileRecord::default(),
         };
 
         // This file must exist on disk already, unless this is the first block
         // stored on disk.
-        let block_file_path = Self::block_file_path(data_dir, last_rec);
+        let block_file_path = block_file_path(self.root_data_dir.clone(), last_rec.last_file);
         let serialized_block: Vec<u8> = bincode::serialize(&new_block).unwrap();
         let serialized_block_size: u64 = serialized_block.len() as u64;
         let mut block_file: fs::File = fs::OpenOptions::new()
@@ -116,8 +89,8 @@ impl ArchivalState {
             .create(true)
             .open(block_file_path.clone())
             .unwrap();
-        if Self::new_block_file_is_needed(&block_file, serialized_block_size) {
-            last_rec = LastRecord {
+        if new_block_file_is_needed(&block_file, serialized_block_size) {
+            last_rec = LastFileRecord {
                 last_file: last_rec.last_file + 1,
             };
             block_file = fs::OpenOptions::new()
@@ -140,6 +113,7 @@ impl ArchivalState {
         };
 
         // Make room in file for mmapping and record where block starts
+        // TODO: I think this overwrites the previous block each time. FIX!
         block_file
             .seek(SeekFrom::Current(serialized_block_size as i64 - 1))
             .unwrap();
@@ -176,24 +150,72 @@ impl ArchivalState {
         block_index_entries.push((block_record_key, block_record_value));
 
         // Missing: height record and last record
-        block_index_entries.push((BlockIndexKey::Last, BlockIndexValue::Last(last_rec)));
+        block_index_entries.push((BlockIndexKey::LastFile, BlockIndexValue::LastFile(last_rec)));
         blocks_at_same_height.push(new_block.hash);
         block_index_entries.push((
             height_record_key,
             BlockIndexValue::Height(blocks_at_same_height),
         ));
+
+        // Mark block as tip if its PoW family is larger than current most canonical
+        if current_max_pow_family.is_none()
+            || current_max_pow_family.unwrap() < new_block.header.proof_of_work_family
+        {
+            block_index_entries.push((
+                BlockIndexKey::BlockTipDigest,
+                BlockIndexValue::BlockTipDigest(new_block.hash),
+            ));
+        }
+
         db_lock.block_index.batch_write(&block_index_entries);
 
-        // Release both locks
         Ok(())
+    }
+
+    /// Given a mutex lock on the database, return the latest block
+    fn get_latest_block_from_disk(
+        &self,
+        databases: &mut tokio::sync::MutexGuard<BlockDatabases>,
+    ) -> Result<Option<Block>> {
+        let tip_digest = databases.block_index.get(BlockIndexKey::BlockTipDigest);
+        let tip_digest: Digest = match tip_digest {
+            Some(digest) => digest.as_tip_digest(),
+            None => return Ok(None),
+        };
+
+        let tip_block_record: BlockRecord = databases
+            .block_index
+            .get(BlockIndexKey::Block(tip_digest))
+            .unwrap()
+            .as_block_record();
+
+        // Get path of file for block
+        let block_file_path: PathBuf = block_file_path(
+            self.root_data_dir.clone(),
+            tip_block_record.file_location.file_index,
+        );
+        let mut block_file: fs::File = fs::OpenOptions::new()
+            .read(true)
+            .open(block_file_path)
+            .unwrap();
+        block_file.seek(std::io::SeekFrom::Current(
+            tip_block_record.file_location.offset as i64,
+        ))?;
+        let mmap = unsafe { Mmap::map(&block_file)? };
+        let block: Block = bincode::deserialize(&mmap).unwrap();
+
+        Ok(Some(block))
     }
 
     /// Return latest block from database, or genesis block if no other block
     /// is known.
     pub async fn get_latest_block(&self) -> Block {
         let mut dbs = self.block_databases.lock().await;
-        let lookup_res_info: Option<Block> =
-            BlockDatabases::get_latest_block(&mut dbs).expect("Failed to read from DB");
+        // let lookup_res_info: Option<Block> =
+        //     BlockDatabases::get_latest_block_from_disk(&mut dbs).expect("Failed to read from DB");
+        let lookup_res_info: Option<Block> = self
+            .get_latest_block_from_disk(&mut dbs)
+            .expect("Failed to read block from disk");
 
         match lookup_res_info {
             None => *self.genesis_block.clone(),
@@ -266,7 +288,7 @@ mod archival_state_tests {
     use crate::{
         config_models::network::Network,
         models::state::{blockchain_state::BlockchainState, light_state::LightState},
-        tests::shared::{databases, make_mock_block},
+        tests::shared::{add_block_to_archival_state, databases, make_mock_block},
     };
 
     #[traced_test]
@@ -274,12 +296,12 @@ mod archival_state_tests {
     async fn initialize_archival_state_test() -> Result<()> {
         // Ensure that the archival state can be initialized without overflowing the stack
         tokio::spawn(async move {
-            let (block_databases, _) = databases(Network::Main).unwrap();
-            let _archival_state0 = ArchivalState::new(block_databases);
-            let (block_databases, _) = databases(Network::Main).unwrap();
-            let _archival_state1 = ArchivalState::new(block_databases);
-            let (block_databases, _) = databases(Network::Main).unwrap();
-            let _archival_state2 = ArchivalState::new(block_databases);
+            let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
+            let _archival_state0 = ArchivalState::new(block_databases, data_dir.clone());
+            let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
+            let _archival_state1 = ArchivalState::new(block_databases, data_dir.clone());
+            let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
+            let _archival_state2 = ArchivalState::new(block_databases, data_dir);
             let b = Block::genesis_block();
             let blockchain_state = BlockchainState {
                 archival_state: Some(_archival_state2),
@@ -313,12 +335,62 @@ mod archival_state_tests {
         Ok(())
     }
 
+    #[traced_test]
+    #[tokio::test]
+    async fn get_latest_block_test() -> Result<()> {
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        println!("root_data_dir_path = {:?}", root_data_dir_path);
+        let archival_state = ArchivalState::new(block_databases.clone(), root_data_dir_path);
+        let mut db_lock_0 = block_databases.lock().await;
+        let ret = archival_state.get_latest_block_from_disk(&mut db_lock_0)?;
+        assert!(
+            ret.is_none(),
+            "Must return None when no block is stored in DB"
+        );
+        drop(db_lock_0);
+
+        // Add a block to archival state and verify that this is returned
+        let genesis = *archival_state.genesis_block.clone();
+        let mock_block_1 = make_mock_block(genesis.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
+        let mut db_lock_1 = block_databases.lock().await;
+        let ret1 = archival_state.get_latest_block_from_disk(&mut db_lock_1)?;
+        assert!(
+            ret1.is_some(),
+            "Must return a block when one is stored to DB"
+        );
+        assert_eq!(
+            mock_block_1,
+            ret1.unwrap(),
+            "Returned block must match the one inserted"
+        );
+        drop(db_lock_1);
+
+        // Add a 2nd block and verify that this new block is now returned
+        let mock_block_2 = make_mock_block(mock_block_1, None);
+        add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
+        let mut db_lock_2 = block_databases.lock().await;
+        let ret2 = archival_state.get_latest_block_from_disk(&mut db_lock_2)?;
+        assert!(
+            ret2.is_some(),
+            "Must return a block when one is stored to DB"
+        );
+
+        assert_eq!(
+            mock_block_2,
+            ret2.unwrap(),
+            "Returned block must match the one inserted"
+        );
+
+        Ok(())
+    }
+
     #[should_panic]
     #[traced_test]
     #[tokio::test]
     async fn digest_of_ancestors_panic_test() {
-        let (block_databases, _) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases);
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
         let genesis = archival_state.genesis_block.clone();
         archival_state
             .get_ancestor_block_digests(genesis.header.prev_block_digest, 10)
@@ -328,8 +400,8 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn digest_of_ancestors_test() -> Result<()> {
-        let (block_databases, _) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases);
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
         let genesis = *archival_state.genesis_block.clone();
 
         assert!(archival_state

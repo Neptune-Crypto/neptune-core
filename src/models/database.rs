@@ -1,5 +1,4 @@
-use crate::database::{leveldb::LevelDB, rusty::RustyLevelDB};
-use anyhow::{Context, Result};
+use crate::database::rusty::RustyLevelDB;
 use serde::{Deserialize, Serialize};
 use std::{fmt, net::IpAddr};
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -7,7 +6,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use super::{
     blockchain::{
         block::{block_header::BlockHeader, block_height::BlockHeight, Block},
-        digest::{Digest, Hashable},
+        digest::Digest,
     },
     peer::PeerStanding,
 };
@@ -74,7 +73,7 @@ impl FileRecord {
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
-pub struct LastRecord {
+pub struct LastFileRecord {
     pub last_file: u32,
 }
 
@@ -83,7 +82,8 @@ pub enum BlockIndexKey {
     Block(Digest),       // points to block headers and file locations
     File(u32),           // points to file information
     Height(BlockHeight), // Maps from block height to list of blocks
-    Last,                // points to last file used
+    LastFile,            // points to last file used
+    BlockTipDigest,      // points to block digest of most canonical block known
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,51 +91,43 @@ pub enum BlockIndexValue {
     Block(Box<BlockRecord>),
     File(FileRecord),
     Height(Vec<Digest>),
-    Last(LastRecord),
+    LastFile(LastFileRecord),
+    BlockTipDigest(Digest),
 }
 
 impl BlockIndexValue {
     pub fn as_block_record(&self) -> BlockRecord {
         match self {
             BlockIndexValue::Block(rec) => *rec.to_owned(),
-            BlockIndexValue::File(_) => panic!("Requested block record, found FileRecord"),
-            BlockIndexValue::Height(_) => {
-                panic!("Requested block record, found HeightRecord")
-            }
-            BlockIndexValue::Last(_) => panic!("Requested block record, found LastRecord"),
+            _ => panic!("Requested BlockTipDigest, found {:?}", self),
         }
     }
 
     pub fn as_file_record(&self) -> FileRecord {
         match self {
-            BlockIndexValue::Block(_) => panic!("Requested file record, found BlockRecord"),
             BlockIndexValue::File(rec) => rec.to_owned(),
-            BlockIndexValue::Height(_) => {
-                panic!("Requested file record, found HeightRecord")
-            }
-            BlockIndexValue::Last(_) => panic!("Requested file record, found LastRecord"),
+            _ => panic!("Requested BlockTipDigest, found {:?}", self),
         }
     }
 
     pub fn as_height_record(&self) -> Vec<Digest> {
         match self {
-            BlockIndexValue::Block(_) => {
-                panic!("Requested height record, found BlockRecord")
-            }
-            BlockIndexValue::File(_) => panic!("Requested height record, found FileRecord"),
             BlockIndexValue::Height(rec) => rec.to_owned(),
-            BlockIndexValue::Last(_) => panic!("Requested height record, found LastRecord"),
+            _ => panic!("Requested BlockTipDigest, found {:?}", self),
         }
     }
 
-    pub fn as_last_record(&self) -> LastRecord {
+    pub fn as_last_file_record(&self) -> LastFileRecord {
         match self {
-            BlockIndexValue::Block(_) => panic!("Requested last record, found BlockRecord"),
-            BlockIndexValue::File(_) => panic!("Requested last record, found FileRecord"),
-            BlockIndexValue::Height(_) => {
-                panic!("Requested last record, found HeightRecord")
-            }
-            BlockIndexValue::Last(rec) => rec.to_owned(),
+            BlockIndexValue::LastFile(rec) => rec.to_owned(),
+            _ => panic!("Requested BlockTipDigest, found {:?}", self),
+        }
+    }
+
+    pub fn as_tip_digest(&self) -> Digest {
+        match self {
+            BlockIndexValue::BlockTipDigest(digest) => digest.to_owned(),
+            _ => panic!("Requested BlockTipDigest, found {:?}", self),
         }
     }
 }
@@ -166,31 +158,5 @@ impl fmt::Debug for BlockDatabases {
 impl fmt::Debug for PeerDatabases {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("").finish()
-    }
-}
-
-impl BlockDatabases {
-    /// Given a mutex lock on the database, return the latest block
-    pub fn get_latest_block(
-        databases: &mut tokio::sync::MutexGuard<BlockDatabases>,
-    ) -> Result<Option<Block>> {
-        let block_header_res = databases.block_index.get(BlockIndexKey::Last);
-        let last_file_used: LastRecord = match block_header_res {
-            Some(last) => last,
-            None => return Ok(None),
-        }
-        .as_last_record();
-        // let block_header_res = databases.latest_block_header.get(());
-        // let block_header = match block_header_res {
-        //     None => return Ok(None),
-        //     Some(bh) => bh,
-        // };
-
-        // let block = databases
-        //     .block_hash_to_block
-        //     .get(block_header.hash())
-        //     .context("Database entry for block_hash_to_block must be set for block header found in latest_block_header")?;
-
-        // Ok(Some(block))
     }
 }

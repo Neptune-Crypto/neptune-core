@@ -371,7 +371,7 @@ mod block_tests {
         // verify that the same block is returned
         let genesis = Block::genesis_block();
         let block_1 = make_mock_block(genesis, None);
-        let (block_dbs, _) = databases(Network::Main)?;
+        let (block_dbs, _, _) = databases(Network::Main)?;
         block_dbs
             .lock()
             .await

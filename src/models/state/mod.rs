@@ -12,6 +12,7 @@ pub mod archival_state;
 pub mod blockchain_state;
 pub mod light_state;
 pub mod networking_state;
+pub mod shared;
 
 /// State handles all state of the client that is shared across threads.
 /// The policy used here is that only the main thread should update the

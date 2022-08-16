@@ -318,7 +318,7 @@ impl MainLoopHandler {
                     .write_block(
                         block.clone(),
                         &mut db_lock,
-                        self.global_state.cli.get_data_directory().unwrap(),
+                        Some(light_state_locked.proof_of_work_family),
                     )?;
                 *light_state_locked = block.header.clone();
             }
@@ -400,7 +400,7 @@ impl MainLoopHandler {
                             .write_block(
                                 Box::new(block),
                                 &mut db_lock,
-                                self.global_state.cli.get_data_directory().unwrap(),
+                                Some(previous_block_header.proof_of_work_family),
                             )?;
                     }
 
