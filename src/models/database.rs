@@ -12,15 +12,16 @@ use super::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FileLocation {
+pub struct BlockFileLocation {
     pub file_index: u32,
     pub offset: u64,
+    pub block_length: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockRecord {
     pub block_header: BlockHeader,
-    pub file_location: FileLocation,
+    pub file_location: BlockFileLocation,
     pub tx_count: u32,
 }
 

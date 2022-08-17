@@ -1,5 +1,5 @@
 use anyhow::Result;
-use memmap2::Mmap;
+use memmap2::MmapOptions;
 use std::{
     fs,
     io::{Seek, SeekFrom, Write},
@@ -8,9 +8,10 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex as TokioMutex;
+use tracing::debug;
 use twenty_first::amount::u32s::U32s;
 
-use super::shared::{block_file_path, new_block_file_is_needed};
+use super::shared::{get_block_file_path, new_block_file_is_needed};
 use crate::{
     database::leveldb::LevelDB,
     models::{
@@ -19,8 +20,8 @@ use crate::{
             digest::Digest,
         },
         database::{
-            BlockDatabases, BlockIndexKey, BlockIndexValue, BlockRecord, FileLocation, FileRecord,
-            LastFileRecord,
+            BlockDatabases, BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord,
+            FileRecord, LastFileRecord,
         },
     },
 };
@@ -80,7 +81,8 @@ impl ArchivalState {
 
         // This file must exist on disk already, unless this is the first block
         // stored on disk.
-        let block_file_path = block_file_path(self.root_data_dir.clone(), last_rec.last_file);
+        let mut block_file_path =
+            get_block_file_path(self.root_data_dir.clone(), last_rec.last_file);
         let serialized_block: Vec<u8> = bincode::serialize(&new_block).unwrap();
         let serialized_block_size: u64 = serialized_block.len() as u64;
         let mut block_file: fs::File = fs::OpenOptions::new()
@@ -93,14 +95,16 @@ impl ArchivalState {
             last_rec = LastFileRecord {
                 last_file: last_rec.last_file + 1,
             };
+            block_file_path = get_block_file_path(self.root_data_dir.clone(), last_rec.last_file);
             block_file = fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
-                .open(block_file_path)
+                .open(block_file_path.clone())
                 .unwrap();
         }
 
+        debug!("Writing block to: {}", block_file_path.display());
         // Get associated file record from database, otherwise create it
         let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
         let file_record_value: Option<FileRecord> = db_lock
@@ -113,7 +117,8 @@ impl ArchivalState {
         };
 
         // Make room in file for mmapping and record where block starts
-        // TODO: I think this overwrites the previous block each time. FIX!
+        let pos = block_file.seek(SeekFrom::End(0)).unwrap();
+        debug!("Opened file offset: {}", pos);
         block_file
             .seek(SeekFrom::Current(serialized_block_size as i64 - 1))
             .unwrap();
@@ -121,6 +126,10 @@ impl ArchivalState {
         let file_offset: u64 = block_file
             .seek(SeekFrom::Current(-(serialized_block_size as i64)))
             .unwrap();
+        debug!(
+            "New file size: {} bytes",
+            block_file.metadata().unwrap().len()
+        );
 
         let height_record_key = BlockIndexKey::Height(new_block.header.height);
         let mut blocks_at_same_height: Vec<Digest> =
@@ -129,22 +138,29 @@ impl ArchivalState {
                 None => vec![],
             };
 
-        // Write to file with mmap
-        let mmap = unsafe { Mmap::map(&block_file).unwrap() };
-        let mut mmap = mmap.make_mut().unwrap();
-        mmap.deref_mut().write_all(&serialized_block).unwrap();
+        // Write to file with mmap, only map relevant part of file into memory
+        let mmap = unsafe {
+            MmapOptions::new()
+                .offset(pos)
+                .len(serialized_block_size as usize)
+                .map(&block_file)?
+        };
+        let mut mmap: memmap2::MmapMut = mmap.make_mut().unwrap();
+        mmap.deref_mut()[..].copy_from_slice(&serialized_block);
 
         // Update block index database with newly stored block
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
         let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash);
         let block_record_value: BlockIndexValue = BlockIndexValue::Block(Box::new(BlockRecord {
             block_header: new_block.header.clone(),
-            file_location: FileLocation {
+            file_location: BlockFileLocation {
                 file_index: last_rec.last_file,
                 offset: file_offset,
+                block_length: serialized_block_size as usize,
             },
             tx_count: new_block.body.transactions.len() as u32,
         }));
+        debug!("New block record: {:?}", block_record_value);
 
         block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
         block_index_entries.push((block_record_key, block_record_value));
@@ -172,6 +188,32 @@ impl ArchivalState {
         Ok(())
     }
 
+    fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
+        // Get path of file for block
+        let block_file_path: PathBuf = get_block_file_path(
+            self.root_data_dir.clone(),
+            block_record.file_location.file_index,
+        );
+
+        // Open file as read-only
+        let block_file: fs::File = fs::OpenOptions::new()
+            .read(true)
+            .open(block_file_path)
+            .unwrap();
+
+        // Read the file into memory, set the offset and length indicated in the block record
+        // to avoid using more memory than needed
+        let mmap = unsafe {
+            MmapOptions::new()
+                .offset(block_record.file_location.offset)
+                .len(block_record.file_location.block_length)
+                .map(&block_file)?
+        };
+        let block: Block = bincode::deserialize(&mmap).unwrap();
+
+        Ok(block)
+    }
+
     /// Given a mutex lock on the database, return the latest block
     fn get_latest_block_from_disk(
         &self,
@@ -189,20 +231,7 @@ impl ArchivalState {
             .unwrap()
             .as_block_record();
 
-        // Get path of file for block
-        let block_file_path: PathBuf = block_file_path(
-            self.root_data_dir.clone(),
-            tip_block_record.file_location.file_index,
-        );
-        let mut block_file: fs::File = fs::OpenOptions::new()
-            .read(true)
-            .open(block_file_path)
-            .unwrap();
-        block_file.seek(std::io::SeekFrom::Current(
-            tip_block_record.file_location.offset as i64,
-        ))?;
-        let mmap = unsafe { Mmap::map(&block_file)? };
-        let block: Block = bincode::deserialize(&mmap).unwrap();
+        let block: Block = self.get_block_from_block_record(tip_block_record)?;
 
         Ok(Some(block))
     }
@@ -211,8 +240,6 @@ impl ArchivalState {
     /// is known.
     pub async fn get_latest_block(&self) -> Block {
         let mut dbs = self.block_databases.lock().await;
-        // let lookup_res_info: Option<Block> =
-        //     BlockDatabases::get_latest_block_from_disk(&mut dbs).expect("Failed to read from DB");
         let lookup_res_info: Option<Block> = self
             .get_latest_block_from_disk(&mut dbs)
             .expect("Failed to read block from disk");
@@ -225,22 +252,28 @@ impl ArchivalState {
 
     // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
-        let maybe_block = self
+        let maybe_record: Option<BlockRecord> = self
             .block_databases
             .lock()
             .await
-            .block_hash_to_block
-            .get(block_digest)
-            .or_else(move || {
-                // If block was not found in database, check if the digest matches the genesis block
+            .block_index
+            .get(BlockIndexKey::Block(block_digest))
+            .map(|x| x.as_block_record());
+        let record: BlockRecord = match maybe_record {
+            Some(rec) => rec,
+            None => {
                 if self.genesis_block.hash == block_digest {
-                    Some(*self.genesis_block.clone())
+                    return Ok(Some(*self.genesis_block.clone()));
                 } else {
-                    None
+                    return Ok(None);
                 }
-            });
+            }
+        };
 
-        Ok(maybe_block)
+        // Fetch block from disk
+        let block = self.get_block_from_block_record(record)?;
+
+        Ok(Some(block))
     }
 
     /// Return a list of digests of the ancestors to the requested digest. Does not include the input
@@ -255,6 +288,7 @@ impl ArchivalState {
         block_digest: Digest,
         mut count: usize,
     ) -> Vec<Digest> {
+        // TODO: This can be rewritten to only fetch block headers
         let input_block = self
             .get_block(block_digest)
             .await
@@ -283,6 +317,7 @@ impl ArchivalState {
 mod archival_state_tests {
     use super::*;
 
+    use rand::{thread_rng, RngCore};
     use tracing_test::traced_test;
 
     use crate::{
@@ -385,6 +420,69 @@ mod archival_state_tests {
         Ok(())
     }
 
+    #[traced_test]
+    #[tokio::test]
+    async fn get_block_test() -> Result<()> {
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let archival_state = ArchivalState::new(block_databases.clone(), root_data_dir_path);
+        let genesis = *archival_state.genesis_block.clone();
+        let mock_block_1 = make_mock_block(genesis.clone(), None);
+
+        // Lookup a block in an empty database, expect None to be returned
+        let ret0 = archival_state.get_block(mock_block_1.hash).await?;
+        assert!(
+            ret0.is_none(),
+            "Must return a block when one is stored to DB"
+        );
+
+        add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
+        let ret1 = archival_state.get_block(mock_block_1.hash).await?;
+        assert!(
+            ret1.is_some(),
+            "Must return a block when one is stored to DB"
+        );
+        assert_eq!(
+            mock_block_1,
+            ret1.unwrap(),
+            "Returned block must match the one inserted"
+        );
+
+        // Inserted a new block and verify that both blocks can be found
+        let mock_block_2 = make_mock_block(
+            mock_block_1.clone(),
+            Some(mock_block_1.header.proof_of_work_family),
+        );
+        add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
+        let fetched2 = archival_state.get_block(mock_block_2.hash).await?.unwrap();
+        println!("\n\nheight2: {}\n\n", fetched2.header.height);
+        assert_eq!(
+            mock_block_2, fetched2,
+            "Returned block must match the one inserted"
+        );
+        let fetched1 = archival_state.get_block(mock_block_1.hash).await?.unwrap();
+        println!("\n\nheight1: {}\n\n", fetched1.header.height);
+        assert_eq!(
+            mock_block_1, fetched1,
+            "Returned block must match the one inserted"
+        );
+
+        // Insert N new blocks and verify that they can all be fetched
+        let mut last_block = mock_block_2.clone();
+        let mut blocks = vec![genesis, mock_block_1, mock_block_2];
+        for _ in 0..(thread_rng().next_u32() % 20) {
+            let new_block = make_mock_block(last_block, None);
+            add_block_to_archival_state(&archival_state, new_block.clone()).await?;
+            blocks.push(new_block.clone());
+            last_block = new_block;
+        }
+
+        for block in blocks {
+            assert_eq!(block, archival_state.get_block(block.hash).await?.unwrap());
+        }
+
+        Ok(())
+    }
+
     #[should_panic]
     #[traced_test]
     #[tokio::test]
@@ -415,24 +513,13 @@ mod archival_state_tests {
 
         // Insert blocks and verify that the same result is returned
         let mock_block_1 = make_mock_block(genesis.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
         let mock_block_2 = make_mock_block(mock_block_1.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
         let mock_block_3 = make_mock_block(mock_block_2.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_3.clone()).await?;
         let mock_block_4 = make_mock_block(mock_block_3.clone(), None);
-
-        let mut databases_locked = archival_state.block_databases.lock().await;
-        databases_locked
-            .block_hash_to_block
-            .put(mock_block_1.hash, mock_block_1.clone());
-        databases_locked
-            .block_hash_to_block
-            .put(mock_block_2.hash, mock_block_2.clone());
-        databases_locked
-            .block_hash_to_block
-            .put(mock_block_3.hash, mock_block_3.clone());
-        databases_locked
-            .block_hash_to_block
-            .put(mock_block_4.hash, mock_block_4.clone());
-        drop(databases_locked); // drop lock because `get_ancestor_block_digests` acquires its own lock
+        add_block_to_archival_state(&archival_state, mock_block_4.clone()).await?;
 
         assert!(archival_state
             .get_ancestor_block_digests(genesis.hash, 10)

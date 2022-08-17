@@ -21,7 +21,7 @@ pub fn new_block_file_is_needed(file: &fs::File, bytes_to_store: u64) -> bool {
 }
 
 /// Return the file path of the file, and create any missing directories
-pub fn block_file_path(data_dir: PathBuf, file_index: u32) -> PathBuf {
+pub fn get_block_file_path(data_dir: PathBuf, file_index: u32) -> PathBuf {
     let mut file_path = data_dir;
     file_path.push(DIR_NAME_FOR_BLOCKS);
 
