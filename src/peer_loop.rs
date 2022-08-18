@@ -363,24 +363,22 @@ impl PeerLoopHandler {
                         .await
                         .expect("Lookup must work");
                     if let Some(block_candidate) = block_candidate {
-                        // Verify that this block is not only know but also belongs to the canonical
+                        // Verify that this block is not only known but also belongs to the canonical
                         // chain. Also check if it's the genesis block.
+                        let tip_header = self.state.chain.light_state.get_latest_block_header();
+
                         if self
                             .state
                             .chain
                             .archival_state
                             .as_ref()
                             .unwrap()
-                            .block_databases
-                            .lock()
+                            .block_belongs_to_canonical_chain(&block_candidate.header, &tip_header)
                             .await
-                            .block_height_to_hash
-                            .get(block_candidate.header.height)
-                            .is_some()
                             || block_candidate.header.height == BlockHeight::genesis()
                         {
                             peers_most_canonical_block = Some(block_candidate);
-                            debug!("Found block {} in database", digest);
+                            debug!("Found block {}", digest);
                             break;
                         }
                     }

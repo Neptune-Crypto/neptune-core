@@ -1,5 +1,4 @@
 use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
-use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::Hashable;
@@ -406,9 +405,6 @@ impl MainLoopHandler {
 
                     // Update information about latest header
                     *previous_block_header = last_block.header.clone();
-                    db_lock
-                        .latest_block_header
-                        .put((), last_block.header.clone());
                 }
 
                 // Inform all peers about new block

@@ -16,8 +16,12 @@ use crate::{
     database::leveldb::LevelDB,
     models::{
         blockchain::{
-            block::{block_header::PROOF_OF_WORK_COUNT_U32_SIZE, Block},
-            digest::Digest,
+            block::{
+                block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE},
+                block_height::BlockHeight,
+                Block,
+            },
+            digest::{Digest, Hashable},
         },
         database::{
             BlockDatabases, BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord,
@@ -59,15 +63,15 @@ impl ArchivalState {
         current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
         // TODO: Multiple blocks can have the same height: fix!
-        db_lock
-            .block_height_to_hash
-            .put(new_block.header.height, new_block.hash);
-        db_lock
-            .block_hash_to_block
-            .put(new_block.hash, *new_block.clone());
-        db_lock
-            .latest_block_header
-            .put((), new_block.header.clone());
+        // db_lock
+        //     .block_height_to_hash
+        //     .put(new_block.header.height, new_block.hash);
+        // db_lock
+        //     .block_hash_to_block
+        //     .put(new_block.hash, *new_block.clone());
+        // db_lock
+        //     .latest_block_header
+        //     .put((), new_block.header.clone());
 
         // Write block to disk
         let mut last_rec: LastFileRecord = match db_lock
@@ -160,7 +164,6 @@ impl ArchivalState {
             },
             tx_count: new_block.body.transactions.len() as u32,
         }));
-        debug!("New block record: {:?}", block_record_value);
 
         block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
         block_index_entries.push((block_record_key, block_record_value));
@@ -250,6 +253,15 @@ impl ArchivalState {
         }
     }
 
+    pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
+        self.block_databases
+            .lock()
+            .await
+            .block_index
+            .get(BlockIndexKey::Block(block_digest))
+            .map(|x| x.as_block_record().block_header)
+    }
+
     // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record: Option<BlockRecord> = self
@@ -274,6 +286,156 @@ impl ArchivalState {
         let block = self.get_block_from_block_record(record)?;
 
         Ok(Some(block))
+    }
+
+    /// Return the number of blocks with the given height
+    async fn block_height_to_block_count(&self, height: BlockHeight) -> usize {
+        match self
+            .block_databases
+            .lock()
+            .await
+            .block_index
+            .get(BlockIndexKey::Height(height))
+            .map(|x| x.as_height_record())
+        {
+            Some(rec) => rec.len(),
+            None => 0,
+        }
+    }
+
+    /// Return the headers of the known blocks at a specific height
+    async fn block_height_to_block_headers(&self, block_height: BlockHeight) -> Vec<BlockHeader> {
+        let maybe_digests = self
+            .block_databases
+            .lock()
+            .await
+            .block_index
+            .get(BlockIndexKey::Height(block_height))
+            .map(|x| x.as_height_record());
+
+        // Note that if you do not assign the `maybe_digests` value but use the RHS expression instead,
+        // you create a deadlock when the body of the `Some` branch below attempts to grab the lock.
+        match maybe_digests {
+            Some(block_digests) => {
+                let mut block_headers = vec![];
+                for block_digest in block_digests {
+                    let block_header = self
+                        .block_databases
+                        .lock()
+                        .await
+                        .block_index
+                        .get(BlockIndexKey::Block(block_digest))
+                        .map(|x| x.as_block_record())
+                        .unwrap();
+                    block_headers.push(block_header.block_header);
+                }
+
+                block_headers
+            }
+            None => vec![],
+        }
+    }
+
+    async fn get_children_blocks(&self, block_header: &BlockHeader) -> Vec<BlockHeader> {
+        // Get all blocks with height n + 1
+        let blocks_from_childrens_generation: Vec<BlockHeader> = self
+            .block_height_to_block_headers(block_header.height.next())
+            .await;
+
+        // Filter out those that don't have the right parent
+        blocks_from_childrens_generation
+            .into_iter()
+            .filter(|x| x.prev_block_digest == block_header.hash())
+            .collect()
+    }
+
+    /// Return a boolean indicating if block belongs to longest chain
+    pub async fn block_belongs_to_canonical_chain(
+        &self,
+        block_header: &BlockHeader,
+        tip_header: &BlockHeader,
+    ) -> bool {
+        let mut block_height: BlockHeight = block_header.height;
+        // If only one block at this height is known and block height is less than or equal
+        // to that of the tip, then this block must belong to the canonical chain
+        if self.block_height_to_block_count(block_height).await == 1
+            && tip_header.height >= block_height
+        {
+            return true;
+        }
+
+        // If tip header height is less than this block, or the same but with a different hash,
+        // then it cannot belong to the canonical chain
+        if tip_header.height < block_height
+            || tip_header.height == block_height && tip_header.hash() != block_header.hash()
+        {
+            return false;
+        }
+
+        // If multiple blocks at this height is known, check all children blocks until we have one or zero blocks at a specific height
+        let mut previous_generation_blocks: Vec<BlockHeader> = vec![block_header.clone()];
+        let mut offspring_of_generation_x: Vec<BlockHeader> =
+            self.get_children_blocks(block_header).await;
+        block_height = block_height.next();
+        while offspring_of_generation_x.len() > 1 && block_height < tip_header.height {
+            previous_generation_blocks = offspring_of_generation_x.clone();
+            let mut next_generation_offspring: Vec<BlockHeader> = vec![];
+            for offspring in offspring_of_generation_x.iter() {
+                next_generation_offspring.append(&mut self.get_children_blocks(offspring).await);
+            }
+            offspring_of_generation_x = next_generation_offspring;
+            block_height = block_height.next();
+        }
+
+        if previous_generation_blocks
+            .iter()
+            .any(|x| x.hash() == tip_header.hash())
+        {
+            return true;
+        }
+
+        if offspring_of_generation_x
+            .iter()
+            .any(|x| x.hash() == tip_header.hash())
+        {
+            return true;
+        }
+
+        if block_height == tip_header.height {
+            return false;
+        }
+
+        if offspring_of_generation_x.is_empty() {
+            return false;
+        }
+
+        if offspring_of_generation_x.len() == 1 {
+            let offspring_candidate: BlockHeader = offspring_of_generation_x[0].clone();
+            if self
+                .block_height_to_block_count(offspring_candidate.height)
+                .await
+                == 1
+            {
+                return true;
+            } else {
+                // Track backwards from tip and check if we find offspring candidate
+                let mut tip_ancestor = tip_header.to_owned();
+                while tip_ancestor != offspring_candidate
+                    && tip_ancestor.height > offspring_candidate.height
+                {
+                    tip_ancestor = self
+                        .get_block_header(tip_ancestor.prev_block_digest)
+                        .await
+                        .unwrap();
+                }
+
+                return tip_ancestor.hash() == offspring_candidate.hash();
+            }
+        }
+
+        // This should never be hit as we above this have checked both reasons as to why the
+        // while loop could stop.
+        panic!("This should never happen");
     }
 
     /// Return a list of digests of the ancestors to the requested digest. Does not include the input
@@ -332,38 +494,34 @@ mod archival_state_tests {
         // Ensure that the archival state can be initialized without overflowing the stack
         tokio::spawn(async move {
             let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
-            let _archival_state0 = ArchivalState::new(block_databases, data_dir.clone());
+            let archival_state0 = ArchivalState::new(block_databases, data_dir.clone());
             let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
             let _archival_state1 = ArchivalState::new(block_databases, data_dir.clone());
             let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
-            let _archival_state2 = ArchivalState::new(block_databases, data_dir);
+            let archival_state2 = ArchivalState::new(block_databases, data_dir);
             let b = Block::genesis_block();
             let blockchain_state = BlockchainState {
-                archival_state: Some(_archival_state2),
+                archival_state: Some(archival_state2),
                 light_state: LightState::new(_archival_state1.genesis_block.header),
             };
             let block_1 = make_mock_block(b, None);
-            let mut lock0 = blockchain_state
+            let lock0 = blockchain_state
                 .archival_state
                 .as_ref()
                 .unwrap()
                 .block_databases
                 .lock()
                 .await;
-            lock0.block_hash_to_block.put(block_1.hash, block_1.clone());
-            let c = lock0.block_hash_to_block.get(block_1.hash).unwrap();
+            add_block_to_archival_state(&archival_state0, block_1.clone())
+                .await
+                .unwrap();
+            let c = archival_state0
+                .get_block(block_1.hash)
+                .await
+                .unwrap()
+                .unwrap();
             println!("genesis digest = {}", c.hash);
             drop(lock0);
-
-            let mut lock1 = blockchain_state
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_databases
-                .lock()
-                .await;
-            let c = lock1.block_hash_to_block.get(block_1.hash).unwrap();
-            println!("genesis digest = {}", c.hash);
         })
         .await?;
 
@@ -478,6 +636,275 @@ mod archival_state_tests {
 
         for block in blocks {
             assert_eq!(block, archival_state.get_block(block.hash).await?.unwrap());
+        }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn block_belongs_to_canonical_chain_test() -> Result<()> {
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let genesis = *archival_state.genesis_block.clone();
+        assert!(
+            archival_state
+                .block_belongs_to_canonical_chain(&genesis.header, &genesis.header)
+                .await,
+            "Genesis block is always part of the canonical chain, tip"
+        );
+
+        // Insert a block that is descendant from genesis block and verify that it is canonical
+        let mock_block_1 = make_mock_block(genesis.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
+        assert!(
+            archival_state
+                .block_belongs_to_canonical_chain(&genesis.header, &mock_block_1.header)
+                .await,
+            "Genesis block is always part of the canonical chain, tip parent"
+        );
+        assert!(
+            archival_state
+                .block_belongs_to_canonical_chain(&mock_block_1.header, &mock_block_1.header)
+                .await,
+            "Tip block is always part of the canonical chain"
+        );
+
+        // Insert three more blocks and verify that all are part of the canonical chain
+        let mock_block_2_a = make_mock_block(mock_block_1.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_2_a.clone()).await?;
+        let mock_block_3_a = make_mock_block(mock_block_2_a.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_3_a.clone()).await?;
+        let mock_block_4_a =
+            make_mock_block(mock_block_3_a.clone(), Some(U32s::new([5000, 0, 0, 0, 0])));
+        add_block_to_archival_state(&archival_state, mock_block_4_a.clone()).await?;
+        for (i, block) in [
+            genesis.clone(),
+            mock_block_1.clone(),
+            mock_block_2_a.clone(),
+            mock_block_3_a.clone(),
+            mock_block_4_a.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
+                archival_state
+                    .block_belongs_to_canonical_chain(&block.header, &mock_block_4_a.header)
+                    .await,
+                "only chain {} is canonical",
+                i
+            );
+        }
+
+        // Make a tree and verify that the correct parts of the tree are identified as
+        // belonging to the canonical chain
+        let mock_block_2_b = make_mock_block(mock_block_1.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_2_b.clone()).await?;
+        let mock_block_3_b = make_mock_block(mock_block_2_b.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_3_b.clone()).await?;
+        let mock_block_4_b = make_mock_block(mock_block_3_b.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_4_b.clone()).await?;
+        let mock_block_5_b = make_mock_block(
+            mock_block_4_b.clone(),
+            Some(U32s::new([200000, 0, 0, 0, 0])),
+        );
+        add_block_to_archival_state(&archival_state, mock_block_5_b.clone()).await?;
+        for (i, block) in [
+            genesis.clone(),
+            mock_block_1.clone(),
+            mock_block_2_a.clone(),
+            mock_block_3_a.clone(),
+            mock_block_4_a.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
+                archival_state
+                    .block_belongs_to_canonical_chain(&block.header, &mock_block_4_a.header)
+                    .await,
+                "canonical chain {} is canonical",
+                i
+            );
+        }
+
+        // These blocks do not belong to the canonical chain since block 4_a has a higher PoW family
+        // value
+        for (i, block) in [
+            mock_block_2_b.clone(),
+            mock_block_3_b.clone(),
+            mock_block_4_b.clone(),
+            mock_block_5_b.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
+                !archival_state
+                    .block_belongs_to_canonical_chain(&block.header, &mock_block_4_a.header)
+                    .await,
+                "Stale chain {} is not canonical",
+                i
+            );
+        }
+
+        // Make a complicated tree and verify that the function identifies the correct blocks as part
+        // of the PoW family. In the below tree 6d is the tip as it has the highest accumulated PoW family value
+        //                     /-3c<----4c<----5c<-----6c<---7c<---8c
+        //                    /
+        //                   /---3a<----4a<----5a
+        //                  /
+        //   gen<----1<----2a<---3d<----4d<----5d<-----6d
+        //            \            \
+        //             \            \---4e<----5e
+        //              \
+        //               \
+        //                \2b<---3b<----4b<----5b ((<--6b)) (added in test later)
+        //
+        // Note that in the later test, 6b becomes the tip.
+
+        let mock_block_3_c = make_mock_block(mock_block_2_a.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_3_c.clone()).await?;
+        let mock_block_4_c = make_mock_block(mock_block_3_c.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_4_c.clone()).await?;
+        let mock_block_5_c = make_mock_block(mock_block_4_c.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_5_c.clone()).await?;
+        let mock_block_6_c = make_mock_block(mock_block_5_c.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_6_c.clone()).await?;
+        let mock_block_7_c = make_mock_block(mock_block_6_c.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_7_c.clone()).await?;
+        let mock_block_8_c = make_mock_block(mock_block_7_c.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_8_c.clone()).await?;
+        let mock_block_5_a = make_mock_block(mock_block_4_a.clone(), None);
+        add_block_to_archival_state(&archival_state, mock_block_5_a.clone()).await?;
+        let mock_block_3_d =
+            make_mock_block(mock_block_2_a.clone(), Some(U32s::new([1000, 0, 0, 0, 0])));
+        add_block_to_archival_state(&archival_state, mock_block_3_d.clone()).await?;
+        let mock_block_4_d =
+            make_mock_block(mock_block_3_d.clone(), Some(U32s::new([2000, 0, 0, 0, 0])));
+        add_block_to_archival_state(&archival_state, mock_block_4_d.clone()).await?;
+        let mock_block_5_d =
+            make_mock_block(mock_block_4_d.clone(), Some(U32s::new([20000, 0, 0, 0, 0])));
+        add_block_to_archival_state(&archival_state, mock_block_5_d.clone()).await?;
+
+        // This is the most canonical block in the known set
+        let mock_block_6_d =
+            make_mock_block(mock_block_5_d.clone(), Some(U32s::new([2000, 0, 0, 0, 0])));
+        add_block_to_archival_state(&archival_state, mock_block_6_d.clone()).await?;
+
+        let mock_block_4_e =
+            make_mock_block(mock_block_3_d.clone(), Some(U32s::new([2006, 0, 0, 0, 0])));
+        add_block_to_archival_state(&archival_state, mock_block_4_e.clone()).await?;
+        let mock_block_5_e =
+            make_mock_block(mock_block_3_d.clone(), Some(U32s::new([2002, 0, 0, 0, 0])));
+        add_block_to_archival_state(&archival_state, mock_block_5_e.clone()).await?;
+
+        for (i, block) in [
+            genesis.clone(),
+            mock_block_1.clone(),
+            mock_block_2_a.clone(),
+            mock_block_3_d.clone(),
+            mock_block_4_d.clone(),
+            mock_block_5_d.clone(),
+            mock_block_6_d.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
+                archival_state
+                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_d.header)
+                    .await,
+                "canonical chain {} is canonical, complicated",
+                i
+            );
+        }
+
+        for (i, block) in [
+            mock_block_2_b.clone(),
+            mock_block_3_b.clone(),
+            mock_block_4_b.clone(),
+            mock_block_5_b.clone(),
+            mock_block_3_c.clone(),
+            mock_block_4_c.clone(),
+            mock_block_5_c.clone(),
+            mock_block_6_c.clone(),
+            mock_block_7_c.clone(),
+            mock_block_8_c.clone(),
+            mock_block_3_a.clone(),
+            mock_block_4_a.clone(),
+            mock_block_5_a.clone(),
+            mock_block_4_e.clone(),
+            mock_block_5_e.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
+                !archival_state
+                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_d.header)
+                    .await,
+                "Stale chain {} is not canonical",
+                i
+            );
+        }
+
+        // Make a new block, 6b, canonical and verify that all checks work
+        let mock_block_6_b = make_mock_block(
+            mock_block_5_b.clone(),
+            Some(U32s::new([200000002, 2, 0, 0, 0])),
+        );
+        add_block_to_archival_state(&archival_state, mock_block_6_b.clone()).await?;
+        for (i, block) in [
+            mock_block_3_c.clone(),
+            mock_block_4_c.clone(),
+            mock_block_5_c.clone(),
+            mock_block_6_c.clone(),
+            mock_block_7_c.clone(),
+            mock_block_8_c.clone(),
+            mock_block_2_a.clone(),
+            mock_block_3_a.clone(),
+            mock_block_4_a.clone(),
+            mock_block_5_a.clone(),
+            mock_block_4_e.clone(),
+            mock_block_5_e.clone(),
+            mock_block_3_d.clone(),
+            mock_block_4_d.clone(),
+            mock_block_5_d.clone(),
+            mock_block_6_d.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
+                !archival_state
+                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_b.header)
+                    .await,
+                "Stale chain {} is not canonical",
+                i
+            );
+        }
+
+        for (i, block) in [
+            genesis,
+            mock_block_1,
+            mock_block_2_b,
+            mock_block_3_b,
+            mock_block_4_b,
+            mock_block_5_b,
+            mock_block_6_b.clone(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert!(
+                archival_state
+                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_b.header)
+                    .await,
+                "canonical chain {} is canonical, complicated",
+                i
+            );
         }
 
         Ok(())

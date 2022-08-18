@@ -27,9 +27,11 @@ use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::traits::GetRandomElements;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
+use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
+use crate::models::database::BlockIndexKey;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
@@ -216,7 +218,23 @@ pub async fn add_block_to_archival_state(
     new_block: Block,
 ) -> Result<()> {
     let mut db_lock = archival_state.block_databases.lock().await;
-    archival_state.write_block(Box::new(new_block), &mut db_lock, None)?;
+    let tip_digest: Option<Digest> = db_lock
+        .block_index
+        .get(BlockIndexKey::BlockTipDigest)
+        .map(|x| x.as_tip_digest());
+    let tip_header: Option<BlockHeader> = tip_digest.map(|digest| {
+        db_lock
+            .block_index
+            .get(BlockIndexKey::Block(digest))
+            .unwrap()
+            .as_block_record()
+            .block_header
+    });
+    archival_state.write_block(
+        Box::new(new_block),
+        &mut db_lock,
+        tip_header.map(|x| x.proof_of_work_family),
+    )?;
 
     Ok(())
 }
