@@ -413,6 +413,8 @@ impl PeerLoopHandler {
                         .lock()
                         .await;
                     let mut previous_digest = peers_most_canonical_block.hash;
+
+                    // TODO: Let's use the function to get children here
                     for i in 1..=responded_batch_size {
                         let bh = peers_most_canonical_block.header.height + i;
                         let digest = match db_lock.block_height_to_hash.get(bh) {
@@ -567,6 +569,9 @@ impl PeerLoopHandler {
                         .lock()
                         .await;
                     debug!("Locked block database object");
+
+                    // TODO: Let's use the new block index entries to map from height to
+                    // digests here
                     let hash_res = databases.block_height_to_hash.get(block_height);
                     match hash_res {
                         None => {
