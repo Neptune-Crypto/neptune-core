@@ -8,6 +8,7 @@ use super::blockchain::{
     digest::Digest,
 };
 use crate::config_models::network::Network;
+use crate::models::blockchain::simple::*;
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
@@ -205,6 +206,7 @@ pub enum PeerMessage {
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
     Bye,
     ConnectionStatus(ConnectionStatus),
+    Send(Vec<SignedSimpleTransaction>),
 }
 
 impl PeerMessage {
@@ -222,6 +224,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => "peer list resp".to_string(),
             PeerMessage::Bye => "bye".to_string(),
             PeerMessage::ConnectionStatus(_) => "connection status".to_string(),
+            PeerMessage::Send(_) => "send".to_string(),
         }
     }
 
@@ -239,6 +242,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
+            PeerMessage::Send(_) => false,
         }
     }
 
@@ -257,6 +261,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
+            PeerMessage::Send(_) => true,
         }
     }
 }

@@ -4,6 +4,7 @@ use neptune_core::rpc_server::RPCClient;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
+use tracing::info_span;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[derive(Debug, Parser)]
@@ -13,6 +14,7 @@ enum Command {
     Head,
     ClearAllStandings,
     ClearIpStanding { ip: IpAddr },
+    Send { send_argument: String },
 }
 
 #[derive(Debug, Parser)]
@@ -64,6 +66,16 @@ async fn main() -> Result<()> {
         Command::ClearIpStanding { ip } => {
             client.clear_ip_standing(context::current(), ip).await?;
             tracing::info!("Cleared standing of {}", ip);
+        }
+        Command::Send { send_argument } => {
+            // Only proceed if the input string is valid JSON
+            let _v: Vec<serde_json::Value> = info_span!("Validating TXSPEC object as JSON")
+                .in_scope(|| serde_json::from_str(&send_argument))?;
+
+            client
+                .send(context::current(), send_argument.clone())
+                .await?;
+            tracing::debug!("Send-command issued with argument: {}.", send_argument);
         }
     }
 

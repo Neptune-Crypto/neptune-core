@@ -6,6 +6,7 @@ use crate::models::blockchain::block::*;
 use crate::models::blockchain::digest::ordered_digest::*;
 use crate::models::blockchain::digest::*;
 use crate::models::blockchain::shared::*;
+use crate::models::blockchain::simple::*;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
@@ -30,11 +31,13 @@ const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
 
 /// Attempt to mine a valid block for the network
+#[tracing::instrument(skip_all, level = "debug")]
 async fn make_devnet_block(
     previous_block: Block,
     sender: oneshot::Sender<Block>,
     public_key: secp256k1::PublicKey,
     state: State,
+    incoming_simple_transactions: Vec<SignedSimpleTransaction>,
 ) {
     let next_block_height: BlockHeight = previous_block.header.height.next();
     let coinbase_utxo = Utxo {
@@ -59,6 +62,24 @@ async fn make_devnet_block(
         timestamp,
     };
 
+    let incoming_transactions = incoming_simple_transactions
+        .iter()
+        .map(|stx: &SignedSimpleTransaction| -> Transaction {
+            Transaction {
+                inputs: vec![],
+                outputs: stx
+                    .tx
+                    .outputs
+                    .iter()
+                    .map(|utxo| (utxo.clone(), output_randomness.clone().into()))
+                    .collect(),
+                public_scripts: vec![],
+                fee: U32s::zero(),
+                timestamp,
+            }
+        })
+        .collect();
+
     // For now, we just mine blocks with only the coinbase transaction. Therefore, the
     // mutator set update structure only contains an addition record, and no removal
     // records, as these represent spent UTXOs
@@ -74,12 +95,14 @@ async fn make_devnet_block(
     new_ms.add(&mut coinbase_addition_record);
 
     let block_body: BlockBody = BlockBody {
-        transactions: vec![coinbase_transaction],
+        transactions: [vec![coinbase_transaction], incoming_transactions].concat(),
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
         previous_mutator_set_accumulator: previous_block.body.next_mutator_set_accumulator,
         stark_proof: vec![],
     };
+
+    debug!("Transactions: {:#?}", block_body.transactions);
 
     let zero = BFieldElement::ring_zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
@@ -143,7 +166,7 @@ async fn make_devnet_block(
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
-#[instrument]
+#[tracing::instrument(skip_all)]
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
@@ -151,6 +174,7 @@ pub async fn mock_regtest_mine(
     own_public_key: secp256k1::PublicKey,
     state: State,
 ) -> Result<()> {
+    let mut incoming_transactions_tmp = vec![];
     loop {
         let (sender, receiver) = oneshot::channel::<Block>();
         let state_clone = state.clone();
@@ -158,11 +182,14 @@ pub async fn mock_regtest_mine(
             info!("Not mining because we are syncing");
             None
         } else {
+            let itx_owned = incoming_transactions_tmp.clone();
+            incoming_transactions_tmp = vec![];
             Some(tokio::spawn(make_devnet_block(
                 latest_block.clone(),
                 sender,
                 own_public_key,
                 state_clone,
+                itx_owned,
             )))
         };
 
@@ -183,6 +210,10 @@ pub async fn mock_regtest_mine(
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
+                    MainToMiner::Send(incoming_txs) => {
+                        debug!("Miner thread received incoming transactions from main: {:?}", incoming_txs);
+                        incoming_transactions_tmp = incoming_txs
+                    },
                 }
             }
             new_fake_block_res = receiver => {

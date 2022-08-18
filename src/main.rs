@@ -20,9 +20,10 @@ pub async fn main() -> Result<()> {
         .with_env_filter(info_env_filter)
         .with_thread_ids(display_thread_ids)
         .finish();
+
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|_err| eprintln!("Unable to set global default subscriber"))
-        .expect("Failed to set log subscriber");
+        .expect("Failed to set trace subscriber");
 
     neptune_core::initialize(args).await
 }

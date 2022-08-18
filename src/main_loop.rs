@@ -17,7 +17,9 @@ use tokio::{select, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
 
-use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
+use crate::models::channel::{
+    MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
+};
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
@@ -491,6 +493,19 @@ impl MainLoopHandler {
                     );
                 }
             }
+            PeerThreadToMain::Send(transactions) => {
+                debug!(
+                    "`main` received following transactions from `peer`: {:?}",
+                    transactions
+                );
+
+                // relay to peers - this will result in an explosion of messages.
+                //self.main_to_peer_broadcast_tx.send(MainToPeerThread::Send(transactions.clone()));
+
+                // relay to miner
+                self.main_to_miner_tx
+                    .send(MainToMiner::Send(transactions))?;
+            }
         }
 
         Ok(())
@@ -693,6 +708,7 @@ impl MainLoopHandler {
         &self,
         mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
         mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
+        mut rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
     ) -> Result<()> {
         // Handle incoming connections, messages from peer threads, and messages from the mining thread
         let mut main_loop_state = MutableMainLoopState::default();
@@ -753,6 +769,10 @@ impl MainLoopHandler {
                     self.handle_miner_thread_message(main_message).await?
                 }
 
+                Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
+                    self.handle_rpc_server_message(rpc_server_message).await?
+                }
+
                 // Handle peer discovery
                 _ = &mut peer_discovery_timer => {
                     // Check number of peers we are connected to and connect to more peers
@@ -775,5 +795,29 @@ impl MainLoopHandler {
                 // TODO: Add signal::ctrl_c/shutdown handling here
             }
         }
+    }
+}
+
+impl MainLoopHandler {
+    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<()> {
+        match msg {
+            RPCServerToMain::Send(transactions) => {
+                //
+                debug!(
+                    "`main` received following transactions from RPC Server: {:?}",
+                    transactions
+                );
+
+                // send to peers
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerThread::Send(transactions.clone()))?;
+
+                // send to miner
+                self.main_to_miner_tx
+                    .send(MainToMiner::Send(transactions))?;
+            }
+        }
+
+        Ok(())
     }
 }
