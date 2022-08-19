@@ -26,10 +26,7 @@ use config_models::network::Network;
 use database::rusty::RustyLevelDB;
 use futures::future;
 use futures::StreamExt;
-use models::blockchain::block::block_header::BlockHeader;
-use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
-use models::blockchain::digest::Digest;
 use models::blockchain::wallet::Wallet;
 use models::database::BlockIndexKey;
 use models::database::BlockIndexValue;
@@ -57,9 +54,6 @@ pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
 const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
-const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
-const LATEST_BLOCK_DB_NAME: &str = "latest";
 const BLOCK_INDEX_DB_NAME: &str = "block_index";
 const BANNED_IPS_DB_NAME: &str = "banned_ips";
 const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
@@ -163,22 +157,12 @@ fn initialize_databases(root_path: &Path) -> Result<(BlockDatabases, PeerDatabas
         )
     });
 
-    let block_hash_to_block =
-        RustyLevelDB::<Digest, Block>::new(&path, BLOCK_HASH_TO_BLOCK_DB_NAME)?;
-    let block_height_to_hash =
-        RustyLevelDB::<BlockHeight, Digest>::new(&path, BLOCK_HEIGHT_TO_HASH_DB_NAME)?;
-    let latest_block = RustyLevelDB::<(), BlockHeader>::new(&path, LATEST_BLOCK_DB_NAME)?;
     let block_index =
         RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(&path, BLOCK_INDEX_DB_NAME)?;
     let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
 
     Ok((
-        BlockDatabases {
-            block_hash_to_block,
-            block_height_to_hash,
-            latest_block_header: latest_block,
-            block_index,
-        },
+        BlockDatabases { block_index },
         PeerDatabases {
             peer_standings: banned_peers,
         },

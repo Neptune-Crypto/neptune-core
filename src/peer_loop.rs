@@ -1,8 +1,9 @@
 use crate::database::leveldb::LevelDB;
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::digest::Digest;
+use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -351,6 +352,7 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestBatch(most_canonical_digests, requested_batch_size) => {
                 // Find the block that the peer is requesting to start from
                 let mut peers_most_canonical_block: Option<Block> = None;
+                let tip_header = self.state.chain.light_state.get_latest_block_header();
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
@@ -365,7 +367,6 @@ impl PeerLoopHandler {
                     if let Some(block_candidate) = block_candidate {
                         // Verify that this block is not only known but also belongs to the canonical
                         // chain. Also check if it's the genesis block.
-                        let tip_header = self.state.chain.light_state.get_latest_block_header();
 
                         if self
                             .state
@@ -375,7 +376,6 @@ impl PeerLoopHandler {
                             .unwrap()
                             .block_belongs_to_canonical_chain(&block_candidate.header, &tip_header)
                             .await
-                            || block_candidate.header.height == BlockHeight::genesis()
                         {
                             peers_most_canonical_block = Some(block_candidate);
                             debug!("Found block {}", digest);
@@ -401,38 +401,52 @@ impl PeerLoopHandler {
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
-                // Create a local scope for the DB lock, so it gets released when it goes out of scope
-                {
-                    let mut db_lock = self
+                let parent: BlockHeader = peers_most_canonical_block.header;
+                while returned_blocks.len() < responded_batch_size {
+                    let children = self
                         .state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .block_databases
-                        .lock()
+                        .get_children_blocks(&parent)
                         .await;
-                    let mut previous_digest = peers_most_canonical_block.hash;
-
-                    // TODO: Let's use the function to get children here
-                    for i in 1..=responded_batch_size {
-                        let bh = peers_most_canonical_block.header.height + i;
-                        let digest = match db_lock.block_height_to_hash.get(bh) {
-                            Some(digest) => digest,
-                            None => panic!("Failed to find block for height {}", bh),
-                        };
-                        let block = db_lock.block_hash_to_block.get(digest).unwrap();
-                        assert_eq!(
-                            previous_digest, block.header.prev_block_digest,
-                            "Current block prev_digest must match previous block's digest"
-                        );
-                        previous_digest = block.hash;
-                        returned_blocks.push(block.into());
+                    if children.is_empty() {
+                        break;
                     }
-                }
+                    let header_of_canonical_child = if children.len() == 1 {
+                        children[0].clone()
+                    } else {
+                        let mut canonical: BlockHeader = children[0].clone();
+                        for child in children {
+                            if self
+                                .state
+                                .chain
+                                .archival_state
+                                .as_ref()
+                                .unwrap()
+                                .block_belongs_to_canonical_chain(&child, &tip_header)
+                                .await
+                            {
+                                canonical = child;
+                                break;
+                            }
+                        }
+                        canonical
+                    };
 
-                // TODO: Consider sanctioning or increasing some counter to disallow the
-                // peer from requesting too much from us.
+                    let canonical_child: Block = self
+                        .state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .get_block(header_of_canonical_child.hash())
+                        .await?
+                        .unwrap();
+
+                    returned_blocks.push(canonical_child.into());
+                }
 
                 peer.send(PeerMessage::BlockResponseBatch(returned_blocks))
                     .await?;
@@ -557,42 +571,59 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestByHeight(block_height) => {
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                let block_response;
-                {
-                    let mut databases = self
+                let block_headers: Vec<BlockHeader> = self
+                    .state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_height_to_block_headers(block_height)
+                    .await;
+                debug!("Locked block database object");
+
+                if block_headers.is_empty() {
+                    warn!("Got block request by height for unknown block");
+                    self.punish(PeerSanctionReason::BlockRequestUnknownHeight)?;
+                    return Ok(false);
+                }
+
+                // If more than one block is found, we need to find the one that's canonical
+                let mut canonical_chain_block_header = block_headers[0].clone();
+                if block_headers.len() > 1 {
+                    let tip_header = self
                         .state
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_databases
+                        .light_state
+                        .latest_block_header
                         .lock()
-                        .await;
-                    debug!("Locked block database object");
-
-                    // TODO: Let's use the new block index entries to map from height to
-                    // digests here
-                    let hash_res = databases.block_height_to_hash.get(block_height);
-                    match hash_res {
-                        None => {
-                            warn!("Got block request by height for unknown block");
-                            // TODO: Consider punishing here
-                            return Ok(false);
-                        }
-                        Some(digest) => {
-                            debug!("Found digest for height");
-                            block_response = match databases.block_hash_to_block.get(digest) {
-                                // I think it makes sense to panic here since we found the block in the height to digest
-                                // database. So it should be in the hash to block database.
-                                None => panic!("Failed to find block with hash {:?}", digest),
-                                Some(block) => {
-                                    debug!("Found block for digest");
-                                    PeerMessage::Block(Box::new(block.into()))
-                                }
-                            };
+                        .unwrap()
+                        .to_owned();
+                    for block_header in block_headers {
+                        if self
+                            .state
+                            .chain
+                            .archival_state
+                            .as_ref()
+                            .unwrap()
+                            .block_belongs_to_canonical_chain(&block_header, &tip_header)
+                            .await
+                        {
+                            canonical_chain_block_header = block_header;
                         }
                     }
                 }
+
+                let canonical_chain_block: Block = self
+                    .state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .get_block(canonical_chain_block_header.hash())
+                    .await?
+                    .unwrap();
+                let block_response: PeerMessage =
+                    PeerMessage::Block(Box::new(canonical_chain_block.into()));
 
                 debug!("Sending block");
                 peer.send(block_response).await?;

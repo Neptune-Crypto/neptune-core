@@ -62,17 +62,6 @@ impl ArchivalState {
         db_lock: &mut tokio::sync::MutexGuard<'_, BlockDatabases>,
         current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
-        // TODO: Multiple blocks can have the same height: fix!
-        // db_lock
-        //     .block_height_to_hash
-        //     .put(new_block.header.height, new_block.hash);
-        // db_lock
-        //     .block_hash_to_block
-        //     .put(new_block.hash, *new_block.clone());
-        // db_lock
-        //     .latest_block_header
-        //     .put((), new_block.header.clone());
-
         // Write block to disk
         let mut last_rec: LastFileRecord = match db_lock
             .block_index
@@ -168,7 +157,6 @@ impl ArchivalState {
         block_index_entries.push((file_record_key, BlockIndexValue::File(file_record_value)));
         block_index_entries.push((block_record_key, block_record_value));
 
-        // Missing: height record and last record
         block_index_entries.push((BlockIndexKey::LastFile, BlockIndexValue::LastFile(last_rec)));
         blocks_at_same_height.push(new_block.hash);
         block_index_entries.push((
@@ -304,7 +292,10 @@ impl ArchivalState {
     }
 
     /// Return the headers of the known blocks at a specific height
-    async fn block_height_to_block_headers(&self, block_height: BlockHeight) -> Vec<BlockHeader> {
+    pub async fn block_height_to_block_headers(
+        &self,
+        block_height: BlockHeight,
+    ) -> Vec<BlockHeader> {
         let maybe_digests = self
             .block_databases
             .lock()
@@ -336,7 +327,7 @@ impl ArchivalState {
         }
     }
 
-    async fn get_children_blocks(&self, block_header: &BlockHeader) -> Vec<BlockHeader> {
+    pub async fn get_children_blocks(&self, block_header: &BlockHeader) -> Vec<BlockHeader> {
         // Get all blocks with height n + 1
         let blocks_from_childrens_generation: Vec<BlockHeader> = self
             .block_height_to_block_headers(block_header.height.next())
@@ -349,7 +340,7 @@ impl ArchivalState {
             .collect()
     }
 
-    /// Return a boolean indicating if block belongs to longest chain
+    /// Return a boolean indicating if block belongs to most canonical chain
     pub async fn block_belongs_to_canonical_chain(
         &self,
         block_header: &BlockHeader,

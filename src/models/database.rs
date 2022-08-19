@@ -5,7 +5,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use super::{
     blockchain::{
-        block::{block_header::BlockHeader, block_height::BlockHeight, Block},
+        block::{block_header::BlockHeader, block_height::BlockHeight},
         digest::Digest,
     },
     peer::PeerStanding,
@@ -134,9 +134,6 @@ impl BlockIndexValue {
 }
 
 pub struct BlockDatabases {
-    pub block_height_to_hash: RustyLevelDB<BlockHeight, Digest>,
-    pub block_hash_to_block: RustyLevelDB<Digest, Block>,
-    pub latest_block_header: RustyLevelDB<(), BlockHeader>,
     pub block_index: RustyLevelDB<BlockIndexKey, BlockIndexValue>,
 }
 
