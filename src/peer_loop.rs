@@ -1246,6 +1246,66 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
+        // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
+        // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let block_1 = make_mock_block(&genesis_block, None);
+        let block_2_a = make_mock_block(&block_1, Some(U32s::new([2_000_000, 0, 0, 0, 0])));
+        let block_3_a = make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0]))); // <--- canonical
+        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])));
+        let block_3_b = make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])));
+
+        add_block(&state, block_1.clone()).await?;
+        add_block(&state, block_2_a.clone()).await?;
+        add_block(&state, block_3_a.clone()).await?;
+        add_block(&state, block_2_b.clone()).await?;
+        add_block(&state, block_3_b.clone()).await?;
+
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
+            Action::Write(PeerMessage::Block(Box::new(block_2_a.into()))),
+            Action::Read(PeerMessage::BlockRequestByHeight(3.into())),
+            Action::Write(PeerMessage::Block(Box::new(block_3_a.into()))),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_address,
+            hsd,
+            false,
+            1,
+        );
+
+        // This will return error if seen read/write order does not match that of the
+        // mocked object.
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await?;
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
