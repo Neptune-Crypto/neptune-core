@@ -252,12 +252,20 @@ impl ArchivalState {
     }
 
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
-        self.block_databases
+        let mut ret = self
+            .block_databases
             .lock()
             .await
             .block_index
             .get(BlockIndexKey::Block(block_digest))
-            .map(|x| x.as_block_record().block_header)
+            .map(|x| x.as_block_record().block_header);
+
+        // If no block was found, check if digest is genesis digest
+        if ret.is_none() && block_digest == self.genesis_block.hash {
+            ret = Some(self.genesis_block.header.clone());
+        }
+
+        ret
     }
 
     // Return the block with a given block digest, iff it's available in state somewhere
@@ -451,21 +459,12 @@ impl ArchivalState {
         block_digest: Digest,
         mut count: usize,
     ) -> Vec<Digest> {
-        // TODO: This can be rewritten to only fetch block headers
-        let input_block = self
-            .get_block(block_digest)
-            .await
-            .expect("block lookup must succeed")
-            .unwrap();
-        let mut parent_digest = input_block.header.prev_block_digest;
+        let input_block_header = self.get_block_header(block_digest).await.unwrap();
+        let mut parent_digest = input_block_header.prev_block_digest;
         let mut ret = vec![];
-        while let Some(parent) = self
-            .get_block(parent_digest)
-            .await
-            .expect("block lookup must succeed")
-        {
-            ret.push(parent.hash);
-            parent_digest = parent.header.prev_block_digest;
+        while let Some(parent) = self.get_block_header(parent_digest).await {
+            ret.push(parent.hash());
+            parent_digest = parent.prev_block_digest;
             count -= 1;
             if count == 0 {
                 break;
