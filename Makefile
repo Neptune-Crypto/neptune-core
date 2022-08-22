@@ -20,6 +20,20 @@ endif
 build:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
 	cargo build $(release)
+	rustup check
+	@echo "Update with \`rustup install stable\` if needed."
+
+doc:
+	cargo doc --no-deps
+	xdg-open "target/doc/neptune-core/index.html"
+
+check:
+	cargo check
+
+ctags:
+	# Do `cargo install rusty-tags`
+	# See https://github.com/dan-t/rusty-tags
+	rusty-tags vi
 
 format:
 	cargo fmt
@@ -28,7 +42,7 @@ install:
 	cp target/$(target)/$(prog) ~/bin/$(prog)$(extension)
 
 lint:
-	cargo clippy
+	cargo clippy --all-targets
 
 # Get a stack trace upon kernel panic (may slow down implementation)
 run: export RUST_BACKTRACE = 1
@@ -45,6 +59,7 @@ test:
 bench:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
 	cargo bench
+
 bench-no-run:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
 	cargo bench --no-run
@@ -54,9 +69,10 @@ all: lint build test bench-no-run
 help:
 	@echo "usage: make [debug=1]"
 
-restart:
-	@rm -rf ~/.local/share/neptune-integration-test
-
 clean:
+	@echo "      ._.  ██    ██  ███  ██ ██ █████    ████ ██    █████  ███  ██  ██"
+	@echo "    c/-|   ███  ███ ██ ██ ████  ██      ██    ██    ██    ██ ██ ███ ██"
+	@echo "   c/--|   ████████ █████ ███   ███     ██    ██    ███   █████ ██████"
+	@echo "   /  /|   ██ ██ ██ ██ ██ ████  ██      ██    ██    ██    ██ ██ ██ ███"
+	@echo " mmm ' '   ██    ██ ██ ██ ██ ██ █████    ████ █████ █████ ██ ██ ██  ██"
 	@rm -rf target
-	cargo clean
