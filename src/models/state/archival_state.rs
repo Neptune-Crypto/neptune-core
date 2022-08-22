@@ -1172,6 +1172,35 @@ mod archival_state_tests {
         assert_eq!(mock_block_2, block_from_block_record);
         assert_eq!(mock_block_2.hash, block_from_block_record.hash);
 
+        // Test `get_block_header`
+        drop(db_lock);
+        let block_header_2 = archival_state
+            .get_block_header(mock_block_2.hash)
+            .await
+            .unwrap();
+        assert_eq!(mock_block_2.header, block_header_2);
+
+        // Test `block_height_to_block_headers`
+        let block_headers_of_height_2 =
+            archival_state.block_height_to_block_headers(2.into()).await;
+        assert_eq!(1, block_headers_of_height_2.len());
+        assert_eq!(mock_block_2.header, block_headers_of_height_2[0]);
+
+        // Test `get_children_blocks`
+        let children_of_mock_block_1 = archival_state
+            .get_children_blocks(&mock_block_1.header)
+            .await;
+        assert_eq!(1, children_of_mock_block_1.len());
+        assert_eq!(mock_block_2.header, children_of_mock_block_1[0]);
+
+        // Test `get_ancestor_block_digests`
+        let ancestor_digests = archival_state
+            .get_ancestor_block_digests(mock_block_2.hash, 10)
+            .await;
+        assert_eq!(2, ancestor_digests.len());
+        assert_eq!(mock_block_1.header.hash(), ancestor_digests[0]);
+        assert_eq!(genesis.header.hash(), ancestor_digests[1]);
+
         Ok(())
     }
 }
