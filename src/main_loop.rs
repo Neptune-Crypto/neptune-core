@@ -1,5 +1,4 @@
 use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
-use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::Hashable;
@@ -244,6 +243,7 @@ impl PotentialPeersState {
     }
 }
 
+/// Return a boolean indicating if synchronization mode should be entered
 fn enter_sync_mode(
     own_block_tip_header: BlockHeader,
     peer_synchronization_state: PeerSynchronizationState,
@@ -254,6 +254,7 @@ fn enter_sync_mode(
             > max_number_of_blocks_before_syncing as i128
 }
 
+/// Return a boolean indicating if synchronization mode should be left
 fn stay_in_sync_mode(
     own_block_tip_header: BlockHeader,
     sync_state: &SyncState,
@@ -265,10 +266,13 @@ fn stay_in_sync_mode(
         .max_by_key(|x| x.claimed_max_pow_family);
     match max_claimed_pow {
         None => false, // we lost all connections. Can't sync.
+
+        // Synchronization is left when the remaining number of block is half of what has
+        // been indicated to fit into RAM
         Some(max_claim) => {
             own_block_tip_header.proof_of_work_family < max_claim.claimed_max_pow_family
                 && max_claim.claimed_max_height - own_block_tip_header.height
-                    > max_number_of_blocks_before_syncing as i128
+                    > max_number_of_blocks_before_syncing as i128 / 2
         }
     }
 }
@@ -288,7 +292,34 @@ impl MainLoopHandler {
                 );
 
                 // Store block in database
-                self.global_state.update_latest_block(block).await?;
+                // Acquire both locks before updating
+                let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
+                    .global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_databases
+                    .lock()
+                    .await;
+                let mut light_state_locked = self
+                    .global_state
+                    .chain
+                    .light_state
+                    .latest_block_header
+                    .lock()
+                    .unwrap();
+                self.global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .write_block(
+                        block.clone(),
+                        &mut db_lock,
+                        Some(light_state_locked.proof_of_work_family),
+                    )?;
+                *light_state_locked = block.header.clone();
             }
         }
 
@@ -307,8 +338,7 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    // Acquire locks for blockchain state in correct order to avoid deadlocks
-                    let mut databases: tokio::sync::MutexGuard<BlockDatabases> = self
+                    let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain
                         .archival_state
@@ -323,7 +353,7 @@ impl MainLoopHandler {
                         .light_state
                         .latest_block_header
                         .lock()
-                        .expect("Lock on block header must succeed");
+                        .unwrap();
 
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
@@ -361,17 +391,20 @@ impl MainLoopHandler {
                     // Store blocks in database
                     for block in blocks {
                         debug!("Storing block {:?} in database", block.hash);
-                        databases
-                            .block_height_to_hash
-                            .put(block.header.height, block.hash);
-                        databases.block_hash_to_block.put(block.hash, block);
+                        self.global_state
+                            .chain
+                            .archival_state
+                            .as_ref()
+                            .unwrap()
+                            .write_block(
+                                Box::new(block),
+                                &mut db_lock,
+                                Some(previous_block_header.proof_of_work_family),
+                            )?;
                     }
 
                     // Update information about latest header
                     *previous_block_header = last_block.header.clone();
-                    databases
-                        .latest_block_header
-                        .put((), last_block.header.clone());
                 }
 
                 // Inform all peers about new block

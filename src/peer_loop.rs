@@ -1,8 +1,9 @@
 use crate::database::leveldb::LevelDB;
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::digest::Digest;
+use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -351,6 +352,7 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestBatch(most_canonical_digests, requested_batch_size) => {
                 // Find the block that the peer is requesting to start from
                 let mut peers_most_canonical_block: Option<Block> = None;
+                let tip_header = self.state.chain.light_state.get_latest_block_header();
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
@@ -363,24 +365,20 @@ impl PeerLoopHandler {
                         .await
                         .expect("Lookup must work");
                     if let Some(block_candidate) = block_candidate {
-                        // Verify that this block is not only know but also belongs to the canonical
+                        // Verify that this block is not only known but also belongs to the canonical
                         // chain. Also check if it's the genesis block.
+
                         if self
                             .state
                             .chain
                             .archival_state
                             .as_ref()
                             .unwrap()
-                            .block_databases
-                            .lock()
+                            .block_belongs_to_canonical_chain(&block_candidate.header, &tip_header)
                             .await
-                            .block_height_to_hash
-                            .get(block_candidate.header.height)
-                            .is_some()
-                            || block_candidate.header.height == BlockHeight::genesis()
                         {
                             peers_most_canonical_block = Some(block_candidate);
-                            debug!("Found block {} in database", digest);
+                            debug!("Found block {}", digest);
                             break;
                         }
                     }
@@ -403,36 +401,58 @@ impl PeerLoopHandler {
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
-                // Create a local scope for the DB lock, so it gets released when it goes out of scope
-                {
-                    let mut db_lock = self
+                let mut parent_block_header: BlockHeader = peers_most_canonical_block.header;
+                while returned_blocks.len() < responded_batch_size {
+                    let children = self
                         .state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .block_databases
-                        .lock()
+                        .get_children_blocks(&parent_block_header)
                         .await;
-                    let mut previous_digest = peers_most_canonical_block.hash;
-                    for i in 1..=responded_batch_size {
-                        let bh = peers_most_canonical_block.header.height + i;
-                        let digest = match db_lock.block_height_to_hash.get(bh) {
-                            Some(digest) => digest,
-                            None => panic!("Failed to find block for height {}", bh),
-                        };
-                        let block = db_lock.block_hash_to_block.get(digest).unwrap();
-                        assert_eq!(
-                            previous_digest, block.header.prev_block_digest,
-                            "Current block prev_digest must match previous block's digest"
-                        );
-                        previous_digest = block.hash;
-                        returned_blocks.push(block.into());
+                    if children.is_empty() {
+                        break;
                     }
+                    let header_of_canonical_child = if children.len() == 1 {
+                        children[0].clone()
+                    } else {
+                        let mut canonical: BlockHeader = children[0].clone();
+                        for child in children {
+                            if self
+                                .state
+                                .chain
+                                .archival_state
+                                .as_ref()
+                                .unwrap()
+                                .block_belongs_to_canonical_chain(&child, &tip_header)
+                                .await
+                            {
+                                canonical = child;
+                                break;
+                            }
+                        }
+                        canonical
+                    };
+
+                    let canonical_child: Block = self
+                        .state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .get_block(header_of_canonical_child.hash())
+                        .await?
+                        .unwrap();
+
+                    parent_block_header = header_of_canonical_child;
+                    returned_blocks.push(canonical_child.into());
                 }
 
-                // TODO: Consider sanctioning or increasing some counter to disallow the
-                // peer from requesting too much from us.
+                debug!(
+                    "Returning {} blocks in batch response",
+                    returned_blocks.len()
+                );
 
                 peer.send(PeerMessage::BlockResponseBatch(returned_blocks))
                     .await?;
@@ -557,39 +577,60 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestByHeight(block_height) => {
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                let block_response;
-                {
-                    let mut databases = self
+                let block_headers: Vec<BlockHeader> = self
+                    .state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_height_to_block_headers(block_height)
+                    .await;
+                debug!("Found {} blocks", block_headers.len());
+                debug!("Locked block database object");
+
+                if block_headers.is_empty() {
+                    warn!("Got block request by height for unknown block");
+                    self.punish(PeerSanctionReason::BlockRequestUnknownHeight)?;
+                    return Ok(false);
+                }
+
+                // If more than one block is found, we need to find the one that's canonical
+                let mut canonical_chain_block_header = block_headers[0].clone();
+                if block_headers.len() > 1 {
+                    let tip_header = self
                         .state
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_databases
+                        .light_state
+                        .latest_block_header
                         .lock()
-                        .await;
-                    debug!("Locked block database object");
-                    let hash_res = databases.block_height_to_hash.get(block_height);
-                    match hash_res {
-                        None => {
-                            warn!("Got block request by height for unknown block");
-                            // TODO: Consider punishing here
-                            return Ok(false);
-                        }
-                        Some(digest) => {
-                            debug!("Found digest for height");
-                            block_response = match databases.block_hash_to_block.get(digest) {
-                                // I think it makes sense to panic here since we found the block in the height to digest
-                                // database. So it should be in the hash to block database.
-                                None => panic!("Failed to find block with hash {:?}", digest),
-                                Some(block) => {
-                                    debug!("Found block for digest");
-                                    PeerMessage::Block(Box::new(block.into()))
-                                }
-                            };
+                        .unwrap()
+                        .to_owned();
+                    for block_header in block_headers {
+                        if self
+                            .state
+                            .chain
+                            .archival_state
+                            .as_ref()
+                            .unwrap()
+                            .block_belongs_to_canonical_chain(&block_header, &tip_header)
+                            .await
+                        {
+                            canonical_chain_block_header = block_header;
                         }
                     }
                 }
+
+                let canonical_chain_block: Block = self
+                    .state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .get_block(canonical_chain_block_header.hash())
+                    .await?
+                    .unwrap();
+                let block_response: PeerMessage =
+                    PeerMessage::Block(Box::new(canonical_chain_block.into()));
 
                 debug!("Sending block");
                 peer.send(block_response).await?;
@@ -741,7 +782,7 @@ impl PeerLoopHandler {
                                         Ok(close) => close,
                                         Err(err) => {
                                             warn!("{}. Closing connection.", err);
-                                            true
+                                            bail!("{}", err);
                                         }
                                     };
 
@@ -753,9 +794,8 @@ impl PeerLoopHandler {
                             }
                         }
                         Err(err) => {
-                            error!("Error when receiving from peer: {}. Closing connection.", err);
-
-                            break;
+                            error!("Error when receiving from peer: {}.", self.peer_address);
+                            bail!("Error when receiving from peer: {}. Closing connection.", err);
                         }
                     }
                 }
@@ -845,11 +885,10 @@ impl PeerLoopHandler {
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
-        let _res = self.run(peer, from_main_rx, &mut peer_state).await;
+        let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
-        // TODO: Send message to main removing claimed max block height in case we are
-        // syncing and we banned the peer for sending us bad blocks.
+        // Store any new peer-standing to database
         let peer_info_writeback = self
             .state
             .net
@@ -877,7 +916,10 @@ impl PeerLoopHandler {
             .await?;
 
         debug!("Ending peer loop for {}", self.peer_address);
-        Ok(())
+
+        // Return any error that `run` returned. Returning and not suppressing errors is a quite nice
+        // feature to have for testing purposes.
+        res
     }
 }
 
@@ -890,7 +932,7 @@ mod peer_loop_tests {
     use crate::{
         config_models::{cli_args, network::Network},
         models::blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
-        tests::shared::{get_genesis_setup, make_mock_block, Action, Mock},
+        tests::shared::{add_block, get_genesis_setup, make_mock_block, Action, Mock},
     };
 
     use super::*;
@@ -994,7 +1036,7 @@ mod peer_loop_tests {
             .await;
         different_genesis_block.header.nonce[2].increment();
         different_genesis_block.hash = different_genesis_block.header.hash();
-        let block_1_with_different_genesis = make_mock_block(different_genesis_block, None);
+        let block_1_with_different_genesis = make_mock_block(&different_genesis_block, None);
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
             block_1_with_different_genesis.into(),
         )))]);
@@ -1007,9 +1049,13 @@ mod peer_loop_tests {
             true,
             1,
         );
-        peer_loop_handler
+        let res = peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
-            .await?;
+            .await;
+        assert!(
+            res.is_err(),
+            "run_wrapper must return failure when genesis is different"
+        );
 
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
@@ -1068,7 +1114,7 @@ mod peer_loop_tests {
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
         let block_without_valid_pow = make_mock_block(
-            genesis_block,
+            &genesis_block,
             Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
                 1_000_000, 0, 0, 0, 0,
             ])),
@@ -1091,9 +1137,10 @@ mod peer_loop_tests {
             true,
             1,
         );
-        peer_loop_handler
+        let res = peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
-            .await?;
+            .await;
+        println!("run_wrapper returned {:?}", res);
 
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
@@ -1139,7 +1186,7 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
         // The scenario tested here is that a client receives a block that is already
-        // in the database. The expected behavior is to ignore the block and not send
+        // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main thread.
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
@@ -1159,8 +1206,8 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
 
-        let block_1 = make_mock_block(genesis_block, None);
-        state.update_latest_block(Box::new(block_1.clone())).await?;
+        let block_1 = make_mock_block(&genesis_block, None);
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
@@ -1205,6 +1252,153 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn block_request_batch_test() -> Result<()> {
+        // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
+        // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
+        // returned.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let block_1 = make_mock_block(&genesis_block, None);
+        let block_2_a = make_mock_block(&block_1, Some(U32s::new([2_000_000, 0, 0, 0, 0])));
+        let block_3_a = make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0]))); // <--- canonical
+        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])));
+        let block_3_b = make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])));
+
+        add_block(&state, block_1.clone()).await?;
+        add_block(&state, block_2_a.clone()).await?;
+        add_block(&state, block_3_a.clone()).await?;
+        add_block(&state, block_2_b.clone()).await?;
+        add_block(&state, block_3_b.clone()).await?;
+
+        let mut mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestBatch(vec![genesis_block.hash], 14)),
+            Action::Write(PeerMessage::BlockResponseBatch(vec![
+                block_1.clone().into(),
+                block_2_a.clone().into(),
+                block_3_a.clone().into(),
+            ])),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_address,
+            hsd.clone(),
+            false,
+            1,
+        );
+
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone.resubscribe())
+            .await?;
+
+        // Peer knows block 2_b, verify that canonical chain with 2_a is returned
+        mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestBatch(
+                vec![block_2_b.hash, block_1.hash, genesis_block.hash],
+                14,
+            )),
+            Action::Write(PeerMessage::BlockResponseBatch(vec![
+                block_2_a.into(),
+                block_3_a.into(),
+            ])),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_address,
+            hsd,
+            false,
+            1,
+        );
+
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await?;
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
+        // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
+        // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let block_1 = make_mock_block(&genesis_block, None);
+        let block_2_a = make_mock_block(&block_1, Some(U32s::new([2_000_000, 0, 0, 0, 0])));
+        let block_3_a = make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0]))); // <--- canonical
+        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])));
+        let block_3_b = make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])));
+
+        add_block(&state, block_1.clone()).await?;
+        add_block(&state, block_2_a.clone()).await?;
+        add_block(&state, block_3_a.clone()).await?;
+        add_block(&state, block_2_b.clone()).await?;
+        add_block(&state, block_3_b.clone()).await?;
+
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
+            Action::Write(PeerMessage::Block(Box::new(block_2_a.into()))),
+            Action::Read(PeerMessage::BlockRequestByHeight(3.into())),
+            Action::Write(PeerMessage::Block(Box::new(block_3_a.into()))),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_address,
+            hsd,
+            false,
+            1,
+        );
+
+        // This will return error if seen read/write order does not match that of the
+        // mocked object.
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await?;
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
@@ -1227,7 +1421,7 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
-                make_mock_block(genesis_block, None).into(),
+                make_mock_block(&genesis_block, None).into(),
             ))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1290,8 +1484,8 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
+        let block_1 = make_mock_block(&genesis_block, None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -1370,11 +1564,11 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1429,10 +1623,10 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
-        // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
+        // then receives block 4, meaning that block 3 and 2 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_address = state
+        let peer_address: SocketAddr = state
             .net
             .peer_map
             .lock()
@@ -1447,11 +1641,11 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1528,9 +1722,9 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -1594,7 +1788,7 @@ mod peer_loop_tests {
         // notification.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_address = state
+        let peer_address: SocketAddr = state
             .net
             .peer_map
             .lock()
@@ -1609,12 +1803,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
-        let block_5 = make_mock_block(block_4.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
+        let block_5 = make_mock_block(&block_4.clone(), None);
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1691,7 +1885,7 @@ mod peer_loop_tests {
         // for a list of peers.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
-        let peer_infos = state
+        let peer_infos: Vec<PeerInfo> = state
             .net
             .peer_map
             .lock()
@@ -1710,11 +1904,11 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
-        state.update_latest_block(Box::new(block_1)).await?;
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
+        add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),

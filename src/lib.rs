@@ -20,18 +20,16 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::State;
 use crate::rpc_server::RPC;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use config_models::cli_args;
 use config_models::network::Network;
 use database::rusty::RustyLevelDB;
-use directories::ProjectDirs;
 use futures::future;
 use futures::StreamExt;
-use models::blockchain::block::block_header::BlockHeader;
-use models::blockchain::block::block_height::BlockHeight;
 use models::blockchain::block::Block;
-use models::blockchain::digest::Digest;
 use models::blockchain::wallet::Wallet;
+use models::database::BlockIndexKey;
+use models::database::BlockIndexValue;
 use models::database::{BlockDatabases, PeerDatabases};
 use models::peer::PeerInfo;
 use std::collections::HashMap;
@@ -56,24 +54,12 @@ pub const MAGIC_STRING_RESPONSE: &[u8] = b"Hello Neptune!\n";
 const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const BLOCK_HASH_TO_BLOCK_DB_NAME: &str = "blocks";
-const BLOCK_HEIGHT_TO_HASH_DB_NAME: &str = "block_hashes";
-const LATEST_BLOCK_DB_NAME: &str = "latest";
+const BLOCK_INDEX_DB_NAME: &str = "block_index";
 const BANNED_IPS_DB_NAME: &str = "banned_ips";
 const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard";
 const STANDARD_WALLET_VERSION: u8 = 0;
-
-fn get_data_directory(network: Network) -> Result<PathBuf> {
-    if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
-        let mut path = proj_dirs.data_dir().to_path_buf();
-        path.push(network.to_string());
-        Ok(path)
-    } else {
-        bail!("Could not determine data directory")
-    }
-}
 
 /// Create a wallet file, and set restrictive permissions
 #[cfg(target_family = "unix")]
@@ -171,75 +157,51 @@ fn initialize_databases(root_path: &Path) -> Result<(BlockDatabases, PeerDatabas
         )
     });
 
-    let block_hash_to_block =
-        RustyLevelDB::<Digest, Block>::new(&path, BLOCK_HASH_TO_BLOCK_DB_NAME)?;
-    let block_height_to_hash =
-        RustyLevelDB::<BlockHeight, Digest>::new(&path, BLOCK_HEIGHT_TO_HASH_DB_NAME)?;
-    let latest_block = RustyLevelDB::<(), BlockHeader>::new(&path, LATEST_BLOCK_DB_NAME)?;
+    let block_index =
+        RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(&path, BLOCK_INDEX_DB_NAME)?;
     let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
 
     Ok((
-        BlockDatabases {
-            block_hash_to_block,
-            block_height_to_hash,
-            latest_block_header: latest_block,
-        },
+        BlockDatabases { block_index },
         PeerDatabases {
             peer_standings: banned_peers,
         },
     ))
 }
 
-/// Return the tip of the blockchain, the most canonical block. If no block is stored in the database,
-/// the use the genesis block.
-async fn get_latest_block(databases: Arc<tokio::sync::Mutex<BlockDatabases>>) -> Result<Block> {
-    let mut dbs = databases.lock().await;
-    let lookup_res_info: Option<Block> = BlockDatabases::get_latest_block(&mut dbs)?;
-
-    match lookup_res_info {
-        None => {
-            info!("No previous state saved. Using genesis block.");
-            Ok(Block::genesis_block())
-        }
-        Some(block) => {
-            info!(
-                "Latest block was block height {}, hash = {:?}",
-                block.header.height, block.hash
-            );
-            Ok(block)
-        }
-    }
-}
-
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    let path_buf = get_data_directory(cli_args.network)?;
+    let root_data_dir_path_buf = cli_args.get_data_directory().unwrap();
 
     // The root path is where both the wallet and all databases are stored
-    let root_path = path_buf.as_path();
+    let root_data_dir_path = root_data_dir_path_buf.as_path();
 
     // Create root directory for databases and wallet if it does not already exist
-    std::fs::create_dir_all(root_path).unwrap_or_else(|_| {
+    std::fs::create_dir_all(root_data_dir_path).unwrap_or_else(|_| {
         panic!(
             "Failed to create data directory in {}",
-            root_path.to_string_lossy()
+            root_data_dir_path_buf.to_string_lossy()
         )
     });
 
     // Get wallet object, create one if none exists
-    debug!("Data root path is {:?}", root_path);
-    let wallet: Wallet =
-        initialize_wallet(root_path, STANDARD_WALLET_NAME, STANDARD_WALLET_VERSION);
+    debug!("Data root path is {:?}", root_data_dir_path_buf);
+    let wallet: Wallet = initialize_wallet(
+        root_data_dir_path,
+        STANDARD_WALLET_NAME,
+        STANDARD_WALLET_VERSION,
+    );
 
     // Connect to or create databases for block state, and for peer state
-    let (block_databases, peer_databases) = initialize_databases(root_path)?;
+    let (block_databases, peer_databases) = initialize_databases(root_data_dir_path)?;
     let block_databases: Arc<tokio::sync::Mutex<BlockDatabases>> =
         Arc::new(tokio::sync::Mutex::new(block_databases));
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
         Arc::new(tokio::sync::Mutex::new(peer_databases));
+    let archival_state = ArchivalState::new(block_databases, root_data_dir_path_buf);
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
-    let latest_block = get_latest_block(Arc::clone(&block_databases)).await?;
+    let latest_block: Block = archival_state.get_latest_block().await;
 
     // Bind socket to port on this machine, to handle incoming connections from peers
     let listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
@@ -274,7 +236,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let light_state: LightState = LightState::new(latest_block.header.clone());
     let blockchain_state = BlockchainState {
         light_state,
-        archival_state: Some(ArchivalState::new(block_databases)),
+        archival_state: Some(archival_state),
     };
     let state = State {
         chain: blockchain_state,

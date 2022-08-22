@@ -11,6 +11,7 @@ use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use secp256k1::Secp256k1;
+use std::path::PathBuf;
 use std::{
     collections::HashMap,
     env,
@@ -26,9 +27,11 @@ use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::traits::GetRandomElements;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
+use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
+use crate::models::database::BlockIndexKey;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
@@ -56,26 +59,23 @@ use crate::{
     PEER_CHANNEL_CAPACITY,
 };
 
-pub const UNIT_TEST_DB_DIRECTORY: &str = "neptune_unit_test_databases";
-
 pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
     Arc::new(std::sync::Mutex::new(HashMap::new()))
 }
 
-/// Return empty database objects
+/// Return empty database objects, and root directory for this unit test instantiation's
+/// data directory.
 pub fn databases(
     network: Network,
 ) -> Result<(
     Arc<tokio::sync::Mutex<BlockDatabases>>,
     Arc<tokio::sync::Mutex<PeerDatabases>>,
+    PathBuf,
 )> {
     // Create databases for unit tests on disk, and return objects for them.
     // For now, we use databases on disk, but it would be nicer to use
     // something that is in-memory only.
-    let temp_dir = env::temp_dir();
-    let mut path = temp_dir;
-    path.push(UNIT_TEST_DB_DIRECTORY);
-    path.push(network.to_string());
+    let mut root_data_dir: PathBuf = get_data_director_for_unit_tests()?;
 
     // Create a randomly named directory to allow the tests to run in parallel.
     // If this is not done, the parallel execution of unit tests will fail as
@@ -85,13 +85,20 @@ pub fn databases(
         .take(20)
         .map(char::from)
         .collect();
-    path.push(random_directory);
+    root_data_dir.push(random_directory);
 
-    let (block_dbs, peer_dbs) = initialize_databases(&path)?;
+    root_data_dir.push(network.to_string());
+    let mut database_dir = root_data_dir.clone();
+    database_dir.push("databases");
+
+    // The `initialize_databases` function call should create a new directory for the databases
+    // meaning that all directories above this are also created.
+    let (block_dbs, peer_dbs) = initialize_databases(&database_dir)?;
 
     Ok((
         Arc::new(tokio::sync::Mutex::new(block_dbs)),
         Arc::new(tokio::sync::Mutex::new(peer_dbs)),
+        root_data_dir,
     ))
 }
 
@@ -182,14 +189,14 @@ pub fn get_genesis_setup(
     }
 
     let (block, _, _) = get_dummy_latest_block(None);
-    let (block_databases, peer_databases) = databases(network)?;
+    let (block_databases, peer_databases, root_data_dir_path) = databases(network)?;
     let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
     let light_state: LightState = LightState::new(block.header);
     let blockchain_state = BlockchainState {
         light_state,
-        archival_state: Some(ArchivalState::new(block_databases)),
+        archival_state: Some(ArchivalState::new(block_databases, root_data_dir_path)),
     };
     let state = State {
         chain: blockchain_state,
@@ -206,6 +213,65 @@ pub fn get_genesis_setup(
     ))
 }
 
+pub async fn add_block_to_archival_state(
+    archival_state: &ArchivalState,
+    new_block: Block,
+) -> Result<()> {
+    let mut db_lock = archival_state.block_databases.lock().await;
+    let tip_digest: Option<Digest> = db_lock
+        .block_index
+        .get(BlockIndexKey::BlockTipDigest)
+        .map(|x| x.as_tip_digest());
+    let tip_header: Option<BlockHeader> = tip_digest.map(|digest| {
+        db_lock
+            .block_index
+            .get(BlockIndexKey::Block(digest))
+            .unwrap()
+            .as_block_record()
+            .block_header
+    });
+    archival_state.write_block(
+        Box::new(new_block),
+        &mut db_lock,
+        tip_header.map(|x| x.proof_of_work_family),
+    )?;
+
+    Ok(())
+}
+
+fn get_data_director_for_unit_tests() -> Result<PathBuf> {
+    let mut dir: PathBuf = env::temp_dir();
+    dir.push("neptune-unit-tests");
+
+    Ok(dir)
+}
+
+/// Helper function for tests to update state with a new block
+pub async fn add_block(state: &State, new_block: Block) -> Result<()> {
+    let mut db_lock = state
+        .chain
+        .archival_state
+        .as_ref()
+        .unwrap()
+        .block_databases
+        .lock()
+        .await;
+    let mut light_state_locked: std::sync::MutexGuard<BlockHeader> =
+        state.chain.light_state.latest_block_header.lock().unwrap();
+
+    let previous_pow_family = light_state_locked.proof_of_work_family;
+    state.chain.archival_state.as_ref().unwrap().write_block(
+        Box::new(new_block.clone()),
+        &mut db_lock,
+        Some(previous_pow_family),
+    )?;
+    if previous_pow_family < new_block.header.proof_of_work_family {
+        *light_state_locked = new_block.header;
+    }
+
+    Ok(())
+}
+
 pin_project! {
 #[derive(Debug)]
 pub struct Mock<Item> {
@@ -214,7 +280,7 @@ pub struct Mock<Item> {
 }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MockError {
     WrongSend,
     UnexpectedSend,
@@ -292,7 +358,7 @@ impl<Item> stream::Stream for Mock<Item> {
 
 /// Return a fake block with a random hash
 pub fn make_mock_block(
-    previous_block: Block,
+    previous_block: &Block,
     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
 ) -> Block {
     let secp = Secp256k1::new();
@@ -320,7 +386,7 @@ pub fn make_mock_block(
         fee: U32s::zero(),
         timestamp,
     };
-    let mut new_ms = previous_block.body.next_mutator_set_accumulator;
+    let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
     let coinbase_digest: Digest = coinbase_utxo.hash();
 

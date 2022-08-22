@@ -22,6 +22,7 @@ const SYNCHRONIZATION_TIMEOUT_SEVERITY: u16 = u16::MAX;
 const FLOODED_PEER_LIST_RESPONSE_SEVERITY: u16 = 2;
 const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
 const INVALID_MESSAGE_SEVERITY: u16 = 2;
+const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -41,6 +42,7 @@ pub enum PeerSanctionReason {
     ForkResolutionError((BlockHeight, u16, Digest)),
     SynchronizationTimeout,
     FloodPeerListResponse,
+    BlockRequestUnknownHeight,
     // Be careful about using this too much as it's bad for log opportunities
     InvalidMessage,
     TooShortBlockBatch,
@@ -89,6 +91,7 @@ impl PeerSanctionReason {
             PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => INVALID_MESSAGE_SEVERITY,
             PeerSanctionReason::BatchBlocksInvalidStartHeight => INVALID_MESSAGE_SEVERITY,
             PeerSanctionReason::BatchBlocksUnknownRequest => BAD_BLOCK_BATCH_REQUEST_SEVERITY,
+            PeerSanctionReason::BlockRequestUnknownHeight => UNKNOWN_BLOCK_HEIGHT,
         }
     }
 }

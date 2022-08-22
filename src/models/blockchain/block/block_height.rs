@@ -6,7 +6,7 @@ use std::{
 };
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockHeight(BFieldElement);
 
 // Assuming a block time of 10 minutes, and a halving every three years,
