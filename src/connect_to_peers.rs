@@ -475,7 +475,8 @@ mod connect_tests {
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
             get_genesis_setup(network, 0)?;
-        if let Err(_) = answer_peer(
+
+        let answer = answer_peer(
             mock,
             state,
             get_dummy_address(),
@@ -484,12 +485,10 @@ mod connect_tests {
             own_handshake,
             8,
         )
-        .await
-        {
-            Ok(())
-        } else {
-            bail!("Expected error from run")
-        }
+        .await;
+        assert!(answer.is_err(), "expected bad magic value failure");
+
+        Ok(())
     }
 
     #[traced_test]
@@ -510,7 +509,8 @@ mod connect_tests {
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
             get_genesis_setup(Network::Main, 0)?;
-        if let Err(_) = answer_peer(
+
+        let answer = answer_peer(
             mock,
             state,
             get_dummy_address(),
@@ -519,12 +519,10 @@ mod connect_tests {
             own_handshake,
             8,
         )
-        .await
-        {
-            Ok(())
-        } else {
-            bail!("Expected error from run")
-        }
+        .await;
+        assert!(answer.is_err(), "bad network must result in error");
+
+        Ok(())
     }
 
     #[traced_test]
@@ -548,7 +546,7 @@ mod connect_tests {
             get_genesis_setup(Network::Main, 2)?;
         let (_, _, _latest_block_header) = get_dummy_latest_block(None);
 
-        if let Err(_) = answer_peer(
+        let answer = answer_peer(
             mock,
             state,
             get_dummy_address(),
@@ -557,12 +555,10 @@ mod connect_tests {
             own_handshake,
             2,
         )
-        .await
-        {
-            Ok(())
-        } else {
-            bail!("Expected error from run")
-        }
+        .await;
+        assert!(answer.is_err(), "max peers exceeded must result in error");
+
+        Ok(())
     }
 
     #[traced_test]
@@ -607,7 +603,7 @@ mod connect_tests {
             .write_peer_standing_on_increase(peer_address.ip(), bad_standing)
             .await;
 
-        if let Err(_) = answer_peer(
+        let answer = answer_peer(
             mock,
             state.clone(),
             peer_address,
@@ -616,11 +612,11 @@ mod connect_tests {
             own_handshake,
             42,
         )
-        .await
-        {
-        } else {
-            bail!("Expected error from run")
-        }
+        .await;
+        assert!(
+            answer.is_err(),
+            "ingoing connection from banned peers must be disallowed"
+        );
 
         // Verify that peer map is empty after connection has been refused
         match state.net.peer_map.lock().unwrap().keys().len() {

@@ -63,8 +63,9 @@ pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
     Arc::new(std::sync::Mutex::new(HashMap::new()))
 }
 
-/// Return empty database objects, and root directory for this unit test instantiation's
+// Return empty database objects, and root directory for this unit test instantiation's
 /// data directory.
+#[allow(clippy::type_complexity)]
 pub fn databases(
     network: Network,
 ) -> Result<(
@@ -162,6 +163,7 @@ pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
 /// block header field of the state.
 /// Returns:
 /// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, state, peer_map)
+#[allow(clippy::type_complexity)]
 pub fn get_genesis_setup(
     network: Network,
     peer_count: u8,
@@ -272,11 +274,21 @@ pub async fn add_block(state: &State, new_block: Block) -> Result<()> {
     Ok(())
 }
 
+// Box<Vec<T>> is unnecessary because Vec<T> is already heap-allocated.
+// However, Box<...> is used here because Pin<T> does not allow a &mut T,
+// So a Box<T> (which also implements DerefMut) allows a pinned, mutable
+// pointer.
+//
+// We suppress `clippy::box-collection` on a type alias because the can't
+// easily place the pragma inside the `pin_project!` macro.
+#[allow(clippy::box_collection)]
+type ActionList<Item> = Box<Vec<Action<Item>>>;
+
 pin_project! {
 #[derive(Debug)]
 pub struct Mock<Item> {
     #[pin]
-    actions: Box<Vec<Action<Item>>>,
+    actions: ActionList<Item>,
 }
 }
 

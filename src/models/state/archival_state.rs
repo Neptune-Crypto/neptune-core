@@ -493,12 +493,15 @@ mod archival_state_tests {
     async fn initialize_archival_state_test() -> Result<()> {
         // Ensure that the archival state can be initialized without overflowing the stack
         tokio::spawn(async move {
-            let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
-            let archival_state0 = ArchivalState::new(block_databases, data_dir.clone());
-            let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
-            let _archival_state1 = ArchivalState::new(block_databases, data_dir.clone());
-            let (block_databases, _, data_dir) = databases(Network::Main).unwrap();
-            let archival_state2 = ArchivalState::new(block_databases, data_dir);
+            let (block_databases_0, _, data_dir_0) = databases(Network::Main).unwrap();
+            let archival_state0 = ArchivalState::new(block_databases_0, data_dir_0);
+
+            let (block_databases_1, _, data_dir_1) = databases(Network::Main).unwrap();
+            let _archival_state1 = ArchivalState::new(block_databases_1, data_dir_1);
+
+            let (block_databases_2, _, data_dir_2) = databases(Network::Main).unwrap();
+            let archival_state2 = ArchivalState::new(block_databases_2, data_dir_2);
+
             let b = Block::genesis_block();
             let blockchain_state = BlockchainState {
                 archival_state: Some(archival_state2),
@@ -1016,35 +1019,37 @@ mod archival_state_tests {
         assert_eq!(0, read_last_file.last_file);
 
         // Verify that `Height` value is stored correctly
-        let expected_height: u64 = 1;
-        let blocks_with_height_1: Vec<Digest> = db_lock
-            .block_index
-            .get(BlockIndexKey::Height(expected_height.into()))
-            .unwrap()
-            .as_height_record();
+        {
+            let expected_height: u64 = 1;
+            let blocks_with_height_1: Vec<Digest> = db_lock
+                .block_index
+                .get(BlockIndexKey::Height(expected_height.into()))
+                .unwrap()
+                .as_height_record();
 
-        assert_eq!(1, blocks_with_height_1.len());
-        assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
+            assert_eq!(1, blocks_with_height_1.len());
+            assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
+        }
 
         // Verify that `File` value is stored correctly
         let expected_file: u32 = read_last_file.last_file;
-        let last_file_record: FileRecord = db_lock
+        let last_file_record_1: FileRecord = db_lock
             .block_index
             .get(BlockIndexKey::File(expected_file))
             .unwrap()
             .as_file_record();
 
-        assert_eq!(1, last_file_record.blocks_in_file_count);
+        assert_eq!(1, last_file_record_1.blocks_in_file_count);
 
         let expected_block_len_1 = bincode::serialize(&mock_block_1).unwrap().len();
-        assert_eq!(expected_block_len_1, last_file_record.file_size as usize);
+        assert_eq!(expected_block_len_1, last_file_record_1.file_size as usize);
         assert_eq!(
             mock_block_1.header.height,
-            last_file_record.min_block_height
+            last_file_record_1.min_block_height
         );
         assert_eq!(
             mock_block_1.header.height,
-            last_file_record.max_block_height
+            last_file_record_1.max_block_height
         );
 
         // Verify that `BlockTipDigest` is stored correctly
@@ -1094,41 +1099,45 @@ mod archival_state_tests {
         assert_eq!(0, read_last_file.last_file);
 
         // Verify that `Height` value is updated correctly
-        let blocks_with_height_1: Vec<Digest> = db_lock
-            .block_index
-            .get(BlockIndexKey::Height(1.into()))
-            .unwrap()
-            .as_height_record();
-        assert_eq!(1, blocks_with_height_1.len());
-        assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
-        let blocks_with_height_2: Vec<Digest> = db_lock
-            .block_index
-            .get(BlockIndexKey::Height(2.into()))
-            .unwrap()
-            .as_height_record();
-        assert_eq!(1, blocks_with_height_2.len());
-        assert_eq!(mock_block_2.hash, blocks_with_height_2[0]);
+        {
+            let blocks_with_height_1: Vec<Digest> = db_lock
+                .block_index
+                .get(BlockIndexKey::Height(1.into()))
+                .unwrap()
+                .as_height_record();
+            assert_eq!(1, blocks_with_height_1.len());
+            assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
+        }
 
+        {
+            let blocks_with_height_2: Vec<Digest> = db_lock
+                .block_index
+                .get(BlockIndexKey::Height(2.into()))
+                .unwrap()
+                .as_height_record();
+            assert_eq!(1, blocks_with_height_2.len());
+            assert_eq!(mock_block_2.hash, blocks_with_height_2[0]);
+        }
         // Verify that `File` value is updated correctly
         let expected_file_2: u32 = read_last_file.last_file;
-        let last_file_record: FileRecord = db_lock
+        let last_file_record_2: FileRecord = db_lock
             .block_index
             .get(BlockIndexKey::File(expected_file_2))
             .unwrap()
             .as_file_record();
-        assert_eq!(2, last_file_record.blocks_in_file_count);
+        assert_eq!(2, last_file_record_2.blocks_in_file_count);
         let expected_block_len_2 = bincode::serialize(&mock_block_2).unwrap().len();
         assert_eq!(
             expected_block_len_1 + expected_block_len_2,
-            last_file_record.file_size as usize
+            last_file_record_2.file_size as usize
         );
         assert_eq!(
             mock_block_1.header.height,
-            last_file_record.min_block_height
+            last_file_record_2.min_block_height
         );
         assert_eq!(
             mock_block_2.header.height,
-            last_file_record.max_block_height
+            last_file_record_2.max_block_height
         );
 
         // Verify that `BlockTipDigest` is updated correctly

@@ -1295,7 +1295,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let peer_loop_handler_1 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state.clone(),
             peer_address,
@@ -1304,7 +1304,7 @@ mod peer_loop_tests {
             1,
         );
 
-        peer_loop_handler
+        peer_loop_handler_1
             .run_wrapper(mock, from_main_rx_clone.resubscribe())
             .await?;
 
@@ -1321,7 +1321,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let peer_loop_handler_2 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state.clone(),
             peer_address,
@@ -1330,7 +1330,7 @@ mod peer_loop_tests {
             1,
         );
 
-        peer_loop_handler
+        peer_loop_handler_2
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
