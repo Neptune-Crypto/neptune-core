@@ -1,0 +1,49 @@
+---
+# Please run `yamllint .drone.yml` after editing this file.
+kind: pipeline
+type: docker
+name: linting-and-benchmarks
+
+# Run `rustup check` to see newest version and update here *after* running
+# `make test`:
+define: &latest_stable 'rust:1.63'
+
+steps:
+  - name: Check
+    image: *latest_stable
+    commands:
+      - cargo check --all-targets
+
+  - name: Clippy
+    image: *latest_stable
+    commands:
+      - rustup component add clippy
+      - cargo clippy --all-targets
+
+  - name: Build
+    image: *latest_stable
+    commands:
+      - RUSTFLAGS="-D warnings" cargo build --all-targets --profile=bench
+
+  - name: Test
+    image: *latest_stable
+    commands:
+      - cargo test --all-targets
+      - cargo test --doc # not included in --all-targets
+
+  - name: Bench
+    image: *latest_stable
+    depends_on:
+      - Check
+      - Clippy
+      - Build
+      - Test
+    commands:
+      - cargo bench
+
+trigger:
+  branch:
+    - master
+
+# Please run `yamllint .drone.yml` after editing this file.
+...
