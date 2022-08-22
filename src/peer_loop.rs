@@ -1249,7 +1249,7 @@ mod peer_loop_tests {
     async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
         let genesis_block: Block = state
             .chain
