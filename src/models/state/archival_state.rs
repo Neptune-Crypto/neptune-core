@@ -1139,25 +1139,38 @@ mod archival_state_tests {
         assert_eq!(mock_block_2.hash, tip_digest_2);
 
         // Verify that `Block` is stored correctly
-        let actual_block_2: BlockRecord = db_lock
+        let actual_block_record_2: BlockRecord = db_lock
             .block_index
             .get(BlockIndexKey::Block(mock_block_2.hash))
             .unwrap()
             .as_block_record();
 
-        assert_eq!(mock_block_2.header, actual_block_2.block_header);
+        assert_eq!(mock_block_2.header, actual_block_record_2.block_header);
         assert_eq!(
             expected_block_len_2,
-            actual_block_2.file_location.block_length
+            actual_block_record_2.file_location.block_length
         );
         assert_eq!(
-            expected_block_len_1 as u64, actual_block_2.file_location.offset,
+            expected_block_len_1 as u64, actual_block_record_2.file_location.offset,
             "Second block written to file must be offset by block 1's length"
         );
         assert_eq!(
             read_last_file_2.last_file,
-            actual_block_2.file_location.file_index
+            actual_block_record_2.file_location.file_index
         );
+
+        // Test `get_latest_block_from_disk`
+        let read_latest_block = archival_state
+            .get_latest_block_from_disk(&mut db_lock)?
+            .unwrap();
+        assert_eq!(mock_block_2, read_latest_block);
+
+        // Test `get_block_from_block_record`
+        let block_from_block_record = archival_state
+            .get_block_from_block_record(actual_block_record_2)
+            .unwrap();
+        assert_eq!(mock_block_2, block_from_block_record);
+        assert_eq!(mock_block_2.hash, block_from_block_record.hash);
 
         Ok(())
     }
