@@ -16,6 +16,8 @@ fn get_block_filename(file_index: u32) -> PathBuf {
     path.with_extension(BLOCK_FILENAME_EXTENSION)
 }
 
+/// Return a boolean indicating if a new file is needed or, in the negative sense, we can continue
+/// writing to the current file.
 pub fn new_block_file_is_needed(file: &fs::File, bytes_to_store: u64) -> bool {
     file.metadata().unwrap().len() + bytes_to_store > MAX_BLOCK_FILE_SIZE
 }

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
+use num_traits::Zero;
 use std::{
     fs,
     io::{Seek, SeekFrom, Write},
@@ -62,7 +63,9 @@ impl ArchivalState {
         db_lock: &mut tokio::sync::MutexGuard<'_, BlockDatabases>,
         current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
-        // Write block to disk
+        // Fetch last file record to find disk location to store block.
+        // This record must exist in the DB already, unless this is the first block
+        // stored on disk.
         let mut last_rec: LastFileRecord = match db_lock
             .block_index
             .get(BlockIndexKey::LastFile)
@@ -72,8 +75,7 @@ impl ArchivalState {
             None => LastFileRecord::default(),
         };
 
-        // This file must exist on disk already, unless this is the first block
-        // stored on disk.
+        // Open the file that was last used for storing a block
         let mut block_file_path =
             get_block_file_path(self.root_data_dir.clone(), last_rec.last_file);
         let serialized_block: Vec<u8> = bincode::serialize(&new_block).unwrap();
@@ -84,6 +86,8 @@ impl ArchivalState {
             .create(true)
             .open(block_file_path.clone())
             .unwrap();
+
+        // Check if we should use the last file, or we need a new one.
         if new_block_file_is_needed(&block_file, serialized_block_size) {
             last_rec = LastFileRecord {
                 last_file: last_rec.last_file + 1,
@@ -106,12 +110,18 @@ impl ArchivalState {
             .map(|x| x.as_file_record());
         let file_record_value: FileRecord = match file_record_value {
             Some(record) => record.add(serialized_block_size, &new_block.header),
-            None => FileRecord::new(serialized_block_size, &new_block.header),
+            None => {
+                assert!(
+                    block_file.metadata().unwrap().len().is_zero(),
+                    "If no file record exists, block file must be empty"
+                );
+                FileRecord::new(serialized_block_size, &new_block.header)
+            }
         };
 
         // Make room in file for mmapping and record where block starts
         let pos = block_file.seek(SeekFrom::End(0)).unwrap();
-        debug!("Opened file offset: {}", pos);
+        debug!("Size of file prior to block writing: {}", pos);
         block_file
             .seek(SeekFrom::Current(serialized_block_size as i64 - 1))
             .unwrap();
@@ -977,6 +987,91 @@ mod archival_state_tests {
         assert_eq!(2, ancestors_of_4_short.len());
         assert_eq!(mock_block_3.hash, ancestors_of_4_short[0]);
         assert_eq!(mock_block_2.hash, ancestors_of_4_short[1]);
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn write_block_db_test() -> Result<()> {
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let genesis = *archival_state.genesis_block.clone();
+        let mock_block_1 = make_mock_block(genesis.clone(), None);
+        let mut db_lock = archival_state.block_databases.lock().await;
+        archival_state.write_block(
+            Box::new(mock_block_1.clone()),
+            &mut db_lock,
+            Some(genesis.header.proof_of_work_family),
+        )?;
+
+        // Verify that `LastFile` value is stored correctly
+        let read_last_file: LastFileRecord = db_lock
+            .block_index
+            .get(BlockIndexKey::LastFile)
+            .unwrap()
+            .as_last_file_record();
+
+        assert_eq!(0, read_last_file.last_file);
+
+        // Verify that `Height` value is stored correctly
+        let expected_height: u64 = 1;
+        let blocks_with_height_1: Vec<Digest> = db_lock
+            .block_index
+            .get(BlockIndexKey::Height(expected_height.into()))
+            .unwrap()
+            .as_height_record();
+
+        assert_eq!(1, blocks_with_height_1.len());
+        assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
+
+        // Verify that `File` value is stored correctly
+        let expected_file: u32 = read_last_file.last_file;
+        let last_file_record: FileRecord = db_lock
+            .block_index
+            .get(BlockIndexKey::File(expected_file))
+            .unwrap()
+            .as_file_record();
+
+        assert_eq!(1, last_file_record.blocks_in_file_count);
+
+        let expected_block_len = bincode::serialize(&mock_block_1).unwrap().len();
+        assert_eq!(expected_block_len, last_file_record.file_size as usize);
+        assert_eq!(
+            mock_block_1.header.height,
+            last_file_record.min_block_height
+        );
+        assert_eq!(
+            mock_block_1.header.height,
+            last_file_record.max_block_height
+        );
+
+        // Verify that `BlockTipDigest` is stored correctly
+        let tip_digest: Digest = db_lock
+            .block_index
+            .get(BlockIndexKey::BlockTipDigest)
+            .unwrap()
+            .as_tip_digest();
+
+        assert_eq!(mock_block_1.hash, tip_digest);
+
+        // Verify that `Block` is stored correctly
+        let actual_block: BlockRecord = db_lock
+            .block_index
+            .get(BlockIndexKey::Block(mock_block_1.hash))
+            .unwrap()
+            .as_block_record();
+
+        assert_eq!(mock_block_1.header, actual_block.block_header);
+        assert_eq!(expected_block_len, actual_block.file_location.block_length);
+        assert_eq!(
+            0, actual_block.file_location.offset,
+            "First block written to file"
+        );
+        assert_eq!(
+            read_last_file.last_file,
+            actual_block.file_location.file_index
+        );
 
         Ok(())
     }

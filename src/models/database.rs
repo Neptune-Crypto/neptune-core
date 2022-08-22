@@ -27,16 +27,16 @@ pub struct BlockRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileRecord {
-    blocks_in_file_count: u32,
-    file_size: u64,
+    pub blocks_in_file_count: u32,
+    pub file_size: u64,
 
     // min and max block height in file, both inclusive
-    min_block_height: BlockHeight,
-    max_block_height: BlockHeight,
+    pub min_block_height: BlockHeight,
+    pub max_block_height: BlockHeight,
 
     // min and max block timestamp in file, both inclusive
-    min_block_timestamp: BFieldElement,
-    max_block_timestamp: BFieldElement,
+    pub min_block_timestamp: BFieldElement,
+    pub max_block_timestamp: BFieldElement,
 }
 
 impl FileRecord {
