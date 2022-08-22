@@ -29,7 +29,7 @@ steps:
     image: *latest_stable
     commands:
       - cargo test --all-targets
-      - cargo test --doc # not included in --all-targets
+      - cargo test --doc  # not included in --all-targets
 
   - name: Bench
     image: *latest_stable
@@ -44,6 +44,7 @@ steps:
 trigger:
   branch:
     - master
+    - ci-test
 
 # Please run `yamllint .drone.yml` after editing this file.
 ...
