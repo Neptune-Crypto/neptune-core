@@ -1035,8 +1035,8 @@ mod archival_state_tests {
 
         assert_eq!(1, last_file_record.blocks_in_file_count);
 
-        let expected_block_len = bincode::serialize(&mock_block_1).unwrap().len();
-        assert_eq!(expected_block_len, last_file_record.file_size as usize);
+        let expected_block_len_1 = bincode::serialize(&mock_block_1).unwrap().len();
+        assert_eq!(expected_block_len_1, last_file_record.file_size as usize);
         assert_eq!(
             mock_block_1.header.height,
             last_file_record.min_block_height
@@ -1063,7 +1063,10 @@ mod archival_state_tests {
             .as_block_record();
 
         assert_eq!(mock_block_1.header, actual_block.block_header);
-        assert_eq!(expected_block_len, actual_block.file_location.block_length);
+        assert_eq!(
+            expected_block_len_1,
+            actual_block.file_location.block_length
+        );
         assert_eq!(
             0, actual_block.file_location.offset,
             "First block written to file"
@@ -1071,6 +1074,89 @@ mod archival_state_tests {
         assert_eq!(
             read_last_file.last_file,
             actual_block.file_location.file_index
+        );
+
+        // Store another block and verify that this block is appended to disk
+        let mock_block_2 = make_mock_block(mock_block_1.clone(), None);
+        archival_state.write_block(
+            Box::new(mock_block_2.clone()),
+            &mut db_lock,
+            Some(mock_block_1.header.proof_of_work_family),
+        )?;
+
+        // Verify that `LastFile` value is updated correctly, unchanged
+        let read_last_file_2: LastFileRecord = db_lock
+            .block_index
+            .get(BlockIndexKey::LastFile)
+            .unwrap()
+            .as_last_file_record();
+        assert_eq!(0, read_last_file.last_file);
+
+        // Verify that `Height` value is updated correctly
+        let blocks_with_height_1: Vec<Digest> = db_lock
+            .block_index
+            .get(BlockIndexKey::Height(1.into()))
+            .unwrap()
+            .as_height_record();
+        assert_eq!(1, blocks_with_height_1.len());
+        assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
+        let blocks_with_height_2: Vec<Digest> = db_lock
+            .block_index
+            .get(BlockIndexKey::Height(2.into()))
+            .unwrap()
+            .as_height_record();
+        assert_eq!(1, blocks_with_height_2.len());
+        assert_eq!(mock_block_2.hash, blocks_with_height_2[0]);
+
+        // Verify that `File` value is updated correctly
+        let expected_file_2: u32 = read_last_file.last_file;
+        let last_file_record: FileRecord = db_lock
+            .block_index
+            .get(BlockIndexKey::File(expected_file_2))
+            .unwrap()
+            .as_file_record();
+        assert_eq!(2, last_file_record.blocks_in_file_count);
+        let expected_block_len_2 = bincode::serialize(&mock_block_2).unwrap().len();
+        assert_eq!(
+            expected_block_len_1 + expected_block_len_2,
+            last_file_record.file_size as usize
+        );
+        assert_eq!(
+            mock_block_1.header.height,
+            last_file_record.min_block_height
+        );
+        assert_eq!(
+            mock_block_2.header.height,
+            last_file_record.max_block_height
+        );
+
+        // Verify that `BlockTipDigest` is updated correctly
+        let tip_digest_2: Digest = db_lock
+            .block_index
+            .get(BlockIndexKey::BlockTipDigest)
+            .unwrap()
+            .as_tip_digest();
+        assert_eq!(mock_block_2.hash, tip_digest_2);
+
+        // Verify that `Block` is stored correctly
+        let actual_block_2: BlockRecord = db_lock
+            .block_index
+            .get(BlockIndexKey::Block(mock_block_2.hash))
+            .unwrap()
+            .as_block_record();
+
+        assert_eq!(mock_block_2.header, actual_block_2.block_header);
+        assert_eq!(
+            expected_block_len_2,
+            actual_block_2.file_location.block_length
+        );
+        assert_eq!(
+            expected_block_len_1 as u64, actual_block_2.file_location.offset,
+            "Second block written to file must be offset by block 1's length"
+        );
+        assert_eq!(
+            read_last_file_2.last_file,
+            actual_block_2.file_location.file_index
         );
 
         Ok(())
