@@ -401,7 +401,7 @@ impl PeerLoopHandler {
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
-                let parent: BlockHeader = peers_most_canonical_block.header;
+                let mut parent_block_header: BlockHeader = peers_most_canonical_block.header;
                 while returned_blocks.len() < responded_batch_size {
                     let children = self
                         .state
@@ -409,7 +409,7 @@ impl PeerLoopHandler {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .get_children_blocks(&parent)
+                        .get_children_blocks(&parent_block_header)
                         .await;
                     if children.is_empty() {
                         break;
@@ -445,8 +445,14 @@ impl PeerLoopHandler {
                         .await?
                         .unwrap();
 
+                    parent_block_header = header_of_canonical_child;
                     returned_blocks.push(canonical_child.into());
                 }
+
+                debug!(
+                    "Returning {} blocks in batch response",
+                    returned_blocks.len()
+                );
 
                 peer.send(PeerMessage::BlockResponseBatch(returned_blocks))
                     .await?;
@@ -1240,6 +1246,93 @@ mod peer_loop_tests {
         if !state.net.peer_map.lock().unwrap().is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn block_request_batch_test() -> Result<()> {
+        // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
+        // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
+        // returned.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+            get_genesis_setup(Network::Main, 1)?;
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let peer_address = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .connected_address;
+        let block_1 = make_mock_block(&genesis_block, None);
+        let block_2_a = make_mock_block(&block_1, Some(U32s::new([2_000_000, 0, 0, 0, 0])));
+        let block_3_a = make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0]))); // <--- canonical
+        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])));
+        let block_3_b = make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])));
+
+        add_block(&state, block_1.clone()).await?;
+        add_block(&state, block_2_a.clone()).await?;
+        add_block(&state, block_3_a.clone()).await?;
+        add_block(&state, block_2_b.clone()).await?;
+        add_block(&state, block_3_b.clone()).await?;
+
+        let mut mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestBatch(vec![genesis_block.hash], 14)),
+            Action::Write(PeerMessage::BlockResponseBatch(vec![
+                block_1.clone().into(),
+                block_2_a.clone().into(),
+                block_3_a.clone().into(),
+            ])),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_address,
+            hsd.clone(),
+            false,
+            1,
+        );
+
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone.resubscribe())
+            .await?;
+
+        // Peer knows block 2_b, verify that canonical chain with 2_a is returned
+        mock = Mock::new(vec![
+            Action::Read(PeerMessage::BlockRequestBatch(
+                vec![block_2_b.hash, block_1.hash, genesis_block.hash],
+                14,
+            )),
+            Action::Write(PeerMessage::BlockResponseBatch(vec![
+                block_2_a.into(),
+                block_3_a.into(),
+            ])),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_address,
+            hsd,
+            false,
+            1,
+        );
+
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await?;
 
         Ok(())
     }
