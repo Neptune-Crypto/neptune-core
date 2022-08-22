@@ -882,8 +882,7 @@ impl PeerLoopHandler {
         let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
-        // TODO: Send message to main removing claimed max block height in case we are
-        // syncing and we banned the peer for sending us bad blocks.
+        // Store any new peer-standing to database
         let peer_info_writeback = self
             .state
             .net
@@ -912,7 +911,8 @@ impl PeerLoopHandler {
 
         debug!("Ending peer loop for {}", self.peer_address);
 
-        // Return any error that `run` returned
+        // Return any error that `run` returned. Returning and not suppressing errors is a quite nice
+        // feature to have for testing purposes.
         res
     }
 }
