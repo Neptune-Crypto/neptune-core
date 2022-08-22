@@ -1028,7 +1028,7 @@ mod peer_loop_tests {
             .await;
         different_genesis_block.header.nonce[2].increment();
         different_genesis_block.hash = different_genesis_block.header.hash();
-        let block_1_with_different_genesis = make_mock_block(different_genesis_block, None);
+        let block_1_with_different_genesis = make_mock_block(&different_genesis_block, None);
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
             block_1_with_different_genesis.into(),
         )))]);
@@ -1102,7 +1102,7 @@ mod peer_loop_tests {
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
         let block_without_valid_pow = make_mock_block(
-            genesis_block,
+            &genesis_block,
             Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
                 1_000_000, 0, 0, 0, 0,
             ])),
@@ -1193,7 +1193,7 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
 
-        let block_1 = make_mock_block(genesis_block, None);
+        let block_1 = make_mock_block(&genesis_block, None);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1261,7 +1261,7 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
-                make_mock_block(genesis_block, None).into(),
+                make_mock_block(&genesis_block, None).into(),
             ))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1324,8 +1324,8 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
+        let block_1 = make_mock_block(&genesis_block, None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -1404,10 +1404,10 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1481,10 +1481,10 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1562,9 +1562,9 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -1643,11 +1643,11 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
-        let block_5 = make_mock_block(block_4.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
+        let block_5 = make_mock_block(&block_4.clone(), None);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1744,10 +1744,10 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(genesis_block.clone(), None);
-        let block_2 = make_mock_block(block_1.clone(), None);
-        let block_3 = make_mock_block(block_2.clone(), None);
-        let block_4 = make_mock_block(block_3.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None);
+        let block_2 = make_mock_block(&block_1.clone(), None);
+        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_4 = make_mock_block(&block_3.clone(), None);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![

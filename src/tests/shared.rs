@@ -258,12 +258,16 @@ pub async fn add_block(state: &State, new_block: Block) -> Result<()> {
         .await;
     let mut light_state_locked: std::sync::MutexGuard<BlockHeader> =
         state.chain.light_state.latest_block_header.lock().unwrap();
+
+    let previous_pow_family = light_state_locked.proof_of_work_family;
     state.chain.archival_state.as_ref().unwrap().write_block(
         Box::new(new_block.clone()),
         &mut db_lock,
-        Some(new_block.header.proof_of_work_family),
+        Some(previous_pow_family),
     )?;
-    *light_state_locked = new_block.header.clone();
+    if previous_pow_family < new_block.header.proof_of_work_family {
+        *light_state_locked = new_block.header;
+    }
 
     Ok(())
 }
@@ -354,7 +358,7 @@ impl<Item> stream::Stream for Mock<Item> {
 
 /// Return a fake block with a random hash
 pub fn make_mock_block(
-    previous_block: Block,
+    previous_block: &Block,
     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
 ) -> Block {
     let secp = Secp256k1::new();
@@ -382,7 +386,7 @@ pub fn make_mock_block(
         fee: U32s::zero(),
         timestamp,
     };
-    let mut new_ms = previous_block.body.next_mutator_set_accumulator;
+    let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
     let coinbase_digest: Digest = coinbase_utxo.hash();
 
