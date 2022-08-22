@@ -579,6 +579,7 @@ impl PeerLoopHandler {
                     .unwrap()
                     .block_height_to_block_headers(block_height)
                     .await;
+                debug!("Found {} blocks", block_headers.len());
                 debug!("Locked block database object");
 
                 if block_headers.is_empty() {
@@ -775,7 +776,7 @@ impl PeerLoopHandler {
                                         Ok(close) => close,
                                         Err(err) => {
                                             warn!("{}. Closing connection.", err);
-                                            true
+                                            bail!("{}", err);
                                         }
                                     };
 
@@ -787,9 +788,8 @@ impl PeerLoopHandler {
                             }
                         }
                         Err(err) => {
-                            error!("Error when receiving from peer: {}. Closing connection.", err);
-
-                            break;
+                            error!("Error when receiving from peer: {}.", self.peer_address);
+                            bail!("Error when receiving from peer: {}. Closing connection.", err);
                         }
                     }
                 }
@@ -879,7 +879,7 @@ impl PeerLoopHandler {
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
-        let _res = self.run(peer, from_main_rx, &mut peer_state).await;
+        let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
         // TODO: Send message to main removing claimed max block height in case we are
@@ -911,7 +911,9 @@ impl PeerLoopHandler {
             .await?;
 
         debug!("Ending peer loop for {}", self.peer_address);
-        Ok(())
+
+        // Return any error that `run` returned
+        res
     }
 }
 
@@ -1041,9 +1043,13 @@ mod peer_loop_tests {
             true,
             1,
         );
-        peer_loop_handler
+        let res = peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
-            .await?;
+            .await;
+        assert!(
+            res.is_err(),
+            "run_wrapper must return failure when genesis is different"
+        );
 
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
@@ -1125,9 +1131,10 @@ mod peer_loop_tests {
             true,
             1,
         );
-        peer_loop_handler
+        let res = peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
-            .await?;
+            .await;
+        println!("run_wrapper returned {:?}", res);
 
         // Verify that max peer height was sent
         match to_main_rx1.recv().await {
@@ -1173,7 +1180,7 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
         // The scenario tested here is that a client receives a block that is already
-        // in the database. The expected behavior is to ignore the block and not send
+        // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main thread.
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
@@ -1463,7 +1470,7 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
-        // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
+        // then receives block 4, meaning that block 3 and 2 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 1)?;
         let peer_address: SocketAddr = state
