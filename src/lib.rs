@@ -221,18 +221,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Create handshake data which is used when connecting to outgoing peers specified in the
     // CLI arguments
-    let listen_addr_socket = SocketAddr::new(cli_args.listen_addr, cli_args.peer_port);
-    let own_handshake_data = HandshakeData {
-        tip_header: latest_block.header.clone(),
-        listen_address: Some(listen_addr_socket),
-        network: cli_args.network,
-        instance_id: rand::random(),
-        version: VERSION.to_string(),
-    };
-
-    // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
+
     let light_state: LightState = LightState::new(latest_block.header.clone());
     let blockchain_state = BlockchainState {
         light_state,
@@ -243,7 +234,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         cli: cli_args,
         net: networking_state,
     };
+    let own_handshake_data: HandshakeData = state.get_handshakedata();
 
+    // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     for peer in state.cli.peers.clone() {
         let peer_state_var = state.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
