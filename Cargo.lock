@@ -882,12 +882,12 @@ dependencies = [
 [[package]]
 name = "mutator-set-tf"
 version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=0402924df7f13f85dd406a05a6875cb3b5cc53f0#0402924df7f13f85dd406a05a6875cb3b5cc53f0"
+source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=2c2fdd1bbd375f3d1b01c66a8ffe8bcaf4e33017#2c2fdd1bbd375f3d1b01c66a8ffe8bcaf4e33017"
 dependencies = [
  "blake3",
  "itertools",
- "rand 0.8.5",
- "rand_core 0.6.3",
+ "rand 0.7.3",
+ "rand_core 0.5.1",
  "rayon",
  "rusty-leveldb",
  "serde",
@@ -2013,8 +2013,8 @@ dependencies = [
 
 [[package]]
 name = "twenty-first"
-version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=6de5138c4a238a11f6e00cda653a307a3afabd7d#6de5138c4a238a11f6e00cda653a307a3afabd7d"
+version = "0.1.1"
+source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=ead401801a7562ec92a1d612119281695c7c2f1e#ead401801a7562ec92a1d612119281695c7c2f1e"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2032,8 +2032,8 @@ dependencies = [
  "phf",
  "primitive-types",
  "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rand_core 0.6.3",
+ "rand_chacha 0.2.2",
+ "rand_core 0.5.1",
  "rand_distr",
  "rand_pcg",
  "rayon",
