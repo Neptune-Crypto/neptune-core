@@ -1,4 +1,4 @@
-use rusty_leveldb::DB;
+use rusty_leveldb::{LdbIterator, DB};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -125,6 +125,50 @@ where
         }
     }
 
+    pub fn new_or_restore(
+        mut aocl_mmr_db: DB,
+        mut swbf_inactive_mmr_db: DB,
+        mut chunks_db: DB,
+        mut active_window_db: DB,
+    ) -> Self {
+        let aocl_is_empty = aocl_mmr_db.new_iter().unwrap().next().is_none();
+        let aocl: ArchivalMmr<H> = if aocl_is_empty {
+            ArchivalMmr::new(aocl_mmr_db)
+        } else {
+            ArchivalMmr::restore(aocl_mmr_db)
+        };
+
+        let swbf_inactive_is_empty = swbf_inactive_mmr_db.new_iter().unwrap().next().is_none();
+        let swbf_inactive: ArchivalMmr<H> = if swbf_inactive_is_empty {
+            ArchivalMmr::new(swbf_inactive_mmr_db)
+        } else {
+            ArchivalMmr::restore(swbf_inactive_mmr_db)
+        };
+
+        let chunks_is_empty = chunks_db.new_iter().unwrap().next().is_none();
+        let chunks: DatabaseVector<Chunk> = if chunks_is_empty {
+            DatabaseVector::new(chunks_db)
+        } else {
+            DatabaseVector::restore(chunks_db)
+        };
+
+        let active_window_is_empty = active_window_db.new_iter().unwrap().next().is_none();
+        let active_window: ActiveWindow<H> = if active_window_is_empty {
+            ActiveWindow::default()
+        } else {
+            ActiveWindow::restore_from_database(active_window_db)
+        };
+
+        Self {
+            set_commitment: SetCommitment {
+                aocl,
+                swbf_inactive,
+                swbf_active: active_window,
+            },
+            chunks,
+        }
+    }
+
     /// Returns an authentication path for an element in the append-only commitment list
     pub fn get_aocl_authentication_path(
         &mut self,
@@ -230,6 +274,66 @@ mod archival_mutator_set_tests {
     use twenty_first::util_types::{blake3_wrapper, simple_hasher::Hasher};
 
     use super::*;
+
+    #[test]
+    fn new_or_restore_test() {
+        type Hasher = blake3::Hasher;
+        let hasher = Hasher::new();
+        let opt = rusty_leveldb::in_memory();
+        let chunks_db = DB::open("chunks", opt.clone()).unwrap();
+        let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
+        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
+        let active_window_db = DB::open("active_window", opt.clone()).unwrap();
+
+        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> =
+            ArchivalMutatorSet::new_or_restore(
+                aocl_mmr_db,
+                swbf_inactive_mmr_db,
+                chunks_db,
+                active_window_db,
+            );
+
+        let mut rng = thread_rng();
+        let item = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(rng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+        let randomness = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(rng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+
+        let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+        let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+        archival_mutator_set.add(&mut addition_record);
+        assert!(archival_mutator_set.verify(&item, &membership_proof));
+
+        let mut removal_record: RemovalRecord<Hasher> =
+            archival_mutator_set.drop(&item.into(), &membership_proof);
+        archival_mutator_set.remove(&mut removal_record);
+
+        // Let's store the active window back to the database and create
+        // a new archival object from the databases it contains and then check
+        // that this archival MS contains the same values
+        let active_window_db = DB::open("active_window", opt.clone()).unwrap();
+        let active_window_db = archival_mutator_set
+            .set_commitment
+            .swbf_active
+            .store_to_database(active_window_db);
+        drop(archival_mutator_set);
+        let chunks_db = DB::open("chunks", opt.clone()).unwrap();
+        let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
+        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
+        let mut archival_mutator_set = ArchivalMutatorSet::new_or_restore(
+            aocl_mmr_db,
+            swbf_inactive_mmr_db,
+            chunks_db,
+            active_window_db,
+        );
+        assert!(!archival_mutator_set.verify(&item, &membership_proof));
+    }
 
     #[test]
     fn archival_set_commitment_test() {

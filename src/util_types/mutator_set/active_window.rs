@@ -35,11 +35,11 @@ where
         self.bits[0..CHUNK_SIZE / BITS_PER_U32].try_into().unwrap()
     }
 
-    /// Populate an empty database with the values in this active window.
-    /// This is used to persist the state of an archival mutator set
+    /// Populate an database with the values in this active window.
+    /// This is used to persist the state of an archival mutator set.
     pub fn store_to_database(&self, db: DB) -> DB {
         let mut database_array: DatabaseArray<{ WINDOW_SIZE as u128 / BITS_PER_U32 as u128 }, u32> =
-            DatabaseArray::new(db);
+            DatabaseArray::restore(db);
         database_array.batch_set(
             &self
                 .bits
