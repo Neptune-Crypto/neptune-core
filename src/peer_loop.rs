@@ -649,6 +649,18 @@ impl PeerLoopHandler {
                 self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
             }
+            PeerMessage::Send(transactions) => {
+                info!(
+                    "`peer_loop` received following transactions from `peer`: {:?}",
+                    transactions
+                );
+
+                // relay to main
+                self.to_main_tx
+                    .send(PeerThreadToMain::Send(transactions))
+                    .await?;
+                Ok(false)
+            }
         }
     }
 
@@ -739,6 +751,12 @@ impl PeerLoopHandler {
                 if target_socket_addr == self.peer_address {
                     peer.send(PeerMessage::PeerListRequest).await?;
                 }
+                Ok(false)
+            }
+            MainToPeerThread::Send(txs) => {
+                debug!("Sending PeerMessage::Send");
+                peer.send(PeerMessage::Send(txs)).await?;
+                debug!("Sent PeerMessage::Send");
                 Ok(false)
             }
         }

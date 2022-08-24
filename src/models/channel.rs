@@ -7,10 +7,13 @@ use super::blockchain::{
     digest::Digest,
 };
 
+use crate::models::blockchain::simple::*;
+
 #[derive(Clone, Debug)]
 pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
+    Send(Vec<SignedSimpleTransaction>),
     // StopMining,
     // StartMining,
     // SetCoinbasePubkey,
@@ -31,6 +34,7 @@ pub enum MainToPeerThread {
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
     Disconnect(SocketAddr),                       // Disconnect the connection to a specific peer
+    Send(Vec<SignedSimpleTransaction>),
 }
 
 impl MainToPeerThread {
@@ -46,6 +50,7 @@ impl MainToPeerThread {
                 "make specific peer discovery req".to_string()
             }
             MainToPeerThread::Disconnect(_) => "disconnect".to_string(),
+            MainToPeerThread::Send(_) => "send".to_string(),
         }
     }
 }
@@ -57,6 +62,7 @@ pub enum PeerThreadToMain {
     AddPeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
+    Send(Vec<SignedSimpleTransaction>),
 }
 
 impl PeerThreadToMain {
@@ -69,6 +75,12 @@ impl PeerThreadToMain {
                 "remove peer max block height".to_string()
             }
             PeerThreadToMain::PeerDiscoveryAnswer(_) => "peer discovery answer".to_string(),
+            PeerThreadToMain::Send(_) => "send".to_string(),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum RPCServerToMain {
+    Send(Vec<SignedSimpleTransaction>),
 }

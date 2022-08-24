@@ -1,5 +1,8 @@
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::simple::*;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::State;
 use futures::executor;
@@ -7,6 +10,8 @@ use futures::future::{self, Ready};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::context;
+use twenty_first::amount::u32s::U32s;
+
 #[tarpc::service]
 pub trait RPC {
     /// Returns the current block height.
@@ -19,11 +24,14 @@ pub trait RPC {
     async fn clear_all_standings();
     // Clears standing for ip, whether connected or not.
     async fn clear_ip_standing(ip: IpAddr);
+    // Send coins.
+    async fn send(send_argument: String) -> bool;
 }
 #[derive(Clone)]
 pub struct NeptuneRPCServer {
     pub socket_address: SocketAddr,
     pub state: State,
+    pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 impl RPC for NeptuneRPCServer {
     type BlockHeightFut = Ready<BlockHeight>;
@@ -31,6 +39,8 @@ impl RPC for NeptuneRPCServer {
     type HeadFut = Ready<Digest>;
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
+    type SendFut = Ready<bool>;
+
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
         // let lookup_res = databases.latest_block_header.get(());
@@ -84,13 +94,54 @@ impl RPC for NeptuneRPCServer {
         executor::block_on(self.state.clear_ip_standing_in_database(ip));
         future::ready(())
     }
+    fn send(self, _ctx: context::Context, send_argument: String) -> Self::SendFut {
+        let wallet = SimpleWallet::new();
+
+        let span = tracing::debug_span!("Constructing transaction objects");
+        let _enter = span.enter();
+
+        tracing::debug!(?wallet.public_key);
+
+        // 1. Parse
+        let txs = tracing::debug_span!("Parsing TXSPEC")
+            .in_scope(|| serde_json::from_str::<TxSpec>(&send_argument))
+            .unwrap();
+
+        // 2. Build transaction objects.
+        // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
+        let transactions = txs
+            .iter()
+            .map(|tx| -> SignedSimpleTransaction {
+                let balance: Amount = wallet.get_balance();
+
+                let simple_transaction = UnsignedSimpleTransaction::new(
+                    wallet.get_all_utxos(),
+                    vec![
+                        Utxo::new(U32s::new([tx.amount, 0, 0, 0]), tx.recipient_address), // the requested transfer
+                        Utxo::new(U32s::new([balance - tx.amount, 0, 0, 0]), wallet.public_key), // transfer the remainder to ourself.
+                    ],
+                );
+
+                // 3. Sign
+                simple_transaction.sign(&wallet)
+            })
+            .collect::<Vec<_>>();
+        // 4. Send transaction message to main
+        let response = executor::block_on(
+            self.rpc_server_to_main_tx
+                .send(RPCServerToMain::Send(transactions)),
+        );
+
+        // 5. Send acknowledgement to client.
+        future::ready(response.is_ok())
+    }
 }
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
     use crate::{
         config_models::network::Network, models::peer::PeerSanctionReason,
-        rpc_server::NeptuneRPCServer, tests::shared::get_genesis_setup,
+        rpc_server::NeptuneRPCServer, tests::shared::get_genesis_setup, RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
     use std::{
@@ -162,15 +213,17 @@ mod rpc_server_tests {
             assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
 
             // Clear standing of #0
+            let (dummy_tx, _rx) =
+                tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
             let rpc_server = NeptuneRPCServer {
                 socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
                 state: state.clone(),
+                rpc_server_to_main_tx: dummy_tx,
             };
             rpc_server
                 .clear_ip_standing(context::current(), peer_address_0.ip())
                 .await;
         }
-
         // Verify expected resulting conditions in database
         {
             let peer_standing_0 = state
@@ -261,9 +314,11 @@ mod rpc_server_tests {
         }
 
         // Clear standing of both by clearing all standings
+        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
             state: state.clone(),
+            rpc_server_to_main_tx: dummy_tx.clone(),
         };
         rpc_server.clear_all_standings(context::current()).await;
 
