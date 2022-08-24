@@ -102,8 +102,6 @@ async fn make_devnet_block(
         stark_proof: vec![],
     };
 
-    debug!("Transactions: {:#?}", block_body.transactions);
-
     let zero = BFieldElement::ring_zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
     let new_pow_line = previous_block.header.proof_of_work_family + difficulty;

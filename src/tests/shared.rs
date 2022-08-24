@@ -39,7 +39,6 @@ use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::State;
 use crate::{
     config_models::{cli_args, network::Network},
-    initialize_databases,
     models::{
         blockchain::{
             block::{
@@ -94,7 +93,8 @@ pub fn databases(
 
     // The `initialize_databases` function call should create a new directory for the databases
     // meaning that all directories above this are also created.
-    let (block_dbs, peer_dbs) = initialize_databases(&database_dir)?;
+    let block_dbs = ArchivalState::initialize_block_databases(&database_dir)?;
+    let peer_dbs = ArchivalState::initialize_peer_databases(&database_dir)?;
 
     Ok((
         Arc::new(tokio::sync::Mutex::new(block_dbs)),
@@ -192,13 +192,16 @@ pub fn get_genesis_setup(
 
     let (block, _, _) = get_dummy_latest_block(None);
     let (block_databases, peer_databases, root_data_dir_path) = databases(network)?;
+    let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+    let ams = Arc::new(tokio::sync::Mutex::new(ams));
+    let archival_state = ArchivalState::new(block_databases, ams, root_data_dir_path);
     let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
     let light_state: LightState = LightState::new(block.header);
     let blockchain_state = BlockchainState {
         light_state,
-        archival_state: Some(ArchivalState::new(block_databases, root_data_dir_path)),
+        archival_state: Some(archival_state),
     };
     let state = State {
         chain: blockchain_state,

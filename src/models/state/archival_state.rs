@@ -1,11 +1,14 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
+use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use num_traits::Zero;
+use rusty_leveldb::DB;
 use std::{
     fs,
     io::{Seek, SeekFrom, Write},
+    net::IpAddr,
     ops::DerefMut,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::sync::Mutex as TokioMutex;
@@ -14,7 +17,7 @@ use twenty_first::amount::u32s::U32s;
 
 use super::shared::{get_block_file_path, new_block_file_is_needed};
 use crate::{
-    database::leveldb::LevelDB,
+    database::{leveldb::LevelDB, rusty::RustyLevelDB},
     models::{
         blockchain::{
             block::{
@@ -23,15 +26,26 @@ use crate::{
                 Block,
             },
             digest::{Digest, Hashable},
+            shared::Hash,
         },
         database::{
             BlockDatabases, BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord,
-            FileRecord, LastFileRecord,
+            FileRecord, LastFileRecord, PeerDatabases,
         },
+        peer::PeerStanding,
     },
 };
 
-#[derive(Clone, Debug)]
+const BLOCK_INDEX_DB_NAME: &str = "block_index";
+const BANNED_IPS_DB_NAME: &str = "banned_ips";
+const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
+const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
+const MS_AOCL_MMR_DB_NAME: &str = "aocl_mmr";
+const MS_SWBF_INACTIVE_MMR_DB_NAME: &str = "swbfi_mmr";
+const MS_SWBF_ACTIVE_DB_NAME: &str = "swbfa_mmr";
+const MS_CHUNKS_DB_NAME: &str = "chunks";
+
+#[derive(Clone)]
 pub struct ArchivalState {
     // Since this is a database, we use the tokio Mutex here.
     pub block_databases: Arc<TokioMutex<BlockDatabases>>,
@@ -41,17 +55,121 @@ pub struct ArchivalState {
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker thread.
     genesis_block: Box<Block>,
+
+    pub archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
+}
+
+impl ArchivalState {
+    // TODO: This function belongs in NetworkState
+    /// Create databases for peer standings
+    pub fn initialize_peer_databases(root_path: &Path) -> Result<PeerDatabases> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+
+        // Create root directory for all databases if it does not exist
+        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+            panic!(
+                "Failed to create database directory in {}",
+                path.to_string_lossy()
+            )
+        });
+
+        let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
+        Ok(PeerDatabases {
+            peer_standings: banned_peers,
+        })
+    }
+
+    /// Create databases for block persistence
+    pub fn initialize_block_databases(root_path: &Path) -> Result<BlockDatabases> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+
+        // Create root directory for all databases if it does not exist
+        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+            panic!(
+                "Failed to create database directory in {}",
+                path.to_string_lossy()
+            )
+        });
+
+        let block_index =
+            RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(&path, BLOCK_INDEX_DB_NAME)?;
+
+        Ok(BlockDatabases { block_index })
+    }
+
+    /// Return the database for active window. This should not be public.
+    /// This should be fetched when constructing the mutator set, and when persisting the state
+    /// of the active window.
+    fn active_window_db(ms_db_path: &Path) -> Result<DB> {
+        let mut path = ms_db_path.to_owned();
+        path.push(MS_SWBF_ACTIVE_DB_NAME);
+        Ok(DB::open(path, rusty_leveldb::Options::default())?)
+    }
+
+    /// Returns archival mutator set and database for active window
+    pub fn initialize_mutator_set(root_path: &Path) -> Result<ArchivalMutatorSet<Hash>> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+        path.push(MUTATOR_SET_DIRECTORY_NAME);
+
+        // Create root directory for all databases if it does not exist
+        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+            panic!(
+                "Failed to create database directory in {}",
+                path.to_string_lossy()
+            )
+        });
+
+        let options = rusty_leveldb::Options::default();
+
+        let mut aocl_db_path = path.clone();
+        aocl_db_path.push(MS_AOCL_MMR_DB_NAME);
+        let aocl_mmr_db = DB::open(aocl_db_path, options.clone())?;
+
+        let mut swbfi_db_path = path.clone();
+        swbfi_db_path.push(MS_SWBF_INACTIVE_MMR_DB_NAME);
+        let swbf_inactive_mmr_db = DB::open(swbfi_db_path, options.clone())?;
+
+        let mut chunks_db_path = path.clone();
+        chunks_db_path.push(MS_CHUNKS_DB_NAME);
+        let chunks_db = DB::open(chunks_db_path, options)?;
+
+        let active_window_db = Self::active_window_db(&path)?;
+
+        let archival_set: ArchivalMutatorSet<Hash> = ArchivalMutatorSet::new_or_restore(
+            aocl_mmr_db,
+            swbf_inactive_mmr_db,
+            chunks_db,
+            active_window_db,
+        );
+
+        Ok(archival_set)
+    }
+}
+
+impl core::fmt::Debug for ArchivalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArchivalState")
+            .field("block_databases", &self.block_databases)
+            .field("root_data_dir", &self.root_data_dir)
+            .field("genesis_block", &self.genesis_block)
+            .finish()
+    }
 }
 
 impl ArchivalState {
     pub fn new(
         initial_block_databases: Arc<TokioMutex<BlockDatabases>>,
+        archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
         root_data_dir: PathBuf,
     ) -> Self {
         Self {
             block_databases: initial_block_databases,
             root_data_dir,
             genesis_block: Box::new(Block::genesis_block()),
+            archival_mutator_set,
         }
     }
 
@@ -494,13 +612,19 @@ mod archival_state_tests {
         // Ensure that the archival state can be initialized without overflowing the stack
         tokio::spawn(async move {
             let (block_databases_0, _, data_dir_0) = databases(Network::Main).unwrap();
-            let archival_state0 = ArchivalState::new(block_databases_0, data_dir_0);
+            let ams0 = ArchivalState::initialize_mutator_set(&data_dir_0).unwrap();
+            let ams0 = Arc::new(TokioMutex::new(ams0));
+            let archival_state0 = ArchivalState::new(block_databases_0, ams0, data_dir_0);
 
             let (block_databases_1, _, data_dir_1) = databases(Network::Main).unwrap();
-            let _archival_state1 = ArchivalState::new(block_databases_1, data_dir_1);
+            let ams1 = ArchivalState::initialize_mutator_set(&data_dir_1).unwrap();
+            let ams1 = Arc::new(TokioMutex::new(ams1));
+            let _archival_state1 = ArchivalState::new(block_databases_1, ams1, data_dir_1);
 
             let (block_databases_2, _, data_dir_2) = databases(Network::Main).unwrap();
-            let archival_state2 = ArchivalState::new(block_databases_2, data_dir_2);
+            let ams2 = ArchivalState::initialize_mutator_set(&data_dir_2).unwrap();
+            let ams2 = Arc::new(TokioMutex::new(ams2));
+            let archival_state2 = ArchivalState::new(block_databases_2, ams2, data_dir_2);
 
             let b = Block::genesis_block();
             let blockchain_state = BlockchainState {
@@ -536,7 +660,9 @@ mod archival_state_tests {
     async fn get_latest_block_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
         println!("root_data_dir_path = {:?}", root_data_dir_path);
-        let archival_state = ArchivalState::new(block_databases.clone(), root_data_dir_path);
+        let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let archival_state = ArchivalState::new(block_databases.clone(), ams, root_data_dir_path);
         let mut db_lock_0 = block_databases.lock().await;
         let ret = archival_state.get_latest_block_from_disk(&mut db_lock_0)?;
         assert!(
@@ -585,7 +711,9 @@ mod archival_state_tests {
     #[tokio::test]
     async fn get_block_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases.clone(), root_data_dir_path);
+        let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let archival_state = ArchivalState::new(block_databases.clone(), ams, root_data_dir_path);
         let genesis = *archival_state.genesis_block.clone();
         let mock_block_1 = make_mock_block(&genesis.clone(), None);
 
@@ -648,7 +776,9 @@ mod archival_state_tests {
     #[tokio::test]
     async fn block_belongs_to_canonical_chain_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let archival_state = ArchivalState::new(block_databases.clone(), ams, root_data_dir_path);
         let genesis = *archival_state.genesis_block.clone();
         assert!(
             archival_state
@@ -920,7 +1050,9 @@ mod archival_state_tests {
     #[tokio::test]
     async fn digest_of_ancestors_panic_test() {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let archival_state = ArchivalState::new(block_databases.clone(), ams, root_data_dir_path);
         let genesis = archival_state.genesis_block.clone();
         archival_state
             .get_ancestor_block_digests(genesis.header.prev_block_digest, 10)
@@ -931,7 +1063,9 @@ mod archival_state_tests {
     #[tokio::test]
     async fn digest_of_ancestors_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let archival_state = ArchivalState::new(block_databases.clone(), ams, root_data_dir_path);
         let genesis = *archival_state.genesis_block.clone();
 
         assert!(archival_state
@@ -999,7 +1133,9 @@ mod archival_state_tests {
     #[tokio::test]
     async fn write_block_db_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let archival_state = ArchivalState::new(block_databases.clone(), ams, root_data_dir_path);
         let genesis = *archival_state.genesis_block.clone();
         let mock_block_1 = make_mock_block(&genesis.clone(), None);
         let mut db_lock = archival_state.block_databases.lock().await;
