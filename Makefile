@@ -70,6 +70,9 @@ all: lint build test bench-no-run
 help:
 	@echo "usage: make [debug=1]"
 
+restart:
+	@rm -rf ~/.local/share/neptune-integration-test
+
 clean:
 	@echo "      ._.  ██    ██  ███  ██ ██ █████    ████ ██    █████  ███  ██  ██"
 	@echo "    c/-|   ███  ███ ██ ██ ████  ██      ██    ██    ██    ██ ██ ███ ██"
@@ -77,6 +80,7 @@ clean:
 	@echo "   /  /|   ██ ██ ██ ██ ██ ████  ██      ██    ██    ██    ██ ██ ██ ███"
 	@echo " mmm ' '   ██    ██ ██ ██ ██ ██ █████    ████ █████ █████ ██ ██ ██  ██"
 	@rm -rf target
+	cargo clean
 
 stats:
 	git shortlog --numbered --summary --all --email # --committer
