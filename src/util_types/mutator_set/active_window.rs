@@ -9,7 +9,7 @@ use twenty_first::util_types::{
 use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
 use crate::util_types::mutator_set::boxed_big_array::BoxedBigArray;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveWindow<H: simple_hasher::Hasher> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     // The byte array is boxed to prevent stack-overflows when deserializing this data
