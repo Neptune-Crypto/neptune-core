@@ -30,8 +30,8 @@ where
     Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
     H: Hasher,
 {
-    set_commitment: SetCommitment<H, ArchivalMmr<H>>,
-    chunks: DatabaseVector<Chunk>,
+    pub set_commitment: SetCommitment<H, ArchivalMmr<H>>,
+    pub chunks: DatabaseVector<Chunk>,
 }
 
 impl<H> MutatorSet<H> for ArchivalMutatorSet<H>
