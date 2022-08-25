@@ -1,3 +1,4 @@
+.PHONY: clean help stats bench all install run test build doc check format bench-no-run pretty-log
 
 prog :=neptune-core
 
@@ -76,3 +77,9 @@ clean:
 	@echo "   /  /|   ██ ██ ██ ██ ██ ████  ██      ██    ██    ██    ██ ██ ██ ███"
 	@echo " mmm ' '   ██    ██ ██ ██ ██ ██ █████    ████ █████ █████ ██ ██ ██  ██"
 	@rm -rf target
+
+stats:
+	git shortlog --numbered --summary --all --email # --committer
+
+pretty-log:
+	git log --pretty=" %C(brightblack)%>(16)%ch  %C(auto,green)%>(11)%cN %C(brightmagenta)%G? %C(blue)%h %C(auto)%d %<|(118,trunc)%s%C(reset)" --date=relative --topo-order -n 52 --reverse
