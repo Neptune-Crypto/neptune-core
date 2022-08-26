@@ -16,7 +16,7 @@ version = "1"
 
 [dependencies]
 twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "ead401801a7562ec92a1d612119281695c7c2f1e" }
-mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", rev = "2c2fdd1bbd375f3d1b01c66a8ffe8bcaf4e33017" }
+mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", rev = "4e19471c1dac944e71dfcde9be57161c28da51fe" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"

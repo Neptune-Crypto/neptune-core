@@ -1,6 +1,9 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
-use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+use mutator_set_tf::util_types::mutator_set::{
+    addition_record::AdditionRecord, archival_mutator_set::ArchivalMutatorSet,
+    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
+};
 use num_traits::Zero;
 use rusty_leveldb::DB;
 use std::{
@@ -23,6 +26,7 @@ use crate::{
             block::{
                 block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE},
                 block_height::BlockHeight,
+                mutator_set_update::MutatorSetUpdate,
                 Block,
             },
             digest::{Digest, Hashable},
@@ -102,8 +106,10 @@ impl ArchivalState {
     /// Return the database for active window. This should not be public.
     /// This should be fetched when constructing the mutator set, and when persisting the state
     /// of the active window.
-    fn active_window_db(ms_db_path: &Path) -> Result<DB> {
-        let mut path = ms_db_path.to_owned();
+    fn active_window_db(root_path: &Path) -> Result<DB> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+        path.push(MUTATOR_SET_DIRECTORY_NAME);
         path.push(MS_SWBF_ACTIVE_DB_NAME);
         Ok(DB::open(path, rusty_leveldb::Options::default())?)
     }
@@ -136,7 +142,7 @@ impl ArchivalState {
         chunks_db_path.push(MS_CHUNKS_DB_NAME);
         let chunks_db = DB::open(chunks_db_path, options)?;
 
-        let active_window_db = Self::active_window_db(&path)?;
+        let active_window_db = Self::active_window_db(root_path)?;
 
         let archival_set: ArchivalMutatorSet<Hash> = ArchivalMutatorSet::new_or_restore(
             aocl_mmr_db,
@@ -591,18 +597,53 @@ impl ArchivalState {
 
         ret
     }
+
+    pub fn update_mutator_set(
+        &self,
+        ams_lock: &mut tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>>,
+        mutator_set_update: &MutatorSetUpdate,
+    ) -> Result<()> {
+        let mut addition_records: Vec<AdditionRecord<Hash>> = mutator_set_update.additions.clone();
+        let mut removal_records: Vec<RemovalRecord<Hash>> = mutator_set_update.removals.clone();
+        while let Some(mut addition_record) = addition_records.pop() {
+            ams_lock.add(&mut addition_record);
+
+            // TODO: Batch update all removal records from addition
+        }
+
+        while let Some(removal_record) = removal_records.pop() {
+            ams_lock.remove(&removal_record);
+
+            // TODO: Batch update all removal records from removal
+        }
+
+        // Store active window onto disk for persistence
+        let active_window_db = Self::active_window_db(&self.root_data_dir)?;
+        let _active_window_db = ams_lock
+            .set_commitment
+            .swbf_active
+            .store_to_database(active_window_db);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod archival_state_tests {
     use super::*;
 
+    use mutator_set_tf::util_types::mutator_set::shared::{BITS_PER_U32, WINDOW_SIZE};
     use rand::{thread_rng, RngCore};
+    use rusty_leveldb::LdbIterator;
     use tracing_test::traced_test;
+    use twenty_first::shared_math::b_field_element::BFieldElement;
 
     use crate::{
         config_models::network::Network,
-        models::state::{blockchain_state::BlockchainState, light_state::LightState},
+        models::{
+            blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
+            state::{blockchain_state::BlockchainState, light_state::LightState},
+        },
         tests::shared::{add_block_to_archival_state, databases, make_mock_block},
     };
 
@@ -651,6 +692,86 @@ mod archival_state_tests {
             drop(lock0);
         })
         .await?;
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn update_mutator_set_db_write_test() -> Result<()> {
+        // Verify that `update_mutator_set` writes the active window back to disk.
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        println!("root_data_dir_path = {:?}", root_data_dir_path);
+        let mut ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let item: Digest = Digest::new([BFieldElement::new(17); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let randomness: Digest =
+            Digest::new([BFieldElement::new(133337); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let addition_record = ams.commit(&item.into(), &randomness.into());
+        let mutator_set_update_add = MutatorSetUpdate::new(vec![], vec![addition_record]);
+        let ams = Arc::new(TokioMutex::new(ams));
+        let archival_state =
+            ArchivalState::new(block_databases.clone(), ams, root_data_dir_path.clone());
+        let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+        {
+            // Before updating the AMS, the active window DB must be empty.
+            let mut active_window_db_before: DB =
+                ArchivalState::active_window_db(&root_data_dir_path)?;
+            assert!(active_window_db_before.new_iter().unwrap().next().is_none());
+        }
+
+        let membership_proof = ams_lock.prove(&item.into(), &randomness.into(), true);
+        archival_state.update_mutator_set(&mut ams_lock, &mutator_set_update_add)?;
+
+        {
+            // After running the AMS updater, the active window DB must be written back to disk
+            // but all the values in the active window must be zero since no removal record
+            // has been added yet.
+            let mut active_window_db_after_add: DB =
+                ArchivalState::active_window_db(&root_data_dir_path)?;
+            assert!(active_window_db_after_add
+                .new_iter()
+                .unwrap()
+                .next()
+                .is_some());
+            let mut db_iter = active_window_db_after_add.new_iter().unwrap();
+            let mut i = 0;
+            while let Some((_key_bytes, value_bytes)) = db_iter.next() {
+                assert!(value_bytes.iter().all(|x| x.is_zero()));
+                i += 1;
+            }
+
+            assert_eq!(WINDOW_SIZE / BITS_PER_U32, i);
+        }
+
+        // Remove an element from the mutator set, verify that the active window DB
+        // is updated.
+        let removal_record = ams_lock.deref_mut().drop(&item.into(), &membership_proof);
+        let mutator_set_update_remove = MutatorSetUpdate::new(vec![removal_record], vec![]);
+        archival_state.update_mutator_set(&mut ams_lock, &mutator_set_update_remove)?;
+
+        {
+            // After running the MS updater with a removal record, the active window
+            // that is stored on disk must contain non-zero values, i.e. some of the
+            // Bloom filter bits must be flipped.
+            let mut active_window_db_after_remove: DB =
+                ArchivalState::active_window_db(&root_data_dir_path)?;
+            assert!(active_window_db_after_remove
+                .new_iter()
+                .unwrap()
+                .next()
+                .is_some());
+            let mut db_iter = active_window_db_after_remove.new_iter().unwrap();
+            let mut i = 0;
+            let mut non_zero_value_found = false;
+            while let Some((_key_bytes, value_bytes)) = db_iter.next() {
+                non_zero_value_found =
+                    non_zero_value_found || value_bytes.iter().any(|byte| !byte.is_zero());
+                i += 1;
+            }
+
+            assert!(non_zero_value_found);
+            assert_eq!(WINDOW_SIZE / BITS_PER_U32, i);
+        }
 
         Ok(())
     }

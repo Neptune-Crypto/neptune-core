@@ -5,7 +5,9 @@ use crate::models::blockchain::digest::Hashable;
 use crate::models::database::BlockDatabases;
 use crate::models::peer::{HandshakeData, PeerInfo, PeerSynchronizationState};
 use crate::models::state::State;
+use crate::Hash;
 use anyhow::Result;
+use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
@@ -304,6 +306,15 @@ impl MainLoopHandler {
                     .block_databases
                     .lock()
                     .await;
+                let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                    .global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .archival_mutator_set
+                    .lock()
+                    .await;
                 let mut light_state_locked = self
                     .global_state
                     .chain
@@ -321,6 +332,15 @@ impl MainLoopHandler {
                         &mut db_lock,
                         Some(light_state_locked.proof_of_work_family),
                     )?;
+
+                // update the mutator set with the UTXOs from this block
+                self.global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .update_mutator_set(&mut ams_lock, &block.body.mutator_set_update)?;
+
                 *light_state_locked = block.header.clone();
             }
         }
@@ -347,6 +367,15 @@ impl MainLoopHandler {
                         .as_ref()
                         .unwrap()
                         .block_databases
+                        .lock()
+                        .await;
+                    let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .archival_mutator_set
                         .lock()
                         .await;
                     let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = self
@@ -390,7 +419,6 @@ impl MainLoopHandler {
                             .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                     }
 
-                    // Store blocks in database
                     for block in blocks {
                         debug!("Storing block {:?} in database", block.hash);
                         self.global_state
@@ -399,10 +427,18 @@ impl MainLoopHandler {
                             .as_ref()
                             .unwrap()
                             .write_block(
-                                Box::new(block),
+                                Box::new(block.clone()),
                                 &mut db_lock,
                                 Some(previous_block_header.proof_of_work_family),
                             )?;
+
+                        // update the mutator set with the UTXOs from this block
+                        self.global_state
+                            .chain
+                            .archival_state
+                            .as_ref()
+                            .unwrap()
+                            .update_mutator_set(&mut ams_lock, &block.body.mutator_set_update)?;
                     }
 
                     // Update information about latest header
