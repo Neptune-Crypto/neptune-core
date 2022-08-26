@@ -23,11 +23,14 @@ use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
 use config_models::network::Network;
+use database::rusty::RustyLevelDB;
 use futures::future;
 use futures::StreamExt;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::blockchain::wallet::Wallet;
+use models::database::MsBlockSyncKey;
+use models::database::MsBlockSyncValue;
 use models::database::{BlockDatabases, PeerDatabases};
 use models::peer::PeerInfo;
 use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
@@ -171,14 +174,18 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         Arc::new(tokio::sync::Mutex::new(block_databases));
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
         Arc::new(tokio::sync::Mutex::new(peer_databases));
-    let archival_mutator_set: ArchivalMutatorSet<Hash> =
-        ArchivalState::initialize_mutator_set(root_data_dir_path).unwrap();
+    let (archival_mutator_set, ms_block_sync_db): (
+        ArchivalMutatorSet<Hash>,
+        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+    ) = ArchivalState::initialize_mutator_set(root_data_dir_path).unwrap();
     let archival_mutator_set: Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>> =
         Arc::new(tokio::sync::Mutex::new(archival_mutator_set));
+    let ms_block_sync_db = Arc::new(tokio::sync::Mutex::new(ms_block_sync_db));
     let archival_state = ArchivalState::new(
         block_databases,
         archival_mutator_set,
         root_data_dir_path_buf,
+        ms_block_sync_db,
     );
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.

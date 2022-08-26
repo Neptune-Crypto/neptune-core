@@ -192,9 +192,11 @@ pub fn get_genesis_setup(
 
     let (block, _, _) = get_dummy_latest_block(None);
     let (block_databases, peer_databases, root_data_dir_path) = databases(network)?;
-    let ams = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
     let ams = Arc::new(tokio::sync::Mutex::new(ams));
-    let archival_state = ArchivalState::new(block_databases, ams, root_data_dir_path);
+    let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
+    let archival_state =
+        ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync);
     let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
@@ -446,4 +448,29 @@ pub fn make_mock_block(
     };
 
     Block::new(block_header, block_body)
+}
+
+// pub fn make_random_digest() -> Digest {
+//     let mut rng = rand::thread_rng();
+//     let elements: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
+//         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng)
+//             .try_into()
+//             .unwrap();
+//     Digest::new(elements)
+// }
+
+pub fn make_archival_state() -> ArchivalState {
+    let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+    println!("root_data_dir_path = {:?}", root_data_dir_path);
+
+    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+    let ams = Arc::new(tokio::sync::Mutex::new(ams));
+    let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
+
+    ArchivalState::new(
+        block_databases.clone(),
+        ams,
+        root_data_dir_path.clone(),
+        ms_block_sync,
+    )
 }

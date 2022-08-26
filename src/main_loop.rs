@@ -1,8 +1,9 @@
 use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
+use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::Hashable;
-use crate::models::database::BlockDatabases;
+use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
 use crate::models::peer::{HandshakeData, PeerInfo, PeerSynchronizationState};
 use crate::models::state::State;
 use crate::Hash;
@@ -315,6 +316,17 @@ impl MainLoopHandler {
                     .archival_mutator_set
                     .lock()
                     .await;
+                let mut ms_block_sync_lock: tokio::sync::MutexGuard<
+                    RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+                > = self
+                    .global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .ms_block_sync_db
+                    .lock()
+                    .await;
                 let mut light_state_locked = self
                     .global_state
                     .chain
@@ -339,7 +351,7 @@ impl MainLoopHandler {
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .update_mutator_set(&mut ams_lock, &block.body.mutator_set_update)?;
+                    .update_mutator_set(&mut ams_lock, &mut ms_block_sync_lock, &block)?;
 
                 *light_state_locked = block.header.clone();
             }
@@ -376,6 +388,17 @@ impl MainLoopHandler {
                         .as_ref()
                         .unwrap()
                         .archival_mutator_set
+                        .lock()
+                        .await;
+                    let mut ms_block_sync_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+                    > = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .ms_block_sync_db
                         .lock()
                         .await;
                     let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = self
@@ -438,7 +461,7 @@ impl MainLoopHandler {
                             .archival_state
                             .as_ref()
                             .unwrap()
-                            .update_mutator_set(&mut ams_lock, &block.body.mutator_set_update)?;
+                            .update_mutator_set(&mut ams_lock, &mut ms_block_sync_lock, &block)?;
                     }
 
                     // Update information about latest header
