@@ -6,7 +6,6 @@ use crate::models::blockchain::block::*;
 use crate::models::blockchain::digest::ordered_digest::*;
 use crate::models::blockchain::digest::*;
 use crate::models::blockchain::shared::*;
-use crate::models::blockchain::simple::*;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
@@ -37,7 +36,7 @@ async fn make_devnet_block(
     sender: oneshot::Sender<Block>,
     public_key: secp256k1::PublicKey,
     state: State,
-    incoming_simple_transactions: Vec<SignedSimpleTransaction>,
+    incoming_transactions: Vec<Transaction>,
 ) {
     let next_block_height: BlockHeight = previous_block.header.height.next();
     let coinbase_utxo = Utxo {
@@ -61,24 +60,6 @@ async fn make_devnet_block(
         fee: U32s::zero(),
         timestamp,
     };
-
-    let incoming_transactions = incoming_simple_transactions
-        .iter()
-        .map(|stx: &SignedSimpleTransaction| -> Transaction {
-            Transaction {
-                inputs: vec![],
-                outputs: stx
-                    .tx
-                    .outputs
-                    .iter()
-                    .map(|utxo| (utxo.clone(), output_randomness.clone().into()))
-                    .collect(),
-                public_scripts: vec![],
-                fee: U32s::zero(),
-                timestamp,
-            }
-        })
-        .collect();
 
     // For now, we just mine blocks with only the coinbase transaction. Therefore, the
     // mutator set update structure only contains an addition record, and no removal
@@ -210,7 +191,7 @@ pub async fn mock_regtest_mine(
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
-                    MainToMiner::Send(incoming_txs) => {
+                    MainToMiner::NewTransactions(incoming_txs) => {
                         debug!("Miner thread received incoming transactions from main: {:?}", incoming_txs);
                         incoming_transactions_tmp = incoming_txs
                     },
