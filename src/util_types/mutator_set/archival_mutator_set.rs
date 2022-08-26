@@ -89,11 +89,14 @@ where
         }
     }
 
-    fn remove(&mut self, removal_record: &RemovalRecord<H>) {
-        let new_chunks: HashMap<u128, Chunk> = self.set_commitment.remove_helper(removal_record);
+    fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>> {
+        let (new_chunks, diff_indices): (HashMap<u128, Chunk>, Vec<u128>) =
+            self.set_commitment.remove_helper(removal_record);
         for (chunk_index, chunk) in new_chunks {
             self.chunks.set(chunk_index, chunk);
         }
+
+        Some(diff_indices)
     }
 
     fn get_commitment(&mut self) -> <H as Hasher>::Digest {
@@ -265,6 +268,23 @@ where
             cached_bits: Some(bits),
         })
     }
+
+    /// Retrieves the Bloom filter bit with a given `bit_index` in
+    /// either the active window, or in the relevant chunk.
+    pub fn get_bloom_filter_bit(&mut self, bit_index: u128) -> bool {
+        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let active_window_start = batch_index * CHUNK_SIZE as u128;
+
+        if bit_index >= active_window_start {
+            let relative_index = (bit_index - active_window_start) as usize;
+            self.set_commitment.swbf_active.get_bit(relative_index)
+        } else {
+            let chunk_index = bit_index / CHUNK_SIZE as u128;
+            let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
+            let relevant_chunk = self.chunks.get(chunk_index);
+            relevant_chunk.get_bit(relative_index)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -312,7 +332,12 @@ mod archival_mutator_set_tests {
 
         let mut removal_record: RemovalRecord<Hasher> =
             archival_mutator_set.drop(&item.into(), &membership_proof);
-        archival_mutator_set.remove(&mut removal_record);
+        let diff_bits: Vec<u128> = archival_mutator_set.remove(&mut removal_record).unwrap();
+        assert_eq!(
+            removal_record.bit_indices.to_vec(),
+            diff_bits,
+            "diff bits must be equal to bit indices when Bloom filter is empty"
+        );
 
         // Let's store the active window back to the database and create
         // a new archival object from the databases it contains and then check

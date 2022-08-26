@@ -11,7 +11,7 @@ where
 {
     /**
      * prove
-     * Generates a membership proof that will the valid when the item
+     * Generates a membership proof that will be valid when the item
      * is added to the mutator set.
      */
     fn prove(
@@ -50,7 +50,9 @@ where
     /// remove
     /// Updates the mutator set so as to remove the item determined by
     /// its removal record.
-    fn remove(&mut self, removal_record: &RemovalRecord<H>);
+    /// Optionally returns a list of indices into the Bloom filter that
+    /// were flipped from 0 to 1 by the `RemovalRecord`.
+    fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>>;
 
     /// get_commitment
     /// Return a commitment to the entire mutator set

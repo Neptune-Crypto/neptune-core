@@ -18,7 +18,7 @@ where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
 {
-    let opt = rusty_leveldb::in_memory();
+    let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
     let chunks_db = DB::open("chunks", opt.clone()).unwrap();
     let aocl_db = DB::open("aocl", opt.clone()).unwrap();
     let swbf_db = DB::open("swbf", opt).unwrap();
