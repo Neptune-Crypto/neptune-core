@@ -165,7 +165,8 @@ where
 
         // add to list
         let item_index = self.aocl.count_leaves();
-        self.aocl.append(addition_record.commitment.to_owned()); // ignore auth path
+        self.aocl
+            .append(addition_record.canonical_commitment.to_owned()); // ignore auth path
 
         if !Self::window_slides(item_index) {
             return None;

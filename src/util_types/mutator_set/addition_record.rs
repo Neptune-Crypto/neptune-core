@@ -7,7 +7,7 @@ use twenty_first::util_types::{
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AdditionRecord<H: simple_hasher::Hasher> {
-    pub commitment: H::Digest,
+    pub canonical_commitment: H::Digest,
 
     // Although the mutator set is defined in both an accumulator and an archival version,
     // this function only accepts an accumulator MMR here, since we don't want to copy the
@@ -20,9 +20,9 @@ where
     u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
     H: simple_hasher::Hasher,
 {
-    pub fn new(commitment: H::Digest, aocl_snapshot: MmrAccumulator<H>) -> Self {
+    pub fn new(canonical_commitment: H::Digest, aocl_snapshot: MmrAccumulator<H>) -> Self {
         Self {
-            commitment,
+            canonical_commitment,
             aocl_snapshot,
         }
     }
@@ -34,7 +34,7 @@ where
 
     pub fn hash(&mut self) -> H::Digest {
         let mmr_digest = self.aocl_snapshot.bag_peaks();
-        H::new().hash_pair(&self.commitment, &mmr_digest)
+        H::new().hash_pair(&self.canonical_commitment, &mmr_digest)
     }
 }
 
@@ -133,7 +133,10 @@ mod addition_record_tests {
             msa.commit(&1492u128.to_digest(), &1522u128.to_digest());
         let json = serde_json::to_string(&addition_record).unwrap();
         let mut s_back = serde_json::from_str::<AdditionRecord<Hasher>>(&json).unwrap();
-        assert_eq!(addition_record.commitment, s_back.commitment);
+        assert_eq!(
+            addition_record.canonical_commitment,
+            s_back.canonical_commitment
+        );
         assert!(addition_record.has_matching_aocl(&mut s_back.aocl_snapshot));
     }
 }
