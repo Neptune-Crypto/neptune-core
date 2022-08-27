@@ -17,7 +17,7 @@ default-features = false
 features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "95a385cec47706edc66fcddf79780b5511699844" }
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", branch = "reversible-archival-mmrs" }
 blake3 = "1"
 itertools = "0"
 rand = "0"

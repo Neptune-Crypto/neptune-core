@@ -142,13 +142,17 @@ where
      * Determine if the window slides before absorbing an item,
      * given the index of the to-be-added item.
      */
-    pub fn window_slides(index: u128) -> bool {
-        index != 0 && index % BATCH_SIZE as u128 == 0
+    pub fn window_slides(added_index: u128) -> bool {
+        added_index != 0 && added_index % BATCH_SIZE as u128 == 0
 
         // example cases:
         //  - index == 0 we don't care about
         //  - index == 1 does not generate a slide
         //  - index == n * BATCH_SIZE generates a slide for any n
+    }
+
+    pub fn window_slides_back(removed_index: u128) -> bool {
+        Self::window_slides(removed_index)
     }
 
     /// Helper function. Like `add` but also returns the chunk that was added to the inactive SWBF

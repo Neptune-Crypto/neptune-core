@@ -269,6 +269,34 @@ where
         })
     }
 
+    pub fn revert_remove(&mut self, diff_indices: Vec<u128>) {
+        for bit_index in diff_indices {
+            assert!(
+                self.unset_bloom_filter_bit(bit_index),
+                "Bloom filter bit must be set when reverting remove()"
+            );
+        }
+    }
+
+    pub fn revert_add(&mut self, addition_record: &AdditionRecord<H>) {
+        let removed_add_index = self.set_commitment.aocl.count_leaves() - 1;
+
+        // 1. Remove something from AOCL
+        let digest = self.set_commitment.aocl.remove_last_leaf().unwrap();
+        assert_eq!(addition_record.canonical_commitment, digest);
+
+        // 2. Every 10th time, shrink bloom filter by moving a chunk back into active window
+        if !SetCommitment::<H, ArchivalMmr<H>>::window_slides_back(removed_add_index) {
+            return;
+        }
+
+        // Remove a chunk from inactive window
+        let _digest = self.set_commitment.swbf_inactive.remove_last_leaf();
+        let _last_inactive_chunk = self.chunks.pop().unwrap();
+
+        // Slide active window back by putting `last_inactive_chunk` back
+    }
+
     /// Retrieves the Bloom filter bit with a given `bit_index` in
     /// either the active window, or in the relevant chunk.
     pub fn get_bloom_filter_bit(&mut self, bit_index: u128) -> bool {
@@ -283,6 +311,32 @@ where
             let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
             let relevant_chunk = self.chunks.get(chunk_index);
             relevant_chunk.get_bit(relative_index)
+        }
+    }
+
+    /// Unsets the Bloom filter bit with a given `bit_index` in
+    /// either the active window, or in the relevant chunk.
+    ///
+    /// Returns
+    /// - `true` if the bit was flipped from 1 to 0,
+    /// - `false` if the bit was already unset (0).
+    pub fn unset_bloom_filter_bit(&mut self, bit_index: u128) -> bool {
+        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let active_window_start = batch_index * CHUNK_SIZE as u128;
+
+        if bit_index >= active_window_start {
+            let relative_index = (bit_index - active_window_start) as usize;
+            let was_set = self.set_commitment.swbf_active.get_bit(relative_index);
+            self.set_commitment.swbf_active.unset_bit(relative_index);
+            was_set
+        } else {
+            let chunk_index = bit_index / CHUNK_SIZE as u128;
+            let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
+            let mut relevant_chunk = self.chunks.get(chunk_index);
+            let was_set = relevant_chunk.get_bit(relative_index);
+            relevant_chunk.unset_bit(relative_index);
+            self.chunks.set(chunk_index, relevant_chunk);
+            was_set
         }
     }
 }
