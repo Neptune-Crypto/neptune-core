@@ -275,9 +275,10 @@ where
     ///
     /// Fails if attempting to unset a bit that wasn't set.
     pub fn revert_remove(&mut self, diff_indices: Vec<u128>) {
+        let hasher = H::new();
         for bit_index in diff_indices {
             assert!(
-                self.unset_bloom_filter_bit(bit_index),
+                self.unset_bloom_filter_bit(bit_index, &hasher),
                 "Bloom filter bit must be set when reverting remove()"
             );
         }
@@ -336,7 +337,7 @@ where
     /// Returns
     /// - `true` if the bit was flipped from 1 to 0,
     /// - `false` if the bit was already unset (0).
-    pub fn unset_bloom_filter_bit(&mut self, bit_index: u128) -> bool {
+    pub fn unset_bloom_filter_bit(&mut self, bit_index: u128, hasher: &H) -> bool {
         let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
@@ -348,12 +349,14 @@ where
             was_set
         } else {
             let chunk_index = bit_index / CHUNK_SIZE as u128;
-            println!("chunk index = {}", chunk_index);
             let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
             let mut relevant_chunk = self.chunks.get(chunk_index);
             let was_set = relevant_chunk.get_bit(relative_index);
             relevant_chunk.unset_bit(relative_index);
             self.chunks.set(chunk_index, relevant_chunk);
+            self.set_commitment
+                .swbf_inactive
+                .mutate_leaf_raw(chunk_index, relevant_chunk.hash::<H>(hasher));
             was_set
         }
     }
