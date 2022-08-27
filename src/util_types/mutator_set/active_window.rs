@@ -1,3 +1,4 @@
+use num_traits::identities::Zero;
 use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -81,7 +82,10 @@ where
         for i in
             (WINDOW_SIZE / BITS_PER_U32 - CHUNK_SIZE / BITS_PER_U32)..(WINDOW_SIZE / BITS_PER_U32)
         {
-            assert_eq!(0, self.bits[i]);
+            assert!(
+                self.bits[i].is_zero(),
+                "Bits removed from active window must be all zero"
+            );
         }
         for i in (0..(WINDOW_SIZE / BITS_PER_U32) - CHUNK_SIZE / BITS_PER_U32).rev() {
             self.bits[i + CHUNK_SIZE / BITS_PER_U32] = self.bits[i];
@@ -267,6 +271,7 @@ mod active_window_tests {
 
         active_window.slide_window();
 
+        // Sliding window forward must unset the last bits of the active window
         for i in
             (WINDOW_SIZE / BITS_PER_U32 - CHUNK_SIZE / BITS_PER_U32)..(WINDOW_SIZE / BITS_PER_U32)
         {
@@ -275,7 +280,27 @@ mod active_window_tests {
 
         active_window.slide_window_back(&chunk);
 
-        assert_eq!(array, *active_window.bits);
+        assert_eq!(
+            array, *active_window.bits,
+            "Sliding forward and then back must be the identity operation"
+        );
+    }
+
+    #[should_panic(expected = "Bits removed from active window must be all zero")]
+    #[test]
+    fn slide_window_back_panic_test() {
+        type Hasher = blake3::Hasher;
+        let array: [u32; WINDOW_SIZE / BITS_PER_U32] = (0..WINDOW_SIZE / BITS_PER_U32)
+            .map(|_| rand::random::<u32>())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let mut active_window = ActiveWindow::<Hasher>::new(Box::new(array));
+        let dummy_chunk = Chunk {
+            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
+        };
+        active_window.slide_window_back(&dummy_chunk);
     }
 
     #[test]
