@@ -269,6 +269,11 @@ where
         })
     }
 
+    /// Revert the `RemovalRecord`s in a block by unsetting the bits that
+    /// were actually flipped. These live in either the active window, or
+    /// in a relevant chunk.
+    ///
+    /// Fails if attempting to unset a bit that wasn't set.
     pub fn revert_remove(&mut self, diff_indices: Vec<u128>) {
         for bit_index in diff_indices {
             assert!(
@@ -278,23 +283,34 @@ where
         }
     }
 
+    /// Revert the `AdditionRecord`s in a block by
+    ///
+    /// - Removing the last leaf in the append-only commitment list
+    /// - If at a boundary where the active window slides, remove a chunk
+    ///   from the inactive window, and slide window back by putting the
+    ///   last inactive chunk in the active window.
     pub fn revert_add(&mut self, addition_record: &AdditionRecord<H>) {
         let removed_add_index = self.set_commitment.aocl.count_leaves() - 1;
 
-        // 1. Remove something from AOCL
+        // 1. Remove last leaf from AOCL
         let digest = self.set_commitment.aocl.remove_last_leaf().unwrap();
         assert_eq!(addition_record.canonical_commitment, digest);
 
-        // 2. Every 10th time, shrink bloom filter by moving a chunk back into active window
+        // 2. Possibly shrink bloom filter by moving a chunk back into active window
+        //
+        // This happens when the batch index changes (i.e. every `BATCH_SIZE` addition).
         if !SetCommitment::<H, ArchivalMmr<H>>::window_slides_back(removed_add_index) {
             return;
         }
 
-        // Remove a chunk from inactive window
+        // 2.a. Remove a chunk from inactive window
         let _digest = self.set_commitment.swbf_inactive.remove_last_leaf();
-        let _last_inactive_chunk = self.chunks.pop().unwrap();
+        let last_inactive_chunk = self.chunks.pop().unwrap();
 
-        // Slide active window back by putting `last_inactive_chunk` back
+        // 2.b. Slide active window back by putting `last_inactive_chunk` back
+        self.set_commitment
+            .swbf_active
+            .slide_window_back(&last_inactive_chunk);
     }
 
     /// Retrieves the Bloom filter bit with a given `bit_index` in
@@ -325,12 +341,14 @@ where
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         if bit_index >= active_window_start {
+            println!("active window");
             let relative_index = (bit_index - active_window_start) as usize;
             let was_set = self.set_commitment.swbf_active.get_bit(relative_index);
             self.set_commitment.swbf_active.unset_bit(relative_index);
             was_set
         } else {
             let chunk_index = bit_index / CHUNK_SIZE as u128;
+            println!("chunk index = {}", chunk_index);
             let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
             let mut relevant_chunk = self.chunks.get(chunk_index);
             let was_set = relevant_chunk.get_bit(relative_index);
@@ -477,5 +495,135 @@ mod archival_mutator_set_tests {
             membership_proofs.push(membership_proof);
             items.push(item);
         }
+    }
+
+    #[test]
+    fn archival_mutator_set_revert_add_test() {
+        type Hasher = blake3::Hasher;
+
+        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+
+        // Repeatedly insert `AdditionRecord` into empty MutatorSet and revert it
+        //
+        // This does not reach the sliding window, and the MutatorSet reverts back
+        // to being empty on every iteration.
+        for _ in 0..2 * BATCH_SIZE {
+            let (item, mut addition_record, membership_proof) =
+                make_random_addition(&mut archival_mutator_set);
+
+            let commitment_before_add = archival_mutator_set.get_commitment();
+            archival_mutator_set.add(&mut addition_record);
+            assert!(archival_mutator_set.verify(&item, &membership_proof));
+
+            archival_mutator_set.revert_add(&addition_record);
+            let commitment_after_revert = archival_mutator_set.get_commitment();
+            assert!(!archival_mutator_set.verify(&item, &membership_proof));
+            assert_eq!(commitment_before_add, commitment_after_revert);
+        }
+
+        let n_iterations = 10 * BATCH_SIZE;
+        let mut records = Vec::with_capacity(n_iterations);
+        let mut commitments_before = Vec::with_capacity(n_iterations);
+
+        // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
+        for _ in 0..n_iterations {
+            let record = make_random_addition(&mut archival_mutator_set);
+            let (item, mut addition_record, membership_proof) = record.clone();
+            records.push(record);
+            commitments_before.push(archival_mutator_set.get_commitment());
+            archival_mutator_set.add(&mut addition_record);
+            assert!(archival_mutator_set.verify(&item, &membership_proof));
+        }
+
+        assert_eq!(n_iterations, records.len());
+
+        // Revert these `AdditionRecord`s in reverse order and assert they're no longer members.
+        //
+        // This reaches the sliding window every `BATCH_SIZE` iteration.
+        for (item, addition_record, membership_proof) in records.into_iter().rev() {
+            archival_mutator_set.revert_add(&addition_record);
+            let commitment_after_revert = archival_mutator_set.get_commitment();
+            assert!(!archival_mutator_set.verify(&item, &membership_proof));
+
+            let commitment_before_add = commitments_before.pop().unwrap();
+            assert_eq!(
+                commitment_before_add,
+                commitment_after_revert,
+                "Commitment to MutatorSet from before adding should be valid after reverting adding"
+            );
+        }
+    }
+
+    #[test]
+    fn archival_mutator_set_revert_remove_test() {
+        type Hasher = blake3::Hasher;
+
+        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+
+        let n_iterations = 10 * BATCH_SIZE;
+        let mut records = Vec::with_capacity(n_iterations);
+        let mut commitments_before = Vec::with_capacity(n_iterations);
+
+        // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
+        for _ in 0..n_iterations {
+            let record = make_random_addition(&mut archival_mutator_set);
+            let (item, mut addition_record, membership_proof) = record.clone();
+            records.push(record);
+            commitments_before.push(archival_mutator_set.get_commitment());
+            archival_mutator_set.add(&mut addition_record);
+            assert!(archival_mutator_set.verify(&item, &membership_proof));
+        }
+
+        for (idx, (item, _addition_record, expired_membership_proof)) in
+            records.into_iter().rev().enumerate()
+        {
+            println!("revert_remove() #{}", idx);
+            let restored_membership_proof = archival_mutator_set
+                .restore_membership_proof(
+                    &item,
+                    &expired_membership_proof.randomness,
+                    expired_membership_proof.auth_path_aocl.data_index,
+                )
+                .unwrap();
+            assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
+
+            let removal_record = archival_mutator_set.drop(&item, &restored_membership_proof);
+            let commitment_before_remove = archival_mutator_set.get_commitment();
+            let diff_indices = archival_mutator_set.remove(&removal_record).unwrap();
+            println!("diff_indices = {:?}", diff_indices);
+            assert!(!archival_mutator_set.verify(&item, &restored_membership_proof));
+
+            archival_mutator_set.revert_remove(diff_indices);
+            let commitment_after_revert = archival_mutator_set.get_commitment();
+            assert_eq!(commitment_before_remove, commitment_after_revert);
+            assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
+        }
+    }
+
+    fn make_random_addition<H>(
+        archival_mutator_set: &mut ArchivalMutatorSet<H>,
+    ) -> (H::Digest, AdditionRecord<H>, MsMembershipProof<H>)
+    where
+        H: Hasher,
+        Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
+        u128: ToDigest<<H as Hasher>::Digest>,
+    {
+        let mut rng = rand::thread_rng();
+        let hasher = H::new();
+        let item = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(rng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+        let randomness = hasher.hash(
+            &(0..3)
+                .map(|_| BFieldElement::new(rng.next_u64()))
+                .collect::<Vec<_>>(),
+        );
+
+        let addition_record = archival_mutator_set.commit(&item, &randomness);
+        let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
+
+        (item, addition_record, membership_proof)
     }
 }

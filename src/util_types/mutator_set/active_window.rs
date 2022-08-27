@@ -161,7 +161,7 @@ where
 
 #[cfg(test)]
 mod active_window_tests {
-    use rand::{thread_rng, Rng, RngCore};
+    use rand::{thread_rng, RngCore};
 
     use twenty_first::shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH};
 
