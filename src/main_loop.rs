@@ -351,7 +351,12 @@ impl MainLoopHandler {
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .update_mutator_set(&mut ams_lock, &mut ms_block_sync_lock, &block)?;
+                    .update_mutator_set(
+                        &mut db_lock,
+                        &mut ams_lock,
+                        &mut ms_block_sync_lock,
+                        &block,
+                    )?;
 
                 *light_state_locked = block.header.clone();
             }
@@ -372,7 +377,7 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
+                    let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain
                         .archival_state
@@ -451,7 +456,7 @@ impl MainLoopHandler {
                             .unwrap()
                             .write_block(
                                 Box::new(block.clone()),
-                                &mut db_lock,
+                                &mut block_db_lock,
                                 Some(previous_block_header.proof_of_work_family),
                             )?;
 
@@ -461,7 +466,12 @@ impl MainLoopHandler {
                             .archival_state
                             .as_ref()
                             .unwrap()
-                            .update_mutator_set(&mut ams_lock, &mut ms_block_sync_lock, &block)?;
+                            .update_mutator_set(
+                                &mut block_db_lock,
+                                &mut ams_lock,
+                                &mut ms_block_sync_lock,
+                                &block,
+                            )?;
                     }
 
                     // Update information about latest header

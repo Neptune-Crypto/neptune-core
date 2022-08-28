@@ -405,6 +405,36 @@ impl ArchivalState {
     }
 
     // Return the block with a given block digest, iff it's available in state somewhere
+    // Takes a lock on the block databases as argument.
+    fn get_block_with_lock(
+        &self,
+        block_db_lock: &mut tokio::sync::MutexGuard<BlockDatabases>,
+        block_digest: Digest,
+    ) -> Option<Block> {
+        let maybe_record: Option<BlockRecord> = block_db_lock
+            .block_index
+            .get(BlockIndexKey::Block(block_digest))
+            .map(|x| x.as_block_record());
+        let record: BlockRecord = match maybe_record {
+            Some(rec) => rec,
+            None => {
+                if self.genesis_block.hash == block_digest {
+                    return Some(*self.genesis_block.clone());
+                } else {
+                    return None;
+                }
+            }
+        };
+
+        // Fetch block from disk
+        let block = self
+            .get_block_from_block_record(record)
+            .expect("Fetching from disk must succeed");
+
+        Some(block)
+    }
+
+    // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record: Option<BlockRecord> = self
             .block_databases
@@ -610,8 +640,12 @@ impl ArchivalState {
         ret
     }
 
+    /// Update the mutator set with a block after this block has been stored to the database.
+    /// Handles rollback of the mutator set if needed but requires that all blocks that are
+    /// rolled back are present in the DB.
     pub fn update_mutator_set(
         &self,
+        block_db_lock: &mut tokio::sync::MutexGuard<BlockDatabases>,
         ams_lock: &mut tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>>,
         ms_block_sync_lock: &mut tokio::sync::MutexGuard<
             RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
@@ -635,15 +669,39 @@ impl ArchivalState {
         };
 
         // As long as mutator set isn't synced with previous block, roll back
-        // let mut ms_block_rollback_digest = ms_block_sync_digest;
-        let ms_block_rollback_digest = ms_block_sync_digest;
+        let mut ms_block_rollback_digest = ms_block_sync_digest;
         while ms_block_rollback_digest != new_block.header.prev_block_digest {
             // Roll back mutator set
             // block_header_for_current_ms_state = get_current_ms_bh();
-            panic!(
-                "Rollback!\nms_block_sync_digest = {},\nprev_block_digest = {}",
-                ms_block_sync_digest, new_block.header.prev_block_digest
+            let roll_back_block = self
+                .get_block_with_lock(block_db_lock, ms_block_rollback_digest)
+                .expect("Fetching block must succeed");
+
+            // Roll back all addition records contained in block
+            for addition_record in roll_back_block
+                .body
+                .mutator_set_update
+                .additions
+                .iter()
+                .rev()
+            {
+                ams_lock.revert_add(addition_record);
+            }
+
+            // Roll back all removal records contained in block
+            // This is done by fetching from the database the indices
+            // flipped in the Bloom filter by that block.
+            let block_diff_indices = ms_block_sync_lock
+                .get(MsBlockSyncKey::Diff(roll_back_block.hash))
+                .unwrap()
+                .as_diff();
+            debug!(
+                "block_diff_indices being rolled back = {:?}",
+                block_diff_indices
             );
+            ams_lock.revert_remove(block_diff_indices);
+
+            ms_block_rollback_digest = roll_back_block.header.prev_block_digest;
         }
 
         let mut addition_records: Vec<AdditionRecord<Hash>> =
@@ -656,11 +714,17 @@ impl ArchivalState {
             // TODO: Batch update all removal records from addition
         }
 
+        let mut changed_indices: Vec<u128> = vec![];
         while let Some(removal_record) = removal_records.pop() {
-            ams_lock.remove(&removal_record);
+            let mut indices_of_flipped_bits_in_bf = ams_lock.remove(&removal_record).unwrap();
+            changed_indices.append(&mut indices_of_flipped_bits_in_bf);
 
             // TODO: Batch update all removal records from removal
         }
+
+        // Remove duplicates from changed indices
+        changed_indices.sort_unstable();
+        changed_indices.dedup();
 
         // Store active window onto disk for persistence
         let active_window_db = Self::active_window_db(&self.root_data_dir)?;
@@ -670,10 +734,16 @@ impl ArchivalState {
             .store_to_database(active_window_db);
 
         // Write block digest onto disk
-        ms_block_sync_lock.batch_write(&[(
-            MsBlockSyncKey::SyncDigest(()),
-            MsBlockSyncValue::SyncDigest(new_block.hash),
-        )]);
+        ms_block_sync_lock.batch_write(&[
+            (
+                MsBlockSyncKey::SyncDigest(()),
+                MsBlockSyncValue::SyncDigest(new_block.hash),
+            ),
+            (
+                MsBlockSyncKey::Diff(new_block.hash),
+                MsBlockSyncValue::Diff(changed_indices),
+            ),
+        ]);
 
         Ok(())
     }
@@ -777,6 +847,7 @@ mod archival_state_tests {
             root_data_dir_path.clone(),
             ms_block_sync,
         );
+        let mut block_db_lock = archival_state.block_databases.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         {
             // Before updating the AMS, the active window DB must be empty.
@@ -790,7 +861,12 @@ mod archival_state_tests {
         let mock_block_1 = make_mock_block(&archival_state.genesis_block.clone(), None);
 
         let membership_proof = ams_lock.prove(&item.into(), &randomness.into(), true);
-        archival_state.update_mutator_set(&mut ams_lock, &mut ms_block_sync_lock, &mock_block_1)?;
+        archival_state.update_mutator_set(
+            &mut block_db_lock,
+            &mut ams_lock,
+            &mut ms_block_sync_lock,
+            &mock_block_1,
+        )?;
 
         {
             // After running the AMS updater, the active window DB must be written back to disk
@@ -823,7 +899,12 @@ mod archival_state_tests {
 
         // Remove an element from the mutator set, verify that the active window DB
         // is updated.
-        archival_state.update_mutator_set(&mut ams_lock, &mut ms_block_sync_lock, &mock_block_2)?;
+        archival_state.update_mutator_set(
+            &mut block_db_lock,
+            &mut ams_lock,
+            &mut ms_block_sync_lock,
+            &mock_block_2,
+        )?;
 
         {
             // After running the MS updater with a removal record, the active window
@@ -856,24 +937,37 @@ mod archival_state_tests {
     #[tokio::test]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state();
+        let mut block_db_lock = archival_state.block_databases.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
 
-        // 1. Create new block 1
+        // 1. Create new block 1 and store it to the DB
         let mock_block_1a = make_mock_block(&archival_state.genesis_block, None);
+        archival_state.write_block(
+            Box::new(mock_block_1a.clone()),
+            &mut block_db_lock,
+            Some(mock_block_1a.header.proof_of_work_family),
+        )?;
 
         // 2. Update mutator set with this
         archival_state.update_mutator_set(
+            &mut block_db_lock,
             &mut ams_lock,
             &mut ms_block_sync_lock,
             &mock_block_1a,
         )?;
 
-        // 3. Create competing block 1
+        // 3. Create competing block 1 and store it to DB
         let mock_block_1b = make_mock_block(&archival_state.genesis_block, None);
+        archival_state.write_block(
+            Box::new(mock_block_1a.clone()),
+            &mut block_db_lock,
+            Some(mock_block_1b.header.proof_of_work_family),
+        )?;
 
         // 4. Update mutator set with that
         archival_state.update_mutator_set(
+            &mut block_db_lock,
             &mut ams_lock,
             &mut ms_block_sync_lock,
             &mock_block_1b,

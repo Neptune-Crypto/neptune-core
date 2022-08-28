@@ -467,10 +467,5 @@ pub fn make_archival_state() -> ArchivalState {
     let ams = Arc::new(tokio::sync::Mutex::new(ams));
     let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
 
-    ArchivalState::new(
-        block_databases.clone(),
-        ams,
-        root_data_dir_path.clone(),
-        ms_block_sync,
-    )
+    ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync)
 }

@@ -209,7 +209,8 @@ impl Block {
             for (utxo, randomness) in tx.outputs.iter() {
                 let expected_commitment =
                     hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
-                if block_copy.body.mutator_set_update.additions[i].commitment != expected_commitment
+                if block_copy.body.mutator_set_update.additions[i].canonical_commitment
+                    != expected_commitment
                 {
                     warn!("Bad commitment found in addition record");
                     return false;
