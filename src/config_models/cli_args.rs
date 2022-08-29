@@ -64,14 +64,4 @@ impl Args {
         // TODO: Should this function return Option<SocketAddr> or SocketAddr?
         Some(SocketAddr::new(self.listen_addr, self.peer_port))
     }
-
-    pub fn get_data_directory(&self) -> Result<PathBuf> {
-        if let Some(proj_dirs) = ProjectDirs::from("org", "neptune", "neptune") {
-            let mut path = proj_dirs.data_dir().to_path_buf();
-            path.push(self.network.to_string());
-            Ok(path)
-        } else {
-            bail!("Could not determine data directory")
-        }
-    }
 }
