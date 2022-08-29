@@ -1,16 +1,12 @@
-use std::str::FromStr;
-
 use mutator_set_tf::util_types::mutator_set::{
-    addition_record::AdditionRecord, archival_mutator_set::ArchivalMutatorSet,
     mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
 };
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use twenty_first::{
-    amount::u32s::U32s,
-    shared_math::{b_field_element::BFieldElement, traits::GetRandomElements},
-    util_types::{mmr::archival_mmr::ArchivalMmr, simple_hasher::Hasher},
+    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
+    util_types::simple_hasher::Hasher,
 };
 
 pub mod block_body;
@@ -25,11 +21,7 @@ use self::{
 };
 use super::{
     digest::{ordered_digest::OrderedDigest, *},
-    transaction::{
-        utxo::{self, Utxo},
-        Transaction, AMOUNT_SIZE_FOR_U32,
-    },
-    wallet::Wallet,
+    transaction::{utxo::Utxo, Transaction, AMOUNT_SIZE_FOR_U32},
 };
 use crate::models::blockchain::shared::Hash;
 

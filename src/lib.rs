@@ -102,7 +102,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         archival_mutator_set,
         root_data_dir_path_buf,
         ms_block_sync_db,
-    );
+    )
+    .await;
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
     let latest_block: Block = archival_state.get_latest_block().await;

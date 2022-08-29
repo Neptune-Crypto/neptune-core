@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
-use twenty_first::amount::u32s::U32s;
+use twenty_first::{amount::u32s::U32s, util_types::mmr::mmr_trait::Mmr};
 
 use super::shared::{get_block_file_path, new_block_file_is_needed};
 use crate::{
@@ -176,16 +176,30 @@ impl core::fmt::Debug for ArchivalState {
 }
 
 impl ArchivalState {
-    pub fn new(
+    pub async fn new(
         initial_block_databases: Arc<TokioMutex<BlockDatabases>>,
         archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
         root_data_dir: PathBuf,
         ms_block_sync_db: Arc<TokioMutex<RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>>>,
     ) -> Self {
+        let genesis_block = Box::new(Block::genesis_block());
+
+        // If archival mutator set is empty, populate it with the addition records from genesis block
+        // This assumes genesis block doesn't spend anything -- which it can't so that should be OK
+        {
+            let mut ams_lock = archival_mutator_set.lock().await;
+            let ams_is_empty = ams_lock.set_commitment.aocl.count_leaves().is_zero();
+            if ams_is_empty {
+                for mut addition_record in genesis_block.body.mutator_set_update.additions.clone() {
+                    ams_lock.add(&mut addition_record);
+                }
+            }
+        }
+
         Self {
             block_databases: initial_block_databases,
             root_data_dir,
-            genesis_block: Box::new(Block::genesis_block()),
+            genesis_block,
             archival_mutator_set,
             ms_block_sync_db,
         }
@@ -781,7 +795,7 @@ mod archival_state_tests {
             let ams0 = Arc::new(TokioMutex::new(ams0));
             let ms_block_sync_0 = Arc::new(TokioMutex::new(ms_block_sync_0));
             let archival_state0 =
-                ArchivalState::new(block_databases_0, ams0, data_dir_0, ms_block_sync_0);
+                ArchivalState::new(block_databases_0, ams0, data_dir_0, ms_block_sync_0).await;
 
             let (block_databases_1, _, data_dir_1) = databases(Network::Main).unwrap();
             let (ams1, ms_block_sync_1) =
@@ -789,7 +803,7 @@ mod archival_state_tests {
             let ams1 = Arc::new(TokioMutex::new(ams1));
             let ms_block_sync_1 = Arc::new(TokioMutex::new(ms_block_sync_1));
             let _archival_state1 =
-                ArchivalState::new(block_databases_1, ams1, data_dir_1, ms_block_sync_1);
+                ArchivalState::new(block_databases_1, ams1, data_dir_1, ms_block_sync_1).await;
 
             let (block_databases_2, _, data_dir_2) = databases(Network::Main).unwrap();
             let (ams2, ms_block_sync_2) =
@@ -797,7 +811,7 @@ mod archival_state_tests {
             let ams2 = Arc::new(TokioMutex::new(ams2));
             let ms_block_sync_2 = Arc::new(TokioMutex::new(ms_block_sync_2));
             let archival_state2 =
-                ArchivalState::new(block_databases_2, ams2, data_dir_2, ms_block_sync_2);
+                ArchivalState::new(block_databases_2, ams2, data_dir_2, ms_block_sync_2).await;
 
             let b = Block::genesis_block();
             let blockchain_state = BlockchainState {
@@ -846,7 +860,8 @@ mod archival_state_tests {
             ams,
             root_data_dir_path.clone(),
             ms_block_sync,
-        );
+        )
+        .await;
         let mut block_db_lock = archival_state.block_databases.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         {
@@ -936,7 +951,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
-        let archival_state: ArchivalState = make_archival_state();
+        let archival_state: ArchivalState = make_archival_state().await;
         let mut block_db_lock = archival_state.block_databases.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
@@ -992,7 +1007,8 @@ mod archival_state_tests {
             ams,
             root_data_dir_path,
             ms_block_sync,
-        );
+        )
+        .await;
         let mut db_lock_0 = block_databases.lock().await;
         let ret = archival_state.get_latest_block_from_disk(&mut db_lock_0)?;
         assert!(
@@ -1050,7 +1066,8 @@ mod archival_state_tests {
             ams,
             root_data_dir_path,
             ms_block_sync,
-        );
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
         let mock_block_1 = make_mock_block(&genesis.clone(), None);
 
@@ -1122,7 +1139,8 @@ mod archival_state_tests {
             ams,
             root_data_dir_path,
             ms_block_sync,
-        );
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
         assert!(
             archival_state
@@ -1403,7 +1421,8 @@ mod archival_state_tests {
             ams,
             root_data_dir_path,
             ms_block_sync,
-        );
+        )
+        .await;
         let genesis = archival_state.genesis_block.clone();
         archival_state
             .get_ancestor_block_digests(genesis.header.prev_block_digest, 10)
@@ -1423,7 +1442,8 @@ mod archival_state_tests {
             ams,
             root_data_dir_path,
             ms_block_sync,
-        );
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
 
         assert!(archival_state
@@ -1500,7 +1520,8 @@ mod archival_state_tests {
             ams,
             root_data_dir_path,
             ms_block_sync,
-        );
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
         let mock_block_1 = make_mock_block(&genesis.clone(), None);
         let mut db_lock = archival_state.block_databases.lock().await;

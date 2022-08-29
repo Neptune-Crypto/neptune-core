@@ -164,7 +164,7 @@ pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
 /// Returns:
 /// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, state, peer_map)
 #[allow(clippy::type_complexity)]
-pub fn get_genesis_setup(
+pub async fn get_genesis_setup(
     network: Network,
     peer_count: u8,
 ) -> Result<(
@@ -196,7 +196,7 @@ pub fn get_genesis_setup(
     let ams = Arc::new(tokio::sync::Mutex::new(ams));
     let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
     let archival_state =
-        ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync);
+        ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync).await;
     let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
@@ -459,7 +459,7 @@ pub fn make_mock_block(
 //     Digest::new(elements)
 // }
 
-pub fn make_archival_state() -> ArchivalState {
+pub async fn make_archival_state() -> ArchivalState {
     let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
     println!("root_data_dir_path = {:?}", root_data_dir_path);
 
@@ -467,5 +467,5 @@ pub fn make_archival_state() -> ArchivalState {
     let ams = Arc::new(tokio::sync::Mutex::new(ams));
     let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
 
-    ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync)
+    ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync).await
 }
