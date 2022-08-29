@@ -747,6 +747,8 @@ impl PeerLoopHandler {
                 // thread requested to disconnected from.
                 Ok(target_socket_addr == self.peer_address)
             }
+            // Disconnect from this peer, no matter what.
+            MainToPeerThread::DisconnectAll() => Ok(true),
             MainToPeerThread::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
                 if target_socket_addr == self.peer_address {
                     peer.send(PeerMessage::PeerListRequest).await?;

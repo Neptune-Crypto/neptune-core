@@ -13,6 +13,7 @@ use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::process;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -792,7 +793,11 @@ impl MainLoopHandler {
         let synchronization_timer = time::sleep(sync_timer_interval);
         tokio::pin!(synchronization_timer);
 
-        loop {
+        let mut shutting_down: bool = false;
+
+        while !shutting_down {
+            // If do_shutdown, break.
+
             // Set a timer to run peer discovery process every N seconds
 
             // Set a timer for synchronization handling, but only if we are in synchronization mod
@@ -838,8 +843,9 @@ impl MainLoopHandler {
                     self.handle_miner_thread_message(main_message).await?
                 }
 
+                // Handle messages from rpc server thread
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    self.handle_rpc_server_message(rpc_server_message).await?
+                    self.handle_rpc_server_message(rpc_server_message, &mut shutting_down).await?
                 }
 
                 // Handle peer discovery
@@ -859,19 +865,20 @@ impl MainLoopHandler {
                     // Reset the timer to run this branch again in M seconds
                     synchronization_timer.as_mut().reset(tokio::time::Instant::now() + sync_timer_interval);
                 }
-
-
-                // TODO: Add signal::ctrl_c/shutdown handling here
             }
         }
+        process::exit(0);
     }
 }
 
 impl MainLoopHandler {
-    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<()> {
+    async fn handle_rpc_server_message(
+        &self,
+        msg: RPCServerToMain,
+        shutdown: &mut bool,
+    ) -> Result<()> {
         match msg {
             RPCServerToMain::Send(transactions) => {
-                //
                 debug!(
                     "`main` received following transactions from RPC Server: {:?}",
                     transactions
@@ -884,6 +891,23 @@ impl MainLoopHandler {
                 // send to miner
                 self.main_to_miner_tx
                     .send(MainToMiner::NewTransactions(transactions))?;
+            }
+            RPCServerToMain::Shutdown() => {
+                info!("Shutdown initiated.");
+
+                // Peer-map is owned by main-loop, so there is no need to lock it
+                // to prevent new peers joining while shutting down.
+
+                *shutdown = true;
+
+                // Send 'bye' message to alle peers.
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerThread::DisconnectAll())?;
+
+                //TODO: flush all writes? just wait 0.1 second? are we writing blocks?
+                //TODO: Add signal::ctrl_c shutdown handling somewhere?
+
+                info!("Shutdown completed.")
             }
         }
 
