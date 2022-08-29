@@ -13,6 +13,8 @@ use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
@@ -793,9 +795,9 @@ impl MainLoopHandler {
         let synchronization_timer = time::sleep(sync_timer_interval);
         tokio::pin!(synchronization_timer);
 
-        let mut shutting_down: bool = false;
-
-        while !shutting_down {
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutting_down))?;
+        while !shutting_down.load(Ordering::Relaxed) {
             // If do_shutdown, break.
 
             // Set a timer to run peer discovery process every N seconds
@@ -845,7 +847,7 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server thread
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    self.handle_rpc_server_message(rpc_server_message, &mut shutting_down).await?
+                    self.handle_rpc_server_message(rpc_server_message, Arc::clone(&shutting_down)).await?
                 }
 
                 // Handle peer discovery
@@ -867,7 +869,22 @@ impl MainLoopHandler {
                 }
             }
         }
-        sleep(Duration::new(0, 10 * 1000000)); // ten miliseconds
+        info!("Shutdown initiated.");
+
+        // Peer-map is owned by main-loop, so there is no need to lock it
+        // to prevent new peers joining while shutting down.
+
+        // Send 'bye' message to alle peers.
+        self.main_to_peer_broadcast_tx
+            .send(MainToPeerThread::DisconnectAll())?;
+
+        let _response = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+
+        //TODO: flush all writes? just wait 0.1 second? are we writing blocks?
+
+        sleep(Duration::new(0, 10 * 1000)); // ten miliseconds
+        info!("Shutdown completed.");
+
         Ok(())
     }
 }
@@ -876,7 +893,7 @@ impl MainLoopHandler {
     async fn handle_rpc_server_message(
         &self,
         msg: RPCServerToMain,
-        shutdown: &mut bool,
+        shutting_down: Arc<AtomicBool>,
     ) -> Result<()> {
         match msg {
             RPCServerToMain::Send(transactions) => {
@@ -894,23 +911,7 @@ impl MainLoopHandler {
                     .send(MainToMiner::NewTransactions(transactions))?;
             }
             RPCServerToMain::Shutdown() => {
-                info!("Shutdown initiated.");
-
-                // Peer-map is owned by main-loop, so there is no need to lock it
-                // to prevent new peers joining while shutting down.
-
-                *shutdown = true;
-
-                // Send 'bye' message to alle peers.
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::DisconnectAll())?;
-
-                let _response = self.main_to_miner_tx.send(MainToMiner::Shutdown);
-
-                //TODO: flush all writes? just wait 0.1 second? are we writing blocks?
-                //TODO: Add signal::ctrl_c shutdown handling somewhere?
-
-                info!("Shutdown completed.")
+                shutting_down.store(true, Ordering::Relaxed);
             }
         }
         Ok(())
