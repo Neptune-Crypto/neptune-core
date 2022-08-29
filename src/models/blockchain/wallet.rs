@@ -55,11 +55,7 @@ impl Wallet {
             "Entropy for secret key must be initialized. All elements cannot be equal."
         );
 
-        Self {
-            name: name.to_string(),
-            secret: entropy.into(),
-            version,
-        }
+        Self::new_from_secret_key(name, version, entropy.into())
     }
 
     fn _get_ecdsa_sk(&self) -> secp256k1::SecretKey {

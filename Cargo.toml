@@ -15,8 +15,10 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", branch = "reversible-archival-mmrs" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "c95c68634db89ab9537bfe061f590e98a203ec41" }
 mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", rev = "4c29bec3cb75cfb6e2216f2c3eba8e32a9bf4312" }
+# twenty-first = { path = "../twenty-first/twenty-first" }
+# mutator-set-tf = { path = "../mutator-set-tf" }
 anyhow = "1" # Error trait and generalized error handling
 bincode = "1"
 bytes = "1"
