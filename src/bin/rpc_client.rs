@@ -79,9 +79,9 @@ async fn main() -> Result<()> {
             tracing::debug!("Send-command issued with argument: {}.", send_argument);
         }
         Command::Shutdown => {
-            tracing::info!("Issuing shutdown-command.");
+            tracing::info!("Sending shutdown-command.");
             client.shutdown(context::current()).await?;
-            tracing::info!("Shutdown-command issued.");
+            tracing::info!("Shutdown-command completed successfully.");
         }
     }
 

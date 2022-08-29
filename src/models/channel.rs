@@ -13,6 +13,7 @@ pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
     NewTransactions(Vec<Transaction>),
+    Shutdown,
     // StopMining,
     // StartMining,
     // SetCoinbasePubkey,

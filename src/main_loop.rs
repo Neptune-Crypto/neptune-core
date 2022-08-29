@@ -13,7 +13,7 @@ use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::process;
+use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -867,7 +867,8 @@ impl MainLoopHandler {
                 }
             }
         }
-        process::exit(0);
+        sleep(Duration::new(0, 10 * 1000000)); // ten miliseconds
+        Ok(())
     }
 }
 
@@ -904,13 +905,14 @@ impl MainLoopHandler {
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::DisconnectAll())?;
 
+                let _response = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+
                 //TODO: flush all writes? just wait 0.1 second? are we writing blocks?
                 //TODO: Add signal::ctrl_c shutdown handling somewhere?
 
                 info!("Shutdown completed.")
             }
         }
-
         Ok(())
     }
 }

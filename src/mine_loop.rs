@@ -154,7 +154,9 @@ pub async fn mock_regtest_mine(
     state: State,
 ) -> Result<()> {
     let mut incoming_transactions_tmp = vec![];
-    loop {
+    let mut shutdown: bool = false;
+
+    while !shutdown {
         let (sender, receiver) = oneshot::channel::<Block>();
         let state_clone = state.clone();
         let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
@@ -181,6 +183,17 @@ pub async fn mock_regtest_mine(
 
                 let main_message: MainToMiner = from_main.borrow_and_update().clone();
                 match main_message {
+                    MainToMiner::Shutdown => {
+                        debug!("Miner shutting down.");
+
+                        if let Some(mt) = miner_thread {
+                            mt.abort();
+                        }
+
+                        shutdown = true;
+
+                        debug!("Miner shut down gracefully.");
+                    }
                     MainToMiner::NewBlock(block) => {
                         if let Some(mt) = miner_thread {
                             mt.abort();
@@ -192,7 +205,7 @@ pub async fn mock_regtest_mine(
                     MainToMiner::NewTransactions(incoming_txs) => {
                         debug!("Miner thread received incoming transactions from main: {:?}", incoming_txs);
                         incoming_transactions_tmp = incoming_txs
-                    },
+                    }
                 }
             }
             new_fake_block_res = receiver => {
@@ -210,4 +223,5 @@ pub async fn mock_regtest_mine(
             }
         }
     }
+    Ok(())
 }
