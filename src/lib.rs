@@ -4,15 +4,17 @@ mod connect_to_peers;
 mod database;
 mod main_loop;
 mod mine_loop;
-mod models;
+pub mod models;
 mod peer_loop;
 pub mod rpc_server;
 
 #[cfg(test)]
 mod tests;
 
+use crate::config_models::data_directory::get_data_directory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::main_loop::MainLoopHandler;
+use crate::models::blockchain::wallet;
 use crate::models::channel::RPCServerToMain;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
@@ -35,9 +37,8 @@ use models::database::{BlockDatabases, PeerDatabases};
 use models::peer::PeerInfo;
 use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use std::collections::HashMap;
-use std::fs;
+use std::env;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
@@ -45,7 +46,7 @@ use tarpc::server::Channel;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
@@ -57,96 +58,10 @@ const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const WALLET_FILE_NAME: &str = "wallet.dat";
-const STANDARD_WALLET_NAME: &str = "standard";
-const STANDARD_WALLET_VERSION: u8 = 0;
-
-/// Create a wallet file, and set restrictive permissions
-#[cfg(target_family = "unix")]
-fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) {
-    // On Unix/Linux we set the file permissions to 600, to disallow
-    // other users on the same machine to access the secrets.
-    use std::os::unix::prelude::OpenOptionsExt;
-    fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .mode(0o600)
-        .open(path)
-        .unwrap();
-    fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
-}
-
-/// Create a wallet file, without setting restrictive UNIX permissions
-// #[cfg(not(target_family = "unix"))]
-fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) {
-    fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(path)
-        .unwrap();
-    fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
-}
-
-/// Read the wallet from disk. Create one if none exists.
-fn initialize_wallet(root_path: &Path, name: &str, version: u8) -> Wallet {
-    let mut path = root_path.to_owned();
-    path.push(WALLET_FILE_NAME);
-
-    // Check if file exists
-    let wallet: Wallet = if path.exists() {
-        info!("Found wallet file: {}", path.to_string_lossy());
-
-        // Read wallet from disk
-        let file_content: String = match fs::read_to_string(path.clone()) {
-            Ok(fc) => fc,
-            Err(err) => panic!(
-                "Failed to read file {}. Got error: {}",
-                path.to_string_lossy(),
-                err
-            ),
-        };
-
-        // Parse wallet as JSON and return result
-        match serde_json::from_str(&file_content) {
-            Ok(stored_wallet) => stored_wallet,
-            Err(err) => {
-                panic!(
-                    "Failed to parse {} as Wallet in JSON format. Is the wallet file corrupted? Error: {}",
-                    path.to_string_lossy(),
-                    err
-                )
-            }
-        }
-    } else {
-        info!("Creating new wallet file: {}", path.to_string_lossy());
-
-        // New wallet must be made and stored to disk
-        let new_wallet: Wallet = Wallet::new_random_wallet(name, version);
-        let wallet_as_json: String =
-            serde_json::to_string(&new_wallet).expect("wallet serialization must succeed");
-
-        // Store to disk, with the right permissions
-        if cfg!(target_family = "unix") {
-            create_wallet_file_unix(&path, wallet_as_json);
-        } else {
-            create_wallet_file_windows(&path, wallet_as_json);
-        }
-
-        new_wallet
-    };
-
-    // Sanity check that wallet file was stored on disk.
-    assert!(
-        path.exists(),
-        "wallet file must exist on disk after creation."
-    );
-
-    wallet
-}
 
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    let root_data_dir_path_buf = cli_args.get_data_directory().unwrap();
+    let root_data_dir_path_buf = get_data_directory(cli_args.network).unwrap();
 
     // The root path is where both the wallet and all databases are stored
     let root_data_dir_path = root_data_dir_path_buf.as_path();
@@ -161,10 +76,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Get wallet object, create one if none exists
     debug!("Data root path is {:?}", root_data_dir_path_buf);
-    let wallet: Wallet = initialize_wallet(
-        root_data_dir_path,
-        STANDARD_WALLET_NAME,
-        STANDARD_WALLET_VERSION,
+    let wallet_file = Wallet::wallet_path(root_data_dir_path);
+    let wallet: Wallet = Wallet::initialize_wallet(
+        &wallet_file,
+        wallet::STANDARD_WALLET_NAME,
+        wallet::STANDARD_WALLET_VERSION,
     );
 
     // Connect to or create databases for block state, and for peer state
