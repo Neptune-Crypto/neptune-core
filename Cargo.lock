@@ -882,7 +882,7 @@ dependencies = [
 [[package]]
 name = "mutator-set-tf"
 version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=54eacff462fa8004933580e13b5bcfa6d0ae50cf#54eacff462fa8004933580e13b5bcfa6d0ae50cf"
+source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=59dc816d8e4145dbd736f7e0bb74031e1976d133#59dc816d8e4145dbd736f7e0bb74031e1976d133"
 dependencies = [
  "blake3",
  "itertools",
@@ -2015,7 +2015,7 @@ dependencies = [
 [[package]]
 name = "twenty-first"
 version = "0.1.1"
-source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=c95c68634db89ab9537bfe061f590e98a203ec41#c95c68634db89ab9537bfe061f590e98a203ec41"
+source = "git+ssh://git@neptune.builders:2222/core-team/twenty-first.git?rev=06203486b6740cb0ca14bd1e7fdd2ec3ee0e2922#06203486b6740cb0ca14bd1e7fdd2ec3ee0e2922"
 dependencies = [
  "anyhow",
  "bincode",
