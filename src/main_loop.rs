@@ -801,7 +801,7 @@ impl MainLoopHandler {
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
-                    graceful_shutdown(self).await?;
+                    self.graceful_shutdown().await?;
                     break;
                 }
 
@@ -847,8 +847,7 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server thread
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    self.handle_rpc_server_message(rpc_server_message.clone()).await?;
-                    if let RPCServerToMain::Shutdown() = rpc_server_message {
+                    if self.handle_rpc_server_message(rpc_server_message.clone()).await? {
                         break
                     }
                 }
@@ -878,7 +877,7 @@ impl MainLoopHandler {
 }
 
 impl MainLoopHandler {
-    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<()> {
+    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::Send(transactions) => {
                 debug!(
@@ -893,34 +892,39 @@ impl MainLoopHandler {
                 // send to miner
                 self.main_to_miner_tx
                     .send(MainToMiner::NewTransactions(transactions))?;
+
+                // do not shut down
+                Ok(false)
             }
             RPCServerToMain::Shutdown() => {
                 info!("Recived RPC shutdown request.");
-                graceful_shutdown(self).await?;
+                self.graceful_shutdown().await?;
+
+                // shut down
+                Ok(true)
             }
         }
-        Ok(())
     }
 }
 
-async fn graceful_shutdown(handler: &MainLoopHandler) -> Result<()> {
-    info!("Shutdown initiated.");
+impl MainLoopHandler {
+    async fn graceful_shutdown(self: &MainLoopHandler) -> Result<()> {
+        info!("Shutdown initiated.");
 
-    // Peer-map is owned by main-loop, so there is no need to lock it
-    // to prevent new peers joining while shutting down.
+        // Peer-map is owned by main-loop, so there is no need to lock it
+        // to prevent new peers joining while shutting down.
 
-    // Send 'bye' message to alle peers.
-    let _result = handler
-        .main_to_peer_broadcast_tx
-        .send(MainToPeerThread::DisconnectAll());
+        // Send 'bye' message to alle peers.
+        let _result = self
+            .main_to_peer_broadcast_tx
+            .send(MainToPeerThread::DisconnectAll());
 
-    let __result = handler.main_to_miner_tx.send(MainToMiner::Shutdown);
+        let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
-    //TODO: wait for child processes to finish - using stored tokio JoinHandles.
+        //TODO: wait for child processes to finish - using stored tokio JoinHandles.
 
-    //TODO: flush all writes? just wait 0.1 second? are we writing blocks?
+        sleep(Duration::new(0, 10 * 500000)); // ten miliseconds
 
-    sleep(Duration::new(0, 10 * 500000)); // ten miliseconds
-
-    Ok(())
+        Ok(())
+    }
 }
