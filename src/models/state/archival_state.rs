@@ -656,7 +656,7 @@ impl ArchivalState {
 
     /// Update the mutator set with a block after this block has been stored to the database.
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
-    /// rolled back are present in the DB.
+    /// rolled back are present in the DB. The input block is considered chain tip.
     pub fn update_mutator_set(
         &self,
         block_db_lock: &mut tokio::sync::MutexGuard<BlockDatabases>,
@@ -998,15 +998,15 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state().await;
-        let mut block_1 = make_mock_block(&archival_state.genesis_block, None);
+        let mut block_1_a = make_mock_block(&archival_state.genesis_block, None);
 
         // Verify that block_1 that only contains the coinbase output is valid
-        assert!(block_1.archival_is_valid(&archival_state.genesis_block));
+        assert!(block_1_a.archival_is_valid(&archival_state.genesis_block));
 
         // Add a valid input to the block transaction
+        let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transactions[0].outputs[0].0;
-        let premine_output_randomness =
-            archival_state.genesis_block.body.transactions[0].outputs[0].1;
+        let premine_output_randomness = genesis_block.body.transactions[0].outputs[0].1;
         let item = consumed_utxo.hash();
         let input_membership_proof = archival_state
             .archival_mutator_set
@@ -1021,23 +1021,78 @@ mod archival_state_tests {
             .set_commitment
             .drop(&item.into(), &input_membership_proof);
         add_unsigned_dev_net_input_to_block_transaction(
-            &mut block_1,
+            &mut block_1_a,
             consumed_utxo,
             input_membership_proof,
             input_removal_record,
         );
 
         // Unsigned input must fail to validate
-        assert!(!block_1.archival_is_valid(&archival_state.genesis_block));
+        assert!(!block_1_a.archival_is_valid(&archival_state.genesis_block));
 
         // Sign the transaction with a valid key and verify
-        // let genesis_secret_key: secp256k1::SecretKey = secp256k1::SecretKey
-        // block_1.body.transactions[0].sign(secret_key)
         let genesis_wallet = get_mock_wallet();
-        block_1.body.transactions[0].sign(&genesis_wallet);
+        block_1_a.body.transactions[0].sign(&genesis_wallet);
 
         // Block with signed transaction must validate
-        assert!(block_1.archival_is_valid(&archival_state.genesis_block));
+        assert!(block_1_a.archival_is_valid(&archival_state.genesis_block));
+
+        // Verify that we store this block and that we can update the mutator set with it
+        {
+            // Before updating, the active window must be all zeros
+            let mut db_bc_lock = archival_state.block_databases.lock().await;
+            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+            assert!(ams_lock
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()));
+
+            archival_state.write_block(
+                Box::new(block_1_a.clone()),
+                &mut db_bc_lock,
+                Some(genesis_block.header.proof_of_work_family),
+            )?;
+            let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+            archival_state.update_mutator_set(
+                &mut db_bc_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &block_1_a,
+            )?;
+
+            // Verify that the active window is not all zeros as a removal record has flipped
+            // bits in the Bloom filter
+            assert!(!ams_lock
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()));
+
+            // Verify that a block containing a removal record `block_1_a` can be reverted
+            let block_1_b = make_mock_block(&genesis_block, Some(1000.into()));
+            archival_state.write_block(
+                Box::new(block_1_b.clone()),
+                &mut db_bc_lock,
+                Some(genesis_block.header.proof_of_work_family),
+            )?;
+            archival_state.update_mutator_set(
+                &mut db_bc_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &block_1_b,
+            )?;
+
+            // Verify that the active window is all zeros after reverting the removal record
+            assert!(ams_lock
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()));
+        }
 
         Ok(())
     }
