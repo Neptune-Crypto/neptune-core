@@ -93,7 +93,7 @@ impl Block {
             // Add pre-mine UTXO + commitment to coinbase transaction
             genesis_coinbase_tx
                 .outputs
-                .push((premine_utxo, utxo_commitment))
+                .push((premine_utxo, bad_randomness))
         }
 
         let body: BlockBody = BlockBody {

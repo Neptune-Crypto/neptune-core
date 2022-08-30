@@ -22,7 +22,7 @@ pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 pub struct Transaction {
     pub inputs: Vec<DevNetInput>,
 
-    // In `outputs`, element 0 is the UTXO, element 1 is the MS canonical commitment
+    // In `outputs`, element 0 is the UTXO, element 1 is the randomness that goes into the mutator set
     pub outputs: Vec<(Utxo, Digest)>,
     pub public_scripts: Vec<Vec<BFieldElement>>,
     pub fee: U32s<AMOUNT_SIZE_FOR_U32>,
