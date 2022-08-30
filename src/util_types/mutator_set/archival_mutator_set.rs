@@ -342,7 +342,6 @@ where
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         if bit_index >= active_window_start {
-            println!("active window");
             let relative_index = (bit_index - active_window_start) as usize;
             let was_set = self.set_commitment.swbf_active.get_bit(relative_index);
             self.set_commitment.swbf_active.unset_bit(relative_index);
