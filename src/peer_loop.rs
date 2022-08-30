@@ -837,13 +837,12 @@ impl PeerLoopHandler {
                     };
 
                     if close_connection {
-                        warn!("handle_main_thread_message is closing the connection to {}", self.peer_address);
+                        info!("handle_main_thread_message is closing the connection to {}", self.peer_address);
                         break;
                     }
                 }
             }
         }
-
         Ok(())
     }
 

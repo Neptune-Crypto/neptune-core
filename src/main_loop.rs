@@ -13,13 +13,11 @@ use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
-use tokio::{select, time};
+use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
 
@@ -795,16 +793,18 @@ impl MainLoopHandler {
         let synchronization_timer = time::sleep(sync_timer_interval);
         tokio::pin!(synchronization_timer);
 
-        let shutting_down = Arc::new(AtomicBool::new(false));
-        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutting_down))?;
-        while !shutting_down.load(Ordering::Relaxed) {
-            // If do_shutdown, break.
-
+        loop {
             // Set a timer to run peer discovery process every N seconds
 
             // Set a timer for synchronization handling, but only if we are in synchronization mod
 
             select! {
+                Ok(()) = signal::ctrl_c() => {
+                    info!("Detected Ctrl+c signal.");
+                    graceful_shutdown(self).await?;
+                    break;
+                }
+
                 // Handle incoming connections from peer
                 Ok((stream, _)) = self.tcp_listener.accept() => {
                     let state = self.global_state.clone();
@@ -847,7 +847,10 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server thread
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    self.handle_rpc_server_message(rpc_server_message, Arc::clone(&shutting_down)).await?
+                    self.handle_rpc_server_message(rpc_server_message.clone()).await?;
+                    if let RPCServerToMain::Shutdown() = rpc_server_message {
+                        break
+                    }
                 }
 
                 // Handle peer discovery
@@ -869,32 +872,13 @@ impl MainLoopHandler {
                 }
             }
         }
-        info!("Shutdown initiated.");
-
-        // Peer-map is owned by main-loop, so there is no need to lock it
-        // to prevent new peers joining while shutting down.
-
-        // Send 'bye' message to alle peers.
-        self.main_to_peer_broadcast_tx
-            .send(MainToPeerThread::DisconnectAll())?;
-
-        let _response = self.main_to_miner_tx.send(MainToMiner::Shutdown);
-
-        //TODO: flush all writes? just wait 0.1 second? are we writing blocks?
-
-        sleep(Duration::new(0, 10 * 1000)); // ten miliseconds
         info!("Shutdown completed.");
-
         Ok(())
     }
 }
 
 impl MainLoopHandler {
-    async fn handle_rpc_server_message(
-        &self,
-        msg: RPCServerToMain,
-        shutting_down: Arc<AtomicBool>,
-    ) -> Result<()> {
+    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<()> {
         match msg {
             RPCServerToMain::Send(transactions) => {
                 debug!(
@@ -911,9 +895,32 @@ impl MainLoopHandler {
                     .send(MainToMiner::NewTransactions(transactions))?;
             }
             RPCServerToMain::Shutdown() => {
-                shutting_down.store(true, Ordering::Relaxed);
+                info!("Recived RPC shutdown request.");
+                graceful_shutdown(self).await?;
             }
         }
         Ok(())
     }
+}
+
+async fn graceful_shutdown(handler: &MainLoopHandler) -> Result<()> {
+    info!("Shutdown initiated.");
+
+    // Peer-map is owned by main-loop, so there is no need to lock it
+    // to prevent new peers joining while shutting down.
+
+    // Send 'bye' message to alle peers.
+    let _result = handler
+        .main_to_peer_broadcast_tx
+        .send(MainToPeerThread::DisconnectAll());
+
+    let __result = handler.main_to_miner_tx.send(MainToMiner::Shutdown);
+
+    //TODO: wait for child processes to finish - using stored tokio JoinHandles.
+
+    //TODO: flush all writes? just wait 0.1 second? are we writing blocks?
+
+    sleep(Duration::new(0, 10 * 500000)); // ten miliseconds
+
+    Ok(())
 }
