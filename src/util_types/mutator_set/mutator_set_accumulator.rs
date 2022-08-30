@@ -62,8 +62,11 @@ where
         self.add_helper(addition_record);
     }
 
-    fn remove(&mut self, removal_record: &RemovalRecord<H>) {
+    fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>> {
         self.remove_helper(removal_record);
+
+        // Only an ArchivalMutatorSet can calculate the diff indices
+        None
     }
 
     fn get_commitment(&mut self) -> <H as Hasher>::Digest {
@@ -98,7 +101,8 @@ mod accumulation_scheme_tests {
         type Digest = blake3_wrapper::Blake3Hash;
         let hasher = Hasher::new();
         let mut accumulator: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
-        let mut archival: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+        let mut archival_after_remove: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+        let mut archival_before_remove: ArchivalMutatorSet<Hasher> = empty_archival_ms();
         let number_of_interactions = 100;
         let mut prng = thread_rng();
 
@@ -117,7 +121,7 @@ mod accumulation_scheme_tests {
                 let new_commitment = accumulator.get_commitment();
                 assert_eq!(
                     new_commitment,
-                    archival.get_commitment(),
+                    archival_after_remove.get_commitment(),
                     "Commitment to archival/accumulator MS must agree"
                 );
                 match last_ms_commitment {
@@ -157,7 +161,8 @@ mod accumulation_scheme_tests {
                     }
 
                     accumulator.add(&mut addition_record);
-                    archival.add(&mut addition_record);
+                    archival_after_remove.add(&mut addition_record);
+                    archival_before_remove.add(&mut addition_record);
 
                     let updated_mp_indices = update_result.unwrap();
                     println!("{}: Inserted", i);
@@ -229,8 +234,16 @@ mod accumulation_scheme_tests {
 
                     // remove item from set
                     assert!(accumulator.verify(&removal_item.into(), &removal_mp));
+                    let mut removal_record_copy = removal_record.clone();
                     accumulator.remove(&mut removal_record);
-                    archival.remove(&mut removal_record);
+                    let diff_indices: Vec<u128> =
+                        archival_after_remove.remove(&mut removal_record).unwrap();
+                    for diff_index in diff_indices {
+                        println!("diff_index = {}", diff_index);
+                        assert!(archival_after_remove.get_bloom_filter_bit(diff_index));
+                        assert!(!archival_before_remove.get_bloom_filter_bit(diff_index));
+                    }
+                    archival_before_remove.remove(&mut removal_record_copy);
                     assert!(!accumulator.verify(&removal_item.into(), &removal_mp));
 
                     // Verify that the sequential `update_from_remove` return value is correct
@@ -290,7 +303,7 @@ mod accumulation_scheme_tests {
                     assert!(accumulator.verify(item, mp_batch));
 
                     // Verify that the membership proof can be restored from an archival instance
-                    let arch_mp = archival
+                    let arch_mp = archival_after_remove
                         .restore_membership_proof(item, rand, mp_batch.auth_path_aocl.data_index)
                         .unwrap();
                     assert_eq!(arch_mp, *mp_batch);

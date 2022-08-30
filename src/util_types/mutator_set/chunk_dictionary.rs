@@ -12,7 +12,7 @@ use twenty_first::{
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkDictionary<H: simple_hasher::Hasher + Sized> {
-    // {chunk index => (membership proof for the whole chunk to which bit belongs, chunk value)}
+    // {chunk index => (MMR membership proof for the whole chunk to which bit belongs, chunk value)}
     pub dictionary: HashMap<u128, (mmr::mmr_membership_proof::MmrMembershipProof<H>, Chunk)>,
 }
 

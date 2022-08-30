@@ -35,7 +35,7 @@ pub enum SetCommitmentError {
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
@@ -142,13 +142,17 @@ where
      * Determine if the window slides before absorbing an item,
      * given the index of the to-be-added item.
      */
-    pub fn window_slides(index: u128) -> bool {
-        index != 0 && index % BATCH_SIZE as u128 == 0
+    pub fn window_slides(added_index: u128) -> bool {
+        added_index != 0 && added_index % BATCH_SIZE as u128 == 0
 
         // example cases:
         //  - index == 0 we don't care about
         //  - index == 1 does not generate a slide
         //  - index == n * BATCH_SIZE generates a slide for any n
+    }
+
+    pub fn window_slides_back(removed_index: u128) -> bool {
+        Self::window_slides(removed_index)
     }
 
     /// Helper function. Like `add` but also returns the chunk that was added to the inactive SWBF
@@ -165,7 +169,8 @@ where
 
         // add to list
         let item_index = self.aocl.count_leaves();
-        self.aocl.append(addition_record.commitment.to_owned()); // ignore auth path
+        self.aocl
+            .append(addition_record.canonical_commitment.to_owned()); // ignore auth path
 
         if !Self::window_slides(item_index) {
             return None;
@@ -192,22 +197,35 @@ where
         Some((chunk_index_for_inserted_chunk, chunk))
     }
 
-    /// Remove a record and return the chunks that have been updated in this process, after applying the update.
-    pub fn remove_helper(&mut self, removal_record: &RemovalRecord<H>) -> HashMap<u128, Chunk> {
+    /// Remove a record and return the chunks that have been updated in this process,
+    /// after applying the update. Also returns the indices at which bits were flipped
+    /// from 0 to 1 in either the active or the inactive window.
+    pub fn remove_helper(
+        &mut self,
+        removal_record: &RemovalRecord<H>,
+    ) -> (HashMap<u128, Chunk>, Vec<u128>) {
         let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
-        let window_start = batch_index * CHUNK_SIZE as u128;
+        let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         // set all bits
         let mut new_target_chunks: ChunkDictionary<H> = removal_record.target_chunks.clone();
         let chunk_indices_to_bit_indices: HashMap<u128, Vec<u128>> =
             removal_record.get_chunk_index_to_bit_indices();
 
+        // The indices changed by this `RemovalRecord` are gathered to allow for the
+        // reversal of the application of this `RemovalRecord`.
+        let mut diff_indices = vec![];
+
         for (chunk_index, bit_indices) in chunk_indices_to_bit_indices {
             if chunk_index >= batch_index {
                 // bit index is in the active part, flip bits in the active part of the Bloom filter
                 for bit_index in bit_indices {
-                    let relative_index = bit_index - window_start;
-                    self.swbf_active.set_bit(relative_index as usize);
+                    let relative_index = (bit_index - active_window_start) as usize;
+                    let was_set = self.swbf_active.get_bit(relative_index);
+                    if !was_set {
+                        diff_indices.push(bit_index)
+                    }
+                    self.swbf_active.set_bit(relative_index);
                 }
 
                 continue;
@@ -216,9 +234,12 @@ where
             // If chunk index is not in the active part, set the bits in the relevant chunk
             let relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
             for bit_index in bit_indices {
-                relevant_chunk
-                    .1
-                    .set_bit((bit_index % CHUNK_SIZE as u128) as usize);
+                let relative_bit_index = (bit_index % CHUNK_SIZE as u128) as usize;
+                let was_set = relevant_chunk.1.get_bit(relative_bit_index);
+                if !was_set {
+                    diff_indices.push(bit_index)
+                }
+                relevant_chunk.1.set_bit(relative_bit_index);
             }
         }
 
@@ -244,11 +265,16 @@ where
         self.swbf_inactive
             .batch_mutate_leaf_and_update_mps(&mut all_membership_proofs, mutation_data);
 
-        new_target_chunks
-            .dictionary
-            .into_iter()
-            .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
-            .collect()
+        diff_indices.sort_unstable();
+
+        (
+            new_target_chunks
+                .dictionary
+                .into_iter()
+                .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
+                .collect(),
+            diff_indices,
+        )
     }
 
     /**

@@ -9,7 +9,7 @@ use twenty_first::{
 
 use super::shared::{BITS_PER_U32, CHUNK_SIZE};
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Chunk {
     #[serde(with = "BigArray")]
     pub bits: [u32; CHUNK_SIZE / BITS_PER_U32],

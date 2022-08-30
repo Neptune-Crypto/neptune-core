@@ -212,7 +212,7 @@ where
                     .map(|x| &mut x.auth_path_aocl)
                     .collect::<Vec<_>>(),
                 new_item_index,
-                &addition_record.commitment,
+                &addition_record.canonical_commitment,
                 &mutator_set.aocl.get_peaks(),
             );
 
@@ -373,7 +373,7 @@ where
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
             mutator_set.aocl.count_leaves(),
-            &addition_record.commitment,
+            &addition_record.canonical_commitment,
             &mutator_set.aocl.get_peaks(),
         );
 

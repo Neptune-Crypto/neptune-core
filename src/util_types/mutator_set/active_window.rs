@@ -1,3 +1,4 @@
+use num_traits::identities::Zero;
 use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -6,10 +7,13 @@ use twenty_first::util_types::{
     simple_hasher::{self, Hasher, ToDigest},
 };
 
-use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
+use super::{
+    chunk::Chunk,
+    shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE},
+};
 use crate::util_types::mutator_set::boxed_big_array::BoxedBigArray;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveWindow<H: simple_hasher::Hasher> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     // The byte array is boxed to prevent stack-overflows when deserializing this data
@@ -35,11 +39,11 @@ where
         self.bits[0..CHUNK_SIZE / BITS_PER_U32].try_into().unwrap()
     }
 
-    /// Populate an empty database with the values in this active window.
-    /// This is used to persist the state of an archival mutator set
+    /// Populate an database with the values in this active window.
+    /// This is used to persist the state of an archival mutator set.
     pub fn store_to_database(&self, db: DB) -> DB {
         let mut database_array: DatabaseArray<{ WINDOW_SIZE as u128 / BITS_PER_U32 as u128 }, u32> =
-            DatabaseArray::new(db);
+            DatabaseArray::restore(db);
         database_array.batch_set(
             &self
                 .bits
@@ -72,6 +76,21 @@ where
         {
             self.bits[i] = 0u32;
         }
+    }
+
+    pub fn slide_window_back(&mut self, chunk: &Chunk) {
+        for i in
+            (WINDOW_SIZE / BITS_PER_U32 - CHUNK_SIZE / BITS_PER_U32)..(WINDOW_SIZE / BITS_PER_U32)
+        {
+            assert!(
+                self.bits[i].is_zero(),
+                "Bits removed from active window must be all zero"
+            );
+        }
+        for i in (0..(WINDOW_SIZE / BITS_PER_U32) - CHUNK_SIZE / BITS_PER_U32).rev() {
+            self.bits[i + CHUNK_SIZE / BITS_PER_U32] = self.bits[i];
+        }
+        self.bits[0..CHUNK_SIZE / BITS_PER_U32].copy_from_slice(&chunk.bits);
     }
 
     pub fn set_bit(&mut self, index: usize) {
@@ -235,6 +254,53 @@ mod active_window_tests {
         for i in 0..CHUNK_SIZE / BITS_PER_U32 {
             assert_eq!(0x00u32, aw.bits[aw.bits.len() - 1 - i]);
         }
+    }
+
+    #[test]
+    fn slide_window_back_test() {
+        type Hasher = blake3::Hasher;
+        let array: [u32; WINDOW_SIZE / BITS_PER_U32] = (0..WINDOW_SIZE / BITS_PER_U32)
+            .map(|_| rand::random::<u32>())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let mut active_window = ActiveWindow::<Hasher>::new(Box::new(array));
+        let chunk_bits = active_window.get_sliding_chunk_bits();
+        let chunk = Chunk { bits: chunk_bits };
+
+        active_window.slide_window();
+
+        // Sliding window forward must unset the last bits of the active window
+        for i in
+            (WINDOW_SIZE / BITS_PER_U32 - CHUNK_SIZE / BITS_PER_U32)..(WINDOW_SIZE / BITS_PER_U32)
+        {
+            assert_eq!(0, active_window.bits[i]);
+        }
+
+        active_window.slide_window_back(&chunk);
+
+        assert_eq!(
+            array, *active_window.bits,
+            "Sliding forward and then back must be the identity operation"
+        );
+    }
+
+    #[should_panic(expected = "Bits removed from active window must be all zero")]
+    #[test]
+    fn slide_window_back_panic_test() {
+        type Hasher = blake3::Hasher;
+        let array: [u32; WINDOW_SIZE / BITS_PER_U32] = (0..WINDOW_SIZE / BITS_PER_U32)
+            .map(|_| rand::random::<u32>())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let mut active_window = ActiveWindow::<Hasher>::new(Box::new(array));
+        let dummy_chunk = Chunk {
+            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
+        };
+        active_window.slide_window_back(&dummy_chunk);
     }
 
     #[test]
