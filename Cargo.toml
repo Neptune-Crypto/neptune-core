@@ -17,7 +17,7 @@ default-features = false
 features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 
 [dependencies]
-twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "c95c68634db89ab9537bfe061f590e98a203ec41" }
+twenty-first = { git = "ssh://git@neptune.builders:2222/core-team/twenty-first.git", rev = "06203486b6740cb0ca14bd1e7fdd2ec3ee0e2922" }
 blake3 = "1"
 itertools = "0"
 num-traits = "0"
