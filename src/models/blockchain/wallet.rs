@@ -55,11 +55,7 @@ impl Wallet {
             "Entropy for secret key must be initialized. All elements cannot be equal."
         );
 
-        Self {
-            name: name.to_string(),
-            secret: entropy.into(),
-            version,
-        }
+        Self::new_from_secret_key(name, version, entropy.into())
     }
 
     fn _get_ecdsa_sk(&self) -> secp256k1::SecretKey {
@@ -72,7 +68,7 @@ impl Wallet {
         sk.sign_ecdsa(msg_hash)
     }
 
-    pub fn _sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
+    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
         let sk = self._get_ecdsa_sk();
         let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = msg_digest.into();
         let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
@@ -95,7 +91,7 @@ impl Wallet {
             info!("Found wallet file: {}", wallet_file.to_string_lossy());
 
             // Read wallet from disk
-            let file_content: String = match fs::read_to_string(wallet_file.clone()) {
+            let file_content: String = match fs::read_to_string(wallet_file) {
                 Ok(fc) => fc,
                 Err(err) => panic!(
                     "Failed to read file {}. Got error: {}",
@@ -197,7 +193,7 @@ mod ordered_digest_tests {
             "DEVNET signature must verify"
         );
 
-        let signature_alt = wallet._sign_digest(digest);
+        let signature_alt = wallet.sign_digest(digest);
         assert!(
             signature_alt.verify(&msg, &pk).is_ok(),
             "DEVNET signature must verify"

@@ -157,7 +157,7 @@ mod rpc_server_tests {
     async fn clear_ip_standing_test() -> Result<()> {
         // Create initial conditions
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_genesis_setup(Network::Main, 2)?;
+            get_genesis_setup(Network::Main, 2).await?;
         let peer_address_0 = state
             .net
             .peer_map
@@ -253,7 +253,7 @@ mod rpc_server_tests {
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_genesis_setup(Network::Main, 2)?;
+            get_genesis_setup(Network::Main, 2).await?;
         let peer_address_0 = state
             .net
             .peer_map

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
@@ -14,13 +16,20 @@ use super::AMOUNT_SIZE_FOR_U32;
 pub const PUBLIC_KEY_LENGTH_IN_BYTES: usize = 33;
 pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Utxo {
     pub amount: U32s<AMOUNT_SIZE_FOR_U32>,
     pub public_key: secp256k1::PublicKey,
 }
 
 impl Utxo {
+    pub fn new_from_hex(amount: U32s<AMOUNT_SIZE_FOR_U32>, public_key: &str) -> Self {
+        Self::new(
+            amount,
+            secp256k1::PublicKey::from_str(public_key).expect("public key decoded from hex string"),
+        )
+    }
+
     pub fn new(amount: U32s<AMOUNT_SIZE_FOR_U32>, public_key: secp256k1::PublicKey) -> Self {
         Self { amount, public_key }
     }

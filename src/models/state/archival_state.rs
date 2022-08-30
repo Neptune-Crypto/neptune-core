@@ -1,20 +1,26 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
+use mutator_set_tf::util_types::mutator_set::{
+    addition_record::AdditionRecord, archival_mutator_set::ArchivalMutatorSet,
+    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
+};
 use num_traits::Zero;
+use rusty_leveldb::DB;
 use std::{
     fs,
     io::{Seek, SeekFrom, Write},
+    net::IpAddr,
     ops::DerefMut,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
-use twenty_first::amount::u32s::U32s;
+use twenty_first::{amount::u32s::U32s, util_types::mmr::mmr_trait::Mmr};
 
 use super::shared::{get_block_file_path, new_block_file_is_needed};
 use crate::{
-    database::leveldb::LevelDB,
+    database::{leveldb::LevelDB, rusty::RustyLevelDB},
     models::{
         blockchain::{
             block::{
@@ -23,15 +29,27 @@ use crate::{
                 Block,
             },
             digest::{Digest, Hashable},
+            shared::Hash,
         },
         database::{
             BlockDatabases, BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord,
-            FileRecord, LastFileRecord,
+            FileRecord, LastFileRecord, MsBlockSyncKey, MsBlockSyncValue, PeerDatabases,
         },
+        peer::PeerStanding,
     },
 };
 
-#[derive(Clone, Debug)]
+const BLOCK_INDEX_DB_NAME: &str = "block_index";
+const BANNED_IPS_DB_NAME: &str = "banned_ips";
+const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
+const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
+const MS_AOCL_MMR_DB_NAME: &str = "aocl_mmr";
+const MS_SWBF_INACTIVE_MMR_DB_NAME: &str = "swbfi_mmr";
+const MS_SWBF_ACTIVE_DB_NAME: &str = "swbfa_mmr";
+const MS_CHUNKS_DB_NAME: &str = "chunks";
+const MS_BLOCK_SYNC_DB_NAME: &str = "ms_block_sync";
+
+#[derive(Clone)]
 pub struct ArchivalState {
     // Since this is a database, we use the tokio Mutex here.
     pub block_databases: Arc<TokioMutex<BlockDatabases>>,
@@ -41,17 +59,149 @@ pub struct ArchivalState {
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker thread.
     genesis_block: Box<Block>,
+
+    pub archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
+
+    pub ms_block_sync_db: Arc<TokioMutex<RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>>>,
 }
 
 impl ArchivalState {
-    pub fn new(
+    // TODO: This function belongs in NetworkState
+    /// Create databases for peer standings
+    pub fn initialize_peer_databases(root_path: &Path) -> Result<PeerDatabases> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+
+        // Create root directory for all databases if it does not exist
+        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+            panic!(
+                "Failed to create database directory in {}",
+                path.to_string_lossy()
+            )
+        });
+
+        let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
+        Ok(PeerDatabases {
+            peer_standings: banned_peers,
+        })
+    }
+
+    /// Create databases for block persistence
+    pub fn initialize_block_databases(root_path: &Path) -> Result<BlockDatabases> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+
+        // Create root directory for all databases if it does not exist
+        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+            panic!(
+                "Failed to create database directory in {}",
+                path.to_string_lossy()
+            )
+        });
+
+        let block_index =
+            RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(&path, BLOCK_INDEX_DB_NAME)?;
+
+        Ok(BlockDatabases { block_index })
+    }
+
+    /// Return the database for active window. This should not be public.
+    /// This should be fetched when constructing the mutator set, and when persisting the state
+    /// of the active window.
+    fn active_window_db(root_path: &Path) -> Result<DB> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+        path.push(MUTATOR_SET_DIRECTORY_NAME);
+        path.push(MS_SWBF_ACTIVE_DB_NAME);
+        Ok(DB::open(path, rusty_leveldb::Options::default())?)
+    }
+
+    /// Returns archival mutator set and database for active window
+    pub fn initialize_mutator_set(
+        root_path: &Path,
+    ) -> Result<(
+        ArchivalMutatorSet<Hash>,
+        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+    )> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+        path.push(MUTATOR_SET_DIRECTORY_NAME);
+
+        // Create root directory for all databases if it does not exist
+        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+            panic!(
+                "Failed to create database directory in {}",
+                path.to_string_lossy()
+            )
+        });
+
+        let options = rusty_leveldb::Options::default();
+
+        let mut aocl_db_path = path.clone();
+        aocl_db_path.push(MS_AOCL_MMR_DB_NAME);
+        let aocl_mmr_db = DB::open(aocl_db_path, options.clone())?;
+
+        let mut swbfi_db_path = path.clone();
+        swbfi_db_path.push(MS_SWBF_INACTIVE_MMR_DB_NAME);
+        let swbf_inactive_mmr_db = DB::open(swbfi_db_path, options.clone())?;
+
+        let mut chunks_db_path = path.clone();
+        chunks_db_path.push(MS_CHUNKS_DB_NAME);
+        let chunks_db = DB::open(chunks_db_path, options)?;
+
+        let active_window_db = Self::active_window_db(root_path)?;
+
+        let archival_set: ArchivalMutatorSet<Hash> = ArchivalMutatorSet::new_or_restore(
+            aocl_mmr_db,
+            swbf_inactive_mmr_db,
+            chunks_db,
+            active_window_db,
+        );
+
+        let ms_block_sync: RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue> =
+            RustyLevelDB::new(path, MS_BLOCK_SYNC_DB_NAME)?;
+
+        Ok((archival_set, ms_block_sync))
+    }
+}
+
+impl core::fmt::Debug for ArchivalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArchivalState")
+            .field("block_databases", &self.block_databases)
+            .field("root_data_dir", &self.root_data_dir)
+            .field("genesis_block", &self.genesis_block)
+            .finish()
+    }
+}
+
+impl ArchivalState {
+    pub async fn new(
         initial_block_databases: Arc<TokioMutex<BlockDatabases>>,
+        archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
         root_data_dir: PathBuf,
+        ms_block_sync_db: Arc<TokioMutex<RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>>>,
     ) -> Self {
+        let genesis_block = Box::new(Block::genesis_block());
+
+        // If archival mutator set is empty, populate it with the addition records from genesis block
+        // This assumes genesis block doesn't spend anything -- which it can't so that should be OK
+        {
+            let mut ams_lock = archival_mutator_set.lock().await;
+            let ams_is_empty = ams_lock.set_commitment.aocl.count_leaves().is_zero();
+            if ams_is_empty {
+                for mut addition_record in genesis_block.body.mutator_set_update.additions.clone() {
+                    ams_lock.add(&mut addition_record);
+                }
+            }
+        }
+
         Self {
             block_databases: initial_block_databases,
             root_data_dir,
-            genesis_block: Box::new(Block::genesis_block()),
+            genesis_block,
+            archival_mutator_set,
+            ms_block_sync_db,
         }
     }
 
@@ -269,6 +419,36 @@ impl ArchivalState {
     }
 
     // Return the block with a given block digest, iff it's available in state somewhere
+    // Takes a lock on the block databases as argument.
+    fn get_block_with_lock(
+        &self,
+        block_db_lock: &mut tokio::sync::MutexGuard<BlockDatabases>,
+        block_digest: Digest,
+    ) -> Option<Block> {
+        let maybe_record: Option<BlockRecord> = block_db_lock
+            .block_index
+            .get(BlockIndexKey::Block(block_digest))
+            .map(|x| x.as_block_record());
+        let record: BlockRecord = match maybe_record {
+            Some(rec) => rec,
+            None => {
+                if self.genesis_block.hash == block_digest {
+                    return Some(*self.genesis_block.clone());
+                } else {
+                    return None;
+                }
+            }
+        };
+
+        // Fetch block from disk
+        let block = self
+            .get_block_from_block_record(record)
+            .expect("Fetching from disk must succeed");
+
+        Some(block)
+    }
+
+    // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record: Option<BlockRecord> = self
             .block_databases
@@ -473,19 +653,136 @@ impl ArchivalState {
 
         ret
     }
+
+    /// Update the mutator set with a block after this block has been stored to the database.
+    /// Handles rollback of the mutator set if needed but requires that all blocks that are
+    /// rolled back are present in the DB. The input block is considered chain tip.
+    pub fn update_mutator_set(
+        &self,
+        block_db_lock: &mut tokio::sync::MutexGuard<BlockDatabases>,
+        ams_lock: &mut tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>>,
+        ms_block_sync_lock: &mut tokio::sync::MutexGuard<
+            RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+        >,
+        new_block: &Block,
+    ) -> Result<()> {
+        // Get the block digest that MS was most recently synced to
+        let ms_block_sync_digest = match ms_block_sync_lock.get(MsBlockSyncKey::SyncDigest(())) {
+            Some(value) => {
+                debug!("ms_block_sync was present in database.");
+                value.as_sync_digest()
+            }
+            None => {
+                debug!("ms_block_sync was missing in database; using genesis.");
+                assert_eq!(
+                    new_block.header.prev_block_digest, self.genesis_block.hash,
+                    "Empty ms_block_sync_db only allowed for block after genesis block"
+                );
+                self.genesis_block.hash
+            }
+        };
+
+        // As long as mutator set isn't synced with previous block, roll back
+        let mut ms_block_rollback_digest = ms_block_sync_digest;
+        while ms_block_rollback_digest != new_block.header.prev_block_digest {
+            // Roll back mutator set
+            // block_header_for_current_ms_state = get_current_ms_bh();
+            let roll_back_block = self
+                .get_block_with_lock(block_db_lock, ms_block_rollback_digest)
+                .expect("Fetching block must succeed");
+
+            // Roll back all addition records contained in block
+            for addition_record in roll_back_block
+                .body
+                .mutator_set_update
+                .additions
+                .iter()
+                .rev()
+            {
+                ams_lock.revert_add(addition_record);
+            }
+
+            // Roll back all removal records contained in block
+            // This is done by fetching from the database the indices
+            // flipped in the Bloom filter by that block.
+            let block_diff_indices = ms_block_sync_lock
+                .get(MsBlockSyncKey::Diff(roll_back_block.hash))
+                .unwrap()
+                .as_diff();
+            debug!(
+                "block_diff_indices being rolled back = {:?}",
+                block_diff_indices
+            );
+            ams_lock.revert_remove(block_diff_indices);
+
+            ms_block_rollback_digest = roll_back_block.header.prev_block_digest;
+        }
+
+        let mut addition_records: Vec<AdditionRecord<Hash>> =
+            new_block.body.mutator_set_update.additions.clone();
+        let mut removal_records: Vec<RemovalRecord<Hash>> =
+            new_block.body.mutator_set_update.removals.clone();
+        while let Some(mut addition_record) = addition_records.pop() {
+            ams_lock.add(&mut addition_record);
+
+            // TODO: Batch update all removal records from addition
+        }
+
+        let mut changed_indices: Vec<u128> = vec![];
+        while let Some(removal_record) = removal_records.pop() {
+            let mut indices_of_flipped_bits_in_bf = ams_lock.remove(&removal_record).unwrap();
+            changed_indices.append(&mut indices_of_flipped_bits_in_bf);
+
+            // TODO: Batch update all removal records from removal
+        }
+
+        // Remove duplicates from changed indices
+        changed_indices.sort_unstable();
+        changed_indices.dedup();
+
+        // Store active window onto disk for persistence
+        let active_window_db = Self::active_window_db(&self.root_data_dir)?;
+        let _active_window_db = ams_lock
+            .set_commitment
+            .swbf_active
+            .store_to_database(active_window_db);
+
+        // Write block digest onto disk
+        ms_block_sync_lock.batch_write(&[
+            (
+                MsBlockSyncKey::SyncDigest(()),
+                MsBlockSyncValue::SyncDigest(new_block.hash),
+            ),
+            (
+                MsBlockSyncKey::Diff(new_block.hash),
+                MsBlockSyncValue::Diff(changed_indices),
+            ),
+        ]);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod archival_state_tests {
     use super::*;
 
+    use mutator_set_tf::util_types::mutator_set::shared::{BITS_PER_U32, WINDOW_SIZE};
     use rand::{thread_rng, RngCore};
+    use rusty_leveldb::LdbIterator;
     use tracing_test::traced_test;
+    use twenty_first::shared_math::b_field_element::BFieldElement;
 
     use crate::{
         config_models::network::Network,
-        models::state::{blockchain_state::BlockchainState, light_state::LightState},
-        tests::shared::{add_block_to_archival_state, databases, make_mock_block},
+        models::{
+            blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
+            state::{blockchain_state::BlockchainState, light_state::LightState},
+        },
+        tests::shared::{
+            add_block_to_archival_state, add_unsigned_dev_net_input_to_block_transaction,
+            databases, get_mock_wallet, make_archival_state, make_mock_block,
+        },
     };
 
     #[traced_test]
@@ -494,13 +791,28 @@ mod archival_state_tests {
         // Ensure that the archival state can be initialized without overflowing the stack
         tokio::spawn(async move {
             let (block_databases_0, _, data_dir_0) = databases(Network::Main).unwrap();
-            let archival_state0 = ArchivalState::new(block_databases_0, data_dir_0);
+            let (ams0, ms_block_sync_0) =
+                ArchivalState::initialize_mutator_set(&data_dir_0).unwrap();
+            let ams0 = Arc::new(TokioMutex::new(ams0));
+            let ms_block_sync_0 = Arc::new(TokioMutex::new(ms_block_sync_0));
+            let archival_state0 =
+                ArchivalState::new(block_databases_0, ams0, data_dir_0, ms_block_sync_0).await;
 
             let (block_databases_1, _, data_dir_1) = databases(Network::Main).unwrap();
-            let _archival_state1 = ArchivalState::new(block_databases_1, data_dir_1);
+            let (ams1, ms_block_sync_1) =
+                ArchivalState::initialize_mutator_set(&data_dir_1).unwrap();
+            let ams1 = Arc::new(TokioMutex::new(ams1));
+            let ms_block_sync_1 = Arc::new(TokioMutex::new(ms_block_sync_1));
+            let _archival_state1 =
+                ArchivalState::new(block_databases_1, ams1, data_dir_1, ms_block_sync_1).await;
 
             let (block_databases_2, _, data_dir_2) = databases(Network::Main).unwrap();
-            let archival_state2 = ArchivalState::new(block_databases_2, data_dir_2);
+            let (ams2, ms_block_sync_2) =
+                ArchivalState::initialize_mutator_set(&data_dir_2).unwrap();
+            let ams2 = Arc::new(TokioMutex::new(ams2));
+            let ms_block_sync_2 = Arc::new(TokioMutex::new(ms_block_sync_2));
+            let archival_state2 =
+                ArchivalState::new(block_databases_2, ams2, data_dir_2, ms_block_sync_2).await;
 
             let b = Block::genesis_block();
             let blockchain_state = BlockchainState {
@@ -533,10 +845,274 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn update_mutator_set_db_write_test() -> Result<()> {
+        // Verify that `update_mutator_set` writes the active window back to disk.
+        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        println!("root_data_dir_path = {:?}", root_data_dir_path);
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let item: Digest = Digest::new([BFieldElement::new(17); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let randomness: Digest =
+            Digest::new([BFieldElement::new(133337); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path.clone(),
+            ms_block_sync,
+        )
+        .await;
+        let mut block_db_lock = archival_state.block_databases.lock().await;
+        let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+        {
+            // Before updating the AMS, the active window DB must be empty.
+            let mut active_window_db_before: DB =
+                ArchivalState::active_window_db(&root_data_dir_path)?;
+            assert!(active_window_db_before.new_iter().unwrap().next().is_none());
+        }
+        // ms_block_sync_db is empty
+        let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+
+        let mock_block_1 = make_mock_block(&archival_state.genesis_block.clone(), None);
+
+        let membership_proof = ams_lock.prove(&item.into(), &randomness.into(), true);
+        archival_state.update_mutator_set(
+            &mut block_db_lock,
+            &mut ams_lock,
+            &mut ms_block_sync_lock,
+            &mock_block_1,
+        )?;
+
+        {
+            // After running the AMS updater, the active window DB must be written back to disk
+            // but all the values in the active window must be zero since no removal record
+            // has been added yet.
+            let mut active_window_db_after_add: DB =
+                ArchivalState::active_window_db(&root_data_dir_path)?;
+            assert!(active_window_db_after_add
+                .new_iter()
+                .unwrap()
+                .next()
+                .is_some());
+            let mut db_iter = active_window_db_after_add.new_iter().unwrap();
+            let mut i = 0;
+            while let Some((_key_bytes, value_bytes)) = db_iter.next() {
+                assert!(value_bytes.iter().all(|x| x.is_zero()));
+                i += 1;
+            }
+
+            assert_eq!(WINDOW_SIZE / BITS_PER_U32, i);
+        }
+
+        let mut mock_block_2 = make_mock_block(&mock_block_1, None);
+        let removal_record = ams_lock.deref_mut().drop(&item.into(), &membership_proof);
+        mock_block_2
+            .body
+            .mutator_set_update
+            .removals
+            .push(removal_record);
+
+        // Remove an element from the mutator set, verify that the active window DB
+        // is updated.
+        archival_state.update_mutator_set(
+            &mut block_db_lock,
+            &mut ams_lock,
+            &mut ms_block_sync_lock,
+            &mock_block_2,
+        )?;
+
+        {
+            // After running the MS updater with a removal record, the active window
+            // that is stored on disk must contain non-zero values, i.e. some of the
+            // Bloom filter bits must be flipped.
+            let mut active_window_db_after_remove: DB =
+                ArchivalState::active_window_db(&root_data_dir_path)?;
+            assert!(active_window_db_after_remove
+                .new_iter()
+                .unwrap()
+                .next()
+                .is_some());
+            let mut db_iter = active_window_db_after_remove.new_iter().unwrap();
+            let mut i = 0;
+            let mut non_zero_value_found = false;
+            while let Some((_key_bytes, value_bytes)) = db_iter.next() {
+                non_zero_value_found =
+                    non_zero_value_found || value_bytes.iter().any(|byte| !byte.is_zero());
+                i += 1;
+            }
+
+            assert!(non_zero_value_found);
+            assert_eq!(WINDOW_SIZE / BITS_PER_U32, i);
+        }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
+        let archival_state: ArchivalState = make_archival_state().await;
+        let mut block_db_lock = archival_state.block_databases.lock().await;
+        let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+        let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+
+        // 1. Create new block 1 and store it to the DB
+        let mock_block_1a = make_mock_block(&archival_state.genesis_block, None);
+        archival_state.write_block(
+            Box::new(mock_block_1a.clone()),
+            &mut block_db_lock,
+            Some(mock_block_1a.header.proof_of_work_family),
+        )?;
+
+        // 2. Update mutator set with this
+        archival_state.update_mutator_set(
+            &mut block_db_lock,
+            &mut ams_lock,
+            &mut ms_block_sync_lock,
+            &mock_block_1a,
+        )?;
+
+        // 3. Create competing block 1 and store it to DB
+        let mock_block_1b = make_mock_block(&archival_state.genesis_block, None);
+        archival_state.write_block(
+            Box::new(mock_block_1a.clone()),
+            &mut block_db_lock,
+            Some(mock_block_1b.header.proof_of_work_family),
+        )?;
+
+        // 4. Update mutator set with that
+        archival_state.update_mutator_set(
+            &mut block_db_lock,
+            &mut ams_lock,
+            &mut ms_block_sync_lock,
+            &mock_block_1b,
+        )?;
+
+        // 5. Experience rollback
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn allow_consumption_of_genesis_output_test() -> Result<()> {
+        let archival_state: ArchivalState = make_archival_state().await;
+        let mut block_1_a = make_mock_block(&archival_state.genesis_block, None);
+
+        // Verify that block_1 that only contains the coinbase output is valid
+        assert!(block_1_a.archival_is_valid(&archival_state.genesis_block));
+
+        // Add a valid input to the block transaction
+        let genesis_block = archival_state.genesis_block.clone();
+        let consumed_utxo = archival_state.genesis_block.body.transactions[0].outputs[0].0;
+        let premine_output_randomness = genesis_block.body.transactions[0].outputs[0].1;
+        let item = consumed_utxo.hash();
+        let input_membership_proof = archival_state
+            .archival_mutator_set
+            .lock()
+            .await
+            .restore_membership_proof(&item.into(), &premine_output_randomness.into(), 0)
+            .unwrap();
+        let input_removal_record = archival_state
+            .archival_mutator_set
+            .lock()
+            .await
+            .set_commitment
+            .drop(&item.into(), &input_membership_proof);
+        add_unsigned_dev_net_input_to_block_transaction(
+            &mut block_1_a,
+            consumed_utxo,
+            input_membership_proof,
+            input_removal_record,
+        );
+
+        // Unsigned input must fail to validate
+        assert!(!block_1_a.archival_is_valid(&archival_state.genesis_block));
+
+        // Sign the transaction with a valid key and verify
+        let genesis_wallet = get_mock_wallet();
+        block_1_a.body.transactions[0].sign(&genesis_wallet);
+
+        // Block with signed transaction must validate
+        assert!(block_1_a.archival_is_valid(&archival_state.genesis_block));
+
+        // Verify that we store this block and that we can update the mutator set with it
+        {
+            // Before updating, the active window must be all zeros
+            let mut db_bc_lock = archival_state.block_databases.lock().await;
+            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+            assert!(ams_lock
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()));
+
+            archival_state.write_block(
+                Box::new(block_1_a.clone()),
+                &mut db_bc_lock,
+                Some(genesis_block.header.proof_of_work_family),
+            )?;
+            let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+            archival_state.update_mutator_set(
+                &mut db_bc_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &block_1_a,
+            )?;
+
+            // Verify that the active window is not all zeros as a removal record has flipped
+            // bits in the Bloom filter
+            assert!(!ams_lock
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()));
+
+            // Verify that a block containing a removal record `block_1_a` can be reverted
+            let block_1_b = make_mock_block(&genesis_block, Some(1000.into()));
+            archival_state.write_block(
+                Box::new(block_1_b.clone()),
+                &mut db_bc_lock,
+                Some(genesis_block.header.proof_of_work_family),
+            )?;
+            archival_state.update_mutator_set(
+                &mut db_bc_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &block_1_b,
+            )?;
+
+            // Verify that the active window is all zeros after reverting the removal record
+            assert!(ams_lock
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()));
+        }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn get_latest_block_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
         println!("root_data_dir_path = {:?}", root_data_dir_path);
-        let archival_state = ArchivalState::new(block_databases.clone(), root_data_dir_path);
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path,
+            ms_block_sync,
+        )
+        .await;
         let mut db_lock_0 = block_databases.lock().await;
         let ret = archival_state.get_latest_block_from_disk(&mut db_lock_0)?;
         assert!(
@@ -585,7 +1161,17 @@ mod archival_state_tests {
     #[tokio::test]
     async fn get_block_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases.clone(), root_data_dir_path);
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path,
+            ms_block_sync,
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
         let mock_block_1 = make_mock_block(&genesis.clone(), None);
 
@@ -648,7 +1234,17 @@ mod archival_state_tests {
     #[tokio::test]
     async fn block_belongs_to_canonical_chain_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path,
+            ms_block_sync,
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
         assert!(
             archival_state
@@ -920,7 +1516,17 @@ mod archival_state_tests {
     #[tokio::test]
     async fn digest_of_ancestors_panic_test() {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path,
+            ms_block_sync,
+        )
+        .await;
         let genesis = archival_state.genesis_block.clone();
         archival_state
             .get_ancestor_block_digests(genesis.header.prev_block_digest, 10)
@@ -931,7 +1537,17 @@ mod archival_state_tests {
     #[tokio::test]
     async fn digest_of_ancestors_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path,
+            ms_block_sync,
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
 
         assert!(archival_state
@@ -999,7 +1615,17 @@ mod archival_state_tests {
     #[tokio::test]
     async fn write_block_db_test() -> Result<()> {
         let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
-        let archival_state = ArchivalState::new(block_databases, root_data_dir_path);
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path,
+            ms_block_sync,
+        )
+        .await;
         let genesis = *archival_state.genesis_block.clone();
         let mock_block_1 = make_mock_block(&genesis.clone(), None);
         let mut db_lock = archival_state.block_databases.lock().await;

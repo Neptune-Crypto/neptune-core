@@ -21,7 +21,7 @@ use self::{
 };
 use super::{
     digest::{ordered_digest::OrderedDigest, *},
-    transaction::AMOUNT_SIZE_FOR_U32,
+    transaction::{utxo::Utxo, Transaction, AMOUNT_SIZE_FOR_U32},
 };
 use crate::models::blockchain::shared::Hash;
 
@@ -63,22 +63,51 @@ impl Block {
     }
 
     pub fn genesis_block() -> Self {
-        let mut empty_mutator = MutatorSetAccumulator::default();
-        let body: BlockBody = BlockBody {
-            transactions: vec![],
-            next_mutator_set_accumulator: empty_mutator.clone(),
-            previous_mutator_set_accumulator: empty_mutator.clone(),
-            mutator_set_update: MutatorSetUpdate::default(),
-            stark_proof: vec![],
-        };
-
+        let empty_mutator_set = MutatorSetAccumulator::default();
+        let mut genesis_mutator_set = MutatorSetAccumulator::default();
+        let mut ms_update = MutatorSetUpdate::default();
         // This is just the UNIX timestamp when this code was written
         let timestamp: BFieldElement = BFieldElement::new(1655916990u64);
+
+        let mut genesis_coinbase_tx = Transaction {
+            inputs: vec![],
+            outputs: vec![],
+            public_scripts: vec![],
+            fee: 0u32.into(),
+            timestamp,
+        };
+
+        for premine_utxo in Self::premine_utxos() {
+            // A commitment to the pre-mine UTXO
+            let utxo_commitment = premine_utxo.hash();
+
+            // This isn't random.
+            let bad_randomness = Digest::default();
+
+            // Add pre-mine UTXO to MutatorSet
+            let mut addition_record =
+                genesis_mutator_set.commit(&utxo_commitment.into(), &bad_randomness.into());
+            ms_update.additions.push(addition_record.clone());
+            genesis_mutator_set.add(&mut addition_record);
+
+            // Add pre-mine UTXO + commitment to coinbase transaction
+            genesis_coinbase_tx
+                .outputs
+                .push((premine_utxo, bad_randomness))
+        }
+
+        let body: BlockBody = BlockBody {
+            transactions: vec![genesis_coinbase_tx],
+            next_mutator_set_accumulator: genesis_mutator_set.clone(),
+            previous_mutator_set_accumulator: empty_mutator_set,
+            mutator_set_update: ms_update,
+            stark_proof: vec![],
+        };
 
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::ring_zero(),
             height: BFieldElement::ring_zero().into(),
-            mutator_set_commitment: empty_mutator.get_commitment().into(),
+            mutator_set_commitment: genesis_mutator_set.get_commitment().into(),
             prev_block_digest: Digest::default(),
             timestamp,
             nonce: [
@@ -95,6 +124,13 @@ impl Block {
         };
 
         Self::new(header, body)
+    }
+
+    fn premine_utxos() -> Vec<Utxo> {
+        vec![Utxo::new_from_hex(
+            20000.into(),
+            "03c7635c31ad6c52fa86f982275e3c2620dd712718b68be19e57f14595da133522",
+        )]
     }
 
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {
@@ -209,7 +245,8 @@ impl Block {
             for (utxo, randomness) in tx.outputs.iter() {
                 let expected_commitment =
                     hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
-                if block_copy.body.mutator_set_update.additions[i].commitment != expected_commitment
+                if block_copy.body.mutator_set_update.additions[i].canonical_commitment
+                    != expected_commitment
                 {
                     warn!("Bad commitment found in addition record");
                     return false;

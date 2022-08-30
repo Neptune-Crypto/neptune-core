@@ -13,7 +13,6 @@ mod tests;
 
 use crate::config_models::data_directory::get_data_directory;
 use crate::connect_to_peers::call_peer_wrapper;
-use crate::database::leveldb::LevelDB;
 use crate::main_loop::MainLoopHandler;
 use crate::models::blockchain::wallet;
 use crate::models::channel::RPCServerToMain;
@@ -30,15 +29,16 @@ use database::rusty::RustyLevelDB;
 use futures::future;
 use futures::StreamExt;
 use models::blockchain::block::Block;
+use models::blockchain::shared::Hash;
 use models::blockchain::wallet::Wallet;
-use models::database::BlockIndexKey;
-use models::database::BlockIndexValue;
+use models::database::MsBlockSyncKey;
+use models::database::MsBlockSyncValue;
 use models::database::{BlockDatabases, PeerDatabases};
 use models::peer::PeerInfo;
+use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use std::collections::HashMap;
 use std::env;
-use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
@@ -49,7 +49,7 @@ use tokio_serde::formats::*;
 use tracing::{debug, instrument};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
-use crate::models::peer::{HandshakeData, PeerStanding};
+use crate::models::peer::HandshakeData;
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -58,34 +58,6 @@ const PEER_CHANNEL_CAPACITY: usize = 1000;
 const MINER_CHANNEL_CAPACITY: usize = 3;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const BLOCK_INDEX_DB_NAME: &str = "block_index";
-const BANNED_IPS_DB_NAME: &str = "banned_ips";
-const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
-
-/// Create databases if they don't already exists. Also return the databases used by the client.
-fn initialize_databases(root_path: &Path) -> Result<(BlockDatabases, PeerDatabases)> {
-    let mut path = root_path.to_owned();
-    path.push(DATABASE_DIRECTORY_ROOT_NAME);
-
-    // Create root directory for all databases if it does not exist
-    std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
-        panic!(
-            "Failed to create database directory in {}",
-            path.to_string_lossy()
-        )
-    });
-
-    let block_index =
-        RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(&path, BLOCK_INDEX_DB_NAME)?;
-    let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
-
-    Ok((
-        BlockDatabases { block_index },
-        PeerDatabases {
-            peer_standings: banned_peers,
-        },
-    ))
-}
 
 #[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
@@ -112,12 +84,26 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     );
 
     // Connect to or create databases for block state, and for peer state
-    let (block_databases, peer_databases) = initialize_databases(root_data_dir_path)?;
+    let block_databases = ArchivalState::initialize_block_databases(root_data_dir_path)?;
+    let peer_databases = ArchivalState::initialize_peer_databases(root_data_dir_path)?;
     let block_databases: Arc<tokio::sync::Mutex<BlockDatabases>> =
         Arc::new(tokio::sync::Mutex::new(block_databases));
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
         Arc::new(tokio::sync::Mutex::new(peer_databases));
-    let archival_state = ArchivalState::new(block_databases, root_data_dir_path_buf);
+    let (archival_mutator_set, ms_block_sync_db): (
+        ArchivalMutatorSet<Hash>,
+        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+    ) = ArchivalState::initialize_mutator_set(root_data_dir_path).unwrap();
+    let archival_mutator_set: Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>> =
+        Arc::new(tokio::sync::Mutex::new(archival_mutator_set));
+    let ms_block_sync_db = Arc::new(tokio::sync::Mutex::new(ms_block_sync_db));
+    let archival_state = ArchivalState::new(
+        block_databases,
+        archival_mutator_set,
+        root_data_dir_path_buf,
+        ms_block_sync_db,
+    )
+    .await;
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
     let latest_block: Block = archival_state.get_latest_block().await;

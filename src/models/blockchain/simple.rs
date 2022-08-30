@@ -59,7 +59,7 @@ impl super::transaction::devnet_input::DevNetInput {
         };
 
         Self {
-            utxo: input_utxo.clone(),
+            utxo: *input_utxo,
             membership_proof,
             removal_record,
             signature: wallet.sign(input_utxo),
@@ -77,7 +77,7 @@ impl super::transaction::Transaction {
         // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
         let output_utxos_with_digest = outputs
             .into_iter()
-            .map(|out_utxo| (out_utxo.clone(), out_utxo.hash()))
+            .map(|out_utxo| (out_utxo, out_utxo.hash()))
             .collect::<Vec<_>>();
 
         let timestamp = BFieldElement::new(

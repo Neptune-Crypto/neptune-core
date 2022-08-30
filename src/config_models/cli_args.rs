@@ -1,12 +1,7 @@
 use super::network::Network;
-use anyhow::{bail, Result};
 use clap::builder::RangedI64ValueParser;
 use clap::Parser;
-use directories::ProjectDirs;
-use std::{
-    net::{IpAddr, SocketAddr},
-    path::PathBuf,
-};
+use std::net::{IpAddr, SocketAddr};
 
 /// Decalarative specification of command-line arguments
 #[derive(Parser, Debug, Clone)]

@@ -55,7 +55,7 @@ async fn make_devnet_block(
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
     let coinbase_transaction = Transaction {
         inputs: vec![],
-        outputs: vec![(coinbase_utxo.clone(), output_randomness.clone().into())],
+        outputs: vec![(coinbase_utxo, output_randomness.clone().into())],
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,
@@ -82,8 +82,6 @@ async fn make_devnet_block(
         previous_mutator_set_accumulator: previous_block.body.next_mutator_set_accumulator,
         stark_proof: vec![],
     };
-
-    debug!("Transactions: {:#?}", block_body.transactions);
 
     let zero = BFieldElement::ring_zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);

@@ -1,11 +1,14 @@
 use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
+use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::Hashable;
-use crate::models::database::BlockDatabases;
+use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
 use crate::models::peer::{HandshakeData, PeerInfo, PeerSynchronizationState};
 use crate::models::state::State;
+use crate::Hash;
 use anyhow::Result;
+use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
@@ -304,6 +307,26 @@ impl MainLoopHandler {
                     .block_databases
                     .lock()
                     .await;
+                let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                    .global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .archival_mutator_set
+                    .lock()
+                    .await;
+                let mut ms_block_sync_lock: tokio::sync::MutexGuard<
+                    RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+                > = self
+                    .global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .ms_block_sync_db
+                    .lock()
+                    .await;
                 let mut light_state_locked = self
                     .global_state
                     .chain
@@ -321,6 +344,20 @@ impl MainLoopHandler {
                         &mut db_lock,
                         Some(light_state_locked.proof_of_work_family),
                     )?;
+
+                // update the mutator set with the UTXOs from this block
+                self.global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .update_mutator_set(
+                        &mut db_lock,
+                        &mut ams_lock,
+                        &mut ms_block_sync_lock,
+                        &block,
+                    )?;
+
                 *light_state_locked = block.header.clone();
             }
         }
@@ -340,13 +377,33 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
+                    let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
                         .block_databases
+                        .lock()
+                        .await;
+                    let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .archival_mutator_set
+                        .lock()
+                        .await;
+                    let mut ms_block_sync_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+                    > = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .ms_block_sync_db
                         .lock()
                         .await;
                     let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = self
@@ -390,7 +447,6 @@ impl MainLoopHandler {
                             .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                     }
 
-                    // Store blocks in database
                     for block in blocks {
                         debug!("Storing block {:?} in database", block.hash);
                         self.global_state
@@ -399,9 +455,22 @@ impl MainLoopHandler {
                             .as_ref()
                             .unwrap()
                             .write_block(
-                                Box::new(block),
-                                &mut db_lock,
+                                Box::new(block.clone()),
+                                &mut block_db_lock,
                                 Some(previous_block_header.proof_of_work_family),
+                            )?;
+
+                        // update the mutator set with the UTXOs from this block
+                        self.global_state
+                            .chain
+                            .archival_state
+                            .as_ref()
+                            .unwrap()
+                            .update_mutator_set(
+                                &mut block_db_lock,
+                                &mut ams_lock,
+                                &mut ms_block_sync_lock,
+                                &block,
                             )?;
                     }
 
