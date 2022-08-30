@@ -5,11 +5,14 @@ use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use secp256k1::ecdsa;
 use secp256k1::Secp256k1;
 use std::path::PathBuf;
 use std::{
@@ -31,6 +34,8 @@ use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::transaction::devnet_input::DevNetInput;
+use crate::models::blockchain::wallet::Wallet;
 use crate::models::database::BlockIndexKey;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
@@ -373,6 +378,50 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
+/// Add an unsigned (incorrectly signed) devnet input to a transaction
+pub fn add_unsigned_dev_net_input_to_block_transaction(
+    block: &mut Block,
+    input_utxo: Utxo,
+    membership_proof: MsMembershipProof<Hash>,
+    removal_record: RemovalRecord<Hash>,
+) {
+    assert_eq!(
+        1,
+        block.body.transactions.len(),
+        "Helper function expects block with one tx"
+    );
+    let mut tx = block.body.transactions[0].clone();
+    let new_devnet_input = DevNetInput {
+        utxo: input_utxo,
+        membership_proof: membership_proof.into(),
+        removal_record: removal_record.clone(),
+        // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
+        signature: ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap(),
+    };
+    tx.inputs.push(new_devnet_input);
+    block.body.transactions[0] = tx;
+
+    // add removal record for this spending
+    block
+        .body
+        .mutator_set_update
+        .removals
+        .push(removal_record.clone());
+
+    // Update block mutator set accumulator
+    let mut next_mutator_set_accumulator = block.body.next_mutator_set_accumulator.clone();
+    next_mutator_set_accumulator.remove(&removal_record);
+    block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
+
+    // update header fields
+    block.header.mutator_set_commitment = block
+        .body
+        .next_mutator_set_accumulator
+        .get_commitment()
+        .into();
+    block.header.block_body_merkle_root = block.body.hash();
+}
+
 /// Return a fake block with a random hash
 pub fn make_mock_block(
     previous_block: &Block,
@@ -398,7 +447,7 @@ pub fn make_mock_block(
     );
     let tx = Transaction {
         inputs: vec![],
-        outputs: vec![(coinbase_utxo.clone(), output_randomness.clone().into())],
+        outputs: vec![(coinbase_utxo, output_randomness.clone().into())],
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,
@@ -420,7 +469,6 @@ pub fn make_mock_block(
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
 
-        // TODO: Consider to use something else than an empty MS here
         previous_mutator_set_accumulator: previous_ms,
         stark_proof: vec![],
     };
@@ -450,14 +498,18 @@ pub fn make_mock_block(
     Block::new(block_header, block_body)
 }
 
-// pub fn make_random_digest() -> Digest {
-//     let mut rng = rand::thread_rng();
-//     let elements: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
-//         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng)
-//             .try_into()
-//             .unwrap();
-//     Digest::new(elements)
-// }
+/// Return a dummy-wallet used for testing
+pub fn get_mock_wallet() -> Wallet {
+    let dummy_secret_for_genesis_wallet = Digest::new([
+        BFieldElement::new(14683724377595469133),
+        BFieldElement::new(4905634007273628284),
+        BFieldElement::new(2544353828551980854),
+        BFieldElement::new(9457203229242732950),
+        BFieldElement::new(5097796649750941488),
+        BFieldElement::new(12701344140082211424),
+    ]);
+    Wallet::new_from_secret_key("unit_test_dummy", 0, dummy_secret_for_genesis_wallet)
+}
 
 pub async fn make_archival_state() -> ArchivalState {
     let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();

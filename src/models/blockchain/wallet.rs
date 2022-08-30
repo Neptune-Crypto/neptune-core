@@ -68,7 +68,7 @@ impl Wallet {
         sk.sign_ecdsa(msg_hash)
     }
 
-    pub fn _sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
+    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
         let sk = self._get_ecdsa_sk();
         let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = msg_digest.into();
         let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
@@ -193,7 +193,7 @@ mod ordered_digest_tests {
             "DEVNET signature must verify"
         );
 
-        let signature_alt = wallet._sign_digest(digest);
+        let signature_alt = wallet.sign_digest(digest);
         assert!(
             signature_alt.verify(&msg, &pk).is_ok(),
             "DEVNET signature must verify"

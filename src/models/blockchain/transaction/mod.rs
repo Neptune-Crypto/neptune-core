@@ -14,6 +14,7 @@ use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utx
 use super::{
     digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
+    wallet::Wallet,
 };
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
@@ -97,6 +98,16 @@ impl Transaction {
                 .collect(),
             public_scripts: self.public_scripts.clone(),
             timestamp: self.timestamp,
+        }
+    }
+
+    /// Sign all transaction inputs with the same signature
+    pub fn sign(&mut self, wallet: &Wallet) {
+        let kernel: TransactionKernel = self.get_kernel();
+        let kernel_digest: Digest = kernel.hash();
+        let signature = wallet.sign_digest(kernel_digest);
+        for input in self.inputs.iter_mut() {
+            input.signature = signature;
         }
     }
 

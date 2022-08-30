@@ -56,7 +56,7 @@ async fn make_devnet_block(
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
     let coinbase_transaction = Transaction {
         inputs: vec![],
-        outputs: vec![(coinbase_utxo.clone(), output_randomness.clone().into())],
+        outputs: vec![(coinbase_utxo, output_randomness.clone().into())],
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,
@@ -71,7 +71,7 @@ async fn make_devnet_block(
                     .tx
                     .outputs
                     .iter()
-                    .map(|utxo| (utxo.clone(), output_randomness.clone().into()))
+                    .map(|utxo| (*utxo, output_randomness.clone().into()))
                     .collect(),
                 public_scripts: vec![],
                 fee: U32s::zero(),

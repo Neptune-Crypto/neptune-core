@@ -780,7 +780,8 @@ mod archival_state_tests {
             state::{blockchain_state::BlockchainState, light_state::LightState},
         },
         tests::shared::{
-            add_block_to_archival_state, databases, make_archival_state, make_mock_block,
+            add_block_to_archival_state, add_unsigned_dev_net_input_to_block_transaction,
+            databases, get_mock_wallet, make_archival_state, make_mock_block,
         },
     };
 
@@ -989,6 +990,54 @@ mod archival_state_tests {
         )?;
 
         // 5. Experience rollback
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn allow_consumption_of_genesis_output_test() -> Result<()> {
+        let archival_state: ArchivalState = make_archival_state().await;
+        let mut block_1 = make_mock_block(&archival_state.genesis_block, None);
+
+        // Verify that block_1 that only contains the coinbase output is valid
+        assert!(block_1.archival_is_valid(&archival_state.genesis_block));
+
+        // Add a valid input to the block transaction
+        let consumed_utxo = archival_state.genesis_block.body.transactions[0].outputs[0].0;
+        let premine_output_randomness =
+            archival_state.genesis_block.body.transactions[0].outputs[0].1;
+        let item = consumed_utxo.hash();
+        let input_membership_proof = archival_state
+            .archival_mutator_set
+            .lock()
+            .await
+            .restore_membership_proof(&item.into(), &premine_output_randomness.into(), 0)
+            .unwrap();
+        let input_removal_record = archival_state
+            .archival_mutator_set
+            .lock()
+            .await
+            .set_commitment
+            .drop(&item.into(), &input_membership_proof);
+        add_unsigned_dev_net_input_to_block_transaction(
+            &mut block_1,
+            consumed_utxo,
+            input_membership_proof,
+            input_removal_record,
+        );
+
+        // Unsigned input must fail to validate
+        assert!(!block_1.archival_is_valid(&archival_state.genesis_block));
+
+        // Sign the transaction with a valid key and verify
+        // let genesis_secret_key: secp256k1::SecretKey = secp256k1::SecretKey
+        // block_1.body.transactions[0].sign(secret_key)
+        let genesis_wallet = get_mock_wallet();
+        block_1.body.transactions[0].sign(&genesis_wallet);
+
+        // Block with signed transaction must validate
+        assert!(block_1.archival_is_valid(&archival_state.genesis_block));
 
         Ok(())
     }
