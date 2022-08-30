@@ -493,7 +493,7 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerThreadToMain::Send(transactions) => {
+            PeerThreadToMain::NewTransactions(transactions) => {
                 debug!(
                     "`main` received following transactions from `peer`: {:?}",
                     transactions
@@ -504,7 +504,7 @@ impl MainLoopHandler {
 
                 // relay to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::Send(transactions))?;
+                    .send(MainToMiner::NewTransactions(transactions))?;
             }
         }
 
@@ -810,11 +810,11 @@ impl MainLoopHandler {
 
                 // send to peers
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Send(transactions.clone()))?;
+                    .send(MainToPeerThread::Transactions(transactions.clone()))?;
 
                 // send to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::Send(transactions))?;
+                    .send(MainToMiner::NewTransactions(transactions))?;
             }
         }
 

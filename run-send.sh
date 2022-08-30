@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-#
-# Run three instances where instance 0 and instance 2 are mining but instance 1 is not. The nodes are connected like this:
-# (0) <-> (1) <-> (2)
-# So whenever a block is found by 0 or by 2, it is propagated through 1.
+
+# Run one node with an RPC-server and a mining thread.
+# Run one RPC-client and issue `send` command.
 
 set -e # Exit on first error.
-#set -x
+set -x # Debug
 
 export RUST_LOG=debug;
 

@@ -5,15 +5,14 @@ use twenty_first::amount::u32s::U32s;
 use super::blockchain::{
     block::{block_header::PROOF_OF_WORK_COUNT_U32_SIZE, block_height::BlockHeight, Block},
     digest::Digest,
+    transaction::Transaction,
 };
-
-use crate::models::blockchain::simple::*;
 
 #[derive(Clone, Debug)]
 pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
-    Send(Vec<SignedSimpleTransaction>),
+    NewTransactions(Vec<Transaction>),
     // StopMining,
     // StartMining,
     // SetCoinbasePubkey,
@@ -34,7 +33,7 @@ pub enum MainToPeerThread {
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
     Disconnect(SocketAddr),                       // Disconnect the connection to a specific peer
-    Send(Vec<SignedSimpleTransaction>),
+    Transactions(Vec<Transaction>),
 }
 
 impl MainToPeerThread {
@@ -50,7 +49,7 @@ impl MainToPeerThread {
                 "make specific peer discovery req".to_string()
             }
             MainToPeerThread::Disconnect(_) => "disconnect".to_string(),
-            MainToPeerThread::Send(_) => "send".to_string(),
+            MainToPeerThread::Transactions(_) => "send".to_string(),
         }
     }
 }
@@ -62,7 +61,7 @@ pub enum PeerThreadToMain {
     AddPeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
-    Send(Vec<SignedSimpleTransaction>),
+    NewTransactions(Vec<Transaction>),
 }
 
 impl PeerThreadToMain {
@@ -75,12 +74,12 @@ impl PeerThreadToMain {
                 "remove peer max block height".to_string()
             }
             PeerThreadToMain::PeerDiscoveryAnswer(_) => "peer discovery answer".to_string(),
-            PeerThreadToMain::Send(_) => "send".to_string(),
+            PeerThreadToMain::NewTransactions(_) => "send".to_string(),
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum RPCServerToMain {
-    Send(Vec<SignedSimpleTransaction>),
+    Send(Vec<Transaction>),
 }

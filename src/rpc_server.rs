@@ -2,6 +2,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::blockchain::simple::*;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::State;
@@ -10,7 +11,6 @@ use futures::future::{self, Ready};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::context;
-use twenty_first::amount::u32s::U32s;
 
 #[tarpc::service]
 pub trait RPC {
@@ -103,33 +103,34 @@ impl RPC for NeptuneRPCServer {
         tracing::debug!(?wallet.public_key);
 
         // 1. Parse
-        let txs = tracing::debug_span!("Parsing TXSPEC")
-            .in_scope(|| serde_json::from_str::<TxSpec>(&send_argument))
+        let txs = tracing::debug_span!("Parsing TxSpec")
+            .in_scope(|| serde_json::from_str::<Vec<Utxo>>(&send_argument))
             .unwrap();
 
         // 2. Build transaction objects.
         // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
-        let transactions = txs
+        let dummy_transactions = txs
             .iter()
-            .map(|tx| -> SignedSimpleTransaction {
+            .map(|tx| -> Transaction {
                 let balance: Amount = wallet.get_balance();
 
-                let simple_transaction = UnsignedSimpleTransaction::new(
+                Transaction::new(
                     wallet.get_all_utxos(),
                     vec![
-                        Utxo::new(U32s::new([tx.amount, 0, 0, 0]), tx.recipient_address), // the requested transfer
-                        Utxo::new(U32s::new([balance - tx.amount, 0, 0, 0]), wallet.public_key), // transfer the remainder to ourself.
+                        // the requested transfer
+                        Utxo::new(tx.amount, tx.public_key),
+                        // transfer the remainder to ourself
+                        Utxo::new(balance - tx.amount, wallet.public_key),
                     ],
-                );
-
-                // 3. Sign
-                simple_transaction.sign(&wallet)
+                    &wallet,
+                )
             })
             .collect::<Vec<_>>();
+
         // 4. Send transaction message to main
         let response = executor::block_on(
             self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(transactions)),
+                .send(RPCServerToMain::Send(dummy_transactions)),
         );
 
         // 5. Send acknowledgement to client.

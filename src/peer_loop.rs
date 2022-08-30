@@ -649,7 +649,7 @@ impl PeerLoopHandler {
                 self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
             }
-            PeerMessage::Send(transactions) => {
+            PeerMessage::Transactions(transactions) => {
                 info!(
                     "`peer_loop` received following transactions from `peer`: {:?}",
                     transactions
@@ -657,7 +657,7 @@ impl PeerLoopHandler {
 
                 // relay to main
                 self.to_main_tx
-                    .send(PeerThreadToMain::Send(transactions))
+                    .send(PeerThreadToMain::NewTransactions(transactions))
                     .await?;
                 Ok(false)
             }
@@ -753,9 +753,9 @@ impl PeerLoopHandler {
                 }
                 Ok(false)
             }
-            MainToPeerThread::Send(txs) => {
+            MainToPeerThread::Transactions(txs) => {
                 debug!("Sending PeerMessage::Send");
-                peer.send(PeerMessage::Send(txs)).await?;
+                peer.send(PeerMessage::Transactions(txs)).await?;
                 debug!("Sent PeerMessage::Send");
                 Ok(false)
             }
