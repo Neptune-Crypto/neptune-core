@@ -9,7 +9,7 @@ use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
     PeerSanctionReason, PeerStanding,
 };
-use crate::models::state::State;
+use crate::models::state::GlobalState;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
@@ -29,7 +29,7 @@ const MINIMUM_BLOCK_BATCH_SIZE: usize = 10;
 /// since this needs to be a mutable variable in most methods.
 pub struct PeerLoopHandler {
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    state: State,
+    state: GlobalState,
     peer_address: SocketAddr,
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
@@ -39,7 +39,7 @@ pub struct PeerLoopHandler {
 impl PeerLoopHandler {
     pub fn new(
         to_main_tx: mpsc::Sender<PeerThreadToMain>,
-        state: State,
+        state: GlobalState,
         peer_address: SocketAddr,
         peer_handshake_data: HandshakeData,
         inbound_connection: bool,

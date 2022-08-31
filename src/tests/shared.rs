@@ -41,7 +41,7 @@ use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::networking_state::NetworkingState;
-use crate::models::state::State;
+use crate::models::state::GlobalState;
 use crate::{
     config_models::{cli_args, network::Network},
     models::{
@@ -177,7 +177,7 @@ pub async fn get_genesis_setup(
     broadcast::Receiver<MainToPeerThread>,
     mpsc::Sender<PeerThreadToMain>,
     mpsc::Receiver<PeerThreadToMain>,
-    State,
+    GlobalState,
     HandshakeData,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =
@@ -210,7 +210,7 @@ pub async fn get_genesis_setup(
         light_state,
         archival_state: Some(archival_state),
     };
-    let state = State {
+    let state = GlobalState {
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
@@ -259,7 +259,7 @@ fn get_data_director_for_unit_tests() -> Result<PathBuf> {
 }
 
 /// Helper function for tests to update state with a new block
-pub async fn add_block(state: &State, new_block: Block) -> Result<()> {
+pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
     let mut db_lock = state
         .chain
         .archival_state

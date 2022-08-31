@@ -5,7 +5,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
-use crate::models::state::State;
+use crate::models::state::GlobalState;
 use futures::executor;
 use futures::future::{self, Ready};
 use std::net::IpAddr;
@@ -32,7 +32,7 @@ pub trait RPC {
 #[derive(Clone)]
 pub struct NeptuneRPCServer {
     pub socket_address: SocketAddr,
-    pub state: State,
+    pub state: GlobalState,
     pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 impl RPC for NeptuneRPCServer {

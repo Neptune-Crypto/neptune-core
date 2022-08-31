@@ -16,7 +16,7 @@ use crate::{
     models::{
         channel::{MainToPeerThread, PeerThreadToMain},
         peer::{ConnectionRefusedReason, ConnectionStatus, HandshakeData, PeerMessage},
-        state::State,
+        state::GlobalState,
     },
     peer_loop::PeerLoopHandler,
     MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
@@ -24,7 +24,7 @@ use crate::{
 
 async fn get_connection_status(
     max_peers: u16,
-    state: &State,
+    state: &GlobalState,
     own_handshake: &HandshakeData,
     other_handshake: &HandshakeData,
     peer_address: &SocketAddr,
@@ -73,7 +73,7 @@ async fn get_connection_status(
 #[instrument]
 pub async fn answer_peer<S>(
     stream: S,
-    state: State,
+    state: GlobalState,
     peer_address: std::net::SocketAddr,
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
@@ -156,7 +156,7 @@ where
 #[instrument]
 pub async fn call_peer_wrapper(
     peer_address: std::net::SocketAddr,
-    state: State,
+    state: GlobalState,
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: HandshakeData,
@@ -191,7 +191,7 @@ pub async fn call_peer_wrapper(
 #[instrument]
 async fn call_peer<S>(
     stream: S,
-    state: State,
+    state: GlobalState,
     peer_address: std::net::SocketAddr,
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,

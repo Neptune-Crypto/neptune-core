@@ -9,7 +9,7 @@ use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
-use crate::models::state::State;
+use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
@@ -35,7 +35,7 @@ async fn make_devnet_block(
     previous_block: Block,
     sender: oneshot::Sender<Block>,
     public_key: secp256k1::PublicKey,
-    state: State,
+    state: GlobalState,
     incoming_transactions: Vec<Transaction>,
 ) {
     let next_block_height: BlockHeight = previous_block.header.height.next();
@@ -151,7 +151,7 @@ pub async fn mock_regtest_mine(
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block: Block,
     own_public_key: secp256k1::PublicKey,
-    state: State,
+    state: GlobalState,
 ) -> Result<()> {
     let mut incoming_transactions_tmp = vec![];
 

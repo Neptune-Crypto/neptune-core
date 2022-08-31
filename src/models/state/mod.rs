@@ -14,22 +14,22 @@ pub mod light_state;
 pub mod networking_state;
 pub mod shared;
 
-/// State handles all state of the client that is shared across threads.
-/// The policy used here is that only the main thread should update the
-/// state, all other threads are only allowed to read from the state.
+/// `GlobalState` handles all state of a Neptune node that is shared across its threads.
+///
+/// Some fields are only accessed by some threads.
 #[derive(Debug, Clone)]
-pub struct State {
-    // Only the main thread may update these values.
+pub struct GlobalState {
+    /// The `BlockchainState` may only be updated by the main thread.
     pub chain: BlockchainState,
 
-    // This contains values that both the peer threads and main thread may update
+    /// The `NetworkingState` may be updated by both the main thread and peer threads.
     pub net: NetworkingState,
 
-    // This field is read-only as it's set at launch
+    /// The `cli_args::Args` are read-only and accessible by all threads.
     pub cli: cli_args::Args,
 }
 
-impl State {
+impl GlobalState {
     // Storing IP addresses is, according to this answer, not a violation of GDPR:
     // https://law.stackexchange.com/a/28609/45846
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
