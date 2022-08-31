@@ -1,5 +1,4 @@
 use twenty_first::{
-    amount::u32s::U32s,
     shared_math::b_field_element::BFieldElement,
     util_types::{merkle_tree::MerkleTree, simple_hasher::Hasher},
 };
@@ -9,13 +8,13 @@ use crate::models::blockchain::{
     shared::Hash,
 };
 
-use super::{utxo::Utxo, AMOUNT_SIZE_FOR_U32};
+use super::{utxo::Utxo, Amount, AMOUNT_SIZE_FOR_U32};
 
 pub struct TransactionKernel {
     pub input_utxos: Vec<Utxo>,
     pub output_utxos: Vec<Utxo>,
     pub public_scripts: Vec<Vec<BFieldElement>>,
-    pub fee: U32s<AMOUNT_SIZE_FOR_U32>,
+    pub fee: Amount,
     pub timestamp: BFieldElement,
 }
 
