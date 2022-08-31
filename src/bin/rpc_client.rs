@@ -49,24 +49,24 @@ async fn main() -> Result<()> {
     match args.command {
         Command::BlockHeight => {
             let block_height = client.block_height(context::current()).await?;
-            tracing::info!("Block height: {}", block_height);
+            println!("Block height: {}", block_height);
         }
         Command::GetPeerInfo => {
             let peers = client.get_peer_info(context::current()).await?;
-            tracing::info!("{} connected peers", peers.len());
-            tracing::info!("{}", serde_json::to_string(&peers)?);
+            println!("{} connected peers", peers.len());
+            println!("{}", serde_json::to_string(&peers)?);
         }
         Command::Head => {
             let head_hash = client.head(context::current()).await?;
-            tracing::info!("{}", head_hash);
+            println!("{}", head_hash);
         }
         Command::ClearAllStandings => {
             client.clear_all_standings(context::current()).await?;
-            tracing::info!("Cleared all standings.");
+            println!("Cleared all standings.");
         }
         Command::ClearIpStanding { ip } => {
             client.clear_ip_standing(context::current(), ip).await?;
-            tracing::info!("Cleared standing of {}", ip);
+            println!("Cleared standing of {}", ip);
         }
         Command::Send { send_argument } => {
             // Only proceed if the input string is valid JSON
@@ -76,12 +76,12 @@ async fn main() -> Result<()> {
             client
                 .send(context::current(), send_argument.clone())
                 .await?;
-            tracing::debug!("Send-command issued with argument: {}.", send_argument);
+            println!("Send-command issued with argument: {}.", send_argument);
         }
         Command::Shutdown => {
-            tracing::info!("Sending shutdown-command.");
+            println!("Sending shutdown-command.");
             client.shutdown(context::current()).await?;
-            tracing::info!("Shutdown-command completed successfully.");
+            println!("Shutdown-command completed successfully.");
         }
     }
 
