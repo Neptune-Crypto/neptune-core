@@ -16,25 +16,32 @@ use tarpc::context;
 pub trait RPC {
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
+
     /// Returns info about the peers we are connected to
     async fn get_peer_info() -> Vec<PeerInfo>;
+
     /// Returns the digest of the latest block
     async fn head() -> Digest;
-    // Clears standing for all peers, connected or not.
+
+    /// Clears standing for all peers, connected or not
     async fn clear_all_standings();
-    // Clears standing for ip, whether connected or not.
+
+    /// Clears standing for ip, whether connected or not
     async fn clear_ip_standing(ip: IpAddr);
-    // Send coins.
+
+    /// Send coins
     async fn send(send_argument: String) -> bool;
     // Gracious shutdown.
     async fn shutdown() -> bool;
 }
+
 #[derive(Clone)]
 pub struct NeptuneRPCServer {
     pub socket_address: SocketAddr,
     pub state: GlobalState,
     pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
+
 impl RPC for NeptuneRPCServer {
     type BlockHeightFut = Ready<BlockHeight>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
@@ -50,10 +57,12 @@ impl RPC for NeptuneRPCServer {
         let latest_block = self.state.chain.light_state.get_latest_block_header();
         future::ready(latest_block.height)
     }
+
     fn head(self, _: context::Context) -> Ready<Digest> {
         let latest_block = self.state.chain.light_state.get_latest_block_header();
         future::ready(latest_block.hash())
     }
+
     fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
         let peer_map = self
             .state
@@ -66,6 +75,7 @@ impl RPC for NeptuneRPCServer {
             .collect();
         future::ready(peer_map)
     }
+
     fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
         let mut peers = self
             .state
@@ -81,6 +91,7 @@ impl RPC for NeptuneRPCServer {
         executor::block_on(self.state.clear_all_standings_in_database());
         future::ready(())
     }
+
     fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
         let mut peers = self
             .state
@@ -149,6 +160,7 @@ impl RPC for NeptuneRPCServer {
         future::ready(response.is_ok())
     }
 }
+
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
