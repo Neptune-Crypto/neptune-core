@@ -144,7 +144,7 @@ impl RPC for NeptuneRPCServer {
         // 4. Send transaction message to main
         let response = executor::block_on(
             self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(dummy_transactions)),
+                .send(RPCServerToMain::Send(transaction)),
         );
 
         // 5. Send acknowledgement to client.

@@ -199,10 +199,10 @@ pub async fn mock_regtest_mine(
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
-                    MainToMiner::NewTransactions(incoming_txs) => {
-                        debug!("Miner thread received incoming transactions from main: {:?}", incoming_txs);
-                        incoming_transactions_tmp = incoming_txs
-                    }
+                    MainToMiner::NewTransaction(incoming_tx) => {
+                        debug!("Miner thread received incoming transactions from main: {:?}", incoming_tx);
+                        incoming_transactions_tmp = vec![incoming_tx]
+                    },
                 }
             }
             new_fake_block_res = receiver => {

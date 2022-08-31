@@ -563,10 +563,10 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerThreadToMain::NewTransactions(transactions) => {
+            PeerThreadToMain::NewTransaction(transaction) => {
                 debug!(
                     "`main` received following transactions from `peer`: {:?}",
-                    transactions
+                    transaction
                 );
 
                 // relay to peers - this will result in an explosion of messages.
@@ -574,7 +574,7 @@ impl MainLoopHandler {
 
                 // relay to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewTransactions(transactions))?;
+                    .send(MainToMiner::NewTransaction(transaction))?;
             }
         }
 
@@ -879,19 +879,19 @@ impl MainLoopHandler {
 impl MainLoopHandler {
     async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
-            RPCServerToMain::Send(transactions) => {
+            RPCServerToMain::Send(transaction) => {
                 debug!(
                     "`main` received following transactions from RPC Server: {:?}",
-                    transactions
+                    transaction
                 );
 
                 // send to peers
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Transactions(transactions.clone()))?;
+                    .send(MainToPeerThread::Transaction(transaction.clone()))?;
 
                 // send to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewTransactions(transactions))?;
+                    .send(MainToMiner::NewTransaction(transaction))?;
 
                 // do not shut down
                 Ok(false)
