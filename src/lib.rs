@@ -138,6 +138,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         chain: blockchain_state,
         cli: cli_args,
         net: networking_state,
+        wallet,
     };
     let own_handshake_data: HandshakeData = state.get_handshakedata();
 
@@ -174,7 +175,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                 main_to_miner_rx,
                 miner_to_main_tx,
                 latest_block,
-                wallet.get_public_key(),
+                state_clone_for_miner.wallet.get_public_key(),
                 state_clone_for_miner,
             )
             .await

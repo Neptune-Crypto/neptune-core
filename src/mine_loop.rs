@@ -153,6 +153,7 @@ pub async fn mock_regtest_mine(
     own_public_key: secp256k1::PublicKey,
     state: GlobalState,
 ) -> Result<()> {
+    // TODO: Reduce to one transaction instead of a list.
     let mut incoming_transactions_tmp = vec![];
 
     loop {

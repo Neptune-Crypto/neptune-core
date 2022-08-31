@@ -1,8 +1,7 @@
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::simple::*;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::GlobalState;
@@ -108,38 +107,28 @@ impl RPC for NeptuneRPCServer {
         executor::block_on(self.state.clear_ip_standing_in_database(ip));
         future::ready(())
     }
+
     fn send(self, _ctx: context::Context, send_argument: String) -> Self::SendFut {
-        let wallet = SimpleWallet::new();
+        let wallet = self.state.wallet;
 
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
-        tracing::debug!(?wallet.public_key);
+        tracing::debug!("Wallet public key: {}", wallet.get_public_key());
 
         // 1. Parse
         let txs = tracing::debug_span!("Parsing TxSpec")
             .in_scope(|| serde_json::from_str::<Vec<Utxo>>(&send_argument))
             .unwrap();
 
-        // 2. Build transaction objects.
-        // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
-        let dummy_transactions = txs
-            .iter()
-            .map(|tx| -> Transaction {
-                let balance: Amount = wallet.get_balance();
+        // TODO: Get these from `send_argument` instead of sending to oneself:
+        let amount: Amount = 100.into();
+        let recipient_public_key = wallet.get_public_key();
 
-                Transaction::new(
-                    wallet.get_all_utxos(),
-                    vec![
-                        // the requested transfer
-                        Utxo::new(tx.amount, tx.public_key),
-                        // transfer the remainder to ourself
-                        Utxo::new(balance - tx.amount, wallet.public_key),
-                    ],
-                    &wallet,
-                )
-            })
-            .collect::<Vec<_>>();
+        // 2. Build transaction objects.
+        let transaction: Transaction = wallet
+            .create_transaction(amount, recipient_public_key)
+            .expect("Could not create transaction object; TODO: Handle error better.");
 
         // 4. Send transaction message to main
         let response = executor::block_on(

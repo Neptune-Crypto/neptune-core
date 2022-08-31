@@ -8,6 +8,8 @@ use crate::{
     VERSION,
 };
 
+use super::blockchain::wallet::Wallet;
+
 pub mod archival_state;
 pub mod blockchain_state;
 pub mod light_state;
@@ -21,6 +23,11 @@ pub mod shared;
 pub struct GlobalState {
     /// The `BlockchainState` may only be updated by the main thread.
     pub chain: BlockchainState,
+
+    /// The `Wallet` may be updated by the main thread and the RPC server.
+    ///
+    /// TODO: Add some persistent `WalletState`, verify update policy.
+    pub wallet: Wallet,
 
     /// The `NetworkingState` may be updated by both the main thread and peer threads.
     pub net: NetworkingState,

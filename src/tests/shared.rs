@@ -214,6 +214,7 @@ pub async fn get_genesis_setup(
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
+        wallet: get_mock_wallet(),
     };
     Ok((
         peer_broadcast_tx,
