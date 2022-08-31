@@ -747,6 +747,8 @@ impl PeerLoopHandler {
                 // thread requested to disconnected from.
                 Ok(target_socket_addr == self.peer_address)
             }
+            // Disconnect from this peer, no matter what.
+            MainToPeerThread::DisconnectAll() => Ok(true),
             MainToPeerThread::MakeSpecificPeerDiscoveryRequest(target_socket_addr) => {
                 if target_socket_addr == self.peer_address {
                     peer.send(PeerMessage::PeerListRequest).await?;
@@ -835,13 +837,12 @@ impl PeerLoopHandler {
                     };
 
                     if close_connection {
-                        warn!("handle_main_thread_message is closing the connection to {}", self.peer_address);
+                        info!("handle_main_thread_message is closing the connection to {}", self.peer_address);
                         break;
                     }
                 }
             }
         }
-
         Ok(())
     }
 

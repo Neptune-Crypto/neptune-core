@@ -13,6 +13,7 @@ pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
     NewTransactions(Vec<Transaction>),
+    Shutdown,
     // StopMining,
     // StartMining,
     // SetCoinbasePubkey,
@@ -32,8 +33,9 @@ pub enum MainToPeerThread {
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
-    Disconnect(SocketAddr),                       // Disconnect the connection to a specific peer
+    Disconnect(SocketAddr),                       // Disconnect from a specific peer
     Transactions(Vec<Transaction>),
+    DisconnectAll(), // Disconnect from all peers
 }
 
 impl MainToPeerThread {
@@ -48,8 +50,9 @@ impl MainToPeerThread {
             MainToPeerThread::MakeSpecificPeerDiscoveryRequest(_) => {
                 "make specific peer discovery req".to_string()
             }
-            MainToPeerThread::Disconnect(_) => "disconnect".to_string(),
             MainToPeerThread::Transactions(_) => "send".to_string(),
+            MainToPeerThread::Disconnect(_) => "disconnect".to_string(),
+            MainToPeerThread::DisconnectAll() => "disconnect all".to_string(),
         }
     }
 }
@@ -82,4 +85,5 @@ impl PeerThreadToMain {
 #[derive(Clone, Debug)]
 pub enum RPCServerToMain {
     Send(Vec<Transaction>),
+    Shutdown(),
 }

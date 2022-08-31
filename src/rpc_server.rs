@@ -26,6 +26,8 @@ pub trait RPC {
     async fn clear_ip_standing(ip: IpAddr);
     // Send coins.
     async fn send(send_argument: String) -> bool;
+    // Gracious shutdown.
+    async fn shutdown() -> bool;
 }
 #[derive(Clone)]
 pub struct NeptuneRPCServer {
@@ -40,6 +42,7 @@ impl RPC for NeptuneRPCServer {
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
     type SendFut = Ready<bool>;
+    type ShutdownFut = Ready<bool>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
@@ -134,6 +137,15 @@ impl RPC for NeptuneRPCServer {
         );
 
         // 5. Send acknowledgement to client.
+        future::ready(response.is_ok())
+    }
+
+    fn shutdown(self, _: context::Context) -> Self::ShutdownFut {
+        // 1. Send shutdown message to main
+        let response =
+            executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::Shutdown()));
+
+        // 2. Send acknowledgement to client.
         future::ready(response.is_ok())
     }
 }

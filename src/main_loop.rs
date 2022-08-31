@@ -13,10 +13,11 @@ use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
-use tokio::{select, time};
+use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
 
@@ -798,6 +799,12 @@ impl MainLoopHandler {
             // Set a timer for synchronization handling, but only if we are in synchronization mod
 
             select! {
+                Ok(()) = signal::ctrl_c() => {
+                    info!("Detected Ctrl+c signal.");
+                    self.graceful_shutdown().await?;
+                    break;
+                }
+
                 // Handle incoming connections from peer
                 Ok((stream, _)) = self.tcp_listener.accept() => {
                     let state = self.global_state.clone();
@@ -838,8 +845,11 @@ impl MainLoopHandler {
                     self.handle_miner_thread_message(main_message).await?
                 }
 
+                // Handle messages from rpc server thread
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    self.handle_rpc_server_message(rpc_server_message).await?
+                    if self.handle_rpc_server_message(rpc_server_message.clone()).await? {
+                        break
+                    }
                 }
 
                 // Handle peer discovery
@@ -859,19 +869,17 @@ impl MainLoopHandler {
                     // Reset the timer to run this branch again in M seconds
                     synchronization_timer.as_mut().reset(tokio::time::Instant::now() + sync_timer_interval);
                 }
-
-
-                // TODO: Add signal::ctrl_c/shutdown handling here
             }
         }
+        info!("Shutdown completed.");
+        Ok(())
     }
 }
 
 impl MainLoopHandler {
-    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<()> {
+    async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::Send(transactions) => {
-                //
                 debug!(
                     "`main` received following transactions from RPC Server: {:?}",
                     transactions
@@ -884,8 +892,38 @@ impl MainLoopHandler {
                 // send to miner
                 self.main_to_miner_tx
                     .send(MainToMiner::NewTransactions(transactions))?;
+
+                // do not shut down
+                Ok(false)
+            }
+            RPCServerToMain::Shutdown() => {
+                info!("Recived RPC shutdown request.");
+                self.graceful_shutdown().await?;
+
+                // shut down
+                Ok(true)
             }
         }
+    }
+}
+
+impl MainLoopHandler {
+    async fn graceful_shutdown(self: &MainLoopHandler) -> Result<()> {
+        info!("Shutdown initiated.");
+
+        // Peer-map is owned by main-loop, so there is no need to lock it
+        // to prevent new peers joining while shutting down.
+
+        // Send 'bye' message to alle peers.
+        let _result = self
+            .main_to_peer_broadcast_tx
+            .send(MainToPeerThread::DisconnectAll());
+
+        let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+
+        //TODO: wait for child processes to finish - using stored tokio JoinHandles.
+
+        sleep(Duration::new(0, 10 * 500000)); // ten miliseconds
 
         Ok(())
     }

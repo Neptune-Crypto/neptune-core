@@ -15,6 +15,7 @@ enum Command {
     ClearAllStandings,
     ClearIpStanding { ip: IpAddr },
     Send { send_argument: String },
+    Shutdown,
 }
 
 #[derive(Debug, Parser)]
@@ -76,6 +77,11 @@ async fn main() -> Result<()> {
                 .send(context::current(), send_argument.clone())
                 .await?;
             tracing::debug!("Send-command issued with argument: {}.", send_argument);
+        }
+        Command::Shutdown => {
+            tracing::info!("Sending shutdown-command.");
+            client.shutdown(context::current()).await?;
+            tracing::info!("Shutdown-command completed successfully.");
         }
     }
 
