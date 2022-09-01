@@ -1,11 +1,9 @@
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::simple::*;
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
-use crate::models::state::State;
+use crate::models::state::GlobalState;
 use futures::executor;
 use futures::future::{self, Ready};
 use std::net::IpAddr;
@@ -16,25 +14,32 @@ use tarpc::context;
 pub trait RPC {
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
+
     /// Returns info about the peers we are connected to
     async fn get_peer_info() -> Vec<PeerInfo>;
+
     /// Returns the digest of the latest block
     async fn head() -> Digest;
-    // Clears standing for all peers, connected or not.
+
+    /// Clears standing for all peers, connected or not
     async fn clear_all_standings();
-    // Clears standing for ip, whether connected or not.
+
+    /// Clears standing for ip, whether connected or not
     async fn clear_ip_standing(ip: IpAddr);
-    // Send coins.
+
+    /// Send coins
     async fn send(send_argument: String) -> bool;
     // Gracious shutdown.
     async fn shutdown() -> bool;
 }
+
 #[derive(Clone)]
 pub struct NeptuneRPCServer {
     pub socket_address: SocketAddr,
-    pub state: State,
+    pub state: GlobalState,
     pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
+
 impl RPC for NeptuneRPCServer {
     type BlockHeightFut = Ready<BlockHeight>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
@@ -50,10 +55,12 @@ impl RPC for NeptuneRPCServer {
         let latest_block = self.state.chain.light_state.get_latest_block_header();
         future::ready(latest_block.height)
     }
+
     fn head(self, _: context::Context) -> Ready<Digest> {
         let latest_block = self.state.chain.light_state.get_latest_block_header();
         future::ready(latest_block.hash())
     }
+
     fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
         let peer_map = self
             .state
@@ -66,6 +73,7 @@ impl RPC for NeptuneRPCServer {
             .collect();
         future::ready(peer_map)
     }
+
     fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
         let mut peers = self
             .state
@@ -81,6 +89,7 @@ impl RPC for NeptuneRPCServer {
         executor::block_on(self.state.clear_all_standings_in_database());
         future::ready(())
     }
+
     fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
         let mut peers = self
             .state
@@ -97,43 +106,28 @@ impl RPC for NeptuneRPCServer {
         executor::block_on(self.state.clear_ip_standing_in_database(ip));
         future::ready(())
     }
-    fn send(self, _ctx: context::Context, send_argument: String) -> Self::SendFut {
-        let wallet = SimpleWallet::new();
+
+    fn send(self, _ctx: context::Context, _send_argument: String) -> Self::SendFut {
+        let wallet = self.state.wallet;
 
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
-        tracing::debug!(?wallet.public_key);
+        tracing::debug!("Wallet public key: {}", wallet.get_public_key());
 
-        // 1. Parse
-        let txs = tracing::debug_span!("Parsing TxSpec")
-            .in_scope(|| serde_json::from_str::<Vec<Utxo>>(&send_argument))
-            .unwrap();
+        // TODO: Get these from `send_argument` instead of sending to oneself:
+        let amount: Amount = 100.into();
+        let recipient_public_key = wallet.get_public_key();
 
         // 2. Build transaction objects.
-        // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
-        let dummy_transactions = txs
-            .iter()
-            .map(|tx| -> Transaction {
-                let balance: Amount = wallet.get_balance();
-
-                Transaction::new(
-                    wallet.get_all_utxos(),
-                    vec![
-                        // the requested transfer
-                        Utxo::new(tx.amount, tx.public_key),
-                        // transfer the remainder to ourself
-                        Utxo::new(balance - tx.amount, wallet.public_key),
-                    ],
-                    &wallet,
-                )
-            })
-            .collect::<Vec<_>>();
+        let transaction: Transaction = wallet
+            .create_transaction(amount, recipient_public_key)
+            .expect("Could not create transaction object; TODO: Handle error better.");
 
         // 4. Send transaction message to main
         let response = executor::block_on(
             self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(dummy_transactions)),
+                .send(RPCServerToMain::Send(transaction)),
         );
 
         // 5. Send acknowledgement to client.
@@ -149,6 +143,7 @@ impl RPC for NeptuneRPCServer {
         future::ready(response.is_ok())
     }
 }
+
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;

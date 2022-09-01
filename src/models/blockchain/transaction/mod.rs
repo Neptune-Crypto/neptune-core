@@ -18,6 +18,7 @@ use super::{
 };
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
+pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
@@ -26,7 +27,7 @@ pub struct Transaction {
     // In `outputs`, element 0 is the UTXO, element 1 is the randomness that goes into the mutator set
     pub outputs: Vec<(Utxo, Digest)>,
     pub public_scripts: Vec<Vec<BFieldElement>>,
-    pub fee: U32s<AMOUNT_SIZE_FOR_U32>,
+    pub fee: Amount,
     pub timestamp: BFieldElement,
 }
 
@@ -111,15 +112,14 @@ impl Transaction {
         }
     }
 
-    pub fn devnet_is_valid(&self, coinbase_amount: Option<U32s<AMOUNT_SIZE_FOR_U32>>) -> bool {
+    pub fn devnet_is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
         // What belongs here are the things that would otherwise
         // be verified by the transaction validity proof.
 
         // Membership proofs and removal records are checked by caller, don't check here.
 
         // 1. UTXO: sum(inputs) + coinbase_amount >= fee + sum(outputs)
-        let mut spendable_amount: U32s<AMOUNT_SIZE_FOR_U32> =
-            self.inputs.iter().map(|input| input.utxo.amount).sum();
+        let mut spendable_amount: Amount = self.inputs.iter().map(|input| input.utxo.amount).sum();
         spendable_amount = spendable_amount
             + match coinbase_amount {
                 None => U32s::zero(),

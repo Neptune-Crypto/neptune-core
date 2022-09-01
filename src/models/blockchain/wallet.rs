@@ -1,3 +1,7 @@
+use crate::Hash;
+use anyhow::Result;
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use num_traits::Zero;
 use rand::thread_rng;
 use secp256k1::{ecdsa, Secp256k1};
 use serde::{Deserialize, Serialize};
@@ -13,6 +17,9 @@ use super::digest::{
     Digest, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
     RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
 };
+use super::transaction::devnet_input::DevNetInput;
+use super::transaction::utxo::Utxo;
+use super::transaction::{Amount, Transaction};
 
 pub const WALLET_FILE_NAME: &str = "wallet.dat";
 pub const STANDARD_WALLET_NAME: &str = "standard";
@@ -165,6 +172,53 @@ impl Wallet {
             .open(path)
             .unwrap();
         fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
+    }
+
+    pub fn get_balance(&self) -> Amount {
+        // TODO: Get from memory, but make sure it's in sync with disk.
+        //
+        // self.utxos.iter().map(|utxo| utxo.amount).sum()
+        Amount::zero()
+    }
+
+    pub fn create_transaction(
+        &self,
+        amount: Amount,
+        _recipient_public_key: secp256k1::PublicKey,
+    ) -> Result<Transaction> {
+        let _spendable_utxos: Vec<(Utxo, Digest)> = self.allocate_sufficient_input_funds(amount)?;
+        let _membership_proofs: Vec<MsMembershipProof<Hash>> = vec![];
+
+        // TODO: Fetch `MembershipProof`s, generate `RemovalRecord`s, and sign.
+        //
+        // See `allow_consumption_of_genesis_output_test` in archival_state.
+        let inputs: Vec<DevNetInput> = vec![];
+        let outputs = vec![];
+
+        let transaction = Transaction {
+            inputs,
+            outputs,
+            public_scripts: vec![],
+            fee: Amount::zero(),
+            timestamp: BFieldElement::new(1655916990),
+        };
+
+        Ok(transaction)
+    }
+
+    // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
+    //
+    // TODO: Assert that balance is sufficient! (There is similar logic in block-validation elsewhere.)
+    fn allocate_sufficient_input_funds(&self, _amount: Amount) -> Result<Vec<(Utxo, Digest)>> {
+        let _allocated_amount = Amount::zero();
+        // while allocated_amount < amount {
+        // TODO: Allocate enough.
+        //
+        // TODO: Depends on wallet database of owned UTXOs being available.
+        //
+        // TODO: Eventually sort by optimal granularity.
+        // }
+        Ok(vec![])
     }
 }
 

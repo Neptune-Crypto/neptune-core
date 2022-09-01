@@ -6,6 +6,8 @@ use tokio::sync::Mutex as TokioMutex;
 
 type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
 
+/// `NetworkingState` contains in-memory and persisted data for interacting
+/// with network peers.
 #[derive(Debug, Clone)]
 pub struct NetworkingState {
     // Stores info about the peers that the client is connected to

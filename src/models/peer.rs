@@ -206,7 +206,7 @@ pub enum PeerMessage {
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
     Bye,
     ConnectionStatus(ConnectionStatus),
-    Transactions(Vec<Transaction>),
+    Transaction(Transaction),
 }
 
 impl PeerMessage {
@@ -224,7 +224,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => "peer list resp".to_string(),
             PeerMessage::Bye => "bye".to_string(),
             PeerMessage::ConnectionStatus(_) => "connection status".to_string(),
-            PeerMessage::Transactions(_) => "send".to_string(),
+            PeerMessage::Transaction(_) => "send".to_string(),
         }
     }
 
@@ -242,7 +242,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
-            PeerMessage::Transactions(_) => false,
+            PeerMessage::Transaction(_) => false,
         }
     }
 
@@ -261,7 +261,7 @@ impl PeerMessage {
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
-            PeerMessage::Transactions(_) => true,
+            PeerMessage::Transaction(_) => true,
         }
     }
 }

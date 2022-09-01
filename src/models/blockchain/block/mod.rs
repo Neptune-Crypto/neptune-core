@@ -21,7 +21,7 @@ use self::{
 };
 use super::{
     digest::{ordered_digest::OrderedDigest, *},
-    transaction::{utxo::Utxo, Transaction, AMOUNT_SIZE_FOR_U32},
+    transaction::{utxo::Utxo, Amount, Transaction},
 };
 use crate::models::blockchain::shared::Hash;
 
@@ -52,8 +52,8 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
-    pub fn get_mining_reward(block_height: BlockHeight) -> U32s<AMOUNT_SIZE_FOR_U32> {
-        let mut reward: U32s<AMOUNT_SIZE_FOR_U32> = U32s::new([100, 0, 0, 0]);
+    pub fn get_mining_reward(block_height: BlockHeight) -> Amount {
+        let mut reward: Amount = U32s::new([100, 0, 0, 0]);
         let generation = block_height.get_generation();
         for _ in 0..generation {
             reward.div_two()

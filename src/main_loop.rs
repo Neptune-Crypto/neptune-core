@@ -5,7 +5,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
 use crate::models::peer::{HandshakeData, PeerInfo, PeerSynchronizationState};
-use crate::models::state::State;
+use crate::models::state::GlobalState;
 use crate::Hash;
 use anyhow::Result;
 use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
@@ -34,7 +34,7 @@ const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
     tcp_listener: TcpListener,
-    global_state: State,
+    global_state: GlobalState,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     main_to_miner_tx: watch::Sender<MainToMiner>,
@@ -43,7 +43,7 @@ pub struct MainLoopHandler {
 impl MainLoopHandler {
     pub fn new(
         tcp_listener: TcpListener,
-        state: State,
+        state: GlobalState,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
         peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
         main_to_miner_tx: watch::Sender<MainToMiner>,
@@ -484,9 +484,6 @@ impl MainLoopHandler {
                     .send(MainToPeerThread::Block(Box::new(last_block)))
                     .expect("Peer handler broadcast was closed. This should never happen");
             }
-            // PeerThreadToMain::NewTransaction(_txs) => {
-            //     error!("Unimplemented txs msg received");
-            // }
             PeerThreadToMain::AddPeerMaxBlockHeight((
                 socket_addr,
                 claimed_max_height,
@@ -563,10 +560,10 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerThreadToMain::NewTransactions(transactions) => {
+            PeerThreadToMain::NewTransaction(transaction) => {
                 debug!(
                     "`main` received following transactions from `peer`: {:?}",
-                    transactions
+                    transaction
                 );
 
                 // relay to peers - this will result in an explosion of messages.
@@ -574,7 +571,7 @@ impl MainLoopHandler {
 
                 // relay to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewTransactions(transactions))?;
+                    .send(MainToMiner::NewTransaction(transaction))?;
             }
         }
 
@@ -879,19 +876,19 @@ impl MainLoopHandler {
 impl MainLoopHandler {
     async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
-            RPCServerToMain::Send(transactions) => {
+            RPCServerToMain::Send(transaction) => {
                 debug!(
                     "`main` received following transactions from RPC Server: {:?}",
-                    transactions
+                    transaction
                 );
 
                 // send to peers
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Transactions(transactions.clone()))?;
+                    .send(MainToPeerThread::Transaction(transaction.clone()))?;
 
                 // send to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewTransactions(transactions))?;
+                    .send(MainToMiner::NewTransaction(transaction))?;
 
                 // do not shut down
                 Ok(false)

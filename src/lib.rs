@@ -20,7 +20,7 @@ use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::networking_state::NetworkingState;
-use crate::models::state::State;
+use crate::models::state::GlobalState;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
@@ -134,10 +134,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         light_state,
         archival_state: Some(archival_state),
     };
-    let state = State {
+    let state = GlobalState {
         chain: blockchain_state,
         cli: cli_args,
         net: networking_state,
+        wallet,
     };
     let own_handshake_data: HandshakeData = state.get_handshakedata();
 
@@ -174,7 +175,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                 main_to_miner_rx,
                 miner_to_main_tx,
                 latest_block,
-                wallet.get_public_key(),
+                state_clone_for_miner.wallet.get_public_key(),
                 state_clone_for_miner,
             )
             .await
@@ -189,7 +190,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     )
     .await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
-    let rpc_listener_state: State = state.clone();
+    let rpc_listener_state: GlobalState = state.clone();
     tokio::spawn(async move {
         rpc_listener
             // Ignore accept errors.
