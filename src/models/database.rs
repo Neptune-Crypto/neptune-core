@@ -22,7 +22,6 @@ pub struct BlockFileLocation {
 pub struct BlockRecord {
     pub block_header: BlockHeader,
     pub file_location: BlockFileLocation,
-    pub tx_count: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

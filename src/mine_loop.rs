@@ -36,48 +36,34 @@ async fn make_devnet_block(
     sender: oneshot::Sender<Block>,
     public_key: secp256k1::PublicKey,
     state: GlobalState,
-    incoming_transactions: Vec<Transaction>,
+    transaction: Transaction,
 ) {
-    let next_block_height: BlockHeight = previous_block.header.height.next();
-    let coinbase_utxo = Utxo {
-        amount: Block::get_mining_reward(next_block_height),
-        public_key,
-    };
-
-    let timestamp: BFieldElement = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
-            .as_secs(),
-    );
-
-    let output_randomness: Vec<BFieldElement> =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
-    let coinbase_transaction = Transaction {
-        inputs: vec![],
-        outputs: vec![(coinbase_utxo, output_randomness.clone().into())],
-        public_scripts: vec![],
-        fee: U32s::zero(),
-        timestamp,
-    };
-
-    // For now, we just mine blocks with only the coinbase transaction. Therefore, the
-    // mutator set update structure only contains an addition record, and no removal
-    // records, as these represent spent UTXOs
-    let mut new_ms: MutatorSetAccumulator<Hash> =
+    let mut additions = Vec::with_capacity(transaction.outputs.len());
+    let mut removals = Vec::with_capacity(transaction.inputs.len());
+    let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> =
         previous_block.body.next_mutator_set_accumulator.clone();
-    let coinbase_digest: Digest = coinbase_utxo.hash();
-    let mut coinbase_addition_record: AdditionRecord<Hash> =
-        new_ms.commit(&coinbase_digest.into(), &output_randomness);
-    let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
-        removals: vec![],
-        additions: vec![coinbase_addition_record.clone()],
-    };
-    new_ms.add(&mut coinbase_addition_record);
+
+    for (output_utxo, randomness) in transaction.outputs.iter() {
+        let mut addition_record =
+            next_mutator_set_accumulator.commit(&output_utxo.hash().into(), &(*randomness).into());
+        next_mutator_set_accumulator.add(&mut addition_record);
+        additions.push(addition_record);
+
+        // TODO: Batch update all removal records from addition
+    }
+
+    for devnet_input in transaction.inputs.iter() {
+        let _diff_indices = next_mutator_set_accumulator.remove(&devnet_input.removal_record);
+        removals.push(devnet_input.removal_record.clone());
+
+        // TODO: Batch update all removal records from removal
+    }
+
+    let mutator_set_update = MutatorSetUpdate::new(removals, additions);
 
     let block_body: BlockBody = BlockBody {
-        transactions: [vec![coinbase_transaction], incoming_transactions].concat(),
-        next_mutator_set_accumulator: new_ms.clone(),
+        transaction,
+        next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
         mutator_set_update,
         previous_mutator_set_accumulator: previous_block.body.next_mutator_set_accumulator,
         stark_proof: vec![],
@@ -85,13 +71,22 @@ async fn make_devnet_block(
 
     let zero = BFieldElement::ring_zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
-    let new_pow_line = previous_block.header.proof_of_work_family + difficulty;
+    let new_pow_line: U32s<5> = previous_block.header.proof_of_work_family + difficulty;
+    let mutator_set_commitment: Digest = next_mutator_set_accumulator.get_commitment().into();
+    let next_block_height = previous_block.header.height.next();
+    let block_timestamp = BFieldElement::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Got bad time timestamp in mining process")
+            .as_secs(),
+    );
+
     let mut block_header = BlockHeader {
         version: zero,
         height: next_block_height,
-        mutator_set_commitment: new_ms.get_commitment().into(),
+        mutator_set_commitment,
         prev_block_digest: previous_block.header.hash(),
-        timestamp,
+        timestamp: block_timestamp,
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
         proof_of_work_line: new_pow_line,
@@ -145,6 +140,35 @@ async fn make_devnet_block(
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
+fn make_coinbase_transaction(
+    public_key: secp256k1::PublicKey,
+    previous_block_header: &BlockHeader,
+) -> Transaction {
+    let next_block_height: BlockHeight = previous_block_header.height.next();
+    let coinbase_utxo = Utxo {
+        amount: Block::get_mining_reward(next_block_height),
+        public_key,
+    };
+
+    let timestamp: BFieldElement = BFieldElement::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Got bad time timestamp in mining process")
+            .as_secs(),
+    );
+
+    let output_randomness: Vec<BFieldElement> =
+        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+
+    Transaction {
+        inputs: vec![],
+        outputs: vec![(coinbase_utxo, output_randomness.clone().into())],
+        public_scripts: vec![],
+        fee: U32s::zero(),
+        timestamp,
+    }
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<MainToMiner>,
@@ -153,9 +177,6 @@ pub async fn mock_regtest_mine(
     own_public_key: secp256k1::PublicKey,
     state: GlobalState,
 ) -> Result<()> {
-    // TODO: Reduce to one transaction instead of a list.
-    let mut incoming_transactions_tmp = vec![];
-
     loop {
         let (sender, receiver) = oneshot::channel::<Block>();
         let state_clone = state.clone();
@@ -163,14 +184,20 @@ pub async fn mock_regtest_mine(
             info!("Not mining because we are syncing");
             None
         } else {
-            let itx_owned = incoming_transactions_tmp.clone();
-            incoming_transactions_tmp = vec![];
+            // For now, we just mine blocks with only the coinbase transaction.
+            let coinbase_transaction =
+                make_coinbase_transaction(own_public_key, &latest_block.header);
+
+            // Merge incoming transactions with the coinbase transaction
+            // let transaction =
+            //     Transaction::merge_transaction(&coinbase_transaction, &incoming_transaction);
+
             Some(tokio::spawn(make_devnet_block(
                 latest_block.clone(),
                 sender,
                 own_public_key,
                 state_clone,
-                itx_owned,
+                coinbase_transaction,
             )))
         };
 
@@ -202,7 +229,7 @@ pub async fn mock_regtest_mine(
                     MainToMiner::Empty => (),
                     MainToMiner::NewTransaction(incoming_tx) => {
                         debug!("Miner thread received incoming transactions from main: {:?}", incoming_tx);
-                        incoming_transactions_tmp = vec![incoming_tx]
+                        // TODO: Replace this message with a transaction pool.
                     },
                 }
             }

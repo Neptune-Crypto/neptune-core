@@ -97,7 +97,7 @@ impl Block {
         }
 
         let body: BlockBody = BlockBody {
-            transactions: vec![genesis_coinbase_tx],
+            transaction: genesis_coinbase_tx,
             next_mutator_set_accumulator: genesis_mutator_set.clone(),
             previous_mutator_set_accumulator: empty_mutator_set,
             mutator_set_update: ms_update,
@@ -143,19 +143,11 @@ impl Block {
     }
 
     fn count_outputs(&self) -> usize {
-        self.body
-            .transactions
-            .iter()
-            .map(|tx| tx.outputs.len())
-            .sum()
+        self.body.transaction.outputs.len()
     }
 
     fn count_inputs(&self) -> usize {
-        self.body
-            .transactions
-            .iter()
-            .map(|tx| tx.inputs.len())
-            .sum()
+        self.body.transaction.inputs.len()
     }
 
     /// Verify a block. It is assumed that `previous_block` is valid.
@@ -202,16 +194,14 @@ impl Block {
             return false;
         }
 
-        for tx in block_copy.body.transactions.iter() {
-            for input in tx.inputs.iter() {
-                // 1.a) Verify validity of membership proofs
-                if !block_copy.body.previous_mutator_set_accumulator.verify(
-                    &input.utxo.hash().into(),
-                    &input.membership_proof.clone().into(),
-                ) {
-                    warn!("Invalid membership proof found in block");
-                    return false;
-                }
+        for input in block_copy.body.transaction.inputs.iter() {
+            // 1.a) Verify validity of membership proofs
+            if !block_copy.body.previous_mutator_set_accumulator.verify(
+                &input.utxo.hash().into(),
+                &input.membership_proof.clone().into(),
+            ) {
+                warn!("Invalid membership proof found in block");
+                return false;
             }
         }
 
@@ -229,59 +219,50 @@ impl Block {
         // Go over all input UTXOs and verify that the removal record is found at the same index
         // in the `mutator_set_update` data structure
         let mut i = 0;
-        for tx in block_copy.body.transactions.iter() {
-            for input in tx.inputs.iter() {
-                if input.removal_record != block_copy.body.mutator_set_update.removals[i] {
-                    warn!("Invalid removal record found in block");
-                    return false;
-                }
-                i += 1;
+        for input in block_copy.body.transaction.inputs.iter() {
+            if input.removal_record != block_copy.body.mutator_set_update.removals[i] {
+                warn!("Invalid removal record found in block");
+                return false;
             }
+            i += 1;
         }
 
         // Go over all output UTXOs and verify that the addition record is found at the same index
         // in the `mutator_set_update` data structure
         i = 0;
         let hasher = Hash::new();
-        for tx in block_copy.body.transactions.iter() {
-            for (utxo, randomness) in tx.outputs.iter() {
-                let expected_commitment =
-                    hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
-                if block_copy.body.mutator_set_update.additions[i].canonical_commitment
-                    != expected_commitment
-                {
-                    warn!("Bad commitment found in addition record");
-                    return false;
-                }
-                if !block_copy.body.mutator_set_update.additions[i]
-                    .has_matching_aocl(&mut block_copy.body.previous_mutator_set_accumulator.aocl)
-                {
-                    warn!("Addition record does not have matching AOCL");
-                    return false;
-                }
-                i += 1;
+        for (utxo, randomness) in block_copy.body.transaction.outputs.iter() {
+            let expected_commitment =
+                hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
+            if block_copy.body.mutator_set_update.additions[i].canonical_commitment
+                != expected_commitment
+            {
+                warn!("Bad commitment found in addition record");
+                return false;
             }
+            if !block_copy.body.mutator_set_update.additions[i]
+                .has_matching_aocl(&mut block_copy.body.previous_mutator_set_accumulator.aocl)
+            {
+                warn!("Addition record does not have matching AOCL");
+                return false;
+            }
+            i += 1;
         }
 
         // 1.d) Verify that the two mutator sets, previous and current, are
         // consistent with the transactions.
         let mut ms = block_copy.body.previous_mutator_set_accumulator.clone();
-        for tx in block_copy.body.transactions.iter() {
-            for input in tx.inputs.iter() {
-                // TODO: This will probably fail with more than one removal record
-                // in the block, since we are not updating the removal records.
-                ms.remove(&input.removal_record);
-            }
+        for input in block_copy.body.transaction.inputs.iter() {
+            // TODO: This will probably fail with more than one removal record
+            // in the block, since we are not updating the removal records.
+            ms.remove(&input.removal_record);
         }
 
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
-        for tx in block_copy.body.transactions.iter() {
-            for (utxo, randomness) in tx.outputs.iter() {
-                let mut addition_record =
-                    ms.commit(&utxo.hash().into(), &randomness.to_owned().into());
-                ms.add(&mut addition_record);
-            }
+        for (utxo, randomness) in block_copy.body.transaction.outputs.iter() {
+            let mut addition_record = ms.commit(&utxo.hash().into(), &randomness.to_owned().into());
+            ms.add(&mut addition_record);
         }
 
         // Verify that the locally constructed mutator set matches that in the received
@@ -296,8 +277,7 @@ impl Block {
             return false;
         }
 
-        // Verify that the locally constructed mutator set matches that in the received
-        // block's header
+        // Verify that the locally constructed mutator set matches that in the received block's header
         if ms.get_commitment()
             != Into::<Vec<BFieldElement>>::into(block_copy.header.mutator_set_commitment)
         {
@@ -305,30 +285,17 @@ impl Block {
             return false;
         }
 
-        // 1.e) verify that all transaction timestamps are less than or equal to
-        // the block's timestamp.
-        if block_copy
-            .body
-            .transactions
-            .iter()
-            .any(|tx| tx.timestamp.value() > block_copy.header.timestamp.value())
-        {
+        // 1.e) verify that the transaction timestamp is less than or equal to the block's timestamp.
+        if block_copy.body.transaction.timestamp.value() > block_copy.header.timestamp.value() {
             warn!("Transaction with invalid timestamp found");
             return false;
         }
 
-        // 1.f) Verify all transactions
-        for (j, tx) in block_copy.body.transactions.iter().enumerate() {
-            let miner_reward = if j == 0 {
-                // The 1st transaction in the block can collect a coinbase transaction
-                Some(Self::get_mining_reward(block_copy.header.height))
-            } else {
-                None
-            };
-            if !tx.devnet_is_valid(miner_reward) {
-                warn!("Invalid transaction found in block");
-                return false;
-            }
+        // 1.f) Verify transaction
+        let miner_reward: Amount = Self::get_mining_reward(block_copy.header.height);
+        if !block_copy.body.transaction.devnet_is_valid(miner_reward) {
+            warn!("Invalid transaction found in block");
+            return false;
         }
 
         // 2. accumulated proof-of-work was computed correctly
