@@ -12,7 +12,7 @@ pub const DEVNET_SECRET_KEY_SIZE_IN_BYTES: usize = 32;
 pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
     RESCUE_PRIME_OUTPUT_SIZE_IN_BFES * BYTES_PER_BFE;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Digest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
 
 pub trait Hashable {

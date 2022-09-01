@@ -1,6 +1,7 @@
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::transaction::{Amount, Transaction};
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::Transaction;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::GlobalState;
@@ -9,6 +10,7 @@ use futures::future::{self, Ready};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::context;
+use tokio::sync::mpsc::error::SendError;
 
 #[tarpc::service]
 pub trait RPC {
@@ -28,7 +30,8 @@ pub trait RPC {
     async fn clear_ip_standing(ip: IpAddr);
 
     /// Send coins
-    async fn send(send_argument: String) -> bool;
+    async fn send(utxos: Vec<Utxo>) -> bool;
+
     // Gracious shutdown.
     async fn shutdown() -> bool;
 }
@@ -107,7 +110,7 @@ impl RPC for NeptuneRPCServer {
         future::ready(())
     }
 
-    fn send(self, _ctx: context::Context, _send_argument: String) -> Self::SendFut {
+    fn send(self, _ctx: context::Context, recipient_utxos: Vec<Utxo>) -> Self::SendFut {
         let wallet = self.state.wallet;
 
         let span = tracing::debug_span!("Constructing transaction objects");
@@ -115,22 +118,26 @@ impl RPC for NeptuneRPCServer {
 
         tracing::debug!("Wallet public key: {}", wallet.get_public_key());
 
-        // TODO: Get these from `send_argument` instead of sending to oneself:
-        let amount: Amount = 100.into();
-        let recipient_public_key = wallet.get_public_key();
+        // Construct and send a transaction object for each of the elements in the user-submitted transactions
+        let mut response: Result<(), SendError<RPCServerToMain>> = Ok(());
+        for utxo in recipient_utxos {
+            // 1. Build transaction objects.
+            let transaction: Transaction = wallet
+                .create_transaction(utxo.amount, utxo.public_key)
+                .expect("Could not create transaction object; TODO: Handle error better.");
 
-        // 2. Build transaction objects.
-        let transaction: Transaction = wallet
-            .create_transaction(amount, recipient_public_key)
-            .expect("Could not create transaction object; TODO: Handle error better.");
+            // 2. Send transaction message to main
+            response = executor::block_on(
+                self.rpc_server_to_main_tx
+                    .send(RPCServerToMain::Send(transaction)),
+            );
 
-        // 4. Send transaction message to main
-        let response = executor::block_on(
-            self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(transaction)),
-        );
+            if response.is_err() {
+                break;
+            }
+        }
 
-        // 5. Send acknowledgement to client.
+        // 3. Send acknowledgement to client.
         future::ready(response.is_ok())
     }
 

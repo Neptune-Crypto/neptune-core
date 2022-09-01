@@ -4,7 +4,9 @@ use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
-use crate::models::peer::{HandshakeData, PeerInfo, PeerSynchronizationState};
+use crate::models::peer::{
+    HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
+};
 use crate::models::state::GlobalState;
 use crate::Hash;
 use anyhow::Result;
@@ -560,18 +562,29 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerThreadToMain::NewTransaction(transaction) => {
+            PeerThreadToMain::Transaction(transaction) => {
                 debug!(
-                    "`main` received following transactions from `peer`: {:?}",
+                    "`main` received following transaction from `peer`: {:?}",
                     transaction
                 );
 
-                // relay to peers - this will result in an explosion of messages.
-                //self.main_to_peer_broadcast_tx.send(MainToPeerThread::Send(transactions.clone()));
+                // send notification to peers
+                let transaction_notification = TransactionNotification::new(&transaction);
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerThread::TransactionNotification(
+                        transaction_notification,
+                    ))?;
 
                 // relay to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewTransaction(transaction))?;
+                    .send(MainToMiner::Transaction(transaction))?;
+            }
+            PeerThreadToMain::TransactionNotification(transaction_notification) => {
+                // Relay notification to all peers.  Originating peer will just ignore this.
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerThread::TransactionNotification(
+                        transaction_notification,
+                    ))?;
             }
         }
 
@@ -878,17 +891,18 @@ impl MainLoopHandler {
         match msg {
             RPCServerToMain::Send(transaction) => {
                 debug!(
-                    "`main` received following transactions from RPC Server: {:?}",
+                    "`main` received following transaction from RPC Server: {:?}",
                     transaction
                 );
 
-                // send to peers
+                // send notification to peers
+                let notification = TransactionNotification::new(&transaction);
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Transaction(transaction.clone()))?;
+                    .send(MainToPeerThread::TransactionNotification(notification))?;
 
-                // send to miner
+                // send transaction to miner
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewTransaction(transaction))?;
+                    .send(MainToMiner::Transaction(transaction))?;
 
                 // do not shut down
                 Ok(false)
