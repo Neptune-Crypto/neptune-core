@@ -2,7 +2,6 @@ pub mod devnet_input;
 pub mod transaction_kernel;
 pub mod utxo;
 
-use num_traits::Zero;
 use secp256k1::Message;
 use serde::{Deserialize, Serialize};
 use twenty_first::{
@@ -149,8 +148,8 @@ impl Transaction {
     }
 
     pub fn merge_transaction(
-        coinbase_transaction: &Transaction,
-        incoming_transactions: &Transaction,
+        _coinbase_transaction: &Transaction,
+        _incoming_transactions: &Transaction,
     ) -> Transaction {
         todo!()
     }

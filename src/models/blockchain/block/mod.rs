@@ -153,7 +153,7 @@ impl Block {
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
-    fn devnet_is_valid(&self, previous_block: &Block) -> bool {
+    pub(crate) fn devnet_is_valid(&self, previous_block: &Block) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
         let mut block_copy = self.to_owned();
