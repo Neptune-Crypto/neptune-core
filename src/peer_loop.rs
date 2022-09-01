@@ -641,10 +641,6 @@ impl PeerLoopHandler {
                 self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)
             }
-            // PeerMessage::NewTransaction(_) => {
-            //     self.punish(PeerSanctionReason::InvalidMessage)?;
-            //     Ok(false)
-            // }
             PeerMessage::ConnectionStatus(_) => {
                 self.punish(PeerSanctionReason::InvalidMessage)?;
                 Ok(false)

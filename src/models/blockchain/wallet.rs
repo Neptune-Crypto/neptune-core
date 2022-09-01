@@ -184,10 +184,10 @@ impl Wallet {
     pub fn create_transaction(
         &self,
         amount: Amount,
-        recipient_public_key: secp256k1::PublicKey,
+        _recipient_public_key: secp256k1::PublicKey,
     ) -> Result<Transaction> {
-        let spendable_utxos: Vec<(Utxo, Digest)> = self.allocate_sufficient_input_funds(amount)?;
-        let membership_proofs: Vec<MsMembershipProof<Hash>> = vec![];
+        let _spendable_utxos: Vec<(Utxo, Digest)> = self.allocate_sufficient_input_funds(amount)?;
+        let _membership_proofs: Vec<MsMembershipProof<Hash>> = vec![];
 
         // TODO: Fetch `MembershipProof`s, generate `RemovalRecord`s, and sign.
         //
@@ -209,16 +209,15 @@ impl Wallet {
     // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
     //
     // TODO: Assert that balance is sufficient! (There is similar logic in block-validation elsewhere.)
-    fn allocate_sufficient_input_funds(&self, amount: Amount) -> Result<Vec<(Utxo, Digest)>> {
-        let mut allocated_amount = Amount::zero();
-        while allocated_amount < amount {
-            // TODO: Allocate enough.
-            //
-            // TODO: Depends on wallet database of owned UTXOs being available.
-            //
-            // TODO: Eventually sort by optimal granularity.
-            break;
-        }
+    fn allocate_sufficient_input_funds(&self, _amount: Amount) -> Result<Vec<(Utxo, Digest)>> {
+        let _allocated_amount = Amount::zero();
+        // while allocated_amount < amount {
+        // TODO: Allocate enough.
+        //
+        // TODO: Depends on wallet database of owned UTXOs being available.
+        //
+        // TODO: Eventually sort by optimal granularity.
+        // }
         Ok(vec![])
     }
 }

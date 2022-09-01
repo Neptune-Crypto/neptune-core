@@ -484,9 +484,6 @@ impl MainLoopHandler {
                     .send(MainToPeerThread::Block(Box::new(last_block)))
                     .expect("Peer handler broadcast was closed. This should never happen");
             }
-            // PeerThreadToMain::NewTransaction(_txs) => {
-            //     error!("Unimplemented txs msg received");
-            // }
             PeerThreadToMain::AddPeerMaxBlockHeight((
                 socket_addr,
                 claimed_max_height,

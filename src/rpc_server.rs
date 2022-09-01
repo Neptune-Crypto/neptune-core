@@ -1,6 +1,5 @@
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
@@ -108,18 +107,13 @@ impl RPC for NeptuneRPCServer {
         future::ready(())
     }
 
-    fn send(self, _ctx: context::Context, send_argument: String) -> Self::SendFut {
+    fn send(self, _ctx: context::Context, _send_argument: String) -> Self::SendFut {
         let wallet = self.state.wallet;
 
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
         tracing::debug!("Wallet public key: {}", wallet.get_public_key());
-
-        // 1. Parse
-        let txs = tracing::debug_span!("Parsing TxSpec")
-            .in_scope(|| serde_json::from_str::<Vec<Utxo>>(&send_argument))
-            .unwrap();
 
         // TODO: Get these from `send_argument` instead of sending to oneself:
         let amount: Amount = 100.into();
