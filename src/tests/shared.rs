@@ -386,12 +386,7 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     membership_proof: MsMembershipProof<Hash>,
     removal_record: RemovalRecord<Hash>,
 ) {
-    assert_eq!(
-        1,
-        block.body.transactions.len(),
-        "Helper function expects block with one tx"
-    );
-    let mut tx = block.body.transactions[0].clone();
+    let mut tx = block.body.transaction.clone();
     let new_devnet_input = DevNetInput {
         utxo: input_utxo,
         membership_proof: membership_proof.into(),
@@ -400,7 +395,7 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
         signature: ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap(),
     };
     tx.inputs.push(new_devnet_input);
-    block.body.transactions[0] = tx;
+    block.body.transaction = tx;
 
     // add removal record for this spending
     block
@@ -446,7 +441,7 @@ pub fn make_mock_block(
             .expect("Got bad time timestamp in mining process")
             .as_secs(),
     );
-    let tx = Transaction {
+    let transaction = Transaction {
         inputs: vec![],
         outputs: vec![(coinbase_utxo, output_randomness.clone().into())],
         public_scripts: vec![],
@@ -466,7 +461,7 @@ pub fn make_mock_block(
     new_ms.add(&mut coinbase_addition_record);
 
     let block_body: BlockBody = BlockBody {
-        transactions: vec![tx],
+        transaction,
         next_mutator_set_accumulator: new_ms.clone(),
         mutator_set_update,
 
