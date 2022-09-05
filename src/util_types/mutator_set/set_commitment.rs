@@ -104,9 +104,7 @@ where
         let hasher = H::new();
         let canonical_commitment = hasher.hash_pair(item, randomness);
 
-        // It's important to *not* use clone here as that could imply copying a whole
-        // archival MMR. Instead we ensure that
-        AdditionRecord::new(canonical_commitment, self.aocl.to_accumulator())
+        AdditionRecord::new(canonical_commitment)
     }
 
     /**
@@ -162,10 +160,6 @@ where
         // randomness that was used to create the commitment. This randomness can only be know
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
         // track of the mutator set.
-        // verify aocl snapshot
-        if !addition_record.has_matching_aocl(&mut self.aocl.to_accumulator()) {
-            panic!("Addition record has aocl snapshot that does not match with the AOCL it is being added to.")
-        }
 
         // add to list
         let item_index = self.aocl.count_leaves();
