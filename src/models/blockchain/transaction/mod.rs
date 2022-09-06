@@ -2,6 +2,7 @@ pub mod devnet_input;
 pub mod transaction_kernel;
 pub mod utxo;
 
+use num_traits::Zero;
 use secp256k1::{Message, PublicKey};
 use serde::{Deserialize, Serialize};
 use twenty_first::{
@@ -129,7 +130,7 @@ impl Transaction {
     }
 
     /// Validate Transaction according to Devnet definitions.
-    pub fn devnet_is_valid(&self, coinbase_amount: Amount) -> bool {
+    pub fn devnet_is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
         // What belongs here are the things that would otherwise
         // be verified by the transaction validity proof.
 
@@ -138,7 +139,7 @@ impl Transaction {
         // 1. Check that Transaction spends at most its input and coinbase
         let sum_inputs: Amount = self.inputs.iter().map(|input| input.utxo.amount).sum();
         let sum_outputs: Amount = self.outputs.iter().map(|(utxo, _)| utxo.amount).sum();
-        let spendable_amount = sum_inputs + coinbase_amount;
+        let spendable_amount = sum_inputs + coinbase_amount.unwrap_or_else(Amount::zero);
         let spent_amount = sum_outputs + self.fee;
         if spent_amount > spendable_amount {
             return false;
