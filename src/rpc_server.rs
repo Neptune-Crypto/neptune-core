@@ -120,10 +120,7 @@ impl RPC for NeptuneRPCServer {
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
-        tracing::debug!(
-            "Wallet public key: {}",
-            wallet_state.wallet.get_public_key()
-        );
+        tracing::debug!("Wallet public key: {}", wallet_state.get_public_key());
 
         // Construct and send a transaction object for each of the elements in the user-submitted transactions
         let mut response: Result<(), SendError<RPCServerToMain>> = Ok(());

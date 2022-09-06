@@ -122,7 +122,7 @@ impl Transaction {
     pub fn sign(&mut self, wallet_state: &WalletState) {
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = kernel.hash();
-        let signature = wallet_state.wallet.sign_digest(kernel_digest);
+        let signature = wallet_state.sign_digest(kernel_digest);
         for input in self.inputs.iter_mut() {
             input.signature = signature;
         }

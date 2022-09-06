@@ -171,34 +171,6 @@ impl Wallet {
     }
 }
 
-impl Wallet {
-    fn _get_ecdsa_sk(&self) -> secp256k1::SecretKey {
-        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.secret.into();
-        secp256k1::SecretKey::from_slice(&bytes).unwrap()
-    }
-
-    fn _sign(&self, msg_hash: secp256k1::Message) -> ecdsa::Signature {
-        let sk = self._get_ecdsa_sk();
-        sk.sign_ecdsa(msg_hash)
-    }
-
-    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
-        let sk = self._get_ecdsa_sk();
-        let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = msg_digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
-        sk.sign_ecdsa(msg)
-    }
-
-    pub fn get_public_key(&self) -> secp256k1::PublicKey {
-        let secp = Secp256k1::new();
-        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.secret.into();
-        let ecdsa_secret_key: secp256k1::SecretKey =
-            secp256k1::SecretKey::from_slice(&bytes).unwrap();
-
-        secp256k1::PublicKey::from_secret_key(&secp, &ecdsa_secret_key)
-    }
-}
-
 /// A wallet indexes its input and output UTXOs after blockhashes
 /// so that one can easily roll-back. We don't want to serialize the
 /// database handle, wherefore this struct exists.
@@ -238,7 +210,7 @@ impl WalletState {
 
         let transaction: Transaction = block.body.transaction.clone();
 
-        let my_pub_key = self.wallet.get_public_key();
+        let my_pub_key = self.get_public_key();
 
         let input_utxos: Vec<Utxo> = transaction.get_input_utxos_with_pub_key(my_pub_key);
 
@@ -310,6 +282,32 @@ impl WalletState {
         // }
         Ok(vec![])
     }
+
+    fn _get_ecdsa_sk(&self) -> secp256k1::SecretKey {
+        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.wallet.secret.into();
+        secp256k1::SecretKey::from_slice(&bytes).unwrap()
+    }
+
+    fn _sign(&self, msg_hash: secp256k1::Message) -> ecdsa::Signature {
+        let sk = self._get_ecdsa_sk();
+        sk.sign_ecdsa(msg_hash)
+    }
+
+    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
+        let sk = self._get_ecdsa_sk();
+        let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = msg_digest.into();
+        let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
+        sk.sign_ecdsa(msg)
+    }
+
+    pub fn get_public_key(&self) -> secp256k1::PublicKey {
+        let secp = Secp256k1::new();
+        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.wallet.secret.into();
+        let ecdsa_secret_key: secp256k1::SecretKey =
+            secp256k1::SecretKey::from_slice(&bytes).unwrap();
+
+        secp256k1::PublicKey::from_secret_key(&secp, &ecdsa_secret_key)
+    }
 }
 
 #[cfg(test)]
@@ -327,19 +325,19 @@ mod ordered_digest_tests {
         let network = Network::Testnet;
         let secret = generate_secret_key();
         let wallet_state = WalletState::new_from_wallet(Wallet::new(secret), network);
-        let pk = wallet_state.wallet.get_public_key();
+        let pk = wallet_state.get_public_key();
         let msg_vec: Vec<BFieldElement> = wallet_state.wallet.secret.values().to_vec();
         let digest_vec: Vec<BFieldElement> = Hash::new().hash(&msg_vec, RP_DEFAULT_OUTPUT_SIZE);
         let digest: Digest = digest_vec.into();
         let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = digest.into();
         let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
-        let signature = wallet_state.wallet._sign(msg);
+        let signature = wallet_state._sign(msg);
         assert!(
             signature.verify(&msg, &pk).is_ok(),
             "DEVNET signature must verify"
         );
 
-        let signature_alt = wallet_state.wallet.sign_digest(digest);
+        let signature_alt = wallet_state.sign_digest(digest);
         assert!(
             signature_alt.verify(&msg, &pk).is_ok(),
             "DEVNET signature must verify"
