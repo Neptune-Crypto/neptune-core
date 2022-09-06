@@ -4,6 +4,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::transaction::{Transaction, TransactionId};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -14,9 +15,10 @@ use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
 use std::cmp;
+use std::collections::HashMap;
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
@@ -24,6 +26,11 @@ use tracing::{debug, error, info, warn};
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
 const MINIMUM_BLOCK_BATCH_SIZE: usize = 10;
+
+const KEEP_CONNECTION_ALIVE: bool = false;
+const _DISCONNECT_CONNECTION: bool = true;
+
+pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 /// Contains the immutable data that this peer-loop needs. Does not contain the `peer` variable
 /// since this needs to be a mutable variable in most methods.
@@ -647,15 +654,62 @@ impl PeerLoopHandler {
             }
             PeerMessage::Transaction(transaction) => {
                 info!(
-                    "`peer_loop` received following transactions from `peer`: {:?}",
+                    "`peer_loop` received following transaction from `peer`: {:?}",
                     transaction
                 );
 
                 // relay to main
                 self.to_main_tx
-                    .send(PeerThreadToMain::NewTransaction(transaction))
+                    .send(PeerThreadToMain::Transaction(transaction))
                     .await?;
-                Ok(false)
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::TransactionNotification(transaction_notification) => {
+                // 1. Ignore if transaction is stale.
+                let age_limit = Duration::new(TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS, 0);
+                if transaction_notification.timestamp < SystemTime::now() + age_limit {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                };
+
+                // 2. Ignore if we already know this transaction.
+                // TODO: substitute with real mempool
+                let mempool = HashMap::<TransactionId, Transaction>::new();
+                if mempool
+                    .get(&transaction_notification.transaction_identifier)
+                    .is_some()
+                {
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // We now have a notification of an unseen `Transaction`.
+
+                // 3. Broadcast notification to peers through main.
+                self.to_main_tx
+                    .send(PeerThreadToMain::TransactionNotification(
+                        transaction_notification,
+                    ))
+                    .await?;
+
+                // 4. For now, always request the actual `Transaction`.
+                peer.send(PeerMessage::TransactionRequest(
+                    transaction_notification.transaction_identifier,
+                ))
+                .await?;
+
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            PeerMessage::TransactionRequest(transaction_identifier) => {
+                // TODO: substitute with real mempool
+                let mempool = HashMap::<TransactionId, Transaction>::new();
+
+                if let Some(transaction) = mempool.get(&transaction_identifier) {
+                    // 2. Otherwise
+                    peer.send(PeerMessage::Transaction(transaction.clone()))
+                        .await?;
+                }
+
+                Ok(KEEP_CONNECTION_ALIVE)
             }
         }
     }
@@ -699,11 +753,6 @@ impl PeerLoopHandler {
                 }
                 Ok(false)
             }
-            // MainToPeerThread::Transaction(nt) => {
-            //     debug!("peer_loop got Transaction message from main");
-            //     peer.send(PeerMessage::NewTransaction(nt)).await?;
-            //     Ok(false)
-            // }
             MainToPeerThread::RequestBlockBatch(most_canonical_block_digests, peer_addr_target) => {
                 // Only ask one of the peers about the batch of blocks
                 if peer_addr_target != self.peer_address {
@@ -751,11 +800,20 @@ impl PeerLoopHandler {
                 }
                 Ok(false)
             }
-            MainToPeerThread::Transaction(tx) => {
-                debug!("Sending PeerMessage::Send");
-                peer.send(PeerMessage::Transaction(tx)).await?;
-                debug!("Sent PeerMessage::Send");
-                Ok(false)
+            MainToPeerThread::Transaction(transaction) => {
+                debug!("Sending PeerMessage::Transaction");
+                peer.send(PeerMessage::Transaction(transaction)).await?;
+                debug!("Sent PeerMessage::Transaction");
+                Ok(KEEP_CONNECTION_ALIVE)
+            }
+            MainToPeerThread::TransactionNotification(transaction_notification) => {
+                debug!("Sending PeerMessage::TransactionNotification");
+                peer.send(PeerMessage::TransactionNotification(
+                    transaction_notification,
+                ))
+                .await?;
+                debug!("Sent PeerMessage::TransactionNotification");
+                Ok(KEEP_CONNECTION_ALIVE)
             }
         }
     }

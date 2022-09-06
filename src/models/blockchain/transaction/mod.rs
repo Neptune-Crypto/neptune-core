@@ -18,6 +18,7 @@ use super::{
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
+pub type TransactionId = Digest;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {

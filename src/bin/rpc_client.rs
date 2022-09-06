@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
+use neptune_core::models::blockchain::transaction::utxo::Utxo;
 use neptune_core::rpc_server::RPCClient;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
-use tracing::info_span;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[derive(Debug, Parser)]
@@ -14,7 +14,7 @@ enum Command {
     Head,
     ClearAllStandings,
     ClearIpStanding { ip: IpAddr },
-    Send { send_argument: String },
+    Send { unparsed_send_argument: String },
     Shutdown,
 }
 
@@ -68,15 +68,16 @@ async fn main() -> Result<()> {
             client.clear_ip_standing(context::current(), ip).await?;
             println!("Cleared standing of {}", ip);
         }
-        Command::Send { send_argument } => {
-            // Only proceed if the input string is valid JSON
-            let _v: Vec<serde_json::Value> = info_span!("Validating TXSPEC object as JSON")
-                .in_scope(|| serde_json::from_str(&send_argument))?;
+        Command::Send {
+            unparsed_send_argument,
+        } => {
+            // Parse on client
+            let utxos = tracing::debug_span!("Parsing TxSpec")
+                .in_scope(|| serde_json::from_str::<Vec<Utxo>>(&unparsed_send_argument))
+                .unwrap();
 
-            client
-                .send(context::current(), send_argument.clone())
-                .await?;
-            println!("Send-command issued with argument: {}.", send_argument);
+            client.send(context::current(), utxos.clone()).await?;
+            println!("Send-command issued with argument: {:?}.", utxos);
         }
         Command::Shutdown => {
             println!("Sending shutdown-command.");

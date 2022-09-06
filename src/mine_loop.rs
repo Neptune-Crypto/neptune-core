@@ -229,9 +229,9 @@ pub async fn mock_regtest_mine(
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
-                    MainToMiner::NewTransaction(incoming_tx) => {
-                        debug!("Miner thread received incoming transactions from main: {:?}", incoming_tx);
-                        // TODO: Replace this message with a transaction pool.
+                    MainToMiner::Transaction(incoming_transaction) => {
+                        debug!("Miner thread received incoming transaction from main: {:?}", incoming_transaction);
+                        // TODO: Replace this message with a transaction pool (mempool).
                     },
                 }
             }

@@ -5,8 +5,8 @@ use super::blockchain::{
         transfer_block::TransferBlock,
         Block,
     },
-    digest::Digest,
-    transaction::Transaction,
+    digest::{Digest, Hashable},
+    transaction::{Transaction, TransactionId},
 };
 use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
@@ -192,6 +192,26 @@ pub enum ConnectionStatus {
     Accepted,
 }
 
+/// A sender broadcasts to all peers a `TransactionNotification` when it has
+/// received a transaction with the given `TransactionId`.  It is implied
+/// that interested peers can request the full transaction object from this
+/// sender.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransactionNotification {
+    pub transaction_identifier: TransactionId,
+    // It may be relevant to know w.r.t relaying if this transaction is current.
+    pub timestamp: SystemTime,
+}
+
+impl TransactionNotification {
+    pub fn new(transaction: &Transaction) -> Self {
+        Self {
+            transaction_identifier: transaction.hash(),
+            timestamp: SystemTime::now(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum PeerMessage {
     Handshake(Box<(Vec<u8>, HandshakeData)>),
@@ -201,12 +221,13 @@ pub enum PeerMessage {
     BlockRequestByHash(Digest),
     BlockRequestBatch(Vec<Digest>, usize), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
-    // NewTransaction(i32),
+    Transaction(Transaction),
+    TransactionNotification(TransactionNotification),
+    TransactionRequest(TransactionId),
     PeerListRequest, // Argument indicates distance in graph.
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
     Bye,
     ConnectionStatus(ConnectionStatus),
-    Transaction(Transaction),
 }
 
 impl PeerMessage {
@@ -219,12 +240,13 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHash(_) => "block req by hash".to_string(),
             PeerMessage::BlockRequestBatch(_, _) => "block req batch".to_string(),
             PeerMessage::BlockResponseBatch(_) => "block resp batch".to_string(),
-            // PeerMessage::NewTransaction(_) => "new tx".to_string(),
+            PeerMessage::Transaction(_) => "send".to_string(),
+            PeerMessage::TransactionNotification(_) => "transaction notification".to_string(),
+            PeerMessage::TransactionRequest(_) => "transaction request".to_string(),
             PeerMessage::PeerListRequest => "peer list req".to_string(),
             PeerMessage::PeerListResponse(_) => "peer list resp".to_string(),
             PeerMessage::Bye => "bye".to_string(),
             PeerMessage::ConnectionStatus(_) => "connection status".to_string(),
-            PeerMessage::Transaction(_) => "send".to_string(),
         }
     }
 
@@ -237,12 +259,13 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHash(_) => false,
             PeerMessage::BlockRequestBatch(_, _) => false,
             PeerMessage::BlockResponseBatch(_) => true,
-            // PeerMessage::NewTransaction(_) => false,
+            PeerMessage::Transaction(_) => false,
+            PeerMessage::TransactionNotification(_) => false,
+            PeerMessage::TransactionRequest(_) => false,
             PeerMessage::PeerListRequest => false,
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
-            PeerMessage::Transaction(_) => false,
         }
     }
 
@@ -256,12 +279,13 @@ impl PeerMessage {
             PeerMessage::BlockRequestByHash(_) => false,
             PeerMessage::BlockRequestBatch(_, _) => false,
             PeerMessage::BlockResponseBatch(_) => false,
-            // PeerMessage::NewTransaction(_) => true,
+            PeerMessage::Transaction(_) => true,
+            PeerMessage::TransactionNotification(_) => false,
+            PeerMessage::TransactionRequest(_) => false,
             PeerMessage::PeerListRequest => false,
             PeerMessage::PeerListResponse(_) => false,
             PeerMessage::Bye => false,
             PeerMessage::ConnectionStatus(_) => false,
-            PeerMessage::Transaction(_) => true,
         }
     }
 }
