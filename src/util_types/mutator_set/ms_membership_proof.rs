@@ -291,9 +291,9 @@ where
 
         // First insert the new entry into the chunk dictionary for the membership
         // proofs that need it.
-        for i in mps_for_new_chunk_dictionary_entry.clone() {
+        for i in mps_for_new_chunk_dictionary_entry.iter() {
             membership_proofs
-                .index_mut(i)
+                .index_mut(*i)
                 .target_chunks
                 .dictionary
                 .insert(
@@ -368,7 +368,6 @@ where
     ) -> Result<bool, Box<dyn Error>> {
         assert!(self.auth_path_aocl.data_index < mutator_set.aocl.count_leaves());
         let new_item_index = mutator_set.aocl.count_leaves();
-        let batch_index = new_item_index / BATCH_SIZE as u128;
 
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
@@ -383,8 +382,6 @@ where
         }
 
         // window does slide
-        let old_window_start_batch_index = batch_index - 1;
-        let new_window_start_batch_index = batch_index;
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
         };
@@ -420,6 +417,9 @@ where
             mmra.append(new_chunk_digest.clone());
 
         let mut swbf_chunk_dictionary_updated = false;
+        let batch_index = new_item_index / BATCH_SIZE as u128;
+        let old_window_start_batch_index = batch_index - 1;
+        let new_window_start_batch_index = batch_index;
         'outer: for chunk_index in chunk_indices_set.into_iter() {
             // Update for bit values that are in the inactive part of the SWBF.
             // Here the MMR membership proofs of the chunks must be updated.
