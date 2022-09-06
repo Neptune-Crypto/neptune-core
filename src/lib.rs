@@ -14,7 +14,7 @@ mod tests;
 use crate::config_models::data_directory::get_data_directory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::main_loop::MainLoopHandler;
-use crate::models::blockchain::wallet;
+use crate::models::blockchain::wallet::Wallet;
 use crate::models::channel::RPCServerToMain;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
@@ -30,7 +30,7 @@ use futures::future;
 use futures::StreamExt;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
-use models::blockchain::wallet::Wallet;
+use models::blockchain::wallet::WalletState;
 use models::database::MsBlockSyncKey;
 use models::database::MsBlockSyncValue;
 use models::database::{BlockDatabases, PeerDatabases};
@@ -77,11 +77,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Get wallet object, create one if none exists
     debug!("Data root path is {:?}", root_data_dir_path_buf);
     let wallet_file = Wallet::wallet_path(root_data_dir_path);
-    let wallet: Wallet = Wallet::initialize_wallet(
-        &wallet_file,
-        wallet::STANDARD_WALLET_NAME,
-        wallet::STANDARD_WALLET_VERSION,
-    );
+    let wallet: Wallet = Wallet::new_from_file_or_default(&wallet_file);
+    let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network);
 
     // Connect to or create databases for block state, and for peer state
     let block_databases = ArchivalState::initialize_block_databases(root_data_dir_path)?;
@@ -138,7 +135,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         chain: blockchain_state,
         cli: cli_args,
         net: networking_state,
-        wallet,
+        wallet_state,
     };
     let own_handshake_data: HandshakeData = state.get_handshakedata();
 
@@ -175,7 +172,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                 main_to_miner_rx,
                 miner_to_main_tx,
                 latest_block,
-                state_clone_for_miner.wallet.get_public_key(),
+                state_clone_for_miner.wallet_state.get_public_key(),
                 state_clone_for_miner,
             )
             .await

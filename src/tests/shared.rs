@@ -12,9 +12,11 @@ use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rusty_leveldb::in_memory;
 use secp256k1::ecdsa;
 use secp256k1::Secp256k1;
 use std::path::PathBuf;
+use std::sync::Mutex as StdMutex;
 use std::{
     collections::HashMap,
     env,
@@ -31,11 +33,14 @@ use twenty_first::shared_math::traits::GetRandomElements;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
 use crate::database::leveldb::LevelDB;
+use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::wallet::Wallet;
+use crate::models::blockchain::wallet::WalletBlock;
+use crate::models::blockchain::wallet::WalletState;
 use crate::models::database::BlockIndexKey;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
@@ -214,7 +219,7 @@ pub async fn get_genesis_setup(
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
-        wallet: get_mock_wallet(),
+        wallet_state: get_mock_wallet_state(),
     };
     Ok((
         peer_broadcast_tx,
@@ -495,7 +500,7 @@ pub fn make_mock_block(
 }
 
 /// Return a dummy-wallet used for testing
-pub fn get_mock_wallet() -> Wallet {
+pub fn get_mock_wallet_state() -> WalletState {
     let dummy_secret_for_genesis_wallet = Digest::new([
         BFieldElement::new(14683724377595469133),
         BFieldElement::new(4905634007273628284),
@@ -504,7 +509,22 @@ pub fn get_mock_wallet() -> Wallet {
         BFieldElement::new(5097796649750941488),
         BFieldElement::new(12701344140082211424),
     ]);
-    Wallet::new_from_secret_key("unit_test_dummy", 0, dummy_secret_for_genesis_wallet)
+    let wallet = Wallet {
+        name: "test_wallet_name".to_string(),
+        version: 0,
+        secret: dummy_secret_for_genesis_wallet,
+    };
+
+    let test_path = get_data_director_for_unit_tests().unwrap();
+    let test_name = "Aaaa";
+
+    let db = Arc::new(StdMutex::new(
+        RustyLevelDB::<Digest, WalletBlock>::new(&test_path, &test_name, in_memory()).unwrap(),
+    ));
+
+    let mock_wallet_state = WalletState { db, wallet };
+
+    return mock_wallet_state;
 }
 
 pub async fn make_archival_state() -> ArchivalState {

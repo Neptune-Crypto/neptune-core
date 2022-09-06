@@ -361,6 +361,12 @@ impl MainLoopHandler {
                         &block,
                     )?;
 
+                // update wallet state with relevant UTXOs from this block
+                let _result = self
+                    .global_state
+                    .wallet_state
+                    .update_wallet_state_with_new_block(&block);
+
                 *light_state_locked = block.header.clone();
             }
         }
@@ -475,6 +481,12 @@ impl MainLoopHandler {
                                 &mut ms_block_sync_lock,
                                 &block,
                             )?;
+
+                        // update wallet state with relevant UTXOs from this block
+                        let _result = self
+                            .global_state
+                            .wallet_state
+                            .update_wallet_state_with_new_block(&block);
                     }
 
                     // Update information about latest header
