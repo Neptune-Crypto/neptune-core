@@ -20,7 +20,10 @@ use twenty_first::{amount::u32s::U32s, util_types::mmr::mmr_trait::Mmr};
 
 use super::shared::{get_block_file_path, new_block_file_is_needed};
 use crate::{
-    database::{leveldb::LevelDB, rusty::RustyLevelDB},
+    database::{
+        leveldb::LevelDB,
+        rusty::{default_options, RustyLevelDB},
+    },
     models::{
         blockchain::{
             block::{
@@ -80,7 +83,11 @@ impl ArchivalState {
             )
         });
 
-        let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(&path, BANNED_IPS_DB_NAME)?;
+        let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(
+            &path,
+            BANNED_IPS_DB_NAME,
+            default_options(),
+        )?;
         Ok(PeerDatabases {
             peer_standings: banned_peers,
         })
@@ -99,8 +106,11 @@ impl ArchivalState {
             )
         });
 
-        let block_index =
-            RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(&path, BLOCK_INDEX_DB_NAME)?;
+        let block_index = RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(
+            &path,
+            BLOCK_INDEX_DB_NAME,
+            default_options(),
+        )?;
 
         Ok(BlockDatabases { block_index })
     }
@@ -158,8 +168,11 @@ impl ArchivalState {
             active_window_db,
         );
 
-        let ms_block_sync: RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue> =
-            RustyLevelDB::new(path, MS_BLOCK_SYNC_DB_NAME)?;
+        let ms_block_sync: RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue> = RustyLevelDB::new(
+            path,
+            MS_BLOCK_SYNC_DB_NAME,
+            rusty_leveldb::Options::default(),
+        )?;
 
         Ok((archival_set, ms_block_sync))
     }
@@ -780,7 +793,7 @@ mod archival_state_tests {
         },
         tests::shared::{
             add_block_to_archival_state, add_unsigned_dev_net_input_to_block_transaction,
-            databases, get_mock_wallet, make_archival_state, make_mock_block,
+            databases, get_mock_wallet_state, make_archival_state, make_mock_block,
         },
     };
 
@@ -1030,7 +1043,7 @@ mod archival_state_tests {
         assert!(!block_1_a.archival_is_valid(&archival_state.genesis_block));
 
         // Sign the transaction with a valid key and verify
-        let genesis_wallet = get_mock_wallet();
+        let genesis_wallet = get_mock_wallet_state();
         block_1_a.body.transaction.sign(&genesis_wallet);
 
         // Block with signed transaction must validate

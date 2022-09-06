@@ -2,7 +2,7 @@ pub mod devnet_input;
 pub mod transaction_kernel;
 pub mod utxo;
 
-use secp256k1::Message;
+use secp256k1::{Message, PublicKey};
 use serde::{Deserialize, Serialize};
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
@@ -13,7 +13,7 @@ use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utx
 use super::{
     digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
-    wallet::Wallet,
+    wallet::WalletState,
 };
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
@@ -87,6 +87,22 @@ impl Hashable for Transaction {
 }
 
 impl Transaction {
+    pub fn get_input_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<Utxo> {
+        self.inputs
+            .iter()
+            .map(|dni| dni.utxo)
+            .filter(|utxo| utxo.public_key == pub_key)
+            .collect::<Vec<_>>()
+    }
+
+    pub fn get_output_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
+        self.outputs
+            .iter()
+            .filter(|(utxo, _randomness)| utxo.public_key == pub_key)
+            .copied()
+            .collect::<Vec<(Utxo, Digest)>>()
+    }
+
     fn get_kernel(&self) -> TransactionKernel {
         TransactionKernel {
             fee: self.fee,
@@ -103,10 +119,10 @@ impl Transaction {
     }
 
     /// Sign all transaction inputs with the same signature
-    pub fn sign(&mut self, wallet: &Wallet) {
+    pub fn sign(&mut self, wallet_state: &WalletState) {
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = kernel.hash();
-        let signature = wallet.sign_digest(kernel_digest);
+        let signature = wallet_state.wallet.sign_digest(kernel_digest);
         for input in self.inputs.iter_mut() {
             input.signature = signature;
         }

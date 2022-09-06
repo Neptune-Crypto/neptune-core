@@ -1,8 +1,6 @@
 use anyhow::Result;
 use neptune_core::config_models::{data_directory::get_data_directory, network::Network};
-use neptune_core::models::blockchain::wallet::{self, Wallet};
-
-pub const WALLET_DIR: &str = "wallet.dat";
+use neptune_core::models::blockchain::wallet::Wallet;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,12 +15,9 @@ async fn main() -> Result<()> {
             err
         )
     });
+
     let wallet_file = Wallet::wallet_path(&root_data_dir_path);
-    let wallet = Wallet::initialize_wallet(
-        &wallet_file,
-        wallet::STANDARD_WALLET_NAME,
-        wallet::STANDARD_WALLET_VERSION,
-    );
+    let wallet = Wallet::new_from_file_or_default(&wallet_file);
 
     println!("Wallet stored in: {}", wallet_file.display());
     println!("Wallet public key: {}", wallet.get_public_key());

@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use neptune_core::models::blockchain::transaction::utxo::Utxo;
 use neptune_core::rpc_server::RPCClient;
+use num_bigint::BigUint;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
@@ -16,6 +17,7 @@ enum Command {
     ClearIpStanding { ip: IpAddr },
     Send { unparsed_send_argument: String },
     Shutdown,
+    Balance,
 }
 
 #[derive(Debug, Parser)]
@@ -83,6 +85,13 @@ async fn main() -> Result<()> {
             println!("Sending shutdown-command.");
             client.shutdown(context::current()).await?;
             println!("Shutdown-command completed successfully.");
+        }
+
+        Command::Balance => {
+            println!("Sending balance-command.");
+            let balance: BigUint = client.get_balance(context::current()).await?.into();
+            println!("Balance received:");
+            println!("{}", balance);
         }
     }
 

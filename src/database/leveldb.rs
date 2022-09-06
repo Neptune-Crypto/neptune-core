@@ -4,7 +4,7 @@ use std::path::Path;
 
 /// The interface we want for any LevelDB crate we may use.
 pub trait LevelDB<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> {
-    fn new<P>(path: P, db_name: &str) -> Result<Self>
+    fn new<P>(path: P, db_name: &str, options: rusty_leveldb::Options) -> Result<Self>
     where
         P: AsRef<Path> + Clone,
         Self: Sized;

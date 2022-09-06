@@ -26,16 +26,24 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> cor
     }
 }
 
+pub fn default_options() -> rusty_leveldb::Options {
+    rusty_leveldb::Options::default()
+}
+
 // pub trait RustyDatabaseTable<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>:
 // DatabaseTable<Key, Value>
 impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> LevelDB<Key, Value>
     for RustyLevelDB<Key, Value>
 {
-    fn new<P: AsRef<Path>>(db_path: P, db_name: &str) -> Result<Self> {
+    // If the DB already exists at that path, it is used.
+    fn new<P: AsRef<Path>>(
+        db_path: P,
+        db_name: &str,
+        options: rusty_leveldb::Options,
+    ) -> Result<Self> {
         let mut path = PathBuf::new();
         path.push(db_path);
         path.push(db_name);
-        let options = rusty_leveldb::Options::default();
         let db = DB::open(path, options)?;
 
         Ok(Self {

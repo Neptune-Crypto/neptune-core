@@ -1,3 +1,15 @@
+use super::block::Block;
+use super::digest::{
+    Digest, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
+    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
+};
+use super::transaction::devnet_input::DevNetInput;
+use super::transaction::utxo::Utxo;
+use super::transaction::{Amount, Transaction};
+use crate::config_models::data_directory::get_data_directory;
+use crate::config_models::network::Network;
+use crate::database::leveldb::LevelDB;
+use crate::database::rusty::RustyLevelDB;
 use crate::Hash;
 use anyhow::Result;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -7,24 +19,52 @@ use secp256k1::{ecdsa, Secp256k1};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tracing::info;
-use twenty_first::shared_math::{
-    b_field_element::BFieldElement,
-    traits::{GetRandomElements, IdentityValues},
-};
+use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 
-use super::digest::{
-    Digest, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
-    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
-};
-use super::transaction::devnet_input::DevNetInput;
-use super::transaction::utxo::Utxo;
-use super::transaction::{Amount, Transaction};
-
-pub const WALLET_FILE_NAME: &str = "wallet.dat";
-pub const STANDARD_WALLET_NAME: &str = "standard";
+pub const WALLET_FILE_NAME: &str = "standard_wallet_file.dat";
+pub const STANDARD_WALLET_NAME: &str = "standard_wallet";
 pub const STANDARD_WALLET_VERSION: u8 = 0;
+pub const STANDARD_WALLET_DB_NAME: &str = "standard_wallet_db";
 
+type BlockHash = Digest;
+/// The parts of a block that this wallet wants to keep track of,
+/// ie. the input and output UTXOs that share this wallets public key.
+#[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
+pub struct WalletBlock {
+    pub input_utxos: Vec<Utxo>,
+    pub output_utxos: Vec<(Utxo, Digest)>,
+}
+
+impl WalletBlock {
+    pub fn new(input_utxos: Vec<Utxo>, output_utxos: Vec<(Utxo, Digest)>) -> Self {
+        Self {
+            input_utxos,
+            output_utxos,
+        }
+    }
+    pub fn sum(&self) -> Amount {
+        let i_sum: Amount = self.input_utxos.iter().map(|utxo| utxo.amount).sum();
+        let o_sum: Amount = self
+            .output_utxos
+            .iter()
+            .map(|(utxo, _digest)| utxo.amount)
+            .sum();
+        o_sum - i_sum
+    }
+}
+
+/// Gets a new secret.
+/// FIXME: This should be reimplemented in a more reasonable way.
+pub fn generate_secret_key() -> Digest {
+    let mut rng = thread_rng();
+
+    BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into()
+}
+
+/// Wallet contains the wallet-related data we want to store in a JSON file,
+/// and that is not updated during regular program execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Wallet {
     pub name: String,
@@ -33,66 +73,16 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    pub fn wallet_path(root_data_dir_path: &Path) -> PathBuf {
-        let mut pb = root_data_dir_path.to_path_buf();
-        pb.push(WALLET_FILE_NAME);
-        pb
-    }
-
-    pub fn new_from_secret_key(name: &str, version: u8, secret: Digest) -> Self {
+    pub fn new(secret: Digest) -> Self {
         Self {
-            name: name.to_string(),
+            name: STANDARD_WALLET_NAME.to_string(),
             secret,
-            version,
+            version: STANDARD_WALLET_VERSION,
         }
     }
 
-    pub fn new_random_wallet(name: &str, version: u8) -> Self {
-        let mut rng = thread_rng();
-        let entropy: Vec<BFieldElement> =
-            BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng);
-
-        // Sanity check to verify that entropy was actually set
-        assert!(
-            !entropy.iter().all(|elem| elem.is_zero()),
-            "Entropy for secret key must be initialized. All elements cannot be zero."
-        );
-        assert!(
-            !entropy.iter().all(|elem| *elem == entropy[0]),
-            "Entropy for secret key must be initialized. All elements cannot be equal."
-        );
-
-        Self::new_from_secret_key(name, version, entropy.into())
-    }
-
-    fn _get_ecdsa_sk(&self) -> secp256k1::SecretKey {
-        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.secret.into();
-        secp256k1::SecretKey::from_slice(&bytes).unwrap()
-    }
-
-    fn _sign(&self, msg_hash: secp256k1::Message) -> ecdsa::Signature {
-        let sk = self._get_ecdsa_sk();
-        sk.sign_ecdsa(msg_hash)
-    }
-
-    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
-        let sk = self._get_ecdsa_sk();
-        let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = msg_digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
-        sk.sign_ecdsa(msg)
-    }
-
-    pub fn get_public_key(&self) -> secp256k1::PublicKey {
-        let secp = Secp256k1::new();
-        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.secret.into();
-        let ecdsa_secret_key: secp256k1::SecretKey =
-            secp256k1::SecretKey::from_slice(&bytes).unwrap();
-
-        secp256k1::PublicKey::from_secret_key(&secp, &ecdsa_secret_key)
-    }
-
     /// Read the wallet from disk. Create one if none exists.
-    pub fn initialize_wallet(wallet_file: &Path, name: &str, version: u8) -> Wallet {
+    pub fn new_from_file_or_default(wallet_file: &Path) -> Wallet {
         // Check if file exists
         let wallet: Wallet = if wallet_file.exists() {
             info!("Found wallet file: {}", wallet_file.to_string_lossy());
@@ -125,7 +115,7 @@ impl Wallet {
             );
 
             // New wallet must be made and stored to disk
-            let new_wallet: Wallet = Wallet::new_random_wallet(name, version);
+            let new_wallet: Wallet = Wallet::new(generate_secret_key());
             let wallet_as_json: String =
                 serde_json::to_string(&new_wallet).expect("wallet serialization must succeed");
 
@@ -146,6 +136,12 @@ impl Wallet {
         );
 
         wallet
+    }
+
+    pub fn wallet_path(root_data_dir_path: &Path) -> PathBuf {
+        let mut pb = root_data_dir_path.to_path_buf();
+        pb.push(WALLET_FILE_NAME);
+        pb
     }
 
     /// Create a wallet file, and set restrictive permissions
@@ -173,12 +169,106 @@ impl Wallet {
             .unwrap();
         fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
     }
+}
+
+impl Wallet {
+    fn _get_ecdsa_sk(&self) -> secp256k1::SecretKey {
+        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.secret.into();
+        secp256k1::SecretKey::from_slice(&bytes).unwrap()
+    }
+
+    fn _sign(&self, msg_hash: secp256k1::Message) -> ecdsa::Signature {
+        let sk = self._get_ecdsa_sk();
+        sk.sign_ecdsa(msg_hash)
+    }
+
+    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
+        let sk = self._get_ecdsa_sk();
+        let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = msg_digest.into();
+        let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
+        sk.sign_ecdsa(msg)
+    }
+
+    pub fn get_public_key(&self) -> secp256k1::PublicKey {
+        let secp = Secp256k1::new();
+        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.secret.into();
+        let ecdsa_secret_key: secp256k1::SecretKey =
+            secp256k1::SecretKey::from_slice(&bytes).unwrap();
+
+        secp256k1::PublicKey::from_secret_key(&secp, &ecdsa_secret_key)
+    }
+}
+
+/// A wallet indexes its input and output UTXOs after blockhashes
+/// so that one can easily roll-back. We don't want to serialize the
+/// database handle, wherefore this struct exists.
+#[derive(Debug, Clone)]
+pub struct WalletState {
+    pub db: Arc<Mutex<RustyLevelDB<BlockHash, WalletBlock>>>,
+    pub wallet: Wallet,
+    // MAYBE: maintain balance here?
+    // TODO: How do we know if the Wallet has seen a given block?
+
+    // This `secret_key` corresponds to a `master_private_key` for Bitcoin wallet.
+    // From this master key several individual UTXO private keys can be derived using this [scheme][scheme]
+    // [scheme]: https://learnmeabitcoin.com/technical/derivation-paths
+}
+
+impl WalletState {
+    pub fn new_from_wallet(wallet: Wallet, network: Network) -> Self {
+        let _db: RustyLevelDB<BlockHash, WalletBlock> =
+            RustyLevelDB::<BlockHash, WalletBlock>::new(
+                get_data_directory(network).unwrap(),
+                STANDARD_WALLET_DB_NAME,
+                rusty_leveldb::Options::default(),
+            )
+            .unwrap();
+        let db = Arc::new(Mutex::new(_db));
+        Self { wallet, db }
+    }
+}
+
+impl WalletState {
+    pub async fn update_wallet_state_with_new_block(&self, block: &Block) {
+        // A wallet contains a set of input and output UTXOs,
+        // each of which contains an address (public key),
+        // which inform the balance of the wallet.
+
+        //TODO: In mainloop, actually call forget_block when you remove it.
+
+        let transaction: Transaction = block.body.transaction.clone();
+
+        let my_pub_key = self.wallet.get_public_key();
+
+        let input_utxos: Vec<Utxo> = transaction.get_input_utxos_with_pub_key(my_pub_key);
+
+        let output_utxos: Vec<(Utxo, Digest)> =
+            transaction.get_output_utxos_with_pub_key(my_pub_key);
+
+        // if we remove this
+        if input_utxos.is_empty() && output_utxos.is_empty() {
+            return;
+        }
+
+        let next_block_of_relevant_utxos = WalletBlock::new(input_utxos, output_utxos);
+
+        self.db
+            .lock()
+            .unwrap()
+            .put(block.hash, next_block_of_relevant_utxos);
+    }
 
     pub fn get_balance(&self) -> Amount {
-        // TODO: Get from memory, but make sure it's in sync with disk.
-        //
-        // self.utxos.iter().map(|utxo| utxo.amount).sum()
-        Amount::zero()
+        self.db
+            .lock()
+            .unwrap()
+            .new_iter()
+            .map(|(_block_hash, wallet_block)| wallet_block.sum())
+            .sum()
+    }
+
+    pub fn forget_block(&self, block_hash: Digest) {
+        self.db.lock().unwrap().delete(block_hash);
     }
 
     pub fn create_transaction(
@@ -234,20 +324,22 @@ mod ordered_digest_tests {
 
     #[test]
     fn new_random_wallet_base_test() {
-        let wallet = Wallet::new_random_wallet("test wallet 1", 6);
-        let pk = wallet.get_public_key();
-        let msg_vec: Vec<BFieldElement> = wallet.secret.values().to_vec();
+        let network = Network::Testnet;
+        let secret = generate_secret_key();
+        let wallet_state = WalletState::new_from_wallet(Wallet::new(secret), network);
+        let pk = wallet_state.wallet.get_public_key();
+        let msg_vec: Vec<BFieldElement> = wallet_state.wallet.secret.values().to_vec();
         let digest_vec: Vec<BFieldElement> = Hash::new().hash(&msg_vec, RP_DEFAULT_OUTPUT_SIZE);
         let digest: Digest = digest_vec.into();
         let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = digest.into();
         let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
-        let signature = wallet._sign(msg);
+        let signature = wallet_state.wallet._sign(msg);
         assert!(
             signature.verify(&msg, &pk).is_ok(),
             "DEVNET signature must verify"
         );
 
-        let signature_alt = wallet.sign_digest(digest);
+        let signature_alt = wallet_state.wallet.sign_digest(digest);
         assert!(
             signature_alt.verify(&msg, &pk).is_ok(),
             "DEVNET signature must verify"
