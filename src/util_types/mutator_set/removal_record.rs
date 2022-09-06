@@ -12,7 +12,10 @@ use super::{
     chunk::Chunk,
     chunk_dictionary::ChunkDictionary,
     set_commitment::SetCommitment,
-    shared::{bit_indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS},
+    shared::{
+        bit_indices_to_hash_map, get_batch_mutation_argument_for_removal_record, BATCH_SIZE,
+        CHUNK_SIZE, NUM_TRIALS,
+    },
 };
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
@@ -154,6 +157,39 @@ where
             mutator_set.swbf_inactive.count_leaves(),
             &new_chunk_digest,
             &mutator_set.swbf_inactive.get_peaks(),
+        );
+
+        Ok(())
+    }
+
+    pub fn batch_update_from_remove(
+        removal_records: &mut [&mut Self],
+        applied_removal_record: &RemovalRecord<H>,
+    ) -> Result<(), Box<dyn Error>> {
+        // Set all chunk values to the new values and calculate the mutation argument
+        // for the batch updating of the MMR membership proofs.
+        let mut chunk_dictionaries: Vec<&mut ChunkDictionary<H>> = removal_records
+            .iter_mut()
+            .map(|mp| &mut mp.target_chunks)
+            .collect();
+        let (_mutated_chunks_by_rr_indices, mutation_argument) =
+            get_batch_mutation_argument_for_removal_record(
+                applied_removal_record,
+                &mut chunk_dictionaries,
+            );
+
+        // Collect all the MMR membership proofs from the chunk dictionaries.
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<H>> = vec![];
+        for chunk_dict in chunk_dictionaries.iter_mut() {
+            for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
+                own_mmr_mps.push(mp);
+            }
+        }
+
+        // Perform the batch mutation of the MMR membership proofs
+        mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            &mut own_mmr_mps,
+            mutation_argument,
         );
 
         Ok(())
@@ -463,6 +499,96 @@ mod removal_record_tests {
             assert!(accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
             accumulator.remove(&random_removal_record);
             assert!(!accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
+        }
+    }
+
+    #[test]
+    fn batch_update_from_addition_and_remove_pbt() {
+        // Verify that a single element can be added to and removed from the mutator set
+        type H = blake3::Hasher;
+        type Digest = blake3_wrapper::Blake3Hash;
+        let hasher = H::new();
+        let mut prng = thread_rng();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+
+        let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
+        let mut items = vec![];
+        let mut mps = vec![];
+        for i in 0..12 * BATCH_SIZE + 4 {
+            let item = hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
+            let randomness =
+                hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
+            let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
+            let mp = accumulator.prove(&item, &randomness, true);
+
+            // Update all removal records from addition, then add the element
+            let update_res_rr = RemovalRecord::batch_update_from_addition(
+                &mut removal_records
+                    .iter_mut()
+                    .map(|x| &mut x.1)
+                    .collect::<Vec<_>>(),
+                &mut accumulator,
+            );
+            assert!(
+                update_res_rr.is_ok(),
+                "batch update must return OK, i = {}",
+                i
+            );
+            let update_res_mp = MsMembershipProof::batch_update_from_addition(
+                &mut mps.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &mut accumulator,
+                &addition_record,
+            );
+            assert!(
+                update_res_mp.is_ok(),
+                "batch update must return OK, i = {}",
+                i
+            );
+            accumulator.add(&mut addition_record);
+            mps.push(mp.clone());
+            items.push(item);
+
+            for removal_record in removal_records.iter().map(|x| &x.1) {
+                assert!(
+                    removal_record.validate(&mut accumulator),
+                    "removal records must validate, i = {}",
+                    i
+                );
+            }
+
+            let rr = accumulator.drop(&item, &mp);
+            removal_records.push((i, rr));
+        }
+
+        // Now apply all removal records one at a time and batch update the remaining removal records
+        for i in 0..12 * BATCH_SIZE + 4 {
+            let (_chosen_index, random_removal_record) = removal_records
+                .choose(&mut rand::thread_rng())
+                .unwrap()
+                .clone();
+            let update_res_rr = RemovalRecord::batch_update_from_remove(
+                &mut removal_records
+                    .iter_mut()
+                    .map(|x| &mut x.1)
+                    .collect::<Vec<_>>(),
+                &random_removal_record,
+            );
+            assert!(
+                update_res_rr.is_ok(),
+                "batch update must return OK, i = {}",
+                i
+            );
+
+            accumulator.remove(&random_removal_record);
+
+            for removal_record in removal_records.iter().map(|x| &x.1) {
+                assert!(
+                    removal_record.validate(&mut accumulator),
+                    "removal records must validate, i = {}",
+                    i
+                );
+            }
         }
     }
 }
