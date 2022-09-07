@@ -732,20 +732,34 @@ impl ArchivalState {
 
         let mut addition_records: Vec<AdditionRecord<Hash>> =
             new_block.body.mutator_set_update.additions.clone();
-        let mut removal_records: Vec<RemovalRecord<Hash>> =
-            new_block.body.mutator_set_update.removals.clone();
-        while let Some(mut addition_record) = addition_records.pop() {
-            ams_lock.add(&mut addition_record);
+        let mut removal_records = new_block.body.mutator_set_update.removals.clone();
+        let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
+            removal_records.iter_mut().collect::<Vec<_>>();
 
-            // TODO: Batch update all removal records from addition
+        // Add elements, thus adding the output UTXOs to the mutator set
+        while let Some(mut addition_record) = addition_records.pop() {
+            // Batch-update all removal records to keep them valid after next addition
+            RemovalRecord::batch_update_from_addition(
+                &mut removal_records,
+                &mut ams_lock.set_commitment,
+            ).expect("MS removal record update from add must succeed in update_mutator_set as block should already be verified");
+
+            // Add the element to the mutator set
+            ams_lock.add(&mut addition_record);
         }
 
+        // Remove elements, thus removing the input UTXOs from the mutator set
         let mut changed_indices: Vec<u128> = vec![];
         while let Some(removal_record) = removal_records.pop() {
-            let mut indices_of_flipped_bits_in_bf = ams_lock.remove(&removal_record).unwrap();
-            changed_indices.append(&mut indices_of_flipped_bits_in_bf);
+            // Batch-update all removal records to keep them valid after next removal
+            RemovalRecord::batch_update_from_remove(
+                &mut removal_records,
+                removal_record,
+            ).expect("MS removal record update from remove must succeed in update_mutator_set as block should already be verified");
 
-            // TODO: Batch update all removal records from removal
+            // Remove the element from the mutator set
+            let mut indices_of_flipped_bits_in_bf = ams_lock.remove(removal_record).unwrap();
+            changed_indices.append(&mut indices_of_flipped_bits_in_bf);
         }
 
         // Remove duplicates from changed indices

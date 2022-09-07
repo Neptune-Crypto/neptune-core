@@ -245,19 +245,17 @@ impl Block {
 
         // 1.d) Verify that the two mutator sets, previous and current, are
         // consistent with the transactions.
-        let mut ms = block_copy.body.previous_mutator_set_accumulator.clone();
-        for input in block_copy.body.transaction.inputs.iter() {
-            // TODO: This will probably fail with more than one removal record
-            // in the block, since we are not updating the removal records.
-            ms.remove(&input.removal_record);
-        }
-
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
-        for (utxo, randomness) in block_copy.body.transaction.outputs.iter() {
-            let mut addition_record = ms.commit(&utxo.hash().into(), &randomness.to_owned().into());
-            ms.add(&mut addition_record);
-        }
+        let mut ms = block_copy.body.previous_mutator_set_accumulator.clone();
+        let ms_update_result = block_copy.body.mutator_set_update.apply(&mut ms);
+        match ms_update_result {
+            Ok(_) => (),
+            Err(err) => {
+                warn!("Failed to apply mutator set update: {}", err);
+                return false;
+            }
+        };
 
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.

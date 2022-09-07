@@ -39,22 +39,24 @@ fn make_devnet_block_template(
         previous_block.body.next_mutator_set_accumulator.clone();
 
     for (output_utxo, randomness) in transaction.outputs.iter() {
-        let mut addition_record =
+        let addition_record =
             next_mutator_set_accumulator.commit(&output_utxo.hash().into(), &(*randomness).into());
-        next_mutator_set_accumulator.add(&mut addition_record);
         additions.push(addition_record);
-
-        // TODO: Batch update all removal records from addition
     }
 
     for devnet_input in transaction.inputs.iter() {
         let _diff_indices = next_mutator_set_accumulator.remove(&devnet_input.removal_record);
         removals.push(devnet_input.removal_record.clone());
-
-        // TODO: Batch update all removal records from removal
     }
 
     let mutator_set_update = MutatorSetUpdate::new(removals, additions);
+
+    // Apply the mutator set update to the mutator set accumulator
+    // This function mutates the MS accumulator that is given as argument to
+    // the function such that the next mutator set accumulator is calculated.
+    mutator_set_update
+        .apply(&mut next_mutator_set_accumulator)
+        .expect("Mutator set mutation must work");
 
     let block_body: BlockBody = BlockBody {
         transaction,
