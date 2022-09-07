@@ -317,13 +317,7 @@ impl Block {
 
     /// The archival-version of block validation. Archival nodes should run this version.
     pub fn archival_is_valid(&self, previous_block: &Block) -> bool {
-        // Check that self is the child of parent
-        // if parent.hash != self.header.prev_block_digest {
-        //     return false;
-        // }
-
         // check that hash is below threshold
-        // TODO: Replace RHS with block `target_difficulty` from this block
         if Into::<OrderedDigest>::into(self.hash)
             > OrderedDigest::to_digest_threshold(self.header.target_difficulty)
         {
@@ -331,15 +325,9 @@ impl Block {
             return false;
         }
 
-        // TODO: `block_body_merkle_root` is hash of block body.
-
-        // Verify that STARK proof is valid
-        // TODO: Add STARK verification here
-
-        // Verify that `transactions` match
-        //     pub transactions: Vec<Transaction>,
-        // pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
-        // pub mutator_set_update: MutatorSetUpdate,
+        // `devnet_is_valid` contains the rest of the block validation logic. `devnet_is_valid`
+        // is factored out such that we can also test if block templates are valid without having
+        // to build a block with a valid PoW digest.
         if !self.devnet_is_valid(previous_block) {
             warn!("Block devnet test failed");
             return false;
