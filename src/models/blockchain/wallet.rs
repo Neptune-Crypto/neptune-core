@@ -19,6 +19,7 @@ use rand::thread_rng;
 use secp256k1::{ecdsa, Secp256k1};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::ops::Add;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
@@ -39,6 +40,22 @@ pub struct WalletBlock {
     pub output_utxos: Vec<(Utxo, Digest)>,
 }
 
+struct WalletBlockIOSums {
+    pub input_sum: Amount,
+    pub output_sum: Amount,
+}
+
+impl Add for WalletBlockIOSums {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            input_sum: self.input_sum + other.input_sum,
+            output_sum: self.output_sum + other.output_sum,
+        }
+    }
+}
+
 impl WalletBlock {
     fn new(input_utxos: Vec<Utxo>, output_utxos: Vec<(Utxo, Digest)>) -> Self {
         Self {
@@ -46,14 +63,15 @@ impl WalletBlock {
             output_utxos,
         }
     }
-    fn sum(&self) -> Amount {
-        let i_sum: Amount = self.input_utxos.iter().map(|utxo| utxo.amount).sum();
-        let o_sum: Amount = self
-            .output_utxos
-            .iter()
-            .map(|(utxo, _digest)| utxo.amount)
-            .sum();
-        o_sum - i_sum
+    fn get_io_sums(&self) -> WalletBlockIOSums {
+        WalletBlockIOSums {
+            input_sum: self.input_utxos.iter().map(|utxo| utxo.amount).sum(),
+            output_sum: self
+                .output_utxos
+                .iter()
+                .map(|(utxo, _digest)| utxo.amount)
+                .sum(),
+        }
     }
 }
 
@@ -236,12 +254,15 @@ impl WalletState {
 
     pub fn get_balance(&self) -> Amount {
         block_on(async {
-            self.db
+            let sums: WalletBlockIOSums = self
+                .db
                 .lock()
                 .await
                 .new_iter()
-                .map(|(_block_hash, wallet_block)| wallet_block.sum())
-                .sum()
+                .map(|(_block_hash, wallet_block)| wallet_block.get_io_sums())
+                .reduce(|a, b| a + b)
+                .unwrap();
+            sums.output_sum - sums.input_sum
         })
     }
 
