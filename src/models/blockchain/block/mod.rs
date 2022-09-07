@@ -240,12 +240,6 @@ impl Block {
                 warn!("Bad commitment found in addition record");
                 return false;
             }
-            if !block_copy.body.mutator_set_update.additions[i]
-                .has_matching_aocl(&mut block_copy.body.previous_mutator_set_accumulator.aocl)
-            {
-                warn!("Addition record does not have matching AOCL");
-                return false;
-            }
             i += 1;
         }
 

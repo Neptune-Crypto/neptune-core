@@ -882,7 +882,7 @@ dependencies = [
 [[package]]
 name = "mutator-set-tf"
 version = "0.1.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=59dc816d8e4145dbd736f7e0bb74031e1976d133#59dc816d8e4145dbd736f7e0bb74031e1976d133"
+source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?rev=afd43b57e13c6518bd93fc04359c3a394c708385#afd43b57e13c6518bd93fc04359c3a394c708385"
 dependencies = [
  "blake3",
  "itertools",

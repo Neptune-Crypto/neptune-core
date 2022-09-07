@@ -18,7 +18,7 @@ pub struct MutatorSetUpdate {
 impl Hashable for MutatorSetUpdate {
     fn hash(&self) -> Digest {
         let additions = self.additions.to_owned();
-        let addition_digests: Vec<_> = additions.into_iter().map(|mut a| a.hash()).collect();
+        let addition_digests: Vec<_> = additions.into_iter().map(|a| a.hash()).collect();
         let removal_digests: Vec<_> = self.removals.iter().map(|a| a.hash()).collect();
         let additions_root =
             MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(&addition_digests);
