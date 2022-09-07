@@ -25,10 +25,10 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::info;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 
-pub const WALLET_FILE_NAME: &str = "standard_wallet_file.dat";
+pub const WALLET_FILE_NAME: &str = "wallet.dat";
 pub const STANDARD_WALLET_NAME: &str = "standard_wallet";
 pub const STANDARD_WALLET_VERSION: u8 = 0;
-pub const STANDARD_WALLET_DB_NAME: &str = "standard_wallet_db";
+pub const STANDARD_WALLET_DB_NAME: &str = "wallet_db.dat";
 
 type BlockHash = Digest;
 /// The parts of a block that this wallet wants to keep track of,
