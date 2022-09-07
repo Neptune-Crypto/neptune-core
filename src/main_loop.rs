@@ -849,11 +849,9 @@ impl MainLoopHandler {
             // Set a timer to run peer discovery process every N seconds
 
             // Set a timer for synchronization handling, but only if we are in synchronization mod
-
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
-                    self.graceful_shutdown().await?;
                     break;
                 }
 
@@ -932,6 +930,7 @@ impl MainLoopHandler {
                 }
             }
         }
+        self.graceful_shutdown().await?;
         info!("Shutdown completed.");
         Ok(())
     }
@@ -959,7 +958,6 @@ impl MainLoopHandler {
             }
             RPCServerToMain::Shutdown() => {
                 info!("Recived RPC shutdown request.");
-                self.graceful_shutdown().await?;
 
                 // shut down
                 Ok(true)
