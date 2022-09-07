@@ -516,15 +516,13 @@ pub fn get_mock_wallet_state() -> WalletState {
     };
 
     let test_path = get_data_director_for_unit_tests().unwrap();
-    let test_name = "Aaaa";
+    let test_name = "mock_wallet_db";
 
     let db = Arc::new(StdMutex::new(
-        RustyLevelDB::<Digest, WalletBlock>::new(&test_path, &test_name, in_memory()).unwrap(),
+        RustyLevelDB::<Digest, WalletBlock>::new(&test_path, test_name, in_memory()).unwrap(),
     ));
 
-    let mock_wallet_state = WalletState { db, wallet };
-
-    return mock_wallet_state;
+    WalletState { db, wallet }
 }
 
 pub async fn make_archival_state() -> ArchivalState {
