@@ -57,7 +57,9 @@ impl MutatorSetUpdate {
     /// accumulator according to the provided additions and removals.
     pub fn apply(&self, ms_accumulator: &mut MutatorSetAccumulator<Hash>) -> Result<()> {
         let mut addition_records: Vec<AdditionRecord<Hash>> = self.additions.clone();
+        addition_records.reverse();
         let mut removal_records = self.removals.clone();
+        removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
         while let Some(mut addition_record) = addition_records.pop() {

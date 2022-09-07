@@ -3,7 +3,7 @@ use mutator_set_tf::util_types::mutator_set::{
 };
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tracing::{debug, warn};
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
     util_types::simple_hasher::Hasher,
@@ -265,7 +265,11 @@ impl Block {
                 .next_mutator_set_accumulator
                 .get_commitment()
         {
-            warn!("Mutator set does not match calculated object");
+            warn!("Reported mutator set does not match calculated object.");
+            debug!(
+                "Read: {:?}. \nCalculated: {:?}",
+                block_copy.body.next_mutator_set_accumulator, ms
+            );
             return false;
         }
 

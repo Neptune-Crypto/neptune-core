@@ -5,6 +5,7 @@ use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
+use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
@@ -423,7 +424,71 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.header.block_body_merkle_root = block.body.hash();
 }
 
-/// Return a fake block with a random hash
+pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
+    let tx = &mut block.body.transaction;
+    let output_randomness: Vec<BFieldElement> =
+        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+    let mut addition_record: AdditionRecord<Hash> = block
+        .body
+        .next_mutator_set_accumulator
+        .commit(&utxo.hash().into(), &output_randomness);
+    tx.outputs.push((utxo, output_randomness.into()));
+
+    // Update block mutator set accumulator
+    block
+        .body
+        .next_mutator_set_accumulator
+        .add(&mut addition_record);
+
+    // Add addition record for this output
+    block
+        .body
+        .mutator_set_update
+        .additions
+        .push(addition_record);
+    println!(
+        "msu removals: {}, additions: {}",
+        block.body.mutator_set_update.removals.len(),
+        block.body.mutator_set_update.additions.len(),
+    );
+
+    // update header fields
+    block.header.mutator_set_commitment = block
+        .body
+        .next_mutator_set_accumulator
+        .get_commitment()
+        .into();
+    block.header.block_body_merkle_root = block.body.hash();
+}
+
+/// Helper function to add an unsigned input to a block's transaction
+pub async fn add_unsigned_input_to_block(
+    block: &mut Block,
+    consumed_utxo: Utxo,
+    randomness: Digest,
+    ams: &Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>>,
+) {
+    let item = consumed_utxo.hash();
+    let input_membership_proof = ams
+        .lock()
+        .await
+        .restore_membership_proof(&item.into(), &randomness.into(), 0)
+        .unwrap();
+    let input_removal_record = ams
+        .lock()
+        .await
+        .set_commitment
+        .drop(&item.into(), &input_membership_proof);
+    add_unsigned_dev_net_input_to_block_transaction(
+        block,
+        consumed_utxo,
+        input_membership_proof,
+        input_removal_record,
+    );
+}
+
+/// Return a fake block with a random hash, containing *one* output UTXO in the form
+/// of a coinbase output.
 pub fn make_mock_block(
     previous_block: &Block,
     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,

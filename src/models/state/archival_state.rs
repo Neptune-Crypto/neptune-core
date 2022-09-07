@@ -794,6 +794,7 @@ mod archival_state_tests {
     use super::*;
 
     use mutator_set_tf::util_types::mutator_set::shared::{BITS_PER_U32, WINDOW_SIZE};
+    use num_traits::One;
     use rand::{thread_rng, RngCore};
     use rusty_leveldb::LdbIterator;
     use tracing_test::traced_test;
@@ -802,11 +803,14 @@ mod archival_state_tests {
     use crate::{
         config_models::network::Network,
         models::{
-            blockchain::digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
+            blockchain::{
+                digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
+                transaction::{utxo::Utxo, Amount},
+            },
             state::{blockchain_state::BlockchainState, light_state::LightState},
         },
         tests::shared::{
-            add_block_to_archival_state, add_unsigned_dev_net_input_to_block_transaction,
+            add_block_to_archival_state, add_output_to_block, add_unsigned_input_to_block,
             databases, get_mock_wallet_state, make_archival_state, make_mock_block,
         },
     };
@@ -1033,25 +1037,13 @@ mod archival_state_tests {
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        let item = consumed_utxo.hash();
-        let input_membership_proof = archival_state
-            .archival_mutator_set
-            .lock()
-            .await
-            .restore_membership_proof(&item.into(), &premine_output_randomness.into(), 0)
-            .unwrap();
-        let input_removal_record = archival_state
-            .archival_mutator_set
-            .lock()
-            .await
-            .set_commitment
-            .drop(&item.into(), &input_membership_proof);
-        add_unsigned_dev_net_input_to_block_transaction(
+        add_unsigned_input_to_block(
             &mut block_1_a,
             consumed_utxo,
-            input_membership_proof,
-            input_removal_record,
-        );
+            premine_output_randomness,
+            &archival_state.archival_mutator_set,
+        )
+        .await;
 
         // Unsigned input must fail to validate
         assert!(!block_1_a.archival_is_valid(&archival_state.genesis_block));
@@ -1075,11 +1067,14 @@ mod archival_state_tests {
                 .iter()
                 .all(|x| x.is_zero()));
 
+            // Write the block to disk
             archival_state.write_block(
                 Box::new(block_1_a.clone()),
                 &mut db_bc_lock,
                 Some(genesis_block.header.proof_of_work_family),
             )?;
+
+            // Update the mutator set
             let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
             archival_state.update_mutator_set(
                 &mut db_bc_lock,
@@ -1119,6 +1114,57 @@ mod archival_state_tests {
                 .iter()
                 .all(|x| x.is_zero()));
         }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
+        let archival_state: ArchivalState = make_archival_state().await;
+        let mut block_1_a = make_mock_block(&archival_state.genesis_block, None);
+
+        // Add a valid input to the block transaction
+        let genesis_block = archival_state.genesis_block.clone();
+        let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
+        let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
+        add_unsigned_input_to_block(
+            &mut block_1_a,
+            consumed_utxo,
+            premine_output_randomness,
+            &archival_state.archival_mutator_set,
+        )
+        .await;
+
+        // Sign and verify validity
+        let genesis_wallet = get_mock_wallet_state();
+        block_1_a.body.transaction.sign(&genesis_wallet);
+        assert!(block_1_a.devnet_is_valid(&genesis_block));
+
+        // Add one output to the block's transaction
+        let output_utxo_0: Utxo = Utxo::new(Amount::one(), genesis_wallet.get_public_key());
+        add_output_to_block(&mut block_1_a, output_utxo_0);
+
+        // Sign the transaction
+        block_1_a.body.transaction.sign(&genesis_wallet);
+        assert!(block_1_a.devnet_is_valid(&genesis_block));
+
+        // Add two more outputs and verify validity
+        // Add one output to the block's transaction
+        let output_utxo_1: Utxo = Utxo::new(
+            Amount::one() + Amount::one(),
+            genesis_wallet.get_public_key(),
+        );
+        add_output_to_block(&mut block_1_a, output_utxo_1);
+        let output_utxo_2: Utxo = Utxo::new(
+            Amount::one() + Amount::one() + Amount::one(),
+            genesis_wallet.get_public_key(),
+        );
+        add_output_to_block(&mut block_1_a, output_utxo_2);
+
+        // Sign the transaction
+        block_1_a.body.transaction.sign(&genesis_wallet);
+        assert!(block_1_a.devnet_is_valid(&genesis_block));
 
         Ok(())
     }
