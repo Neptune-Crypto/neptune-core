@@ -40,13 +40,13 @@ pub struct WalletBlock {
 }
 
 impl WalletBlock {
-    pub fn new(input_utxos: Vec<Utxo>, output_utxos: Vec<(Utxo, Digest)>) -> Self {
+    fn new(input_utxos: Vec<Utxo>, output_utxos: Vec<(Utxo, Digest)>) -> Self {
         Self {
             input_utxos,
             output_utxos,
         }
     }
-    pub fn sum(&self) -> Amount {
+    fn sum(&self) -> Amount {
         let i_sum: Amount = self.input_utxos.iter().map(|utxo| utxo.amount).sum();
         let o_sum: Amount = self
             .output_utxos
@@ -59,7 +59,7 @@ impl WalletBlock {
 
 /// Gets a new secret.
 /// FIXME: This should be reimplemented in a more reasonable way.
-pub fn generate_secret_key() -> Digest {
+fn generate_secret_key() -> Digest {
     let mut rng = thread_rng();
 
     BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into()
@@ -75,7 +75,7 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    pub fn new(secret: Digest) -> Self {
+    fn new(secret: Digest) -> Self {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
             secret,
@@ -245,7 +245,8 @@ impl WalletState {
         })
     }
 
-    pub fn forget_block(&self, block_hash: Digest) {
+    #[allow(dead_code)]
+    fn forget_block(&self, block_hash: Digest) {
         block_on(async { self.db.lock().await.delete(block_hash) });
     }
 
