@@ -1,8 +1,9 @@
 pub mod ordered_digest;
 
-use std::{fmt, str::FromStr};
-
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
 
 pub const BYTES_PER_BFE: usize = 8;
@@ -14,6 +15,20 @@ pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Digest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+
+impl GetSize for Digest {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        42
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
 
 pub trait Hashable {
     fn hash(&self) -> Digest;

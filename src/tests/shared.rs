@@ -40,6 +40,7 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::mempool::Mempool;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
 use crate::models::blockchain::wallet;
@@ -52,6 +53,7 @@ use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::GlobalState;
+use crate::Hash;
 use crate::{
     config_models::{cli_args, network::Network},
     models::{
@@ -62,7 +64,6 @@ use crate::{
                 Block,
             },
             digest::{Digest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
-            shared::Hash,
             transaction::{utxo::Utxo, Transaction},
         },
         channel::{MainToPeerThread, PeerThreadToMain},
@@ -228,11 +229,13 @@ pub async fn get_test_genesis_setup(
         light_state,
         archival_state: Some(archival_state),
     };
+    let mempool = Mempool::default();
     let state = GlobalState {
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
         wallet_state: get_mock_wallet_state(),
+        mempool,
     };
     Ok((
         peer_broadcast_tx,
@@ -557,6 +560,8 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
     }
 }
 
+// `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
+// already have created `DevNetInput`s.
 pub fn make_mock_transaction(
     inputs: Vec<DevNetInput>,
     outputs: Vec<(Utxo, Digest)>,
@@ -573,6 +578,45 @@ pub fn make_mock_transaction(
         outputs,
         public_scripts: vec![],
         fee: U32s::zero(),
+        timestamp,
+        authority_proof: None,
+    }
+}
+
+// `make_mock_transaction2`, in contrast to `make_mock_transaction`, allows you
+// to choose signing wallet, fee, and timestamp.
+pub fn make_mock_transaction2(
+    inputs: Vec<Utxo>,
+    outputs: Vec<Utxo>,
+    fee: Amount,
+    wallet_state: &WalletState,
+    timestamp: Option<BFieldElement>,
+) -> Transaction {
+    let input_utxos_with_signature = inputs
+        .iter()
+        .map(|in_utxo| make_mock_unsigned_devnet_input(in_utxo.amount, &wallet_state.wallet))
+        .collect::<Vec<_>>();
+
+    // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
+    let output_utxos_with_digest = outputs
+        .into_iter()
+        .map(|out_utxo| (out_utxo, <Utxo as Hashable>::hash(&out_utxo)))
+        .collect::<Vec<_>>();
+
+    let timestamp = timestamp.unwrap_or_else(|| {
+        BFieldElement::new(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Timestamping failed")
+                .as_secs(),
+        )
+    });
+
+    Transaction {
+        inputs: input_utxos_with_signature,
+        outputs: output_utxos_with_digest,
+        public_scripts: vec![],
+        fee,
         timestamp,
         authority_proof: None,
     }

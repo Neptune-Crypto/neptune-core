@@ -14,6 +14,7 @@ mod tests;
 use crate::config_models::data_directory::get_data_directory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::main_loop::MainLoopHandler;
+use crate::models::blockchain::mempool::Mempool;
 use crate::models::blockchain::wallet::Wallet;
 use crate::models::channel::RPCServerToMain;
 use crate::models::state::archival_state::ArchivalState;
@@ -131,11 +132,13 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         light_state,
         archival_state: Some(archival_state),
     };
+    let mempool = Mempool::default();
     let state = GlobalState {
         chain: blockchain_state,
         cli: cli_args,
         net: networking_state,
         wallet_state,
+        mempool,
     };
     let own_handshake_data: HandshakeData = state.get_handshakedata();
 

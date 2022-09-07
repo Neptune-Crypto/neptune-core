@@ -6,7 +6,7 @@ use super::blockchain::{
         Block,
     },
     digest::{Digest, Hashable},
-    transaction::{Transaction, TransactionId},
+    transaction::{Transaction, TransactionDigest},
 };
 use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
@@ -201,7 +201,7 @@ pub enum ConnectionStatus {
 /// sender.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionNotification {
-    pub transaction_identifier: TransactionId,
+    pub transaction_digest: TransactionDigest,
     // It may be relevant to know w.r.t relaying if this transaction is current.
     pub timestamp: SystemTime,
 }
@@ -209,7 +209,7 @@ pub struct TransactionNotification {
 impl TransactionNotification {
     pub fn new(transaction: &Transaction) -> Self {
         Self {
-            transaction_identifier: transaction.hash(),
+            transaction_digest: transaction.hash(),
             timestamp: SystemTime::now(),
         }
     }
@@ -226,7 +226,7 @@ pub enum PeerMessage {
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
     Transaction(Transaction),
     TransactionNotification(TransactionNotification),
-    TransactionRequest(TransactionId),
+    TransactionRequest(TransactionDigest),
     PeerListRequest, // Argument indicates distance in graph.
     PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
     Bye,
