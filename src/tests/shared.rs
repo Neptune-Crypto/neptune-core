@@ -16,7 +16,6 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use rusty_leveldb::in_memory;
 use secp256k1::ecdsa;
 use std::path::PathBuf;
-use std::sync::Mutex as StdMutex;
 use std::{
     collections::HashMap,
     env,
@@ -26,6 +25,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
@@ -607,7 +607,7 @@ pub fn get_mock_wallet_state() -> WalletState {
     let test_path = get_data_director_for_unit_tests().unwrap();
     let test_name = "mock_wallet_db";
 
-    let db = Arc::new(StdMutex::new(
+    let db = Arc::new(TokioMutex::new(
         RustyLevelDB::<Digest, WalletBlock>::new(&test_path, test_name, in_memory()).unwrap(),
     ));
 

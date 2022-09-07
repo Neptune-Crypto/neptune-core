@@ -12,6 +12,7 @@ use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::Hash;
 use anyhow::Result;
+use futures::executor::block_on;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use num_traits::Zero;
 use rand::thread_rng;
@@ -19,7 +20,8 @@ use secp256k1::{ecdsa, Secp256k1};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex as TokioMutex;
 use tracing::info;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 
@@ -176,7 +178,7 @@ impl Wallet {
 /// database handle, wherefore this struct exists.
 #[derive(Debug, Clone)]
 pub struct WalletState {
-    pub db: Arc<Mutex<RustyLevelDB<BlockHash, WalletBlock>>>,
+    pub db: Arc<TokioMutex<RustyLevelDB<BlockHash, WalletBlock>>>,
     pub wallet: Wallet,
     // MAYBE: maintain balance here?
     // TODO: How do we know if the Wallet has seen a given block?
@@ -195,13 +197,13 @@ impl WalletState {
                 rusty_leveldb::Options::default(),
             )
             .unwrap();
-        let db = Arc::new(Mutex::new(_db));
+        let db = Arc::new(TokioMutex::new(_db));
         Self { wallet, db }
     }
 }
 
 impl WalletState {
-    pub async fn update_wallet_state_with_new_block(&self, block: &Block) {
+    pub fn update_wallet_state_with_new_block(&self, block: &Block) {
         // A wallet contains a set of input and output UTXOs,
         // each of which contains an address (public key),
         // which inform the balance of the wallet.
@@ -224,23 +226,27 @@ impl WalletState {
 
         let next_block_of_relevant_utxos = WalletBlock::new(input_utxos, output_utxos);
 
-        self.db
-            .lock()
-            .unwrap()
-            .put(block.hash, next_block_of_relevant_utxos);
+        block_on(async {
+            self.db
+                .lock()
+                .await
+                .put(block.hash, next_block_of_relevant_utxos)
+        })
     }
 
     pub fn get_balance(&self) -> Amount {
-        self.db
-            .lock()
-            .unwrap()
-            .new_iter()
-            .map(|(_block_hash, wallet_block)| wallet_block.sum())
-            .sum()
+        block_on(async {
+            self.db
+                .lock()
+                .await
+                .new_iter()
+                .map(|(_block_hash, wallet_block)| wallet_block.sum())
+                .sum()
+        })
     }
 
     pub fn forget_block(&self, block_hash: Digest) {
-        self.db.lock().unwrap().delete(block_hash);
+        block_on(async { self.db.lock().await.delete(block_hash) });
     }
 
     pub fn create_transaction(

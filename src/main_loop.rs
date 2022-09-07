@@ -362,8 +362,7 @@ impl MainLoopHandler {
                     )?;
 
                 // update wallet state with relevant UTXOs from this block
-                let _result = self
-                    .global_state
+                self.global_state
                     .wallet_state
                     .update_wallet_state_with_new_block(&block);
 
@@ -483,8 +482,7 @@ impl MainLoopHandler {
                             )?;
 
                         // update wallet state with relevant UTXOs from this block
-                        let _result = self
-                            .global_state
+                        self.global_state
                             .wallet_state
                             .update_wallet_state_with_new_block(&block);
                     }
