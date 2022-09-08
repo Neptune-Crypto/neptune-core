@@ -704,13 +704,7 @@ impl ArchivalState {
                 .expect("Fetching block must succeed");
 
             // Roll back all addition records contained in block
-            for addition_record in roll_back_block
-                .body
-                .mutator_set_update
-                .additions
-                .iter()
-                .rev()
-            {
+            for addition_record in roll_back_block.body.mutator_set_update.additions.iter() {
                 ams_lock.revert_add(addition_record);
             }
 
@@ -1020,6 +1014,105 @@ mod archival_state_tests {
         )?;
 
         // 5. Experience rollback
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn update_mutator_set_rollback_ms_block_sync_multiple_inputs_outputs_in_block_test(
+    ) -> Result<()> {
+        let archival_state: ArchivalState = make_archival_state().await;
+        let genesis_wallet = get_mock_wallet_state();
+
+        // 1. Create new block 1 with two inputs and three outputs and store it to disk
+        let mut block_1a = make_mock_block(&archival_state.genesis_block, None);
+        let genesis_block = archival_state.genesis_block.clone();
+        let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
+        let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
+        add_unsigned_input_to_block(
+            &mut block_1a,
+            consumed_utxo,
+            premine_output_randomness,
+            &archival_state.archival_mutator_set,
+        )
+        .await;
+        let output_utxo_1: Utxo = Utxo::new(
+            Amount::one() + Amount::one(),
+            genesis_wallet.get_public_key(),
+        );
+        add_output_to_block(&mut block_1a, output_utxo_1);
+        let output_utxo_2: Utxo = Utxo::new(
+            Amount::one() + Amount::one() + Amount::one(),
+            genesis_wallet.get_public_key(),
+        );
+        add_output_to_block(&mut block_1a, output_utxo_2);
+        block_1a.body.transaction.sign(&genesis_wallet);
+        assert!(block_1a.devnet_is_valid(&genesis_block));
+
+        {
+            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+            let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+            archival_state.write_block(
+                Box::new(block_1a.clone()),
+                &mut block_db_lock,
+                Some(block_1a.header.proof_of_work_family),
+            )?;
+
+            // 2. Update mutator set with this
+            archival_state.update_mutator_set(
+                &mut block_db_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &block_1a,
+            )?;
+
+            // 3. Create competing block 1 and store it to DB
+            let mock_block_1b = make_mock_block(&archival_state.genesis_block, None);
+            archival_state.write_block(
+                Box::new(block_1a.clone()),
+                &mut block_db_lock,
+                Some(mock_block_1b.header.proof_of_work_family),
+            )?;
+
+            // 4. Update mutator set with that and verify rollback
+            archival_state.update_mutator_set(
+                &mut block_db_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &mock_block_1b,
+            )?;
+        }
+
+        // 5. Verify correct rollback
+
+        // Verify that the new state of the archival mutator set contains
+        // two UTXOs and that none have been removed
+        assert!(
+            archival_state
+                .archival_mutator_set
+                .lock()
+                .await
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()),
+            "All bits in active window must be unset when no UTXOs have been spent"
+        );
+
+        assert_eq!(
+            2,
+            archival_state
+                .archival_mutator_set
+                .lock()
+                .await
+                .set_commitment
+                .aocl
+                .count_leaves(),
+            "AOCL leaf count must be 2 after two blocks containing only coinbase transactions"
+        );
 
         Ok(())
     }
