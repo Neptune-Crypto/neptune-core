@@ -1215,14 +1215,14 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state().await;
-        let mut block_1_a = make_mock_block(&archival_state.genesis_block, None);
+        let mut block_1 = make_mock_block(&archival_state.genesis_block, None);
 
         // Add a valid input to the block transaction
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
         add_unsigned_input_to_block(
-            &mut block_1_a,
+            &mut block_1,
             consumed_utxo,
             premine_output_randomness,
             &archival_state.archival_mutator_set,
@@ -1231,16 +1231,16 @@ mod archival_state_tests {
 
         // Sign and verify validity
         let genesis_wallet = get_mock_wallet_state();
-        block_1_a.body.transaction.sign(&genesis_wallet);
-        assert!(block_1_a.devnet_is_valid(&genesis_block));
+        block_1.body.transaction.sign(&genesis_wallet);
+        assert!(block_1.devnet_is_valid(&genesis_block));
 
         // Add one output to the block's transaction
         let output_utxo_0: Utxo = Utxo::new(Amount::one(), genesis_wallet.get_public_key());
-        add_output_to_block(&mut block_1_a, output_utxo_0);
+        add_output_to_block(&mut block_1, output_utxo_0);
 
         // Sign the transaction
-        block_1_a.body.transaction.sign(&genesis_wallet);
-        assert!(block_1_a.devnet_is_valid(&genesis_block));
+        block_1.body.transaction.sign(&genesis_wallet);
+        assert!(block_1.devnet_is_valid(&genesis_block));
 
         // Add two more outputs and verify validity
         // Add one output to the block's transaction
@@ -1248,16 +1248,16 @@ mod archival_state_tests {
             Amount::one() + Amount::one(),
             genesis_wallet.get_public_key(),
         );
-        add_output_to_block(&mut block_1_a, output_utxo_1);
+        add_output_to_block(&mut block_1, output_utxo_1);
         let output_utxo_2: Utxo = Utxo::new(
             Amount::one() + Amount::one() + Amount::one(),
             genesis_wallet.get_public_key(),
         );
-        add_output_to_block(&mut block_1_a, output_utxo_2);
+        add_output_to_block(&mut block_1, output_utxo_2);
 
-        // Sign the transaction
-        block_1_a.body.transaction.sign(&genesis_wallet);
-        assert!(block_1_a.devnet_is_valid(&genesis_block));
+        // Sign the transaction and verify validity
+        block_1.body.transaction.sign(&genesis_wallet);
+        assert!(block_1.devnet_is_valid(&genesis_block));
 
         Ok(())
     }
