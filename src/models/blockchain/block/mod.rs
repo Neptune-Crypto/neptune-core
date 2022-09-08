@@ -289,7 +289,11 @@ impl Block {
 
         // 1.f) Verify transaction
         let miner_reward: Amount = Self::get_mining_reward(block_copy.header.height);
-        if !block_copy.body.transaction.devnet_is_valid(miner_reward) {
+        if !block_copy
+            .body
+            .transaction
+            .devnet_is_valid(Some(miner_reward))
+        {
             warn!("Invalid transaction found in block");
             return false;
         }

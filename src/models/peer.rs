@@ -24,6 +24,7 @@ const FLOODED_PEER_LIST_RESPONSE_SEVERITY: u16 = 2;
 const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
 const INVALID_MESSAGE_SEVERITY: u16 = 2;
 const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
+const INVALID_TRANSACTION: u16 = 10;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -50,6 +51,7 @@ pub enum PeerSanctionReason {
     ReceivedBatchBlocksOutsideOfSync,
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
+    InvalidTransaction,
 }
 
 /// Used by main thread to manage synchronizations/catch-up. Main thread has
@@ -93,6 +95,7 @@ impl PeerSanctionReason {
             PeerSanctionReason::BatchBlocksInvalidStartHeight => INVALID_MESSAGE_SEVERITY,
             PeerSanctionReason::BatchBlocksUnknownRequest => BAD_BLOCK_BATCH_REQUEST_SEVERITY,
             PeerSanctionReason::BlockRequestUnknownHeight => UNKNOWN_BLOCK_HEIGHT,
+            PeerSanctionReason::InvalidTransaction => INVALID_TRANSACTION,
         }
     }
 }

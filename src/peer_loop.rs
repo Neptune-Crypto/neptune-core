@@ -658,7 +658,12 @@ impl PeerLoopHandler {
                     transaction
                 );
 
-                // relay to main
+                if !transaction.devnet_is_valid(None) {
+                    self.punish(PeerSanctionReason::InvalidTransaction)?;
+                    return Ok(false);
+                }
+
+                // Otherwise relay to main
                 self.to_main_tx
                     .send(PeerThreadToMain::Transaction(transaction))
                     .await?;
@@ -667,7 +672,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionNotification(transaction_notification) => {
                 // 1. Ignore if transaction is stale.
-                let age_limit = Duration::new(TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS, 0);
+                let age_limit = Duration::from_secs(TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS);
                 if transaction_notification.timestamp < SystemTime::now() + age_limit {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 };
