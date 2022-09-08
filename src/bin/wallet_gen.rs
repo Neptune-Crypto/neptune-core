@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     });
 
     let wallet_file = Wallet::wallet_path(&root_data_dir_path);
-    let wallet = Wallet::new_from_file_or_default(&wallet_file);
+    let wallet = Wallet::read_from_file_or_create(&wallet_file);
 
     let wallet_state = WalletState::new_from_wallet(wallet, network);
 

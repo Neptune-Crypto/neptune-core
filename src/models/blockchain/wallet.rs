@@ -23,7 +23,6 @@ use std::ops::Add;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use tracing::info;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 
 pub const WALLET_FILE_NAME: &str = "wallet.dat";
@@ -93,6 +92,7 @@ pub struct Wallet {
 }
 
 impl Wallet {
+    /// Create new `Wallet` given a `secret` key.
     fn new(secret: Digest) -> Self {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
@@ -101,63 +101,50 @@ impl Wallet {
         }
     }
 
-    /// Read the wallet from disk. Create one if none exists.
-    pub fn new_from_file_or_default(wallet_file: &Path) -> Wallet {
-        // Check if file exists
-        let wallet: Wallet = if wallet_file.exists() {
-            info!("Found wallet file: {}", wallet_file.to_string_lossy());
-
-            // Read wallet from disk
-            let file_content: String = match fs::read_to_string(wallet_file) {
-                Ok(fc) => fc,
-                Err(err) => panic!(
-                    "Failed to read file {}. Got error: {}",
-                    wallet_file.to_string_lossy(),
-                    err
-                ),
-            };
-
-            // Parse wallet as JSON and return result
-            match serde_json::from_str(&file_content) {
-                Ok(stored_wallet) => stored_wallet,
-                Err(err) => {
-                    panic!(
-                    "Failed to parse {} as Wallet in JSON format. Is the wallet file corrupted? Error: {}",
-                    wallet_file.to_string_lossy(),
-                    err
-                )
-                }
-            }
+    /// Read wallet from `wallet_file` if the file exists, or create new wallet
+    /// and save it to `wallet_file`.
+    pub fn read_from_file_or_create(wallet_file: &Path) -> Self {
+        if wallet_file.exists() {
+            Self::read_from_file(wallet_file)
         } else {
-            info!(
-                "Creating new wallet file: {}",
-                wallet_file.to_string_lossy()
-            );
-
-            // New wallet must be made and stored to disk
-            let new_wallet: Wallet = Wallet::new(generate_secret_key());
-            let wallet_as_json: String =
-                serde_json::to_string(&new_wallet).expect("wallet serialization must succeed");
-
-            // Store to disk, with the right permissions
-            if cfg!(target_family = "unix") {
-                Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_as_json);
-            } else {
-                Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_as_json);
-            }
-
+            let new_secret: Digest = generate_secret_key();
+            let new_wallet: Wallet = Wallet::new(new_secret);
+            new_wallet.create_wallet_file(wallet_file);
             new_wallet
-        };
-
-        // Sanity check that wallet file was stored on disk.
-        assert!(
-            wallet_file.exists(),
-            "wallet file must exist on disk after creation."
-        );
-
-        wallet
+        }
     }
 
+    /// Read Wallet from file as JSON
+    fn read_from_file(wallet_file: &Path) -> Self {
+        let wallet_file_content: String = fs::read_to_string(wallet_file).unwrap_or_else(|err| {
+            panic!(
+                "Failed to read wallet from {}: {}",
+                wallet_file.to_string_lossy(),
+                err
+            )
+        });
+
+        serde_json::from_str::<Wallet>(&wallet_file_content).unwrap_or_else(|err| {
+            panic!(
+                "Failed to decode wallet from {}: {}",
+                wallet_file.to_string_lossy(),
+                err
+            )
+        })
+    }
+
+    /// Create wallet file with restrictive permissions and save this wallet to disk
+    fn create_wallet_file(&self, wallet_file: &Path) {
+        let wallet_as_json: String = serde_json::to_string(self).unwrap();
+
+        if cfg!(windows) {
+            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_as_json);
+        } else {
+            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_as_json);
+        }
+    }
+
+    /// Derive the filesystem path for Wallet within data directory
     pub fn wallet_path(root_data_dir_path: &Path) -> PathBuf {
         let mut pb = root_data_dir_path.to_path_buf();
         pb.push(WALLET_FILE_NAME);
@@ -165,7 +152,6 @@ impl Wallet {
     }
 
     /// Create a wallet file, and set restrictive permissions
-    #[cfg(target_family = "unix")]
     fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) {
         // On Unix/Linux we set the file permissions to 600, to disallow
         // other users on the same machine to access the secrets.
@@ -180,7 +166,6 @@ impl Wallet {
     }
 
     /// Create a wallet file, without setting restrictive UNIX permissions
-    // #[cfg(not(target_family = "unix"))]
     fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) {
         fs::OpenOptions::new()
             .create(true)
