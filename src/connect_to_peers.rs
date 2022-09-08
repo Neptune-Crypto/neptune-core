@@ -295,8 +295,8 @@ mod connect_tests {
     #[tokio::test]
     async fn test_outgoing_connection_succeed() -> Result<()> {
         let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data(network);
-        let own_handshake = get_dummy_handshake_data(network);
+        let other_handshake = get_dummy_handshake_data(network, 1);
+        let own_handshake = get_dummy_handshake_data(network, 0);
         let mock = Builder::new()
             .write(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -317,7 +317,7 @@ mod connect_tests {
         call_peer(
             mock,
             state.clone(),
-            get_dummy_address(),
+            get_dummy_address(0),
             from_main_rx_clone,
             to_main_tx,
             &own_handshake,
@@ -350,8 +350,8 @@ mod connect_tests {
             .clone();
         let peer_id = peer.instance_id;
 
-        let own_handshake = get_dummy_handshake_data(network);
-        let mut other_handshake = get_dummy_handshake_data(network);
+        let own_handshake = get_dummy_handshake_data(network, 0);
+        let mut other_handshake = get_dummy_handshake_data(network, 1);
 
         let mut status = get_connection_status(
             4,
@@ -422,8 +422,8 @@ mod connect_tests {
         // object will panic, and the `await` operator will evaluate
         // to Error.
         let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data(network);
-        let own_handshake = get_dummy_handshake_data(network);
+        let other_handshake = get_dummy_handshake_data(network, 1);
+        let own_handshake = get_dummy_handshake_data(network, 0);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -443,7 +443,7 @@ mod connect_tests {
         answer_peer(
             mock,
             state.clone(),
-            get_dummy_address(),
+            get_dummy_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -464,8 +464,8 @@ mod connect_tests {
     #[tokio::test]
     async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
         let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data(network);
-        let own_handshake = get_dummy_handshake_data(network);
+        let other_handshake = get_dummy_handshake_data(network, 1);
+        let own_handshake = get_dummy_handshake_data(network, 0);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_RESPONSE.to_vec(),
@@ -479,7 +479,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(),
+            get_dummy_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -494,8 +494,8 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_incoming_connection_fail_bad_network() -> Result<()> {
-        let other_handshake = get_dummy_handshake_data(Network::Testnet);
-        let own_handshake = get_dummy_handshake_data(Network::Main);
+        let other_handshake = get_dummy_handshake_data(Network::Testnet, 1);
+        let own_handshake = get_dummy_handshake_data(Network::Main, 0);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -513,7 +513,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(),
+            get_dummy_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -529,8 +529,8 @@ mod connect_tests {
     #[tokio::test]
     async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
         let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data(network);
-        let own_handshake = get_dummy_handshake_data(network);
+        let other_handshake = get_dummy_handshake_data(network, 1);
+        let own_handshake = get_dummy_handshake_data(network, 0);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -549,7 +549,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(),
+            get_dummy_address(2),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -567,8 +567,8 @@ mod connect_tests {
         // In this scenario a peer has been banned, and is attempting to make an ingoing
         // connection. This should not be possible.
         let network = Network::Main;
-        let other_handshake = get_dummy_handshake_data(network);
-        let own_handshake = get_dummy_handshake_data(network);
+        let other_handshake = get_dummy_handshake_data(network, 3);
+        let own_handshake = get_dummy_handshake_data(network, 0);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -583,8 +583,9 @@ mod connect_tests {
             ))?)
             .build();
 
+        let peer_count_before_incoming_connection_request = 3;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_genesis_setup(Network::Main, peer_count_before_incoming_connection_request).await?;
         let bad_standing: PeerStanding = PeerStanding {
             standing: u16::MAX,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
@@ -598,7 +599,7 @@ mod connect_tests {
                     .as_secs(),
             ),
         };
-        let peer_address = get_dummy_address();
+        let peer_address = get_dummy_address(3);
         state
             .write_peer_standing_on_increase(peer_address.ip(), bad_standing)
             .await;
@@ -620,7 +621,7 @@ mod connect_tests {
 
         // Verify that peer map is empty after connection has been refused
         match state.net.peer_map.lock().unwrap().keys().len() {
-            0 => (),
+            3 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
 

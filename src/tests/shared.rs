@@ -69,6 +69,7 @@ use crate::{
     PEER_CHANNEL_CAPACITY,
 };
 
+/// Return an empty peer map
 pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
     Arc::new(std::sync::Mutex::new(HashMap::new()))
 }
@@ -114,8 +115,8 @@ pub fn databases(
     ))
 }
 
-pub fn get_dummy_address() -> SocketAddr {
-    std::net::SocketAddr::from_str("127.0.0.1:8080").unwrap()
+pub fn get_dummy_address(count: u8) -> SocketAddr {
+    std::net::SocketAddr::from_str(&format!("127.0.0.{}:8080", count)).unwrap()
 }
 
 pub fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
@@ -152,11 +153,11 @@ pub fn get_dummy_latest_block(
 }
 
 /// Return a handshake object with a randomly set instance ID
-pub fn get_dummy_handshake_data(network: Network) -> HandshakeData {
+pub fn get_dummy_handshake_data(network: Network, id: u8) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
         tip_header: get_dummy_latest_block(None).2.lock().unwrap().to_owned(),
-        listen_address: Some(get_dummy_address()),
+        listen_address: Some(get_dummy_address(id)),
         network,
         version: get_dummy_version(),
     }
@@ -170,10 +171,17 @@ pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
+pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeData, SocketAddr) {
+    let handshake = get_dummy_handshake_data(network, id);
+    let socket_address = get_dummy_address(id);
+
+    (handshake, socket_address)
+}
+
 /// Return a setup with empty databases, and with the genesis block in the
 /// block header field of the state.
 /// Returns:
-/// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, state, peer_map)
+/// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, global state, peer's handshake data)
 #[allow(clippy::type_complexity)]
 pub async fn get_genesis_setup(
     network: Network,
@@ -228,7 +236,7 @@ pub async fn get_genesis_setup(
         to_main_tx,
         _to_main_rx1,
         state,
-        get_dummy_handshake_data(network),
+        get_dummy_handshake_data(network, 0),
     ))
 }
 
