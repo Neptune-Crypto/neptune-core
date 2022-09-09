@@ -364,7 +364,8 @@ impl MainLoopHandler {
                 // update wallet state with relevant UTXOs from this block
                 self.global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(&block);
+                    .update_wallet_state_with_new_block(&block)
+                    .await?;
 
                 *light_state_locked = block.header.clone();
             }
@@ -484,7 +485,8 @@ impl MainLoopHandler {
                         // update wallet state with relevant UTXOs from this block
                         self.global_state
                             .wallet_state
-                            .update_wallet_state_with_new_block(&block);
+                            .update_wallet_state_with_new_block(&block)
+                            .await?;
                     }
 
                     // Update information about latest header

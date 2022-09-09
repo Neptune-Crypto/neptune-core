@@ -28,7 +28,7 @@ use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRando
 pub const WALLET_FILE_NAME: &str = "wallet.dat";
 pub const STANDARD_WALLET_NAME: &str = "standard_wallet";
 pub const STANDARD_WALLET_VERSION: u8 = 0;
-pub const STANDARD_WALLET_DB_NAME: &str = "wallet_db.dat";
+pub const STANDARD_WALLET_DB_NAME: &str = "wallet_db";
 
 type BlockHash = Digest;
 /// The parts of a block that this wallet wants to keep track of,
@@ -75,7 +75,7 @@ impl WalletBlock {
 }
 
 /// Gets a new secret.
-/// FIXME: This should be reimplemented in a more reasonable way.
+/// TODO: Replace this in the future.
 fn generate_secret_key() -> Digest {
     let mut rng = thread_rng();
 
@@ -206,7 +206,7 @@ impl WalletState {
 }
 
 impl WalletState {
-    pub fn update_wallet_state_with_new_block(&self, block: &Block) {
+    pub async fn update_wallet_state_with_new_block(&self, block: &Block) -> Result<()> {
         // A wallet contains a set of input and output UTXOs,
         // each of which contains an address (public key),
         // which inform the balance of the wallet.
@@ -224,17 +224,17 @@ impl WalletState {
 
         // if we remove this
         if input_utxos.is_empty() && output_utxos.is_empty() {
-            return;
+            return Ok(());
         }
 
         let next_block_of_relevant_utxos = WalletBlock::new(input_utxos, output_utxos);
 
-        block_on(async {
-            self.db
-                .lock()
-                .await
-                .put(block.hash, next_block_of_relevant_utxos)
-        })
+        self.db
+            .lock()
+            .await
+            .put(block.hash, next_block_of_relevant_utxos);
+
+        Ok(())
     }
 
     pub fn get_balance(&self) -> Amount {
