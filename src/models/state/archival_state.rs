@@ -704,7 +704,13 @@ impl ArchivalState {
                 .expect("Fetching block must succeed");
 
             // Roll back all addition records contained in block
-            for addition_record in roll_back_block.body.mutator_set_update.additions.iter() {
+            for addition_record in roll_back_block
+                .body
+                .mutator_set_update
+                .additions
+                .iter()
+                .rev()
+            {
                 ams_lock.revert_add(addition_record);
             }
 
@@ -726,7 +732,9 @@ impl ArchivalState {
 
         let mut addition_records: Vec<AdditionRecord<Hash>> =
             new_block.body.mutator_set_update.additions.clone();
+        addition_records.reverse();
         let mut removal_records = new_block.body.mutator_set_update.removals.clone();
+        removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
@@ -767,6 +775,17 @@ impl ArchivalState {
             .swbf_active
             .store_to_database(active_window_db);
 
+        // Sanity check that archival mutator set has been updated consitently with the new block
+        let mut new_block_copy = new_block.clone();
+        assert_eq!(
+            new_block_copy
+                .body
+                .next_mutator_set_accumulator
+                .get_commitment(),
+            ams_lock.get_commitment(),
+            "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block_copy.hash
+        );
+
         // Write block digest onto disk
         ms_block_sync_lock.batch_write(&[
             (
@@ -793,15 +812,11 @@ mod archival_state_tests {
     use rusty_leveldb::LdbIterator;
     use secp256k1::Secp256k1;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::b_field_element::BFieldElement;
 
     use crate::{
         config_models::network::Network,
         models::{
-            blockchain::{
-                digest::RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
-                transaction::{utxo::Utxo, Amount},
-            },
+            blockchain::transaction::{utxo::Utxo, Amount},
             state::{blockchain_state::BlockchainState, light_state::LightState},
         },
         tests::shared::{
@@ -878,9 +893,7 @@ mod archival_state_tests {
         println!("root_data_dir_path = {:?}", root_data_dir_path);
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
-        let item: Digest = Digest::new([BFieldElement::new(17); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
-        let randomness: Digest =
-            Digest::new([BFieldElement::new(133337); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let genesis_wallet = get_mock_wallet_state();
         let ams = Arc::new(TokioMutex::new(ams));
         let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
         let archival_state = ArchivalState::new(
@@ -890,26 +903,31 @@ mod archival_state_tests {
             ms_block_sync,
         )
         .await;
-        let mut block_db_lock = archival_state.block_databases.lock().await;
-        let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+
+        let mock_block_1 = make_mock_block(
+            &archival_state.genesis_block.clone(),
+            None,
+            genesis_wallet.get_public_key(),
+        );
         {
-            // Before updating the AMS, the active window DB must be empty.
-            let mut active_window_db_before: DB =
-                ArchivalState::active_window_db(&root_data_dir_path)?;
-            assert!(active_window_db_before.new_iter().unwrap().next().is_none());
+            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+            {
+                // Before updating the AMS, the active window DB must be empty.
+                let mut active_window_db_before: DB =
+                    ArchivalState::active_window_db(&root_data_dir_path)?;
+                assert!(active_window_db_before.new_iter().unwrap().next().is_none());
+            }
+            // ms_block_sync_db is empty
+            let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+
+            archival_state.update_mutator_set(
+                &mut block_db_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &mock_block_1,
+            )?;
         }
-        // ms_block_sync_db is empty
-        let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
-
-        let mock_block_1 = make_mock_block(&archival_state.genesis_block.clone(), None);
-
-        let membership_proof = ams_lock.prove(&item.into(), &randomness.into(), true);
-        archival_state.update_mutator_set(
-            &mut block_db_lock,
-            &mut ams_lock,
-            &mut ms_block_sync_lock,
-            &mock_block_1,
-        )?;
 
         {
             // After running the AMS updater, the active window DB must be written back to disk
@@ -932,22 +950,34 @@ mod archival_state_tests {
             assert_eq!(WINDOW_SIZE / BITS_PER_U32, i);
         }
 
-        let mut mock_block_2 = make_mock_block(&mock_block_1, None);
-        let removal_record = ams_lock.deref_mut().drop(&item.into(), &membership_proof);
-        mock_block_2
-            .body
-            .mutator_set_update
-            .removals
-            .push(removal_record);
+        // Add an input to the next block's transaction. This will add a removal record to the block, and this removal
+        // record will flip bits in the Bloom filter.
+        let mut mock_block_2 =
+            make_mock_block(&mock_block_1, None, genesis_wallet.get_public_key());
+        let consumed_utxo = mock_block_1.body.transaction.outputs[0].0;
+        let output_randomness = mock_block_1.body.transaction.outputs[0].1;
+        add_unsigned_input_to_block(
+            &mut mock_block_2,
+            consumed_utxo,
+            output_randomness,
+            &archival_state.archival_mutator_set,
+            1,
+        )
+        .await;
 
         // Remove an element from the mutator set, verify that the active window DB
         // is updated.
-        archival_state.update_mutator_set(
-            &mut block_db_lock,
-            &mut ams_lock,
-            &mut ms_block_sync_lock,
-            &mock_block_2,
-        )?;
+        {
+            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+            let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+            archival_state.update_mutator_set(
+                &mut block_db_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &mock_block_2,
+            )?;
+        }
 
         {
             // After running the MS updater with a removal record, the active window
@@ -1047,6 +1077,7 @@ mod archival_state_tests {
             consumed_utxo,
             premine_output_randomness,
             &archival_state.archival_mutator_set,
+            0,
         )
         .await;
         let output_utxo_1: Utxo = Utxo::new(
@@ -1135,6 +1166,143 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn update_mutator_set_rollback_many_blocks_multiple_inputs_outputs_test() -> Result<()> {
+        // Make a rollback of multiple blocks that contains multiple inputs and outputs.
+        // This test is intended to verify that rollbacks work for non-trivial
+        // blocks, also when there are many blocks that push the active window of the
+        // mutator set forwards.
+        let archival_state: ArchivalState = make_archival_state().await;
+        let genesis_wallet = get_mock_wallet_state();
+
+        let genesis_block: Block = *archival_state.genesis_block.to_owned();
+        let mut consumed_utxo = genesis_block.body.transaction.outputs[0].0;
+        let mut output_randomness = genesis_block.body.transaction.outputs[0].1;
+        let mut previous_block = genesis_block;
+        let mut aocl_index_of_consumed_input = 0;
+
+        for i in 0..10 {
+            // Create next block with inputs and outputs
+            let mut next_block =
+                make_mock_block(&previous_block, None, genesis_wallet.get_public_key());
+            add_unsigned_input_to_block(
+                &mut next_block,
+                consumed_utxo,
+                output_randomness,
+                &archival_state.archival_mutator_set,
+                aocl_index_of_consumed_input,
+            )
+            .await;
+            let output_utxo_1: Utxo = Utxo::new(
+                Amount::one() + Amount::one(),
+                genesis_wallet.get_public_key(),
+            );
+            add_output_to_block(&mut next_block, output_utxo_1);
+            let output_utxo_2: Utxo = Utxo::new(
+                Amount::one() + Amount::one() + Amount::one(),
+                genesis_wallet.get_public_key(),
+            );
+            add_output_to_block(&mut next_block, output_utxo_2);
+            next_block.body.transaction.sign(&genesis_wallet);
+            assert!(next_block.devnet_is_valid(&previous_block));
+
+            // Store the produced block
+            {
+                let mut block_db_lock = archival_state.block_databases.lock().await;
+                let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+                let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+                archival_state.write_block(
+                    Box::new(next_block.clone()),
+                    &mut block_db_lock,
+                    Some(next_block.header.proof_of_work_family),
+                )?;
+
+                // 2. Update mutator set with produced block
+                archival_state.update_mutator_set(
+                    &mut block_db_lock,
+                    &mut ams_lock,
+                    &mut ms_block_sync_lock,
+                    &next_block,
+                )?;
+            }
+
+            consumed_utxo = next_block.body.transaction.outputs[0].0;
+            output_randomness = next_block.body.transaction.outputs[0].1;
+
+            // Genesis block may have a different number of outputs than the blocks produced above
+            if i == 0 {
+                aocl_index_of_consumed_input += archival_state
+                    .genesis_block
+                    .body
+                    .mutator_set_update
+                    .additions
+                    .len() as u128;
+            } else {
+                aocl_index_of_consumed_input +=
+                    next_block.body.mutator_set_update.additions.len() as u128;
+            }
+
+            previous_block = next_block;
+        }
+
+        {
+            // 3. Create competing block 1 and store it to DB
+            let mock_block_1b = make_mock_block(
+                &archival_state.genesis_block,
+                None,
+                genesis_wallet.get_public_key(),
+            );
+            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+            let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+            archival_state.write_block(
+                Box::new(mock_block_1b.clone()),
+                &mut block_db_lock,
+                Some(mock_block_1b.header.proof_of_work_family),
+            )?;
+
+            // 4. Update mutator set with that and verify rollback
+            archival_state.update_mutator_set(
+                &mut block_db_lock,
+                &mut ams_lock,
+                &mut ms_block_sync_lock,
+                &mock_block_1b,
+            )?;
+        }
+
+        // 5. Verify correct rollback
+
+        // Verify that the new state of the archival mutator set contains
+        // two UTXOs and that none have been removed
+        assert!(
+            archival_state
+                .archival_mutator_set
+                .lock()
+                .await
+                .set_commitment
+                .swbf_active
+                .bits
+                .iter()
+                .all(|x| x.is_zero()),
+            "All bits in active window must be unset when no UTXOs have been spent"
+        );
+
+        assert_eq!(
+            2,
+            archival_state
+                .archival_mutator_set
+                .lock()
+                .await
+                .set_commitment
+                .aocl
+                .count_leaves(),
+            "AOCL leaf count must be 2 after two blocks containing only coinbase transactions"
+        );
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state().await;
         let genesis_wallet = get_mock_wallet_state();
@@ -1156,6 +1324,7 @@ mod archival_state_tests {
             consumed_utxo,
             premine_output_randomness,
             &archival_state.archival_mutator_set,
+            0,
         )
         .await;
 
@@ -1163,7 +1332,6 @@ mod archival_state_tests {
         assert!(!block_1_a.archival_is_valid(&archival_state.genesis_block));
 
         // Sign the transaction with a valid key and verify
-        let genesis_wallet = get_mock_wallet_state();
         block_1_a.body.transaction.sign(&genesis_wallet);
 
         // Block with signed transaction must validate
@@ -1256,11 +1424,11 @@ mod archival_state_tests {
             consumed_utxo,
             premine_output_randomness,
             &archival_state.archival_mutator_set,
+            0,
         )
         .await;
 
         // Sign and verify validity
-        let genesis_wallet = get_mock_wallet_state();
         block_1.body.transaction.sign(&genesis_wallet);
         assert!(block_1.devnet_is_valid(&genesis_block));
 
