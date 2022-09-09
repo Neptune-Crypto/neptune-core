@@ -5,6 +5,7 @@ pub mod utxo;
 use num_traits::Zero;
 use secp256k1::{Message, PublicKey};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
     util_types::simple_hasher::Hasher,
@@ -142,6 +143,10 @@ impl Transaction {
         let spendable_amount = sum_inputs + coinbase_amount.unwrap_or_else(Amount::zero);
         let spent_amount = sum_outputs + self.fee;
         if spent_amount > spendable_amount {
+            warn!(
+                "Invalid amount: Spent: {:?}, spendable: {:?}",
+                spent_amount, spendable_amount
+            );
             return false;
         }
 
@@ -158,6 +163,7 @@ impl Transaction {
                 .verify(&msg, &input.utxo.public_key)
                 .is_err()
             {
+                warn!("Invalid signature for transaction");
                 return false;
             }
         }

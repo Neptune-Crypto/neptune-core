@@ -194,13 +194,13 @@ impl Block {
             return false;
         }
 
-        for input in block_copy.body.transaction.inputs.iter() {
+        for (i, input) in block_copy.body.transaction.inputs.iter().enumerate() {
             // 1.a) Verify validity of membership proofs
             if !block_copy.body.previous_mutator_set_accumulator.verify(
                 &input.utxo.hash().into(),
                 &input.membership_proof.clone().into(),
             ) {
-                warn!("Invalid membership proof found in block");
+                warn!("Invalid membership proof found in block for input {}", i);
                 return false;
             }
         }
