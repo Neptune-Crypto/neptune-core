@@ -105,6 +105,11 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
     pub fn new_iter(&mut self) -> RustyLevelDBIterator<Key, Value> {
         RustyLevelDBIterator::new(self)
     }
+    pub fn flush(&mut self) {
+        self.database
+            .flush()
+            .expect("Database flushing to disk must succeed");
+    }
 }
 
 pub struct RustyLevelDBIterator<

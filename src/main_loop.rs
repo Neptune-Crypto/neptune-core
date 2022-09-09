@@ -973,6 +973,55 @@ impl MainLoopHandler {
         // Peer-map is owned by main-loop, so there is no need to lock it
         // to prevent new peers joining while shutting down.
 
+        // flush walletblock db
+        self.global_state.wallet_state.db.lock().unwrap().flush();
+
+        // flush peer_standings
+        self.global_state
+            .net
+            .peer_databases
+            .as_ref()
+            .lock()
+            .await
+            .peer_standings
+            .flush();
+
+        // flush block_databases
+        self.global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .block_databases
+            .lock()
+            .await
+            .block_index
+            .flush();
+
+        // flush archival_mutator_set
+        // self.global_state
+        //     .chain
+        //     .archival_state
+        //     .as_ref()
+        //     .unwrap()
+        //     .archival_mutator_set
+        //     .lock()
+        //     .await
+        //     .chunks
+        //     .flush(); // TODO: implement flush in database vector in twenty-first?
+
+        // flush ms_block_sync_db
+        self.global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .ms_block_sync_db
+            .as_ref()
+            .lock()
+            .await
+            .flush();
+
         // Send 'bye' message to alle peers.
         let _result = self
             .main_to_peer_broadcast_tx
