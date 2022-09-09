@@ -392,7 +392,42 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
+pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
+    let tx = &mut block.body.transaction;
+    let output_randomness: Vec<BFieldElement> =
+        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+    let addition_record: AdditionRecord<Hash> = block
+        .body
+        .previous_mutator_set_accumulator
+        .commit(&utxo.hash().into(), &output_randomness);
+    tx.outputs.push((utxo, output_randomness.into()));
+
+    // Add addition record for this output
+    block
+        .body
+        .mutator_set_update
+        .additions
+        .push(addition_record);
+    let mut next_mutator_set_accumulator = block.body.previous_mutator_set_accumulator.clone();
+    block
+        .body
+        .mutator_set_update
+        .apply(&mut next_mutator_set_accumulator)
+        .expect("MS update application must work");
+    block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
+
+    // update header fields
+    block.header.mutator_set_commitment = block
+        .body
+        .next_mutator_set_accumulator
+        .get_commitment()
+        .into();
+    block.header.block_body_merkle_root = block.body.hash();
+}
+
 /// Add an unsigned (incorrectly signed) devnet input to a transaction
+/// Membership proofs and removal records must be valid against `previous_mutator_set_accumulator`,
+/// not against `next_mutator_set_accumulator`.
 pub fn add_unsigned_dev_net_input_to_block_transaction(
     block: &mut Block,
     input_utxo: Utxo,
@@ -411,53 +446,20 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.body.transaction = tx;
 
     // add removal record for this spending
+    block.body.mutator_set_update.removals.push(removal_record);
+
+    // Update block mutator set accumulator. We have to apply *all* elements in the `mutator_set_update`
+    // to the previous mutator set accumulator here, as the removal records need to be updated throughout
+    // this process. This means that the input membership proof and removal records are expected to be
+    // valid against `block.body.previous_mutator_set_accumulator`, not against
+    // `block.body.next_mutator_set_accumulator`
+    let mut next_mutator_set_accumulator = block.body.previous_mutator_set_accumulator.clone();
     block
         .body
         .mutator_set_update
-        .removals
-        .push(removal_record.clone());
-
-    // Update block mutator set accumulator
-    let mut next_mutator_set_accumulator = block.body.next_mutator_set_accumulator.clone();
-    next_mutator_set_accumulator.remove(&removal_record);
+        .apply(&mut next_mutator_set_accumulator)
+        .expect("MS update application must work");
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
-
-    // update header fields
-    block.header.mutator_set_commitment = block
-        .body
-        .next_mutator_set_accumulator
-        .get_commitment()
-        .into();
-    block.header.block_body_merkle_root = block.body.hash();
-}
-
-pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
-    let tx = &mut block.body.transaction;
-    let output_randomness: Vec<BFieldElement> =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
-    let mut addition_record: AdditionRecord<Hash> = block
-        .body
-        .next_mutator_set_accumulator
-        .commit(&utxo.hash().into(), &output_randomness);
-    tx.outputs.push((utxo, output_randomness.into()));
-
-    // Update block mutator set accumulator
-    block
-        .body
-        .next_mutator_set_accumulator
-        .add(&mut addition_record);
-
-    // Add addition record for this output
-    block
-        .body
-        .mutator_set_update
-        .additions
-        .push(addition_record);
-    println!(
-        "msu removals: {}, additions: {}",
-        block.body.mutator_set_update.removals.len(),
-        block.body.mutator_set_update.additions.len(),
-    );
 
     // update header fields
     block.header.mutator_set_commitment = block
@@ -474,13 +476,32 @@ pub async fn add_unsigned_input_to_block(
     consumed_utxo: Utxo,
     randomness: Digest,
     ams: &Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>>,
+    aocl_leaf_index: u128,
 ) {
     let item = consumed_utxo.hash();
     let input_membership_proof = ams
         .lock()
         .await
-        .restore_membership_proof(&item.into(), &randomness.into(), 0)
+        .restore_membership_proof(&item.into(), &randomness.into(), aocl_leaf_index)
         .unwrap();
+
+    // Sanity check that restored membership proof agrees with AMS
+    assert!(
+        ams.lock()
+            .await
+            .verify(&item.into(), &input_membership_proof),
+        "Restored MS membership proof must validate against own AMS"
+    );
+
+    // Sanity check that restored membership proof agree with block
+    assert!(
+        block
+            .body
+            .previous_mutator_set_accumulator
+            .verify(&item.into(), &input_membership_proof),
+        "Restored MS membership proof must validate against input block"
+    );
+
     let input_removal_record = ams
         .lock()
         .await
