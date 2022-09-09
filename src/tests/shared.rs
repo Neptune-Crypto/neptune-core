@@ -15,7 +15,6 @@ use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use rusty_leveldb::in_memory;
 use secp256k1::ecdsa;
-use secp256k1::Secp256k1;
 use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
 use std::{
@@ -500,16 +499,12 @@ pub async fn add_unsigned_input_to_block(
 pub fn make_mock_block(
     previous_block: &Block,
     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
+    coinbase_beneficiary: secp256k1::PublicKey,
 ) -> Block {
-    let secp = Secp256k1::new();
-    let mut rng = thread_rng();
-    let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-        secp.generate_keypair(&mut rng);
-
     let new_block_height: BlockHeight = previous_block.header.height.next();
     let coinbase_utxo = Utxo {
         amount: Block::get_mining_reward(new_block_height),
-        public_key,
+        public_key: coinbase_beneficiary,
     };
     let output_randomness =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());

@@ -1025,6 +1025,8 @@ impl PeerLoopHandler {
 #[cfg(test)]
 mod peer_loop_tests {
     use clap::Parser;
+    use rand::thread_rng;
+    use secp256k1::Secp256k1;
     use tracing_test::traced_test;
     use twenty_first::amount::u32s::U32s;
 
@@ -1133,7 +1135,10 @@ mod peer_loop_tests {
             .await;
         different_genesis_block.header.nonce[2].increment();
         different_genesis_block.hash = different_genesis_block.header.hash();
-        let block_1_with_different_genesis = make_mock_block(&different_genesis_block, None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let block_1_with_different_genesis =
+            make_mock_block(&different_genesis_block, None, public_key);
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
             block_1_with_different_genesis.into(),
         )))]);
@@ -1203,11 +1208,14 @@ mod peer_loop_tests {
 
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
         let block_without_valid_pow = make_mock_block(
             &genesis_block,
             Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
                 1_000_000, 0, 0, 0, 0,
             ])),
+            public_key,
         );
 
         // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
@@ -1292,7 +1300,9 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
 
-        let block_1 = make_mock_block(&genesis_block, None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let block_1 = make_mock_block(&genesis_block, None, public_key);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1351,12 +1361,20 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
         let peer_address = get_dummy_address(0);
-        let block_1 = make_mock_block(&genesis_block, None);
-        let block_2_a = make_mock_block(&block_1, Some(U32s::new([2_000_000, 0, 0, 0, 0])));
-        let block_3_a = make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0]))); // <--- canonical
-        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])));
-        let block_3_b = make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])));
+        let block_1 = make_mock_block(&genesis_block, None, public_key);
+        let block_2_a = make_mock_block(
+            &block_1,
+            Some(U32s::new([2_000_000, 0, 0, 0, 0])),
+            public_key,
+        );
+        let block_3_a =
+            make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key); // <--- canonical
+        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
+        let block_3_b =
+            make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
 
         add_block(&state, block_1.clone()).await?;
         add_block(&state, block_2_a.clone()).await?;
@@ -1430,12 +1448,20 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
         let peer_address = get_dummy_address(0);
-        let block_1 = make_mock_block(&genesis_block, None);
-        let block_2_a = make_mock_block(&block_1, Some(U32s::new([2_000_000, 0, 0, 0, 0])));
-        let block_3_a = make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0]))); // <--- canonical
-        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])));
-        let block_3_b = make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])));
+        let block_1 = make_mock_block(&genesis_block, None, public_key);
+        let block_2_a = make_mock_block(
+            &block_1,
+            Some(U32s::new([2_000_000, 0, 0, 0, 0])),
+            public_key,
+        );
+        let block_3_a =
+            make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key); // <--- canonical
+        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
+        let block_3_b =
+            make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
 
         add_block(&state, block_1.clone()).await?;
         add_block(&state, block_2_a.clone()).await?;
@@ -1475,6 +1501,8 @@ mod peer_loop_tests {
         // Scenario: client only knows genesis block. Then receives block 1.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 0).await?;
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
         let peer_address = get_dummy_address(0);
         let genesis_block: Block = state
             .chain
@@ -1486,7 +1514,7 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(
-                make_mock_block(&genesis_block, None).into(),
+                make_mock_block(&genesis_block, None, public_key).into(),
             ))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1542,8 +1570,10 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block, None);
-        let block_2 = make_mock_block(&block_1.clone(), None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let block_1 = make_mock_block(&genesis_block, None, public_key);
+        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -1615,10 +1645,14 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block.clone(), None);
-        let block_2 = make_mock_block(&block_1.clone(), None);
-        let block_3 = make_mock_block(&block_2.clone(), None);
-        let block_4 = make_mock_block(&block_3.clone(), None);
+        let block_1 = make_mock_block(
+            &genesis_block.clone(),
+            None,
+            state.wallet_state.get_public_key(),
+        );
+        let block_2 = make_mock_block(&block_1.clone(), None, state.wallet_state.get_public_key());
+        let block_3 = make_mock_block(&block_2.clone(), None, state.wallet_state.get_public_key());
+        let block_4 = make_mock_block(&block_3.clone(), None, state.wallet_state.get_public_key());
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1685,10 +1719,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block.clone(), None);
-        let block_2 = make_mock_block(&block_1.clone(), None);
-        let block_3 = make_mock_block(&block_2.clone(), None);
-        let block_4 = make_mock_block(&block_3.clone(), None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
+        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
+        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
+        let block_4 = make_mock_block(&block_3.clone(), None, public_key);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1752,6 +1788,8 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 0).await?;
         let peer_address = get_dummy_address(0);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1759,9 +1797,9 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block.clone(), None);
-        let block_2 = make_mock_block(&block_1.clone(), None);
-        let block_3 = make_mock_block(&block_2.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
+        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
+        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -1825,6 +1863,8 @@ mod peer_loop_tests {
         // notification.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_genesis_setup(Network::Main, 0).await?;
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
         let peer_address: SocketAddr = get_dummy_address(0);
         let genesis_block: Block = state
             .chain
@@ -1833,11 +1873,11 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block.clone(), None);
-        let block_2 = make_mock_block(&block_1.clone(), None);
-        let block_3 = make_mock_block(&block_2.clone(), None);
-        let block_4 = make_mock_block(&block_3.clone(), None);
-        let block_5 = make_mock_block(&block_4.clone(), None);
+        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
+        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
+        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
+        let block_4 = make_mock_block(&block_3.clone(), None, public_key);
+        let block_5 = make_mock_block(&block_4.clone(), None, public_key);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1931,10 +1971,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block.clone(), None);
-        let block_2 = make_mock_block(&block_1.clone(), None);
-        let block_3 = make_mock_block(&block_2.clone(), None);
-        let block_4 = make_mock_block(&block_3.clone(), None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
+        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
+        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
+        let block_4 = make_mock_block(&block_3.clone(), None, public_key);
         add_block(&state, block_1.clone()).await?;
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data(Network::Main, 1);

@@ -272,7 +272,7 @@ mod mine_loop_tests {
         let block_template_1 = Block::new(block_header, block_body);
         assert!(block_template_1.devnet_is_valid(&previous_block));
 
-        let mock_block_1 = make_mock_block(&previous_block, None);
+        let mock_block_1 = make_mock_block(&previous_block, None, wallet_state.get_public_key());
         let coinbase_tx_2 =
             make_coinbase_transaction(wallet_state.get_public_key(), &mock_block_1.header);
         let (block_header_2, block_body_2) =

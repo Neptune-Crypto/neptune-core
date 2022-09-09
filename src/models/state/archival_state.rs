@@ -791,6 +791,7 @@ mod archival_state_tests {
     use num_traits::One;
     use rand::{thread_rng, RngCore};
     use rusty_leveldb::LdbIterator;
+    use secp256k1::Secp256k1;
     use tracing_test::traced_test;
     use twenty_first::shared_math::b_field_element::BFieldElement;
 
@@ -843,7 +844,9 @@ mod archival_state_tests {
                 archival_state: Some(archival_state2),
                 light_state: LightState::new(_archival_state1.genesis_block.header),
             };
-            let block_1 = make_mock_block(&b, None);
+            let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+                Secp256k1::new().generate_keypair(&mut thread_rng());
+            let block_1 = make_mock_block(&b, None, public_key);
             let lock0 = blockchain_state
                 .archival_state
                 .as_ref()
@@ -980,9 +983,11 @@ mod archival_state_tests {
         let mut block_db_lock = archival_state.block_databases.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
 
         // 1. Create new block 1 and store it to the DB
-        let mock_block_1a = make_mock_block(&archival_state.genesis_block, None);
+        let mock_block_1a = make_mock_block(&archival_state.genesis_block, None, public_key);
         archival_state.write_block(
             Box::new(mock_block_1a.clone()),
             &mut block_db_lock,
@@ -998,7 +1003,7 @@ mod archival_state_tests {
         )?;
 
         // 3. Create competing block 1 and store it to DB
-        let mock_block_1b = make_mock_block(&archival_state.genesis_block, None);
+        let mock_block_1b = make_mock_block(&archival_state.genesis_block, None, public_key);
         archival_state.write_block(
             Box::new(mock_block_1a.clone()),
             &mut block_db_lock,
@@ -1022,11 +1027,18 @@ mod archival_state_tests {
     #[tokio::test]
     async fn update_mutator_set_rollback_ms_block_sync_multiple_inputs_outputs_in_block_test(
     ) -> Result<()> {
+        // Make a rollback of one block that contains multiple inputs and outputs.
+        // This test is intended to verify that rollbacks work for non-trivial
+        // blocks.
         let archival_state: ArchivalState = make_archival_state().await;
         let genesis_wallet = get_mock_wallet_state();
 
         // 1. Create new block 1 with two inputs and three outputs and store it to disk
-        let mut block_1a = make_mock_block(&archival_state.genesis_block, None);
+        let mut block_1a = make_mock_block(
+            &archival_state.genesis_block,
+            None,
+            genesis_wallet.get_public_key(),
+        );
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
@@ -1069,7 +1081,11 @@ mod archival_state_tests {
             )?;
 
             // 3. Create competing block 1 and store it to DB
-            let mock_block_1b = make_mock_block(&archival_state.genesis_block, None);
+            let mock_block_1b = make_mock_block(
+                &archival_state.genesis_block,
+                None,
+                genesis_wallet.get_public_key(),
+            );
             archival_state.write_block(
                 Box::new(block_1a.clone()),
                 &mut block_db_lock,
@@ -1121,7 +1137,12 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state().await;
-        let mut block_1_a = make_mock_block(&archival_state.genesis_block, None);
+        let genesis_wallet = get_mock_wallet_state();
+        let mut block_1_a = make_mock_block(
+            &archival_state.genesis_block,
+            None,
+            genesis_wallet.get_public_key(),
+        );
 
         // Verify that block_1 that only contains the coinbase output is valid
         assert!(block_1_a.archival_is_valid(&archival_state.genesis_block));
@@ -1186,7 +1207,11 @@ mod archival_state_tests {
                 .all(|x| x.is_zero()));
 
             // Verify that a block containing a removal record `block_1_a` can be reverted
-            let block_1_b = make_mock_block(&genesis_block, Some(1000.into()));
+            let block_1_b = make_mock_block(
+                &genesis_block,
+                Some(1000.into()),
+                genesis_wallet.get_public_key(),
+            );
             archival_state.write_block(
                 Box::new(block_1_b.clone()),
                 &mut db_bc_lock,
@@ -1215,7 +1240,12 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state().await;
-        let mut block_1 = make_mock_block(&archival_state.genesis_block, None);
+        let genesis_wallet = get_mock_wallet_state();
+        let mut block_1 = make_mock_block(
+            &archival_state.genesis_block,
+            None,
+            genesis_wallet.get_public_key(),
+        );
 
         // Add a valid input to the block transaction
         let genesis_block = archival_state.genesis_block.clone();
@@ -1287,8 +1317,10 @@ mod archival_state_tests {
         drop(db_lock_0);
 
         // Add a block to archival state and verify that this is returned
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
         let genesis = *archival_state.genesis_block.clone();
-        let mock_block_1 = make_mock_block(&genesis.clone(), None);
+        let mock_block_1 = make_mock_block(&genesis.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
         let mut db_lock_1 = block_databases.lock().await;
         let ret1 = archival_state.get_latest_block_from_disk(&mut db_lock_1)?;
@@ -1304,7 +1336,7 @@ mod archival_state_tests {
         drop(db_lock_1);
 
         // Add a 2nd block and verify that this new block is now returned
-        let mock_block_2 = make_mock_block(&mock_block_1, None);
+        let mock_block_2 = make_mock_block(&mock_block_1, None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
         let mut db_lock_2 = block_databases.lock().await;
         let ret2 = archival_state.get_latest_block_from_disk(&mut db_lock_2)?;
@@ -1338,7 +1370,9 @@ mod archival_state_tests {
         )
         .await;
         let genesis = *archival_state.genesis_block.clone();
-        let mock_block_1 = make_mock_block(&genesis.clone(), None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let mock_block_1 = make_mock_block(&genesis.clone(), None, public_key);
 
         // Lookup a block in an empty database, expect None to be returned
         let ret0 = archival_state.get_block(mock_block_1.hash).await?;
@@ -1363,6 +1397,7 @@ mod archival_state_tests {
         let mock_block_2 = make_mock_block(
             &mock_block_1.clone(),
             Some(mock_block_1.header.proof_of_work_family),
+            public_key,
         );
         add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
         let fetched2 = archival_state.get_block(mock_block_2.hash).await?.unwrap();
@@ -1382,7 +1417,7 @@ mod archival_state_tests {
         let mut last_block = mock_block_2.clone();
         let mut blocks = vec![genesis, mock_block_1, mock_block_2];
         for _ in 0..(thread_rng().next_u32() % 20) {
-            let new_block = make_mock_block(&last_block, None);
+            let new_block = make_mock_block(&last_block, None, public_key);
             add_block_to_archival_state(&archival_state, new_block.clone()).await?;
             blocks.push(new_block.clone());
             last_block = new_block;
@@ -1419,7 +1454,9 @@ mod archival_state_tests {
         );
 
         // Insert a block that is descendant from genesis block and verify that it is canonical
-        let mock_block_1 = make_mock_block(&genesis.clone(), None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let mock_block_1 = make_mock_block(&genesis.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
         assert!(
             archival_state
@@ -1435,12 +1472,15 @@ mod archival_state_tests {
         );
 
         // Insert three more blocks and verify that all are part of the canonical chain
-        let mock_block_2_a = make_mock_block(&mock_block_1.clone(), None);
+        let mock_block_2_a = make_mock_block(&mock_block_1.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_2_a.clone()).await?;
-        let mock_block_3_a = make_mock_block(&mock_block_2_a.clone(), None);
+        let mock_block_3_a = make_mock_block(&mock_block_2_a.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_3_a.clone()).await?;
-        let mock_block_4_a =
-            make_mock_block(&mock_block_3_a.clone(), Some(U32s::new([5000, 0, 0, 0, 0])));
+        let mock_block_4_a = make_mock_block(
+            &mock_block_3_a.clone(),
+            Some(U32s::new([5000, 0, 0, 0, 0])),
+            public_key,
+        );
         add_block_to_archival_state(&archival_state, mock_block_4_a.clone()).await?;
         for (i, block) in [
             genesis.clone(),
@@ -1463,15 +1503,16 @@ mod archival_state_tests {
 
         // Make a tree and verify that the correct parts of the tree are identified as
         // belonging to the canonical chain
-        let mock_block_2_b = make_mock_block(&mock_block_1.clone(), None);
+        let mock_block_2_b = make_mock_block(&mock_block_1.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_2_b.clone()).await?;
-        let mock_block_3_b = make_mock_block(&mock_block_2_b.clone(), None);
+        let mock_block_3_b = make_mock_block(&mock_block_2_b.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_3_b.clone()).await?;
-        let mock_block_4_b = make_mock_block(&mock_block_3_b.clone(), None);
+        let mock_block_4_b = make_mock_block(&mock_block_3_b.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_4_b.clone()).await?;
         let mock_block_5_b = make_mock_block(
             &mock_block_4_b.clone(),
             Some(U32s::new([200000, 0, 0, 0, 0])),
+            public_key,
         );
         add_block_to_archival_state(&archival_state, mock_block_5_b.clone()).await?;
         for (i, block) in [
@@ -1528,42 +1569,58 @@ mod archival_state_tests {
         //
         // Note that in the later test, 6b becomes the tip.
 
-        let mock_block_3_c = make_mock_block(&mock_block_2_a.clone(), None);
+        let mock_block_3_c = make_mock_block(&mock_block_2_a.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_3_c.clone()).await?;
-        let mock_block_4_c = make_mock_block(&mock_block_3_c.clone(), None);
+        let mock_block_4_c = make_mock_block(&mock_block_3_c.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_4_c.clone()).await?;
-        let mock_block_5_c = make_mock_block(&mock_block_4_c.clone(), None);
+        let mock_block_5_c = make_mock_block(&mock_block_4_c.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_5_c.clone()).await?;
-        let mock_block_6_c = make_mock_block(&mock_block_5_c.clone(), None);
+        let mock_block_6_c = make_mock_block(&mock_block_5_c.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_6_c.clone()).await?;
-        let mock_block_7_c = make_mock_block(&mock_block_6_c.clone(), None);
+        let mock_block_7_c = make_mock_block(&mock_block_6_c.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_7_c.clone()).await?;
-        let mock_block_8_c = make_mock_block(&mock_block_7_c.clone(), None);
+        let mock_block_8_c = make_mock_block(&mock_block_7_c.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_8_c.clone()).await?;
-        let mock_block_5_a = make_mock_block(&mock_block_4_a.clone(), None);
+        let mock_block_5_a = make_mock_block(&mock_block_4_a.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_5_a.clone()).await?;
-        let mock_block_3_d =
-            make_mock_block(&mock_block_2_a.clone(), Some(U32s::new([1000, 0, 0, 0, 0])));
+        let mock_block_3_d = make_mock_block(
+            &mock_block_2_a.clone(),
+            Some(U32s::new([1000, 0, 0, 0, 0])),
+            public_key,
+        );
         add_block_to_archival_state(&archival_state, mock_block_3_d.clone()).await?;
-        let mock_block_4_d =
-            make_mock_block(&mock_block_3_d.clone(), Some(U32s::new([2000, 0, 0, 0, 0])));
+        let mock_block_4_d = make_mock_block(
+            &mock_block_3_d.clone(),
+            Some(U32s::new([2000, 0, 0, 0, 0])),
+            public_key,
+        );
         add_block_to_archival_state(&archival_state, mock_block_4_d.clone()).await?;
         let mock_block_5_d = make_mock_block(
             &mock_block_4_d.clone(),
             Some(U32s::new([20000, 0, 0, 0, 0])),
+            public_key,
         );
         add_block_to_archival_state(&archival_state, mock_block_5_d.clone()).await?;
 
         // This is the most canonical block in the known set
-        let mock_block_6_d =
-            make_mock_block(&mock_block_5_d.clone(), Some(U32s::new([2000, 0, 0, 0, 0])));
+        let mock_block_6_d = make_mock_block(
+            &mock_block_5_d.clone(),
+            Some(U32s::new([2000, 0, 0, 0, 0])),
+            public_key,
+        );
         add_block_to_archival_state(&archival_state, mock_block_6_d.clone()).await?;
 
-        let mock_block_4_e =
-            make_mock_block(&mock_block_3_d.clone(), Some(U32s::new([2006, 0, 0, 0, 0])));
+        let mock_block_4_e = make_mock_block(
+            &mock_block_3_d.clone(),
+            Some(U32s::new([2006, 0, 0, 0, 0])),
+            public_key,
+        );
         add_block_to_archival_state(&archival_state, mock_block_4_e.clone()).await?;
-        let mock_block_5_e =
-            make_mock_block(&mock_block_3_d.clone(), Some(U32s::new([2002, 0, 0, 0, 0])));
+        let mock_block_5_e = make_mock_block(
+            &mock_block_3_d.clone(),
+            Some(U32s::new([2002, 0, 0, 0, 0])),
+            public_key,
+        );
         add_block_to_archival_state(&archival_state, mock_block_5_e.clone()).await?;
 
         for (i, block) in [
@@ -1620,6 +1677,7 @@ mod archival_state_tests {
         let mock_block_6_b = make_mock_block(
             &mock_block_5_b.clone(),
             Some(U32s::new([200000002, 2, 0, 0, 0])),
+            public_key,
         );
         add_block_to_archival_state(&archival_state, mock_block_6_b.clone()).await?;
         for (i, block) in [
@@ -1725,13 +1783,15 @@ mod archival_state_tests {
             .is_empty());
 
         // Insert blocks and verify that the same result is returned
-        let mock_block_1 = make_mock_block(&genesis.clone(), None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let mock_block_1 = make_mock_block(&genesis.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
-        let mock_block_2 = make_mock_block(&mock_block_1.clone(), None);
+        let mock_block_2 = make_mock_block(&mock_block_1.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
-        let mock_block_3 = make_mock_block(&mock_block_2.clone(), None);
+        let mock_block_3 = make_mock_block(&mock_block_2.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_3.clone()).await?;
-        let mock_block_4 = make_mock_block(&mock_block_3.clone(), None);
+        let mock_block_4 = make_mock_block(&mock_block_3.clone(), None, public_key);
         add_block_to_archival_state(&archival_state, mock_block_4.clone()).await?;
 
         assert!(archival_state
@@ -1792,7 +1852,9 @@ mod archival_state_tests {
         )
         .await;
         let genesis = *archival_state.genesis_block.clone();
-        let mock_block_1 = make_mock_block(&genesis.clone(), None);
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let mock_block_1 = make_mock_block(&genesis.clone(), None, public_key);
         let mut db_lock = archival_state.block_databases.lock().await;
         archival_state.write_block(
             Box::new(mock_block_1.clone()),
@@ -1874,7 +1936,7 @@ mod archival_state_tests {
         );
 
         // Store another block and verify that this block is appended to disk
-        let mock_block_2 = make_mock_block(&mock_block_1.clone(), None);
+        let mock_block_2 = make_mock_block(&mock_block_1.clone(), None, public_key);
         archival_state.write_block(
             Box::new(mock_block_2.clone()),
             &mut db_lock,
