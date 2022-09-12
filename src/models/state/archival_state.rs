@@ -893,7 +893,8 @@ mod archival_state_tests {
         println!("root_data_dir_path = {:?}", root_data_dir_path);
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
-        let genesis_wallet = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet = genesis_wallet_state.wallet;
         let ams = Arc::new(TokioMutex::new(ams));
         let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
         let archival_state = ArchivalState::new(
@@ -907,7 +908,7 @@ mod archival_state_tests {
         let mock_block_1 = make_mock_block(
             &archival_state.genesis_block.clone(),
             None,
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
         {
             let mut block_db_lock = archival_state.block_databases.lock().await;
@@ -953,7 +954,7 @@ mod archival_state_tests {
         // Add an input to the next block's transaction. This will add a removal record to the block, and this removal
         // record will flip bits in the Bloom filter.
         let mut mock_block_2 =
-            make_mock_block(&mock_block_1, None, genesis_wallet.wallet.get_public_key());
+            make_mock_block(&mock_block_1, None, genesis_wallet.get_public_key());
         let consumed_utxo = mock_block_1.body.transaction.outputs[0].0;
         let output_randomness = mock_block_1.body.transaction.outputs[0].1;
         add_unsigned_input_to_block(
@@ -1061,13 +1062,14 @@ mod archival_state_tests {
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks.
         let archival_state: ArchivalState = make_archival_state().await;
-        let genesis_wallet = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet = genesis_wallet_state.wallet;
 
         // 1. Create new block 1 with two inputs and three outputs and store it to disk
         let mut block_1a = make_mock_block(
             &archival_state.genesis_block,
             None,
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
@@ -1082,12 +1084,12 @@ mod archival_state_tests {
         .await;
         let output_utxo_1: Utxo = Utxo::new(
             Amount::one() + Amount::one(),
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
         add_output_to_block(&mut block_1a, output_utxo_1);
         let output_utxo_2: Utxo = Utxo::new(
             Amount::one() + Amount::one() + Amount::one(),
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
         add_output_to_block(&mut block_1a, output_utxo_2);
         block_1a.body.transaction.sign(&genesis_wallet);
@@ -1115,7 +1117,7 @@ mod archival_state_tests {
             let mock_block_1b = make_mock_block(
                 &archival_state.genesis_block,
                 None,
-                genesis_wallet.wallet.get_public_key(),
+                genesis_wallet.get_public_key(),
             );
             archival_state.write_block(
                 Box::new(block_1a.clone()),
@@ -1172,7 +1174,8 @@ mod archival_state_tests {
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
         let archival_state: ArchivalState = make_archival_state().await;
-        let genesis_wallet = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet = genesis_wallet_state.wallet;
 
         let genesis_block: Block = *archival_state.genesis_block.to_owned();
         let mut consumed_utxo = genesis_block.body.transaction.outputs[0].0;
@@ -1182,11 +1185,8 @@ mod archival_state_tests {
 
         for i in 0..10 {
             // Create next block with inputs and outputs
-            let mut next_block = make_mock_block(
-                &previous_block,
-                None,
-                genesis_wallet.wallet.get_public_key(),
-            );
+            let mut next_block =
+                make_mock_block(&previous_block, None, genesis_wallet.get_public_key());
             add_unsigned_input_to_block(
                 &mut next_block,
                 consumed_utxo,
@@ -1197,12 +1197,12 @@ mod archival_state_tests {
             .await;
             let output_utxo_1: Utxo = Utxo::new(
                 Amount::one() + Amount::one(),
-                genesis_wallet.wallet.get_public_key(),
+                genesis_wallet.get_public_key(),
             );
             add_output_to_block(&mut next_block, output_utxo_1);
             let output_utxo_2: Utxo = Utxo::new(
                 Amount::one() + Amount::one() + Amount::one(),
-                genesis_wallet.wallet.get_public_key(),
+                genesis_wallet.get_public_key(),
             );
             add_output_to_block(&mut next_block, output_utxo_2);
             next_block.body.transaction.sign(&genesis_wallet);
@@ -1252,7 +1252,7 @@ mod archival_state_tests {
             let mock_block_1b = make_mock_block(
                 &archival_state.genesis_block,
                 None,
-                genesis_wallet.wallet.get_public_key(),
+                genesis_wallet.get_public_key(),
             );
             let mut block_db_lock = archival_state.block_databases.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
@@ -1308,11 +1308,12 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state().await;
-        let genesis_wallet = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1_a = make_mock_block(
             &archival_state.genesis_block,
             None,
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
 
         // Verify that block_1 that only contains the coinbase output is valid
@@ -1381,7 +1382,7 @@ mod archival_state_tests {
             let block_1_b = make_mock_block(
                 &genesis_block,
                 Some(1000.into()),
-                genesis_wallet.wallet.get_public_key(),
+                genesis_wallet.get_public_key(),
             );
             archival_state.write_block(
                 Box::new(block_1_b.clone()),
@@ -1411,11 +1412,12 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
         let archival_state: ArchivalState = make_archival_state().await;
-        let genesis_wallet = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1 = make_mock_block(
             &archival_state.genesis_block,
             None,
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
 
         // Add a valid input to the block transaction
@@ -1436,7 +1438,7 @@ mod archival_state_tests {
         assert!(block_1.devnet_is_valid(&genesis_block));
 
         // Add one output to the block's transaction
-        let output_utxo_0: Utxo = Utxo::new(Amount::one(), genesis_wallet.wallet.get_public_key());
+        let output_utxo_0: Utxo = Utxo::new(Amount::one(), genesis_wallet.get_public_key());
         add_output_to_block(&mut block_1, output_utxo_0);
 
         // Sign the transaction
@@ -1447,12 +1449,12 @@ mod archival_state_tests {
         // Add one output to the block's transaction
         let output_utxo_1: Utxo = Utxo::new(
             Amount::one() + Amount::one(),
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
         add_output_to_block(&mut block_1, output_utxo_1);
         let output_utxo_2: Utxo = Utxo::new(
             Amount::one() + Amount::one() + Amount::one(),
-            genesis_wallet.wallet.get_public_key(),
+            genesis_wallet.get_public_key(),
         );
         add_output_to_block(&mut block_1, output_utxo_2);
 
