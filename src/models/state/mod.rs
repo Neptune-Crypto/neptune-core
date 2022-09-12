@@ -18,14 +18,14 @@ pub mod shared;
 
 /// `GlobalState` handles all state of a Neptune node that is shared across its threads.
 ///
-/// Some fields are only accessed by some threads.
+/// Some fields are only written to by certain threads.
 #[derive(Debug, Clone)]
 pub struct GlobalState {
-    /// The `BlockchainState` may only be updated by the main thread.
-    pub chain: BlockchainState,
-
     /// The `WalletState` may be updated by the main thread and the RPC server.
     pub wallet_state: WalletState,
+
+    /// The `BlockchainState` may only be updated by the main thread.
+    pub chain: BlockchainState,
 
     /// The `NetworkingState` may be updated by both the main thread and peer threads.
     pub net: NetworkingState,

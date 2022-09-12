@@ -302,6 +302,9 @@ impl MainLoopHandler {
 
                 // Store block in database
                 // Acquire both locks before updating
+                let mut wallet_state_db: tokio::sync::MutexGuard<
+                    RustyLevelDB<Digest, WalletBlockUtxos>,
+                > = self.global_state.wallet_state.db.lock().await;
                 let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                     .global_state
                     .chain
@@ -331,9 +334,6 @@ impl MainLoopHandler {
                     .ms_block_sync_db
                     .lock()
                     .await;
-                let mut wallet_state_db: tokio::sync::MutexGuard<
-                    RustyLevelDB<Digest, WalletBlockUtxos>,
-                > = self.global_state.wallet_state.db.lock().await;
                 let mut light_state_locked = self
                     .global_state
                     .chain
@@ -389,6 +389,9 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
+                    let mut wallet_state_db: tokio::sync::MutexGuard<
+                        RustyLevelDB<Digest, WalletBlockUtxos>,
+                    > = self.global_state.wallet_state.db.lock().await;
                     let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain
@@ -418,10 +421,7 @@ impl MainLoopHandler {
                         .ms_block_sync_db
                         .lock()
                         .await;
-                    let mut wallet_state_db: tokio::sync::MutexGuard<
-                        RustyLevelDB<Digest, WalletBlockUtxos>,
-                    > = self.global_state.wallet_state.db.lock().await;
-                    let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = self
+                    let mut light_state_locked: std::sync::MutexGuard<BlockHeader> = self
                         .global_state
                         .chain
                         .light_state
@@ -436,7 +436,7 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
-                    let block_is_new = previous_block_header.proof_of_work_family
+                    let block_is_new = light_state_locked.proof_of_work_family
                         < last_block.header.proof_of_work_family;
                     if !block_is_new {
                         return Ok(());
@@ -472,7 +472,7 @@ impl MainLoopHandler {
                             .write_block(
                                 Box::new(block.clone()),
                                 &mut block_db_lock,
-                                Some(previous_block_header.proof_of_work_family),
+                                Some(light_state_locked.proof_of_work_family),
                             )?;
 
                         // update the mutator set with the UTXOs from this block
@@ -495,7 +495,7 @@ impl MainLoopHandler {
                     }
 
                     // Update information about latest header
-                    *previous_block_header = last_block.header.clone();
+                    *light_state_locked = last_block.header.clone();
                 }
 
                 // Inform all peers about new block
