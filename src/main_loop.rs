@@ -2,7 +2,8 @@ use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::wallet::WalletBlockUtxos;
 use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
@@ -330,6 +331,9 @@ impl MainLoopHandler {
                     .ms_block_sync_db
                     .lock()
                     .await;
+                let mut wallet_state_db: tokio::sync::MutexGuard<
+                    RustyLevelDB<Digest, WalletBlockUtxos>,
+                > = self.global_state.wallet_state.db.lock().await;
                 let mut light_state_locked = self
                     .global_state
                     .chain
@@ -364,8 +368,7 @@ impl MainLoopHandler {
                 // update wallet state with relevant UTXOs from this block
                 self.global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(&block)
-                    .await?;
+                    .update_wallet_state_with_new_block(&block, &mut wallet_state_db)?;
 
                 *light_state_locked = block.header.clone();
             }
@@ -415,6 +418,9 @@ impl MainLoopHandler {
                         .ms_block_sync_db
                         .lock()
                         .await;
+                    let mut wallet_state_db: tokio::sync::MutexGuard<
+                        RustyLevelDB<Digest, WalletBlockUtxos>,
+                    > = self.global_state.wallet_state.db.lock().await;
                     let mut previous_block_header: std::sync::MutexGuard<BlockHeader> = self
                         .global_state
                         .chain
@@ -485,8 +491,7 @@ impl MainLoopHandler {
                         // update wallet state with relevant UTXOs from this block
                         self.global_state
                             .wallet_state
-                            .update_wallet_state_with_new_block(&block)
-                            .await?;
+                            .update_wallet_state_with_new_block(&block, &mut wallet_state_db)?;
                     }
 
                     // Update information about latest header

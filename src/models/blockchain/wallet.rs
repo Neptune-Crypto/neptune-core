@@ -200,20 +200,24 @@ pub struct WalletState {
 
 impl WalletState {
     pub fn new_from_wallet(wallet: Wallet, network: Network) -> Self {
-        let _db: RustyLevelDB<BlockHash, WalletBlock> =
-            RustyLevelDB::<BlockHash, WalletBlock>::new(
+        let db: RustyLevelDB<BlockHash, WalletBlockUtxos> =
+            RustyLevelDB::<BlockHash, WalletBlockUtxos>::new(
                 get_data_directory(network).unwrap(),
                 STANDARD_WALLET_DB_NAME,
                 rusty_leveldb::Options::default(),
             )
             .unwrap();
-        let db = Arc::new(TokioMutex::new(_db));
+        let db = Arc::new(TokioMutex::new(db));
         Self { wallet, db }
     }
 }
 
 impl WalletState {
-    pub async fn update_wallet_state_with_new_block(&self, block: &Block) -> Result<()> {
+    pub fn update_wallet_state_with_new_block(
+        &self,
+        block: &Block,
+        wallet_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<Digest, WalletBlockUtxos>>,
+    ) -> Result<()> {
         // A wallet contains a set of input and output UTXOs,
         // each of which contains an address (public key),
         // which inform the balance of the wallet.
@@ -236,10 +240,7 @@ impl WalletState {
 
         let next_block_of_relevant_utxos = WalletBlockUtxos::new(input_utxos, output_utxos);
 
-        self.db
-            .lock()
-            .await
-            .put(block.hash, next_block_of_relevant_utxos);
+        wallet_db_lock.put(block.hash, next_block_of_relevant_utxos);
 
         Ok(())
     }
