@@ -350,6 +350,11 @@ where
             was_set
         }
     }
+
+    /// Flush the DatabaseVector (chunks)
+    pub fn flush(&mut self) {
+        self.chunks.flush()
+    }
 }
 
 #[cfg(test)]
