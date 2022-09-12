@@ -75,9 +75,8 @@ impl WalletBlockUtxos {
 }
 
 /// Gets a new secret.
-fn generate_secret_key() -> Digest {
+pub fn generate_secret_key() -> Digest {
     let mut rng = thread_rng();
-
     BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into()
 }
 
@@ -92,7 +91,7 @@ pub struct Wallet {
 
 impl Wallet {
     /// Create new `Wallet` given a `secret` key.
-    fn new(secret: Digest) -> Self {
+    pub fn new(secret: Digest) -> Self {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
             secret,
@@ -343,13 +342,11 @@ impl WalletState {
 
 #[cfg(test)]
 mod ordered_digest_tests {
+    use super::*;
+    use crate::models::blockchain::{digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES, shared::Hash};
     use twenty_first::{
         shared_math::rescue_prime_xlix::RP_DEFAULT_OUTPUT_SIZE, util_types::simple_hasher::Hasher,
     };
-
-    use crate::models::blockchain::{digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES, shared::Hash};
-
-    use super::*;
 
     #[test]
     fn new_random_wallet_base_test() {

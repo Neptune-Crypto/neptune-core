@@ -5,6 +5,8 @@ pub mod utxo;
 use num_traits::Zero;
 use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use tracing::warn;
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
@@ -146,6 +148,10 @@ impl Transaction {
     }
 
     /// Validate Transaction according to Devnet definitions.
+    ///
+    /// When a transaction occurs in a mined block, `coinbase_amount` is
+    /// derived from that block. When a transaction is received from a peer,
+    /// and is not yet mined, the coinbase amount is None.
     pub fn devnet_is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
         // What belongs here are the things that would otherwise
         // be verified by the transaction validity proof.
@@ -165,14 +171,21 @@ impl Transaction {
             return false;
         }
 
-        // 2. signatures
+        // 2. signatures: either
+        //  - the presence of a devnet authority proof validates the transaction
         //  - for all inputs
         //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = kernel.hash();
         let kernel_digest_as_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = kernel_digest.into();
+        let msg: Message = Message::from_slice(&kernel_digest_as_bytes).unwrap();
+
+        if let Some(signature) = self.authority_proof {
+            let authority_public_key = Wallet::devnet_authority_wallet().get_public_key();
+            return signature.verify(&msg, &authority_public_key).is_ok();
+        }
+
         for input in self.inputs.iter() {
-            let msg: Message = Message::from_slice(&kernel_digest_as_bytes).unwrap();
             if input
                 .signature
                 .verify(&msg, &input.utxo.public_key)
@@ -186,10 +199,64 @@ impl Transaction {
         true
     }
 
-    pub fn merge_transaction(
-        _coinbase_transaction: &Transaction,
-        _incoming_transactions: &Transaction,
-    ) -> Transaction {
-        todo!()
+    pub fn merge_with(self, other: Transaction) -> Transaction {
+        let timestamp = BFieldElement::new(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Timestamping failed")
+                .as_secs(),
+        );
+
+        // Add this `Transaction`
+        let authority_proof = None;
+
+        let mut merged_transaction = Transaction {
+            inputs: vec![self.inputs, other.inputs].concat(),
+            outputs: vec![self.outputs, other.outputs].concat(),
+            public_scripts: vec![self.public_scripts, other.public_scripts].concat(),
+            fee: self.fee + other.fee,
+            timestamp,
+            authority_proof,
+        };
+
+        merged_transaction.devnet_authority_sign();
+        merged_transaction
+    }
+}
+
+#[cfg(test)]
+mod transaction_tests {
+    use super::*;
+    use crate::tests::shared::{
+        make_mock_transaction, make_mock_unsigned_devnet_input, new_random_wallet,
+    };
+    use rand::thread_rng;
+    use tracing_test::traced_test;
+    use twenty_first::shared_math::traits::GetRandomElements;
+
+    #[traced_test]
+    #[test]
+    fn merged_transaction_is_devnet_valid_test() {
+        let mut rng = thread_rng();
+        let wallet_1 = new_random_wallet();
+        let output_amount_1: Amount = 42.into();
+        let output_1 = Utxo {
+            amount: output_amount_1,
+            public_key: wallet_1.get_public_key(),
+        };
+        let randomness: Digest =
+            BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into();
+
+        let coinbase_transaction = make_mock_transaction(vec![], vec![(output_1, randomness)]);
+        let coinbase_amount = Some(output_amount_1);
+
+        assert!(coinbase_transaction.devnet_is_valid(coinbase_amount));
+
+        let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
+        let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
+
+        assert!(!transaction_1.devnet_is_valid(Some(output_amount_1)));
+        transaction_1.sign(&wallet_1);
+        assert!(transaction_1.devnet_is_valid(Some(output_amount_1)));
     }
 }
