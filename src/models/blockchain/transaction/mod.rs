@@ -3,7 +3,7 @@ pub mod transaction_kernel;
 pub mod utxo;
 
 use num_traits::Zero;
-use secp256k1::{Message, PublicKey};
+use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use twenty_first::{
@@ -15,7 +15,7 @@ use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utx
 use super::{
     digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
-    wallet::WalletState,
+    wallet::{Wallet, WalletState},
 };
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
@@ -31,6 +31,7 @@ pub struct Transaction {
     pub public_scripts: Vec<Vec<BFieldElement>>,
     pub fee: Amount,
     pub timestamp: BFieldElement,
+    pub authority_proof: Option<ecdsa::Signature>,
 }
 
 impl Hashable for Transaction {
@@ -124,10 +125,24 @@ impl Transaction {
     pub fn sign(&mut self, wallet_state: &WalletState) {
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = kernel.hash();
-        let signature = wallet_state.sign_digest(kernel_digest);
+        let signature = wallet_state.wallet.sign_digest(kernel_digest);
         for input in self.inputs.iter_mut() {
             input.signature = signature;
         }
+    }
+
+    /// Perform a devnet authority signature on a `Transaction`
+    ///
+    /// This is a placeholder for STARK proofs, since merged
+    /// transactions will have invalid input signatures with the
+    /// current signature scheme.
+    pub fn devnet_authority_sign(&mut self) {
+        let kernel: TransactionKernel = self.get_kernel();
+        let kernel_digest: Digest = kernel.hash();
+        let authority_wallet = Wallet::devnet_authority_wallet();
+        let signature = authority_wallet.sign_digest(kernel_digest);
+
+        self.authority_proof = Some(signature)
     }
 
     /// Validate Transaction according to Devnet definitions.

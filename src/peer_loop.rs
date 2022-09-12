@@ -1648,11 +1648,23 @@ mod peer_loop_tests {
         let block_1 = make_mock_block(
             &genesis_block.clone(),
             None,
-            state.wallet_state.get_public_key(),
+            state.wallet_state.wallet.get_public_key(),
         );
-        let block_2 = make_mock_block(&block_1.clone(), None, state.wallet_state.get_public_key());
-        let block_3 = make_mock_block(&block_2.clone(), None, state.wallet_state.get_public_key());
-        let block_4 = make_mock_block(&block_3.clone(), None, state.wallet_state.get_public_key());
+        let block_2 = make_mock_block(
+            &block_1.clone(),
+            None,
+            state.wallet_state.wallet.get_public_key(),
+        );
+        let block_3 = make_mock_block(
+            &block_2.clone(),
+            None,
+            state.wallet_state.wallet.get_public_key(),
+        );
+        let block_4 = make_mock_block(
+            &block_3.clone(),
+            None,
+            state.wallet_state.wallet.get_public_key(),
+        );
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![

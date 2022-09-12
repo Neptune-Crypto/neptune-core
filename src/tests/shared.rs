@@ -541,6 +541,7 @@ pub fn make_mock_block(
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,
+        authority_proof: None,
     };
     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
