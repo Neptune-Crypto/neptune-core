@@ -12,7 +12,6 @@ use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::Hash;
 use anyhow::Result;
-use futures::executor::block_on;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use num_traits::Zero;
 use rand::thread_rng;
@@ -32,9 +31,9 @@ pub const STANDARD_WALLET_DB_NAME: &str = "wallet_db";
 
 type BlockHash = Digest;
 /// The parts of a block that this wallet wants to keep track of,
-/// ie. the input and output UTXOs that share this wallets public key.
+/// ie. the input and output UTXOs that share this wallet's public key.
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
-pub struct WalletBlock {
+pub struct WalletBlockUtxos {
     pub input_utxos: Vec<Utxo>,
     pub output_utxos: Vec<(Utxo, Digest)>,
 }
@@ -55,13 +54,14 @@ impl Add for WalletBlockIOSums {
     }
 }
 
-impl WalletBlock {
+impl WalletBlockUtxos {
     fn new(input_utxos: Vec<Utxo>, output_utxos: Vec<(Utxo, Digest)>) -> Self {
         Self {
             input_utxos,
             output_utxos,
         }
     }
+
     fn get_io_sums(&self) -> WalletBlockIOSums {
         WalletBlockIOSums {
             input_sum: self.input_utxos.iter().map(|utxo| utxo.amount).sum(),
@@ -75,7 +75,6 @@ impl WalletBlock {
 }
 
 /// Gets a new secret.
-/// TODO: Replace this in the future.
 fn generate_secret_key() -> Digest {
     let mut rng = thread_rng();
 
@@ -101,17 +100,25 @@ impl Wallet {
         }
     }
 
-    /// Read wallet from `wallet_file` if the file exists, or create new wallet
+    /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
     /// and save it to `wallet_file`.
     pub fn read_from_file_or_create(wallet_file: &Path) -> Self {
-        if wallet_file.exists() {
+        let ret = if wallet_file.exists() {
             Self::read_from_file(wallet_file)
         } else {
             let new_secret: Digest = generate_secret_key();
             let new_wallet: Wallet = Wallet::new(new_secret);
             new_wallet.create_wallet_file(wallet_file);
             new_wallet
-        }
+        };
+
+        // Sanity check that wallet file was stored on disk.
+        assert!(
+            wallet_file.exists(),
+            "wallet file must exist on disk after creation or opening."
+        );
+
+        ret
     }
 
     /// Read Wallet from file as JSON
@@ -151,10 +158,13 @@ impl Wallet {
         pb
     }
 
+    #[cfg(target_family = "unix")]
     /// Create a wallet file, and set restrictive permissions
     fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) {
         // On Unix/Linux we set the file permissions to 600, to disallow
         // other users on the same machine to access the secrets.
+        // I don't think the `std::os::unix` library can be imported on a Windows machine,
+        // so this function and the below import is only compiled on Unix machines.
         use std::os::unix::prelude::OpenOptionsExt;
         fs::OpenOptions::new()
             .create(true)
@@ -181,11 +191,8 @@ impl Wallet {
 /// database handle, wherefore this struct exists.
 #[derive(Debug, Clone)]
 pub struct WalletState {
-    pub db: Arc<TokioMutex<RustyLevelDB<BlockHash, WalletBlock>>>,
+    pub db: Arc<TokioMutex<RustyLevelDB<BlockHash, WalletBlockUtxos>>>,
     pub wallet: Wallet,
-    // MAYBE: maintain balance here?
-    // TODO: How do we know if the Wallet has seen a given block?
-
     // This `secret_key` corresponds to a `master_private_key` for Bitcoin wallet.
     // From this master key several individual UTXO private keys can be derived using this [scheme][scheme]
     // [scheme]: https://learnmeabitcoin.com/technical/derivation-paths
@@ -222,12 +229,12 @@ impl WalletState {
         let output_utxos: Vec<(Utxo, Digest)> =
             transaction.get_output_utxos_with_pub_key(my_pub_key);
 
-        // if we remove this
+        // Let's not store the UTXOs of blocks that don't affect our balance
         if input_utxos.is_empty() && output_utxos.is_empty() {
             return Ok(());
         }
 
-        let next_block_of_relevant_utxos = WalletBlock::new(input_utxos, output_utxos);
+        let next_block_of_relevant_utxos = WalletBlockUtxos::new(input_utxos, output_utxos);
 
         self.db
             .lock()
@@ -237,23 +244,21 @@ impl WalletState {
         Ok(())
     }
 
-    pub fn get_balance(&self) -> Amount {
-        block_on(async {
-            let sums: WalletBlockIOSums = self
-                .db
-                .lock()
-                .await
-                .new_iter()
-                .map(|(_block_hash, wallet_block)| wallet_block.get_io_sums())
-                .reduce(|a, b| a + b)
-                .unwrap();
-            sums.output_sum - sums.input_sum
-        })
+    pub async fn get_balance(&self) -> Amount {
+        let sums: WalletBlockIOSums = self
+            .db
+            .lock()
+            .await
+            .new_iter()
+            .map(|(_block_hash, wallet_block)| wallet_block.get_io_sums())
+            .reduce(|a, b| a + b)
+            .unwrap();
+        sums.output_sum - sums.input_sum
     }
 
     #[allow(dead_code)]
-    fn forget_block(&self, block_hash: Digest) {
-        block_on(async { self.db.lock().await.delete(block_hash) });
+    async fn forget_block(&self, block_hash: Digest) {
+        self.db.lock().await.delete(block_hash);
     }
 
     pub fn create_transaction(

@@ -39,7 +39,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::wallet::Wallet;
-use crate::models::blockchain::wallet::WalletBlock;
+use crate::models::blockchain::wallet::WalletBlockUtxos;
 use crate::models::blockchain::wallet::WalletState;
 use crate::models::database::BlockIndexKey;
 use crate::models::state::archival_state::ArchivalState;
@@ -608,7 +608,7 @@ pub fn get_mock_wallet_state() -> WalletState {
     let test_name = "mock_wallet_db";
 
     let db = Arc::new(TokioMutex::new(
-        RustyLevelDB::<Digest, WalletBlock>::new(&test_path, test_name, in_memory()).unwrap(),
+        RustyLevelDB::<Digest, WalletBlockUtxos>::new(&test_path, test_name, in_memory()).unwrap(),
     ));
 
     WalletState { db, wallet }
