@@ -279,11 +279,11 @@ mod connect_tests {
         config_models::network::Network,
         models::{
             blockchain::digest::Digest,
-            peer::{ConnectionStatus, PeerMessage, PeerSanctionReason, PeerStanding},
+            peer::{ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding},
         },
         tests::shared::{
             get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block,
-            get_test_genesis_setup, to_bytes,
+            get_dummy_peer_connection_data, get_test_genesis_setup, to_bytes,
         },
         MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
     };
@@ -337,49 +337,24 @@ mod connect_tests {
         let network = Network::Main;
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, mut state, _hsd) =
             get_test_genesis_setup(network, 1).await?;
-        let peer = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .clone();
-        let peer_id = peer.instance_id;
 
-        let own_handshake = get_dummy_handshake_data(network, 0);
-        let mut other_handshake = get_dummy_handshake_data(network, 1);
+        // Get an address for a peer that's not already connected
+        let (other_handshake, peer_sa) = get_dummy_peer_connection_data(network, 1);
+        let own_handshake = get_dummy_handshake_data(network, 2);
 
-        let mut status = get_connection_status(
-            &state,
-            &own_handshake,
-            &other_handshake,
-            &peer.connected_address,
-        )
-        .await;
+        let mut status =
+            get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
         if status != ConnectionStatus::Accepted {
             bail!("Must return ConnectionStatus::Accepted");
         }
 
-        status = get_connection_status(
-            &state,
-            &own_handshake,
-            &own_handshake,
-            &peer.connected_address,
-        )
-        .await;
+        status = get_connection_status(&state, &own_handshake, &own_handshake, &peer_sa).await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
         }
 
         state.cli.max_peers = 1;
-        status = get_connection_status(
-            &state,
-            &own_handshake,
-            &other_handshake,
-            &peer.connected_address,
-        )
-        .await;
+        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded) {
             bail!(
             "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
@@ -388,18 +363,58 @@ mod connect_tests {
         state.cli.max_peers = 100;
 
         // Attempt to connect to already connected peer
-        other_handshake.instance_id = peer_id;
-        status = get_connection_status(
-            &state,
-            &own_handshake,
-            &other_handshake,
-            &peer.connected_address,
-        )
-        .await;
+        let connected_peer: PeerInfo = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .values()
+            .collect::<Vec<_>>()[0]
+            .clone();
+        let mut mutated_other_handshake = other_handshake.clone();
+        mutated_other_handshake.instance_id = connected_peer.instance_id;
+        status =
+            get_connection_status(&state, &own_handshake, &mutated_other_handshake, &peer_sa).await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
             bail!(
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))"
             );
+        }
+
+        // Verify that banned peers are rejected by this check
+        // First check that peers can be banned by command-line arguments
+        state.cli.ban.push(peer_sa.ip());
+        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+        if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
+            bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on CLI-ban");
+        }
+
+        state.cli.ban.pop();
+        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+        if status != ConnectionStatus::Accepted {
+            bail!("Must return ConnectionStatus::Accepted after unban");
+        }
+
+        // Then check that peers can be banned by bad behavior
+        let bad_standing: PeerStanding = PeerStanding {
+            standing: u16::MAX,
+            latest_sanction: Some(PeerSanctionReason::InvalidBlock((
+                7u64.into(),
+                Digest::default(),
+            ))),
+            timestamp_of_latest_sanction: Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Failed to generate timestamp for peer standing")
+                    .as_secs(),
+            ),
+        };
+        state
+            .write_peer_standing_on_increase(peer_sa.ip(), bad_standing)
+            .await;
+        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+        if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
+            bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on db-ban");
         }
 
         Ok(())
