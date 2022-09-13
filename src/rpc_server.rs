@@ -63,9 +63,9 @@ impl RPC for NeptuneRPCServer {
         future::ready(latest_block.height)
     }
 
-    fn head(self, _: context::Context) -> Ready<Digest> {
-        let latest_block = self.state.chain.light_state.get_latest_block_header();
-        future::ready(latest_block.hash())
+    fn head(self, _: context::Context) -> Self::HeadFut {
+        let latest_block_header = self.state.chain.light_state.get_latest_block_header();
+        future::ready(latest_block_header.hash())
     }
 
     fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
