@@ -182,7 +182,12 @@ impl Transaction {
 
         if let Some(signature) = self.authority_proof {
             let authority_public_key = Wallet::devnet_authority_wallet().get_public_key();
-            return signature.verify(&msg, &authority_public_key).is_ok();
+            let valid: bool = signature.verify(&msg, &authority_public_key).is_ok();
+            if !valid {
+                warn!("Invalid authority-merge-signature for transaction");
+            }
+
+            return valid;
         }
 
         for input in self.inputs.iter() {
@@ -191,7 +196,7 @@ impl Transaction {
                 .verify(&msg, &input.utxo.public_key)
                 .is_err()
             {
-                warn!("Invalid signature for transaction");
+                warn!("Invalid input-signature for transaction");
                 return false;
             }
         }
