@@ -282,5 +282,22 @@ mod transaction_tests {
             !merged_transaction.devnet_is_valid(coinbase_amount),
             "Merged transaction must not be valid without authority proof"
         );
+
+        // Make an authority sign with a wrong secret key and verify failure
+        let kernel: TransactionKernel = merged_transaction.get_kernel();
+        let kernel_digest: Digest = kernel.hash();
+        let bad_authority_signature = wallet_1.sign_digest(kernel_digest);
+        merged_transaction.authority_proof = Some(bad_authority_signature);
+        assert!(
+            !merged_transaction.devnet_is_valid(coinbase_amount),
+            "Merged transaction must not be valid with wrong authority proof"
+        );
+
+        // Restore valid proof
+        merged_transaction.devnet_authority_sign();
+        assert!(
+            merged_transaction.devnet_is_valid(coinbase_amount),
+            "Merged transaction must be valid because of authority proof, 2"
+        );
     }
 }
