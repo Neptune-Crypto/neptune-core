@@ -24,10 +24,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 
-pub const WALLET_FILE_NAME: &str = "wallet.dat";
-pub const STANDARD_WALLET_NAME: &str = "standard_wallet";
-pub const STANDARD_WALLET_VERSION: u8 = 0;
-pub const STANDARD_WALLET_DB_NAME: &str = "wallet_db";
+const WALLET_FILE_NAME: &str = "wallet.dat";
+const STANDARD_WALLET_NAME: &str = "standard_wallet";
+const STANDARD_WALLET_VERSION: u8 = 0;
+const WALLET_BLOCK_DB_NAME: &str = "wallet_block_db";
 
 type BlockHash = Digest;
 /// The parts of a block that this wallet wants to keep track of,
@@ -84,12 +84,12 @@ pub fn generate_secret_key() -> Digest {
 /// and that is not updated during regular program execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Wallet {
-    pub name: String,
+    name: String,
 
     // For now we use `Digest` as secret key as it's consistent with STARK
     // proofs that we're transitioning to after DevNet.
-    pub secret: Digest,
-    pub version: u8,
+    secret: Digest,
+    version: u8,
 }
 
 impl Wallet {
@@ -232,7 +232,8 @@ impl Wallet {
 /// database handle, wherefore this struct exists.
 #[derive(Debug, Clone)]
 pub struct WalletState {
-    pub db: Arc<TokioMutex<RustyLevelDB<BlockHash, WalletBlockUtxos>>>,
+    // wallet_block_db contains those values that are updated each time a block arrives
+    pub wallet_block_db: Arc<TokioMutex<RustyLevelDB<BlockHash, WalletBlockUtxos>>>,
     pub wallet: Wallet,
     // This `secret_key` corresponds to a `master_private_key` for Bitcoin wallet.
     // From this master key several individual UTXO private keys can be derived using this [scheme][scheme]
@@ -241,15 +242,20 @@ pub struct WalletState {
 
 impl WalletState {
     pub fn new_from_wallet(wallet: Wallet, network: Network) -> Self {
-        let db: RustyLevelDB<BlockHash, WalletBlockUtxos> =
+        // Create or connect to wallet block DB
+        let wallet_block_db: RustyLevelDB<BlockHash, WalletBlockUtxos> =
             RustyLevelDB::<BlockHash, WalletBlockUtxos>::new(
                 get_data_directory(network).unwrap(),
-                STANDARD_WALLET_DB_NAME,
+                WALLET_BLOCK_DB_NAME,
                 rusty_leveldb::Options::default(),
             )
             .unwrap();
-        let db = Arc::new(TokioMutex::new(db));
-        Self { wallet, db }
+        let wallet_block_db = Arc::new(TokioMutex::new(wallet_block_db));
+
+        Self {
+            wallet_block_db,
+            wallet,
+        }
     }
 }
 
@@ -288,7 +294,7 @@ impl WalletState {
 
     pub async fn get_balance(&self) -> Amount {
         let sums: WalletBlockIOSums = self
-            .db
+            .wallet_block_db
             .lock()
             .await
             .new_iter()
@@ -300,7 +306,7 @@ impl WalletState {
 
     #[allow(dead_code)]
     async fn forget_block(&self, block_hash: Digest) {
-        self.db.lock().await.delete(block_hash);
+        self.wallet_block_db.lock().await.delete(block_hash);
     }
 
     pub fn create_transaction(

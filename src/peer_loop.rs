@@ -1034,7 +1034,7 @@ mod peer_loop_tests {
         config_models::{cli_args, network::Network},
         models::blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
         tests::shared::{
-            add_block, get_dummy_address, get_dummy_peer_connection_data, get_genesis_setup,
+            add_block, get_dummy_address, get_dummy_peer_connection_data, get_test_genesis_setup,
             make_mock_block, Action, Mock,
         },
     };
@@ -1047,7 +1047,7 @@ mod peer_loop_tests {
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 2).await?;
+            get_test_genesis_setup(Network::Main, 2).await?;
 
         let peer_address = get_dummy_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
@@ -1070,7 +1070,7 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_peer_list() -> Result<()> {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(Network::Main, 2).await?;
+            get_test_genesis_setup(Network::Main, 2).await?;
 
         let mut peer_infos = state
             .net
@@ -1121,7 +1121,7 @@ mod peer_loop_tests {
         // hardcoded. This should lead to the closing of the connection to this peer
         // and a ban.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let peer_address = get_dummy_address(0);
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
@@ -1196,7 +1196,7 @@ mod peer_loop_tests {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let peer_address = get_dummy_address(0);
         let genesis_block: Block = state
             .chain
@@ -1290,7 +1290,7 @@ mod peer_loop_tests {
         // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main thread.
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let peer_address = get_dummy_address(0);
         let genesis_block: Block = state
             .chain
@@ -1353,7 +1353,7 @@ mod peer_loop_tests {
         // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
         // are returned.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1440,7 +1440,7 @@ mod peer_loop_tests {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1500,7 +1500,7 @@ mod peer_loop_tests {
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
             Secp256k1::new().generate_keypair(&mut thread_rng());
         let peer_address = get_dummy_address(0);
@@ -1561,7 +1561,7 @@ mod peer_loop_tests {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 2, meaning that block 1 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let peer_address = get_dummy_address(0);
         let genesis_block: Block = state
             .chain
@@ -1630,7 +1630,7 @@ mod peer_loop_tests {
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
         // process as the alternative is that the program will crash because it runs out of RAM.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, _hsd) =
-            get_genesis_setup(Network::Main, 1).await?;
+            get_test_genesis_setup(Network::Main, 1).await?;
 
         // Restrict max number of blocks held in memory to 2.
         let mut a = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
@@ -1722,7 +1722,7 @@ mod peer_loop_tests {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let peer_address: SocketAddr = get_dummy_address(0);
         let genesis_block: Block = state
             .chain
@@ -1798,7 +1798,7 @@ mod peer_loop_tests {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 3, meaning that block 2 and 1 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let peer_address = get_dummy_address(0);
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
             Secp256k1::new().generate_keypair(&mut thread_rng());
@@ -1874,7 +1874,7 @@ mod peer_loop_tests {
         // But the requests are interrupted by the peer sending another message: a new block
         // notification.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
             Secp256k1::new().generate_keypair(&mut thread_rng());
         let peer_address: SocketAddr = get_dummy_address(0);
@@ -1966,7 +1966,7 @@ mod peer_loop_tests {
         // But the requests are interrupted by the peer sending another message: a request
         // for a list of peers.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
-            get_genesis_setup(Network::Main, 1).await?;
+            get_test_genesis_setup(Network::Main, 1).await?;
         let peer_infos: Vec<PeerInfo> = state
             .net
             .peer_map

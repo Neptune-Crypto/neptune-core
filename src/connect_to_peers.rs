@@ -285,8 +285,8 @@ mod connect_tests {
             peer::{ConnectionStatus, PeerMessage, PeerSanctionReason, PeerStanding},
         },
         tests::shared::{
-            get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block, get_genesis_setup,
-            to_bytes,
+            get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block,
+            get_test_genesis_setup, to_bytes,
         },
         MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
     };
@@ -313,7 +313,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
         call_peer(
             mock,
             state.clone(),
@@ -339,7 +339,7 @@ mod connect_tests {
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Main;
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(network, 1).await?;
+            get_test_genesis_setup(network, 1).await?;
         let peer = state
             .net
             .peer_map
@@ -439,7 +439,7 @@ mod connect_tests {
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         answer_peer(
             mock,
             state.clone(),
@@ -474,7 +474,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(network, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
 
         let answer = answer_peer(
             mock,
@@ -508,7 +508,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Main, 0).await?;
 
         let answer = answer_peer(
             mock,
@@ -543,7 +543,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(Network::Main, 2).await?;
+            get_test_genesis_setup(Network::Main, 2).await?;
         let (_, _, _latest_block_header) = get_dummy_latest_block(None);
 
         let answer = answer_peer(
@@ -585,7 +585,8 @@ mod connect_tests {
 
         let peer_count_before_incoming_connection_request = 3;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_genesis_setup(Network::Main, peer_count_before_incoming_connection_request).await?;
+            get_test_genesis_setup(Network::Main, peer_count_before_incoming_connection_request)
+                .await?;
         let bad_standing: PeerStanding = PeerStanding {
             standing: u16::MAX,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((

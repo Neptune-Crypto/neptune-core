@@ -15,7 +15,7 @@ use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use rusty_leveldb::in_memory;
+use rusty_leveldb;
 use secp256k1::ecdsa;
 use std::path::PathBuf;
 use std::{
@@ -81,7 +81,7 @@ pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
 // Return empty database objects, and root directory for this unit test instantiation's
 /// data directory.
 #[allow(clippy::type_complexity)]
-pub fn databases(
+pub fn unit_test_databases(
     network: Network,
 ) -> Result<(
     Arc<tokio::sync::Mutex<BlockDatabases>>,
@@ -187,7 +187,7 @@ pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeDat
 /// Returns:
 /// (peer_broadcast_channel, from_main_receiver, to_main_transmitter, to_main_receiver, global state, peer's handshake data)
 #[allow(clippy::type_complexity)]
-pub async fn get_genesis_setup(
+pub async fn get_test_genesis_setup(
     network: Network,
     peer_count: u8,
 ) -> Result<(
@@ -214,7 +214,7 @@ pub async fn get_genesis_setup(
     }
 
     let (block, _, _) = get_dummy_latest_block(None);
-    let (block_databases, peer_databases, root_data_dir_path) = databases(network)?;
+    let (block_databases, peer_databases, root_data_dir_path) = unit_test_databases(network)?;
     let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
     let ams = Arc::new(tokio::sync::Mutex::new(ams));
     let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
@@ -270,6 +270,7 @@ pub async fn add_block_to_archival_state(
     Ok(())
 }
 
+/// Return an appropriate data directory for unit tests
 fn get_data_director_for_unit_tests() -> Result<PathBuf> {
     let mut dir: PathBuf = env::temp_dir();
     dir.push("neptune-unit-tests");
@@ -651,24 +652,28 @@ pub fn get_mock_wallet_state() -> WalletState {
         BFieldElement::new(5097796649750941488),
         BFieldElement::new(12701344140082211424),
     ]);
-    let wallet = Wallet {
-        name: "test_wallet_name".to_string(),
-        version: 0,
-        secret: dummy_secret_for_genesis_wallet,
-    };
+    let wallet = Wallet::new(dummy_secret_for_genesis_wallet);
 
     let test_path = get_data_director_for_unit_tests().unwrap();
-    let test_name = "mock_wallet_db";
+    let wallet_block_db_name = "mock_wallet_block_db";
 
-    let db = Arc::new(TokioMutex::new(
-        RustyLevelDB::<Digest, WalletBlockUtxos>::new(&test_path, test_name, in_memory()).unwrap(),
+    let wallet_block_db = Arc::new(TokioMutex::new(
+        RustyLevelDB::<Digest, WalletBlockUtxos>::new(
+            &test_path,
+            wallet_block_db_name,
+            rusty_leveldb::in_memory(),
+        )
+        .unwrap(),
     ));
 
-    WalletState { db, wallet }
+    WalletState {
+        wallet_block_db,
+        wallet,
+    }
 }
 
-pub async fn make_archival_state() -> ArchivalState {
-    let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+pub async fn make_unit_test_archival_state() -> ArchivalState {
+    let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
     println!("root_data_dir_path = {:?}", root_data_dir_path);
 
     let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();

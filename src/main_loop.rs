@@ -304,7 +304,7 @@ impl MainLoopHandler {
                 // Acquire both locks before updating
                 let mut wallet_state_db: tokio::sync::MutexGuard<
                     RustyLevelDB<Digest, WalletBlockUtxos>,
-                > = self.global_state.wallet_state.db.lock().await;
+                > = self.global_state.wallet_state.wallet_block_db.lock().await;
                 let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                     .global_state
                     .chain
@@ -391,7 +391,7 @@ impl MainLoopHandler {
                 {
                     let mut wallet_state_db: tokio::sync::MutexGuard<
                         RustyLevelDB<Digest, WalletBlockUtxos>,
-                    > = self.global_state.wallet_state.db.lock().await;
+                    > = self.global_state.wallet_state.wallet_block_db.lock().await;
                     let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain

@@ -821,7 +821,8 @@ mod archival_state_tests {
         },
         tests::shared::{
             add_block_to_archival_state, add_output_to_block, add_unsigned_input_to_block,
-            databases, get_mock_wallet_state, make_archival_state, make_mock_block,
+            get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
+            unit_test_databases,
         },
     };
 
@@ -830,7 +831,7 @@ mod archival_state_tests {
     async fn initialize_archival_state_test() -> Result<()> {
         // Ensure that the archival state can be initialized without overflowing the stack
         tokio::spawn(async move {
-            let (block_databases_0, _, data_dir_0) = databases(Network::Main).unwrap();
+            let (block_databases_0, _, data_dir_0) = unit_test_databases(Network::Main).unwrap();
             let (ams0, ms_block_sync_0) =
                 ArchivalState::initialize_mutator_set(&data_dir_0).unwrap();
             let ams0 = Arc::new(TokioMutex::new(ams0));
@@ -838,7 +839,7 @@ mod archival_state_tests {
             let archival_state0 =
                 ArchivalState::new(block_databases_0, ams0, data_dir_0, ms_block_sync_0).await;
 
-            let (block_databases_1, _, data_dir_1) = databases(Network::Main).unwrap();
+            let (block_databases_1, _, data_dir_1) = unit_test_databases(Network::Main).unwrap();
             let (ams1, ms_block_sync_1) =
                 ArchivalState::initialize_mutator_set(&data_dir_1).unwrap();
             let ams1 = Arc::new(TokioMutex::new(ams1));
@@ -846,7 +847,7 @@ mod archival_state_tests {
             let _archival_state1 =
                 ArchivalState::new(block_databases_1, ams1, data_dir_1, ms_block_sync_1).await;
 
-            let (block_databases_2, _, data_dir_2) = databases(Network::Main).unwrap();
+            let (block_databases_2, _, data_dir_2) = unit_test_databases(Network::Main).unwrap();
             let (ams2, ms_block_sync_2) =
                 ArchivalState::initialize_mutator_set(&data_dir_2).unwrap();
             let ams2 = Arc::new(TokioMutex::new(ams2));
@@ -889,7 +890,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn update_mutator_set_db_write_test() -> Result<()> {
         // Verify that `update_mutator_set` writes the active window back to disk.
-        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
         println!("root_data_dir_path = {:?}", root_data_dir_path);
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
@@ -1010,7 +1011,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
-        let archival_state: ArchivalState = make_archival_state().await;
+        let archival_state: ArchivalState = make_unit_test_archival_state().await;
         let mut block_db_lock = archival_state.block_databases.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
@@ -1061,7 +1062,7 @@ mod archival_state_tests {
         // Make a rollback of one block that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks.
-        let archival_state: ArchivalState = make_archival_state().await;
+        let archival_state: ArchivalState = make_unit_test_archival_state().await;
         let genesis_wallet_state = get_mock_wallet_state();
         let genesis_wallet = genesis_wallet_state.wallet;
 
@@ -1173,7 +1174,7 @@ mod archival_state_tests {
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
-        let archival_state: ArchivalState = make_archival_state().await;
+        let archival_state: ArchivalState = make_unit_test_archival_state().await;
         let genesis_wallet_state = get_mock_wallet_state();
         let genesis_wallet = genesis_wallet_state.wallet;
 
@@ -1307,7 +1308,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
-        let archival_state: ArchivalState = make_archival_state().await;
+        let archival_state: ArchivalState = make_unit_test_archival_state().await;
         let genesis_wallet_state = get_mock_wallet_state();
         let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1_a = make_mock_block(
@@ -1411,7 +1412,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
-        let archival_state: ArchivalState = make_archival_state().await;
+        let archival_state: ArchivalState = make_unit_test_archival_state().await;
         let genesis_wallet_state = get_mock_wallet_state();
         let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1 = make_mock_block(
@@ -1468,7 +1469,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn get_latest_block_test() -> Result<()> {
-        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
         println!("root_data_dir_path = {:?}", root_data_dir_path);
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
@@ -1530,7 +1531,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn get_block_test() -> Result<()> {
-        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
         let ams = Arc::new(TokioMutex::new(ams));
@@ -1606,7 +1607,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_belongs_to_canonical_chain_test() -> Result<()> {
-        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
         let ams = Arc::new(TokioMutex::new(ams));
@@ -1911,7 +1912,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn digest_of_ancestors_panic_test() {
-        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
         let ams = Arc::new(TokioMutex::new(ams));
@@ -1932,7 +1933,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn digest_of_ancestors_test() -> Result<()> {
-        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
         let ams = Arc::new(TokioMutex::new(ams));
@@ -2012,7 +2013,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn write_block_db_test() -> Result<()> {
-        let (block_databases, _, root_data_dir_path) = databases(Network::Main).unwrap();
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
         let ams = Arc::new(TokioMutex::new(ams));
