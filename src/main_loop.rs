@@ -839,7 +839,6 @@ impl MainLoopHandler {
                     let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
                     let peer_address = stream.peer_addr().unwrap();
                     let own_handshake_data: HandshakeData = state.get_handshakedata();
-                    let max_peers = state.cli.max_peers;
                     tokio::spawn(async move {
                         match answer_peer(
                             stream,
@@ -848,7 +847,6 @@ impl MainLoopHandler {
                             main_to_peer_broadcast_rx_clone,
                             peer_thread_to_main_tx_clone,
                             own_handshake_data,
-                            max_peers
                         ).await {
                             Ok(()) => (),
                             Err(err) => error!("Got error: {:?}", err),

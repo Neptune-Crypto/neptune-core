@@ -23,7 +23,6 @@ use crate::{
 };
 
 async fn get_connection_status(
-    max_peers: u16,
     state: &GlobalState,
     own_handshake: &HandshakeData,
     other_handshake: &HandshakeData,
@@ -49,7 +48,7 @@ async fn get_connection_status(
     let pm = state.net.peer_map.lock().unwrap();
 
     // Disallow connection if max number of &peers has been attained
-    if (max_peers as usize) <= pm.len() {
+    if (state.cli.max_peers as usize) <= pm.len() {
         return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
     }
 
@@ -78,7 +77,6 @@ pub async fn answer_peer<S>(
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: HandshakeData,
-    max_peers: u16,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
@@ -118,8 +116,7 @@ where
 
             // Check if connection is allowed
             let connection_status =
-                get_connection_status(max_peers, &state, &own_handshake_data, &hsd, &peer_address)
-                    .await;
+                get_connection_status(&state, &own_handshake_data, &hsd, &peer_address).await;
 
             peer.send(PeerMessage::ConnectionStatus(connection_status))
                 .await?;
@@ -338,7 +335,7 @@ mod connect_tests {
     #[tokio::test]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Main;
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, mut state, _hsd) =
             get_test_genesis_setup(network, 1).await?;
         let peer = state
             .net
@@ -354,7 +351,6 @@ mod connect_tests {
         let mut other_handshake = get_dummy_handshake_data(network, 1);
 
         let mut status = get_connection_status(
-            4,
             &state,
             &own_handshake,
             &other_handshake,
@@ -366,7 +362,6 @@ mod connect_tests {
         }
 
         status = get_connection_status(
-            4,
             &state,
             &own_handshake,
             &own_handshake,
@@ -377,8 +372,8 @@ mod connect_tests {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
         }
 
+        state.cli.max_peers = 1;
         status = get_connection_status(
-            1,
             &state,
             &own_handshake,
             &other_handshake,
@@ -390,11 +385,11 @@ mod connect_tests {
             "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
         );
         }
+        state.cli.max_peers = 100;
 
         // Attempt to connect to already connected peer
         other_handshake.instance_id = peer_id;
         status = get_connection_status(
-            100,
             &state,
             &own_handshake,
             &other_handshake,
@@ -447,7 +442,6 @@ mod connect_tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
-            8,
         )
         .await?;
 
@@ -483,7 +477,6 @@ mod connect_tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
-            8,
         )
         .await;
         assert!(answer.is_err(), "expected bad magic value failure");
@@ -517,7 +510,6 @@ mod connect_tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
-            8,
         )
         .await;
         assert!(answer.is_err(), "bad network must result in error");
@@ -528,6 +520,8 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
+        // In this scenario a node attempts to make an ingoing connection but this
+        // node is banned, so this should not succeed.
         let network = Network::Main;
         let other_handshake = get_dummy_handshake_data(network, 1);
         let own_handshake = get_dummy_handshake_data(network, 0);
@@ -542,10 +536,13 @@ mod connect_tests {
             ))))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state, _hsd) =
             get_test_genesis_setup(Network::Main, 2).await?;
-        let (_, _, _latest_block_header) = get_dummy_latest_block(None);
 
+        // set max_peers to 2 to ensure failure on next connection attempt
+        state.cli.max_peers = 2;
+
+        let (_, _, _latest_block_header) = get_dummy_latest_block(None);
         let answer = answer_peer(
             mock,
             state,
@@ -553,7 +550,6 @@ mod connect_tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
-            2,
         )
         .await;
         assert!(answer.is_err(), "max peers exceeded must result in error");
@@ -612,7 +608,6 @@ mod connect_tests {
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
-            42,
         )
         .await;
         assert!(
