@@ -130,9 +130,12 @@ impl Block {
     }
 
     fn premine_utxos() -> Vec<Utxo> {
+        // The premine UTXOs can be hardcoded here.
+        // let devnet_authority_wallet = Wallet::devnet_authority_wallet();
         vec![Utxo::new_from_hex(
             20000.into(),
-            "03c7635c31ad6c52fa86f982275e3c2620dd712718b68be19e57f14595da133522",
+            "03b1f961943bfc4875429a8000e94d765bb75b992d16594927677b12ef3927e5a9",
+            // &devnet_authority_wallet.get_public_key().to_string(),
         )]
     }
 

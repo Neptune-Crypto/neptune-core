@@ -666,7 +666,17 @@ pub fn get_mock_wallet_state() -> WalletState {
         .unwrap(),
     ));
 
+    let outgoing_utxo_counter_db = Arc::new(TokioMutex::new(
+        RustyLevelDB::<(), u128>::new(
+            &test_path,
+            "outgoing_utxo_counter_db",
+            rusty_leveldb::in_memory(),
+        )
+        .unwrap(),
+    ));
+
     WalletState {
+        outgoing_utxo_counter_db,
         wallet_block_db,
         wallet,
     }

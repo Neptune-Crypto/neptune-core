@@ -129,9 +129,9 @@ impl RPC for NeptuneRPCServer {
         let mut response: Result<(), SendError<RPCServerToMain>> = Ok(());
         for utxo in recipient_utxos {
             // 1. Build transaction objects.
-            let transaction: Transaction = wallet_state
-                .create_transaction(utxo.amount, utxo.public_key)
-                .expect("Could not create transaction object; TODO: Handle error better.");
+            let transaction: Transaction =
+                executor::block_on(wallet_state.create_transaction(utxo.amount, utxo.public_key))
+                    .expect("Could not create transaction object");
 
             // 2. Send transaction message to main
             response = executor::block_on(
