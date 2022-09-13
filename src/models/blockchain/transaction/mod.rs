@@ -255,8 +255,27 @@ mod transaction_tests {
         let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
         let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
 
-        assert!(!transaction_1.devnet_is_valid(Some(output_amount_1)));
+        assert!(!transaction_1.devnet_is_valid(None));
         transaction_1.sign(&wallet_1);
-        assert!(transaction_1.devnet_is_valid(Some(output_amount_1)));
+        assert!(transaction_1.devnet_is_valid(None));
+
+        let input_2 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
+        let mut transaction_2 = make_mock_transaction(vec![input_2], vec![(output_1, randomness)]);
+
+        assert!(!transaction_2.devnet_is_valid(None));
+        transaction_2.sign(&wallet_1);
+        assert!(transaction_2.devnet_is_valid(None));
+
+        let mut merged_transaction = transaction_1.merge_with(transaction_2);
+        assert!(
+            merged_transaction.devnet_is_valid(coinbase_amount),
+            "Merged transaction must be valid because of authority proof"
+        );
+
+        merged_transaction.authority_proof = None;
+        assert!(
+            !merged_transaction.devnet_is_valid(coinbase_amount),
+            "Merged transaction must not be valid without authority proof"
+        );
     }
 }
