@@ -2,6 +2,7 @@ use mutator_set_tf::util_types::mutator_set::{
     mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
 };
 use num_traits::{One, Zero};
+use secp256k1::ecdsa;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 use twenty_first::{
@@ -68,6 +69,7 @@ impl Block {
         let mut ms_update = MutatorSetUpdate::default();
         // This is just the UNIX timestamp when this code was written
         let timestamp: BFieldElement = BFieldElement::new(1655916990u64);
+        let authority_proof: Option<ecdsa::Signature> = None;
 
         let mut genesis_coinbase_tx = Transaction {
             inputs: vec![],
@@ -75,6 +77,7 @@ impl Block {
             public_scripts: vec![],
             fee: 0u32.into(),
             timestamp,
+            authority_proof,
         };
 
         for premine_utxo in Self::premine_utxos() {

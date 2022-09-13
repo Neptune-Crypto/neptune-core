@@ -174,6 +174,7 @@ fn make_coinbase_transaction(
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,
+        authority_proof: None,
     }
 }
 
@@ -267,14 +268,15 @@ mod mine_loop_tests {
         let previous_block = Block::genesis_block();
         let wallet_state = get_mock_wallet_state();
         let coinbase_tx =
-            make_coinbase_transaction(wallet_state.get_public_key(), &previous_block.header);
+            make_coinbase_transaction(wallet_state.wallet.get_public_key(), &previous_block.header);
         let (block_header, block_body) = make_devnet_block_template(&previous_block, coinbase_tx);
         let block_template_1 = Block::new(block_header, block_body);
         assert!(block_template_1.devnet_is_valid(&previous_block));
 
-        let mock_block_1 = make_mock_block(&previous_block, None, wallet_state.get_public_key());
+        let mock_block_1 =
+            make_mock_block(&previous_block, None, wallet_state.wallet.get_public_key());
         let coinbase_tx_2 =
-            make_coinbase_transaction(wallet_state.get_public_key(), &mock_block_1.header);
+            make_coinbase_transaction(wallet_state.wallet.get_public_key(), &mock_block_1.header);
         let (block_header_2, block_body_2) =
             make_devnet_block_template(&mock_block_1, coinbase_tx_2);
         let block_template_2 = Block::new(block_header_2, block_body_2);

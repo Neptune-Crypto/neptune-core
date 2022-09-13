@@ -24,7 +24,10 @@ async fn main() -> Result<()> {
     let wallet_state = WalletState::new_from_wallet(wallet, network);
 
     println!("Wallet stored in: {}", wallet_file.display());
-    println!("Wallet public key: {}", wallet_state.get_public_key());
+    println!(
+        "Wallet public key: {}",
+        wallet_state.wallet.get_public_key()
+    );
 
     Ok(())
 }

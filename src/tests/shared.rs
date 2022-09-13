@@ -6,7 +6,9 @@ use futures::stream;
 use futures::task::{Context, Poll};
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+use mutator_set_tf::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::One;
@@ -30,6 +32,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::traits::GetRandomElements;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
 use crate::database::leveldb::LevelDB;
@@ -38,6 +41,8 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
+use crate::models::blockchain::transaction::Amount;
+use crate::models::blockchain::wallet;
 use crate::models::blockchain::wallet::Wallet;
 use crate::models::blockchain::wallet::WalletBlockUtxos;
 use crate::models::blockchain::wallet::WalletState;
@@ -515,6 +520,63 @@ pub async fn add_unsigned_input_to_block(
     );
 }
 
+pub fn new_random_wallet() -> Wallet {
+    Wallet::new(wallet::generate_secret_key())
+}
+
+/// Create a mock `DevNetInput`
+///
+/// This mock currently contains a lot of things that don't pass block validation.
+pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNetInput {
+    let mock_mmr_membership_proof = MmrMembershipProof {
+        data_index: 0,
+        authentication_path: vec![],
+    };
+    let mock_ms_membership_proof = MsMembershipProof {
+        randomness: Digest::default().into(),
+        auth_path_aocl: mock_mmr_membership_proof,
+        target_chunks: ChunkDictionary::default(),
+        cached_bits: None,
+    };
+    let mut mock_ms_acc = MutatorSetAccumulator::default();
+    let mock_removal_record =
+        mock_ms_acc.drop(&Digest::default().into(), &mock_ms_membership_proof);
+
+    let utxo = Utxo {
+        amount,
+        public_key: wallet.get_public_key(),
+    };
+
+    DevNetInput {
+        utxo,
+        membership_proof: mock_ms_membership_proof.into(),
+        removal_record: mock_removal_record,
+        // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
+        signature: ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap(),
+    }
+}
+
+pub fn make_mock_transaction(
+    inputs: Vec<DevNetInput>,
+    outputs: Vec<(Utxo, Digest)>,
+) -> Transaction {
+    let timestamp: BFieldElement = BFieldElement::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Got bad time timestamp in mining process")
+            .as_secs(),
+    );
+
+    Transaction {
+        inputs,
+        outputs,
+        public_scripts: vec![],
+        fee: U32s::zero(),
+        timestamp,
+        authority_proof: None,
+    }
+}
+
 /// Return a fake block with a random hash, containing *one* output UTXO in the form
 /// of a coinbase output.
 pub fn make_mock_block(
@@ -529,19 +591,10 @@ pub fn make_mock_block(
     };
     let output_randomness =
         BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
-    let timestamp: BFieldElement = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
-            .as_secs(),
+    let transaction = make_mock_transaction(
+        vec![],
+        vec![(coinbase_utxo, output_randomness.clone().into())],
     );
-    let transaction = Transaction {
-        inputs: vec![],
-        outputs: vec![(coinbase_utxo, output_randomness.clone().into())],
-        public_scripts: vec![],
-        fee: U32s::zero(),
-        timestamp,
-    };
     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
     let coinbase_digest: Digest = coinbase_utxo.hash();
@@ -572,7 +625,7 @@ pub fn make_mock_block(
         height: new_block_height,
         mutator_set_commitment: new_ms.get_commitment().into(),
         prev_block_digest: previous_block.hash,
-        timestamp,
+        timestamp: block_body.transaction.timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
         proof_of_work_line: pow_family,
