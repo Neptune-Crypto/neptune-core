@@ -3,7 +3,7 @@ use serde::ser::{Serialize, SerializeTuple, Serializer};
 use std::fmt;
 use std::marker::PhantomData;
 
-pub trait BoxedBigArray<'de>: Sized {
+pub trait CompositeBigArray<'de>: Sized {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer;
@@ -19,7 +19,7 @@ macro_rules! big_array {
             // represent the `None` and a randomly generation `u128` value inserted below represent
             // the `Some`. This should work as long as the default value for T does not serialize
             // to the random value.
-            impl<'de, T> BoxedBigArray<'de> for Option<[T; $len]>
+            impl<'de, T> CompositeBigArray<'de> for Option<[T; $len]>
                 where T: Default + Copy + Serialize + Deserialize<'de>+ PartialEq
             {
                 fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -83,7 +83,7 @@ macro_rules! big_array {
                 }
             }
 
-            impl<'de, T> BoxedBigArray<'de> for Box<[T; $len]>
+            impl<'de, T> CompositeBigArray<'de> for Box<[T; $len]>
                 where T: Default + Copy + Serialize + Deserialize<'de>
             {
                 fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

@@ -15,7 +15,7 @@ use twenty_first::{
 
 use super::{
     addition_record::AdditionRecord,
-    boxed_big_array::BoxedBigArray,
+    boxed_big_array::CompositeBigArray,
     chunk_dictionary::ChunkDictionary,
     removal_record::RemovalRecord,
     set_commitment::SetCommitment,
@@ -53,7 +53,7 @@ pub struct MsMembershipProof<H: simple_hasher::Hasher> {
     // later bookkeeping, such as updating the membership proof.
     // Warning: These bits should not be trusted and should only be calculated
     // locally. If they are trusted the soundness of the mutator set is compromised.
-    #[serde(with = "BoxedBigArray")]
+    #[serde(with = "CompositeBigArray")]
     pub cached_bits: Option<[u128; NUM_TRIALS]>,
 }
 
