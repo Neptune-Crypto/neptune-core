@@ -13,6 +13,7 @@ enum Command {
     BlockHeight,
     GetPeerInfo,
     Head,
+    Heads { n: usize },
     ClearAllStandings,
     ClearIpStanding { ip: IpAddr },
     Send { unparsed_send_argument: String },
@@ -61,6 +62,12 @@ async fn main() -> Result<()> {
         Command::Head => {
             let head_hash = client.head(context::current()).await?;
             println!("{}", head_hash);
+        }
+        Command::Heads { n } => {
+            let head_hashes = client.heads(context::current(), n).await?;
+            for hash in head_hashes {
+                println!("{}", hash);
+            }
         }
         Command::ClearAllStandings => {
             client.clear_all_standings(context::current()).await?;

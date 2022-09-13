@@ -23,6 +23,9 @@ pub trait RPC {
     /// Returns the digest of the latest block
     async fn head() -> Digest;
 
+    /// Returns the digest of the latest n blocks
+    async fn heads(n: usize) -> Vec<Digest>;
+
     /// Clears standing for all peers, connected or not
     async fn clear_all_standings();
 
@@ -50,6 +53,7 @@ impl RPC for NeptuneRPCServer {
     type BlockHeightFut = Ready<BlockHeight>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
     type HeadFut = Ready<Digest>;
+    type HeadsFut = Ready<Vec<Digest>>;
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
     type SendFut = Ready<bool>;
@@ -66,6 +70,26 @@ impl RPC for NeptuneRPCServer {
     fn head(self, _: context::Context) -> Self::HeadFut {
         let latest_block_header = self.state.chain.light_state.get_latest_block_header();
         future::ready(latest_block_header.hash())
+    }
+
+    fn heads(self, _context: tarpc::context::Context, n: usize) -> Self::HeadsFut {
+        let latest_block_header = self
+            .state
+            .chain
+            .light_state
+            .get_latest_block_header()
+            .hash();
+
+        let head_hashes = executor::block_on(
+            self.state
+                .chain
+                .archival_state
+                .as_ref()
+                .expect("Can not give multiple ancestor hashes unless there is an archival state.")
+                .get_ancestor_block_digests(latest_block_header, n),
+        );
+
+        future::ready(head_hashes)
     }
 
     fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
