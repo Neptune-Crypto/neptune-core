@@ -15,6 +15,74 @@ pub trait BoxedBigArray<'de>: Sized {
 macro_rules! big_array {
     ($($len:expr,)+) => {
         $(
+            // This Option<[T; $len]> is serialized by letting the T::default() value
+            // represent the `None` and a randomly generation `u128` value inserted below represent
+            // the `Some`. This should work as long as the default value for T does not serialize
+            // to the random value.
+            impl<'de, T> BoxedBigArray<'de> for Option<[T; $len]>
+                where T: Default + Copy + Serialize + Deserialize<'de>+ PartialEq
+            {
+                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                    where S: Serializer
+                {
+                    let default = T::default();
+                    match self {
+                        None => {
+                            let mut seq = serializer.serialize_tuple(1)?;
+                            seq.serialize_element(&default)?;
+                            seq.end()
+                        },
+                        Some(array) => {
+                            let mut seq = serializer.serialize_tuple(array.len() + 1)?;
+                            seq.serialize_element(&244708374526624735806982989568916108891u128)?;
+                            for elem in &array[0..] {
+                                seq.serialize_element(elem)?;
+                            }
+                            seq.end()
+                        }
+                    }
+
+                }
+
+                fn deserialize<D>(deserializer: D) -> Result<Option<[T; $len]>, D::Error>
+                    where D: Deserializer<'de>
+                {
+                    struct ArrayVisitor<T> {
+                        element: PhantomData<T>,
+                    }
+
+                    impl<'de, T> Visitor<'de> for ArrayVisitor<T>
+                        where T: Default + Copy + Deserialize<'de> + PartialEq
+                    {
+                        type Value = Option<[T; $len]>;
+
+                        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                            formatter.write_str(concat!("an array of length ", $len))
+                        }
+
+                        fn visit_seq<A>(self, mut seq: A) -> Result<Option<[T; $len]>, A::Error>
+                            where A: SeqAccess<'de>
+                        {
+                            let default = T::default();
+                            if default == seq.next_element()?
+                            .ok_or_else(|| Error::invalid_length(0, &self))? {
+                                Ok(None)
+                            } else {
+                                let mut arr = [T::default(); $len];
+                                for i in 0..$len {
+                                    arr[i] = seq.next_element()?
+                                        .ok_or_else(|| Error::invalid_length(i, &self))?;
+                                }
+                                Ok(Some(arr))
+                            }
+                        }
+                    }
+
+                    let visitor = ArrayVisitor { element: PhantomData };
+                    deserializer.deserialize_tuple($len + 1, visitor)
+                }
+            }
+
             impl<'de, T> BoxedBigArray<'de> for Box<[T; $len]>
                 where T: Default + Copy + Serialize + Deserialize<'de>
             {
