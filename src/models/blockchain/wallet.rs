@@ -85,6 +85,9 @@ pub fn generate_secret_key() -> Digest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Wallet {
     pub name: String,
+
+    // For now we use `Digest` as secret key as it's consistent with STARK
+    // proofs that we're transitioning to after DevNet.
     pub secret: Digest,
     pub version: u8,
 }
@@ -216,6 +219,8 @@ impl Wallet {
         secp256k1::PublicKey::from_secret_key(&secp, &ecdsa_secret_key)
     }
 
+    // This is a temporary workaround until our own cryptography is ready.
+    // At that point we can return `Digest` as is.
     fn get_ecdsa_sk(&self) -> secp256k1::SecretKey {
         let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = self.secret.into();
         secp256k1::SecretKey::from_slice(&bytes).unwrap()
