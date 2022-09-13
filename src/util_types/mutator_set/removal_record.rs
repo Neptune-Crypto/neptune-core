@@ -370,32 +370,6 @@ mod removal_record_tests {
     }
 
     #[test]
-    fn serialization_test() {
-        // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
-        // an imported library. I included it here, though, because the setup seems a bit clumsy
-        // to me so far.
-        type H = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
-        let hasher = H::new();
-        let mut prng = thread_rng();
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash(
-            &BFieldElement::random_elements(3, &mut prng),
-            RP_DEFAULT_OUTPUT_SIZE,
-        );
-        let randomness = hasher.hash(
-            &BFieldElement::random_elements(3, &mut prng),
-            RP_DEFAULT_OUTPUT_SIZE,
-        );
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
-
-        let json: String = serde_json::to_string(&removal_record).unwrap();
-        let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
-        assert_eq!(s_back.bit_indices, removal_record.bit_indices);
-        assert_eq!(s_back.target_chunks, removal_record.target_chunks);
-    }
-
-    #[test]
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = blake3::Hasher;
@@ -590,5 +564,31 @@ mod removal_record_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn serialization_test() {
+        // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
+        // an imported library. I included it here, though, because the setup seems a bit clumsy
+        // to me so far.
+        type H = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
+        let hasher = H::new();
+        let mut prng = thread_rng();
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let item = hasher.hash(
+            &BFieldElement::random_elements(3, &mut prng),
+            RP_DEFAULT_OUTPUT_SIZE,
+        );
+        let randomness = hasher.hash(
+            &BFieldElement::random_elements(3, &mut prng),
+            RP_DEFAULT_OUTPUT_SIZE,
+        );
+        let mp = accumulator.prove(&item, &randomness, true);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+
+        let json: String = serde_json::to_string(&removal_record).unwrap();
+        let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
+        assert_eq!(s_back.bit_indices, removal_record.bit_indices);
+        assert_eq!(s_back.target_chunks, removal_record.target_chunks);
     }
 }
