@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
@@ -38,6 +40,25 @@ pub struct BlockHeader {
     pub target_difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
     pub block_body_merkle_root: Digest,
     pub uncles: Vec<Digest>,
+}
+
+impl Display for BlockHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let string = format!(
+            "Height: {}\n\
+            Timestamp: {}\n\
+            Prev. Digest: {}\n\
+            Proof-of-work-line: IMPLEMENT\n\
+            Proof-of-work-family: IMPLEMENT",
+            self.height,
+            self.timestamp,
+            self.prev_block_digest,
+            //self.proof_of_work_line,
+            //self.proof_of_work_family
+        );
+
+        write!(f, "{}", string)
+    }
 }
 
 impl Hashable for BlockHeader {

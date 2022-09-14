@@ -33,7 +33,7 @@ impl Digest {
     }
 }
 
-const DIGEST_SEPPARATOR: &str = ", ";
+const DIGEST_SEPPARATOR: &str = ",";
 
 impl fmt::Display for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
