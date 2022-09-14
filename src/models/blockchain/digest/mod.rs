@@ -45,13 +45,14 @@ impl fmt::Display for Digest {
 impl FromStr for Digest {
     type Err = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
         let digest = Digest::from(
-            s.split(DIGEST_SEPPARATOR)
-                .map(|s| BFieldElement::new(s.parse::<u64>().unwrap()))
+            string
+                .split(DIGEST_SEPPARATOR)
+                .map(|substring| BFieldElement::new(substring.parse::<u64>().unwrap()))
                 .collect::<Vec<_>>(),
         );
-        return Ok(digest);
+        Ok(digest)
     }
 }
 
