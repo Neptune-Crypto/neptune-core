@@ -1,6 +1,6 @@
 pub mod ordered_digest;
 
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
@@ -33,10 +33,25 @@ impl Digest {
     }
 }
 
+const DIGEST_SEPPARATOR: &str = ", ";
+
 impl fmt::Display for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let string = self.0.map(|elem| elem.to_string()).join(", ");
+        let string = self.0.map(|elem| elem.to_string()).join(DIGEST_SEPPARATOR);
         write!(f, "{}", string)
+    }
+}
+
+impl FromStr for Digest {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let digest = Digest::from(
+            s.split(DIGEST_SEPPARATOR)
+                .map(|s| BFieldElement::new(s.parse::<u64>().unwrap()))
+                .collect::<Vec<_>>(),
+        );
+        return Ok(digest);
     }
 }
 
