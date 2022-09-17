@@ -2,24 +2,31 @@
 
 Reference implementation for the Neptune protocol.
 
-## Setup for Development
-### Ubuntu
+## Setup for Development (Ubuntu)
+
  - curl -- `apt install curl`
  - rustup -- `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` (installs rustup, cargo, rustc etc.)
+ - source the rust environment `source $HOME/.cargo/env`
  - gnuplot -- `apt install gnuplot`
  - build-essential (for `make`) -- `apt install build-essential`
  - levelDB (the database used for this program) -- `apt-get install libleveldb-dev libsnappy-dev cmake`
+ - install `vscode`
+ - in `vscode` install the plugin `rust-analyzer`
+ - in `vscode` activate format-on-save via `File` > `Preferences` > `Settings` then check the box for "Format on Save"
+ - install Criterion with `cargo install cargo-criterion`
 
-## Dev-ops Cheatsheet
+## Cheatsheet
 
- - To test, use `cargo test [start_of_test_name]`. Or, for a complete and slower build, run `make test`.
- - To run, use `make run` or `cargo run`.
- - To lint, use `make lint` or `cargo clippy`.
- - To format, use `make format` or `cargo fmt`.
- - To build, use `make build` or `cargo build`.
- - To install, use `make install` or `cargo install`.
- - To run lint, compile, run tests use `make all`. Note that this does *not* run install.
- - To see available command-line flags use `cargo run -- --help`
+ - To test, use `cargo test [start_of_test_name]`. Or, for a complete and much slower build, run `make test`.
+ - To generate and view API documentation, use `make doc`.
+ - To run, use `make run`.
+ - To lint, use `make lint`.
+ - To format, use `make format`.
+ - To check your code for errors, but skip code generation, use `make check`.  This should be faster than `make build`.
+ - To build, use `make build`.
+ - To install, use `make install`.
+ - To run lint, compile, and run tests use `make all`. Note that this does *not* run install.
+ - To run the benchmarks and generate the benchmark report, use `make bench`, or run `cargo criterion --bench <specific-benchmark>`.
 
 During development you can use `cargo` instead of `make` for the above commands. using `make` makes the compiler treat all warnings as errors, which we want for higher code quality. To send arguments to the Neptune Core program in a development setting use `cargo run -- [<flag> [<value>] [<flag> [<value>]]...]`, e.g. `cargo run -- --peers 8.8.101.69:9798 --peers 8.8.2.123:9798 --mine --listen-addr 10.64.111.55`.
 
