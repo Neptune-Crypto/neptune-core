@@ -28,6 +28,7 @@ pub struct ArchivalMutatorSet<H: Hasher>
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    u128: Hashable<<H as Hasher>::T>,
 {
     pub set_commitment: SetCommitment<H, ArchivalMmr<H>>,
     pub chunks: DatabaseVector<Chunk>,
@@ -37,6 +38,7 @@ impl<H: Hasher> MutatorSet<H> for ArchivalMutatorSet<H>
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     fn prove(
         &mut self,
@@ -111,6 +113,7 @@ impl<H: Hasher> ArchivalMutatorSet<H>
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn new_empty(aocl_mmr_db: DB, swbf_inactive_mmr_db: DB, chunks_db: DB) -> Self {
         let aocl: ArchivalMmr<H> = ArchivalMmr::new(aocl_mmr_db);
@@ -383,7 +386,7 @@ mod archival_mutator_set_tests {
             active_window_db,
         );
 
-        let mut rng = thread_rng();
+        let mut rng = rand::thread_rng();
         let random_elements = <H as Hasher>::T::random_elements(3, &mut rng);
         let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
         let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
@@ -433,7 +436,7 @@ mod archival_mutator_set_tests {
 
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
         let mut items: Vec<<H as Hasher>::Digest> = vec![];
-        let mut rng = thread_rng();
+        let mut rng = rand::thread_rng();
 
         for i in 0..num_additions {
             let random_elements = <H as Hasher>::T::random_elements(6, &mut rng);
@@ -590,6 +593,7 @@ mod archival_mutator_set_tests {
         u128: Hashable<<H as Hasher>::T>,
         Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
         <H as Hasher>::T: GetRandomElements,
+        usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {
         let mut rng = rand::thread_rng();
         let hasher = H::new();
@@ -598,7 +602,9 @@ mod archival_mutator_set_tests {
         let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
         let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
 
-        let addition_record = archival_mutator_set.commit(&item, &randomness);
+        let addition_record = archival_mutator_set
+            .set_commitment
+            .commit(&item, &randomness);
         let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
 
         (item, addition_record, membership_proof)

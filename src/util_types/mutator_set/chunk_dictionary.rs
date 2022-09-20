@@ -26,6 +26,7 @@ impl<H: Hasher> ChunkDictionary<H>
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn default() -> ChunkDictionary<H> {
         Self {
@@ -53,10 +54,7 @@ where
 mod chunk_dict_tests {
     use crate::util_types::mutator_set::shared::{BITS_PER_U32, CHUNK_SIZE};
     use twenty_first::{
-        shared_math::{
-            b_field_element::BFieldElement,
-            rescue_prime_regular::{RescuePrimeRegular, DIGEST_LENGTH},
-        },
+        shared_math::rescue_prime_regular::{RescuePrimeRegular, DIGEST_LENGTH},
         test_shared::mmr::get_archival_mmr_from_digests,
         util_types::{
             mmr::{archival_mmr::ArchivalMmr, mmr_membership_proof::MmrMembershipProof},

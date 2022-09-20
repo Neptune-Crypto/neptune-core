@@ -1,4 +1,3 @@
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap, error::Error, fmt};
 
@@ -42,6 +41,32 @@ pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub swbf_active: ActiveWindow<H>,
 }
 
+impl<H: Hasher, MMR: Mmr<H>> Default for SetCommitment<H, MMR> {
+    fn default() -> Self {
+        Self {
+            //FIXME implement this, or find some other way to construct SetCommitment's in general.
+            aocl: todo!(),
+            swbf_inactive: todo!(),
+            swbf_active: Default::default(),
+        }
+    }
+}
+
+impl<H: Hasher, MMR: Mmr<H>> SetCommitment<H, MMR>
+where
+    u128: Hashable<<H as Hasher>::T>,
+    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+{
+    #[allow(dead_code)]
+    fn get_commitment(&mut self) -> <H as Hasher>::Digest {
+        let aocl_mmr_bagged = self.aocl.bag_peaks();
+        let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
+        let hasher = H::new();
+        let active_swbf_bagged: <H as Hasher>::Digest = self.swbf_active.hash();
+        hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
+    }
+}
+
 /// Helper function. Computes the bloom filter bit indices of the
 /// item, randomness, index triple.
 pub fn get_swbf_indices<H: Hasher>(
@@ -52,6 +77,7 @@ pub fn get_swbf_indices<H: Hasher>(
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let hasher = H::new();
 
@@ -63,11 +89,14 @@ where
 
     // Collect all indices, using counter-mode
     for i in 0_usize..NUM_TRIALS {
-        let mut counter: Vec<H::T> = (i as u128).to_sequence();
-        let randomness_with_counter: H::Digest =
-            hasher.hash_sequence(&vec![timestamp_seq, randomness_seq, counter].concat());
-        let sample_index =
-            hasher.sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE) as u128;
+        let counter: Vec<H::T> = (i as u128).to_sequence();
+        let randomness_with_counter: H::Digest = hasher
+            .hash_sequence(&vec![timestamp_seq.clone(), randomness_seq.clone(), counter].concat());
+        let randomness_with_counter_and_item: H::Digest =
+            hasher.hash_pair(&randomness_with_counter, item); //FIXME: this cant really be the right approach
+        let sample_index = hasher
+            .sample_index_not_power_of_two(&randomness_with_counter_and_item, WINDOW_SIZE)
+            as u128;
         let sample_swbf_index: u128 = sample_index + batch_index * CHUNK_SIZE as u128;
         indices.push(sample_swbf_index);
     }
@@ -78,8 +107,8 @@ where
     let mut j = NUM_TRIALS;
     while indices.len() < NUM_TRIALS {
         let counter: Vec<H::T> = (j as u128).to_sequence();
-        let randomness_with_counter: H::Digest =
-            hasher.hash_sequence(&vec![timestamp_seq, randomness_seq, counter].concat());
+        let randomness_with_counter: H::Digest = hasher
+            .hash_sequence(&vec![timestamp_seq.clone(), randomness_seq.clone(), counter].concat());
         let index = hasher.sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE)
             as u128
             + batch_index * CHUNK_SIZE as u128;
@@ -120,6 +149,7 @@ where
     where
         u128: Hashable<<H as Hasher>::T>,
         Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+        usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {
         let bit_indices = membership_proof.cached_bits.unwrap_or_else(|| {
             get_swbf_indices::<H>(
@@ -291,7 +321,12 @@ where
         item: &H::Digest,
         randomness: &H::Digest,
         store_bits: bool,
-    ) -> MsMembershipProof<H> {
+    ) -> MsMembershipProof<H>
+    where
+        u128: Hashable<<H as Hasher>::T>,
+        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+        usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
+    {
         // compute commitment
         let hasher = H::new();
         let item_commitment = hasher.hash_pair(item, randomness);
@@ -425,9 +460,7 @@ mod accumulation_scheme_tests {
     use rand::Rng;
     use rand::{prelude::*, RngCore};
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
     use twenty_first::shared_math::traits::GetRandomElements;
-    use twenty_first::util_types::blake3_wrapper;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::util_types::simple_hasher::Hasher;
     use twenty_first::utils::has_unique_elements;
@@ -437,14 +470,15 @@ mod accumulation_scheme_tests {
     #[test]
     fn mutator_set_commitment_test() {
         type H = RescuePrimeRegular;
+
         let hasher = H::new();
         let mut empty = MutatorSetAccumulator::<H>::default();
         let commitment_to_empty = empty.get_commitment();
 
         // Add one element to append-only commitment list
-        let mut one_in_aocl = empty.clone();
+        let mut one_in_aocl = empty.set_commitment.clone();
         let mut prng = rand::thread_rng();
-        let item0 = hasher.hash(&BFieldElement::random_elements(3, &mut prng));
+        let item0 = hasher.hash_sequence(&BFieldElement::random_elements(3, &mut prng));
         one_in_aocl.aocl.append(item0.clone());
         let commitment_to_one_aocl = one_in_aocl.get_commitment();
         assert_ne!(
@@ -453,7 +487,7 @@ mod accumulation_scheme_tests {
         );
 
         // Manipulate inactive SWBF
-        let mut one_in_inactive_window = empty.clone();
+        let mut one_in_inactive_window = empty.set_commitment.clone();
         one_in_inactive_window.swbf_inactive.append(item0);
         let commitment_to_one_in_inactive = one_in_inactive_window.get_commitment();
         assert_ne!(
@@ -467,7 +501,7 @@ mod accumulation_scheme_tests {
 
         // Manipulate active window
         let mut active_window_changed = empty;
-        active_window_changed.swbf_active.set_bit(42);
+        active_window_changed.set_commitment.swbf_active.set_bit(42);
         assert_ne!(
             commitment_to_empty,
             active_window_changed.get_commitment(),
@@ -475,7 +509,10 @@ mod accumulation_scheme_tests {
         );
 
         // Sanity check bc reasons
-        active_window_changed.swbf_active.unset_bit(42);
+        active_window_changed
+            .set_commitment
+            .swbf_active
+            .unset_bit(42);
         assert_eq!(
             commitment_to_empty,
             active_window_changed.get_commitment(),
@@ -490,11 +527,13 @@ mod accumulation_scheme_tests {
         type Hasher = RescuePrimeRegular;
         let hasher = Hasher::new();
         let mut prng = rand::thread_rng();
-        let item: Vec<BFieldElement> =
-            hasher.hash(&BFieldElement::random_elements(3, &mut prng), DIGEST_LENGTH);
-        let randomness: Vec<BFieldElement> =
-            hasher.hash(&BFieldElement::random_elements(3, &mut prng), DIGEST_LENGTH);
-        let ret: [u128; NUM_TRIALS] = get_swbf_indices(&hasher, &item, &randomness, 0);
+        let item = hasher
+            .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
+            .into();
+        let randomness = hasher
+            .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
+            .into();
+        let ret: [u128; NUM_TRIALS] = get_swbf_indices::<Hasher>(&item, &randomness, 0);
         assert_eq!(NUM_TRIALS, ret.len());
         assert!(has_unique_elements(ret));
         assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
@@ -518,10 +557,12 @@ mod accumulation_scheme_tests {
         let hasher = Hasher::new();
         let mut prng = rand::thread_rng();
         for _ in 0..2 * BATCH_SIZE + 2 {
-            let item: Vec<BFieldElement> =
-                hasher.hash(&BFieldElement::random_elements(3, &mut prng), DIGEST_LENGTH);
-            let randomness: Vec<BFieldElement> =
-                hasher.hash(&BFieldElement::random_elements(3, &mut prng), DIGEST_LENGTH);
+            let item = hasher
+                .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
+                .into();
+            let randomness = hasher
+                .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
+                .into();
 
             let mut addition_record: AdditionRecord<RescuePrimeRegular> =
                 mutator_set.commit(&item, &randomness);
@@ -541,25 +582,18 @@ mod accumulation_scheme_tests {
 
         let mut mutator_set = SetCommitment::<Hasher, MmrAccumulator<Hasher>>::default();
         let hasher = Hasher::new();
-        let own_item: Vec<BFieldElement> =
-            hasher.hash(&vec![BFieldElement::new(1215)], DIGEST_LENGTH);
-        let randomness: Vec<BFieldElement> =
-            hasher.hash(&vec![BFieldElement::new(1776)], DIGEST_LENGTH);
+        let own_item = hasher.hash_sequence(&vec![BFieldElement::new(1215)]).into();
+        let randomness = hasher.hash_sequence(&vec![BFieldElement::new(1776)]).into();
 
-        let mut addition_record: AdditionRecord<Hasher> =
-            mutator_set.commit(&own_item, &randomness);
-        let mut membership_proof: MsMembershipProof<Hasher> =
-            mutator_set.prove(&own_item, &randomness, false);
+        let mut addition_record = mutator_set.commit(&own_item, &randomness);
+        let mut membership_proof = mutator_set.prove(&own_item, &randomness, false);
         mutator_set.add_helper(&mut addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
-        let new_item: Vec<BFieldElement> =
-            hasher.hash(&vec![BFieldElement::new(1648)], DIGEST_LENGTH);
-        let new_randomness: Vec<BFieldElement> =
-            hasher.hash(&vec![BFieldElement::new(1807)], DIGEST_LENGTH);
-        let mut new_addition_record: AdditionRecord<Hasher> =
-            mutator_set.commit(&new_item, &new_randomness);
-        let original_membership_proof: MsMembershipProof<Hasher> = membership_proof.clone();
+        let new_item = hasher.hash_sequence(&vec![BFieldElement::new(1648)]).into();
+        let new_randomness = hasher.hash_sequence(&vec![BFieldElement::new(1807)]).into();
+        let mut new_addition_record = mutator_set.commit(&new_item, &new_randomness);
+        let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
             &own_item,
             &mut mutator_set,
@@ -600,11 +634,11 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn membership_proof_updating_from_add_pbt() {
-        type Hasher = blake3::Hasher;
+        type Hasher = RescuePrimeRegular;
         let mut rng = thread_rng();
 
         let mut mutator_set = SetCommitment::<Hasher, MmrAccumulator<Hasher>>::default();
-        let hasher: Hasher = blake3::Hasher::new();
+        let hasher: Hasher = RescuePrimeRegular::new();
 
         let num_additions = rng.gen_range(0..=100i32);
         println!(
@@ -613,17 +647,17 @@ mod accumulation_scheme_tests {
         );
 
         let mut membership_proofs_and_items: Vec<(
-            MsMembershipProof<Hasher>,
-            blake3_wrapper::Blake3Hash,
+            MsMembershipProof<RescuePrimeRegular>,
+            [BFieldElement; 5],
         )> = vec![];
         for i in 0..num_additions {
             println!("loop iteration {}", i);
-            let item: blake3_wrapper::Blake3Hash = hasher.hash(
+            let item = hasher.hash_sequence(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
                     .collect::<Vec<_>>(),
             );
-            let randomness = hasher.hash(
+            let randomness = hasher.hash_sequence(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
                     .collect::<Vec<_>>(),
@@ -662,9 +696,8 @@ mod accumulation_scheme_tests {
         type Mmr = MmrAccumulator<Hasher>;
         let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
         let hasher = Hasher::new();
-        let item0: Vec<BFieldElement> = hasher.hash(&vec![BFieldElement::new(1215)], DIGEST_LENGTH);
-        let randomness0: Vec<BFieldElement> =
-            hasher.hash(&vec![BFieldElement::new(1776)], DIGEST_LENGTH);
+        let item0 = hasher.hash_sequence(&vec![BFieldElement::new(1215)]).into();
+        let randomness0 = hasher.hash_sequence(&vec![BFieldElement::new(1776)]).into();
 
         let mut addition_record = mutator_set.commit(&item0, &randomness0);
         let membership_proof = mutator_set.prove(&item0, &randomness0, false);
@@ -676,9 +709,8 @@ mod accumulation_scheme_tests {
         assert!(mutator_set.verify(&item0, &membership_proof));
 
         // Insert a new item and verify that this still works
-        let item1: Vec<BFieldElement> = hasher.hash(&vec![BFieldElement::new(1846)], DIGEST_LENGTH);
-        let randomness1: Vec<BFieldElement> =
-            hasher.hash(&vec![BFieldElement::new(2009)], DIGEST_LENGTH);
+        let item1 = hasher.hash_sequence(&vec![BFieldElement::new(1846)]).into();
+        let randomness1 = hasher.hash_sequence(&vec![BFieldElement::new(2009)]).into();
         let mut addition_record = mutator_set.commit(&item1, &randomness1);
         let membership_proof = mutator_set.prove(&item1, &randomness1, false);
         assert!(!mutator_set.verify(&item1, &membership_proof));
@@ -691,10 +723,12 @@ mod accumulation_scheme_tests {
         // position.
         let mut prng = thread_rng();
         for _ in 0..2 * BATCH_SIZE + 4 {
-            let item: Vec<BFieldElement> =
-                hasher.hash(&BFieldElement::random_elements(2, &mut prng), DIGEST_LENGTH);
-            let randomness: Vec<BFieldElement> =
-                hasher.hash(&BFieldElement::random_elements(2, &mut prng), DIGEST_LENGTH);
+            let item = hasher
+                .hash_sequence(&BFieldElement::random_elements(2, &mut prng).clone())
+                .into();
+            let randomness = hasher
+                .hash_sequence(&BFieldElement::random_elements(2, &mut prng).clone())
+                .into();
             let mut addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
             assert!(!mutator_set.verify(&item, &membership_proof));
@@ -708,9 +742,9 @@ mod accumulation_scheme_tests {
         // set up rng
         let mut rng = thread_rng();
 
-        type Hasher = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
+        type Hasher = RescuePrimeRegular;
         type Mmr = MmrAccumulator<Hasher>;
+
         let hasher = Hasher::new();
         let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
 
@@ -728,20 +762,24 @@ mod accumulation_scheme_tests {
         ];
 
         let mut membership_proofs: Vec<MsMembershipProof<Hasher>> = vec![];
-        let mut items: Vec<Digest> = vec![];
+        let mut items = vec![];
 
         for num_additions in num_additions_list {
             for _ in 0..num_additions {
-                let new_item = hasher.hash(
-                    &(0..3)
-                        .map(|_| BFieldElement::new(rng.next_u64()))
-                        .collect::<Vec<_>>(),
-                );
-                let randomness = hasher.hash(
-                    &(0..3)
-                        .map(|_| BFieldElement::new(rng.next_u64()))
-                        .collect::<Vec<_>>(),
-                );
+                let new_item = hasher
+                    .hash_sequence(
+                        &(0..3)
+                            .map(|_| BFieldElement::new(rng.next_u64()))
+                            .collect::<Vec<_>>(),
+                    )
+                    .into();
+                let randomness = hasher
+                    .hash_sequence(
+                        &(0..3)
+                            .map(|_| BFieldElement::new(rng.next_u64()))
+                            .collect::<Vec<_>>(),
+                    )
+                    .into();
 
                 let mut addition_record = mutator_set.commit(&new_item, &randomness);
                 let membership_proof = mutator_set.prove(&new_item, &randomness, true);
@@ -799,26 +837,30 @@ mod accumulation_scheme_tests {
         // set up rng
         let mut rng = thread_rng();
 
-        type Hasher = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
+        type Hasher = RescuePrimeRegular;
         type Mmr = MmrAccumulator<Hasher>;
         let hasher = Hasher::new();
         let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
 
         let num_additions = 65;
 
-        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<Hasher>)> = vec![];
+        let mut items_and_membership_proofs: Vec<(
+            [BFieldElement; 5],
+            MsMembershipProof<RescuePrimeRegular>,
+        )> = vec![];
 
         for _ in 0..num_additions {
-            let new_item = hasher.hash(
+            let new_item = hasher.hash_sequence(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<_>>()
+                    .clone(),
             );
-            let randomness = hasher.hash(
+            let randomness = hasher.hash_sequence(
                 &(0..3)
                     .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
+                    .collect::<Vec<_>>()
+                    .clone(),
             );
 
             let mut addition_record = mutator_set.commit(&new_item, &randomness);

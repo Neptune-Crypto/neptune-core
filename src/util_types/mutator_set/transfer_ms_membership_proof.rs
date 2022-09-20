@@ -19,10 +19,7 @@ mod transfer_ms_membership_proof_tests {
         ms_membership_proof::MsMembershipProof, set_commitment::SetCommitment,
     };
     use twenty_first::{
-        shared_math::{
-            b_field_element::BFieldElement,
-            rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH},
-        },
+        shared_math::rescue_prime_regular::RescuePrimeRegular,
         util_types::mmr::mmr_accumulator::MmrAccumulator,
     };
 
@@ -33,19 +30,16 @@ mod transfer_ms_membership_proof_tests {
         // You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
-        type Hasher = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
+        type Hasher = RescuePrimeRegular;
         type Mmr = MmrAccumulator<Hasher>;
         type Ms = SetCommitment<Hasher, Mmr>;
         let mut mutator_set = Ms::default();
-        let (mp, item): (
-            MsMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>>,
-            Vec<BFieldElement>,
-        ) = insert_item(&mut mutator_set);
+        let (mp, item) = insert_item(&mut mutator_set);
 
         let transfer_mp: TransferMsMembershipProof<Hasher> = mp.clone().into();
         let json = serde_json::to_string(&transfer_mp).unwrap();
         let s_back = serde_json::from_str::<TransferMsMembershipProof<Hasher>>(&json).unwrap();
-        let reconstructed_mp: MsMembershipProof<RescuePrimeXlix<RP_DEFAULT_WIDTH>> = s_back.into();
+        let reconstructed_mp: MsMembershipProof<RescuePrimeRegular> = s_back.into();
         mutator_set.verify(&item, &reconstructed_mp);
         assert_eq!(reconstructed_mp.randomness, transfer_mp.randomness);
         assert_eq!(mp.randomness, transfer_mp.randomness);

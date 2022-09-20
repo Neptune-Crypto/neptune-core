@@ -96,17 +96,11 @@ impl<H: Hasher> MsMembershipProof<H>
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
     pub fn cache_indices(&mut self, item: &H::Digest) {
-        let hasher = H::new();
-        let bits = get_swbf_indices(
-            &hasher,
-            item,
-            &self.randomness,
-            self.auth_path_aocl.data_index,
-        );
-
+        let bits = get_swbf_indices::<H>(item, &self.randomness, self.auth_path_aocl.data_index);
         self.cached_bits = Some(bits);
     }
 
@@ -177,12 +171,9 @@ where
             .for_each(|(i, (mp, item))| {
                 let bits = match mp.cached_bits {
                     Some(bs) => bs,
-                    None => get_swbf_indices(
-                        &hasher,
-                        item,
-                        &mp.randomness,
-                        mp.auth_path_aocl.data_index,
-                    ),
+                    None => {
+                        get_swbf_indices::<H>(item, &mp.randomness, mp.auth_path_aocl.data_index)
+                    }
                 };
                 let chunks_set: HashSet<u128> =
                     bits.iter().map(|x| x / CHUNK_SIZE as u128).collect();
@@ -319,12 +310,9 @@ where
         // that the latter is an expensive operation.
         let all_bit_indices = match self.cached_bits {
             Some(bits) => bits,
-            None => get_swbf_indices(
-                &hasher,
-                own_item,
-                &self.randomness,
-                self.auth_path_aocl.data_index,
-            ),
+            None => {
+                get_swbf_indices::<H>(own_item, &self.randomness, self.auth_path_aocl.data_index)
+            }
         };
         let chunk_indices_set: HashSet<u128> = all_bit_indices
             .into_iter()
@@ -480,11 +468,11 @@ where
 mod ms_proof_tests {
 
     use crate::util_types::mutator_set::{
-        mutator_set_accumulator::MutatorSetAccumulator, shared::BITS_PER_U32,
+        mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
+        shared::BITS_PER_U32,
     };
     use num_traits::Zero;
     use rand::thread_rng;
-    use rand_core::RngCore;
     use twenty_first::{
         shared_math::{
             rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH},
@@ -494,11 +482,7 @@ mod ms_proof_tests {
             blake3_wrapper::{self, Blake3Hash},
             mmr,
         shared_math::{rescue_prime_regular::RescuePrimeRegular, traits::GetRandomElements},
-        util_types::{
-            blake3_wrapper::{self, Blake3Hash},
-            mmr::{self, mmr_membership_proof::MmrMembershipProof},
-            simple_hasher::Hasher,
-        },
+        util_types::{mmr::mmr_membership_proof::MmrMembershipProof, simple_hasher::Hasher},
     };
 
     use super::*;
@@ -530,11 +514,10 @@ mod ms_proof_tests {
         let hasher = H::new();
         let mut rng = thread_rng();
         let random_elements = <H as Hasher>::T::random_elements(9, &mut rng);
-        let item = hasher.hash_sequence(&random_elements[0..3]);
         let randomness = hasher.hash_sequence(&random_elements[3..6]);
         let other_randomness = hasher.hash_sequence(&random_elements[6..9]);
         let mp_with_cached_bits = MsMembershipProof::<H> {
-            randomness: randomness,
+            randomness,
             auth_path_aocl: MmrMembershipProof::<H> {
                 data_index: 0,
                 authentication_path: vec![],

@@ -14,7 +14,9 @@ use super::{
 
 pub struct MutatorSetAccumulator<H: Hasher>
 where
+    usize: Hashable<<H as Hasher>::T>,
     u128: Hashable<<H as Hasher>::T>,
+    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
     pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
 }
@@ -22,6 +24,8 @@ where
 impl<H: Hasher> MutatorSetAccumulator<H>
 where
     u128: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
+    Vec<BFieldElement>: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn default() -> Self {
         let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
@@ -38,6 +42,7 @@ impl<H: Hasher> MutatorSet<H> for MutatorSetAccumulator<H>
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     fn prove(
         &mut self,
@@ -45,15 +50,15 @@ where
         randomness: &H::Digest,
         store_bits: bool,
     ) -> MsMembershipProof<H> {
-        self.prove(item, randomness, store_bits)
+        self.set_commitment.prove(item, randomness, store_bits)
     }
 
     fn verify(&mut self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
-        self.verify(item, membership_proof)
+        self.set_commitment.verify(item, membership_proof)
     }
 
     fn commit(&mut self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
-        self.commit(item, randomness)
+        self.set_commitment.commit(item, randomness)
     }
 
     fn drop(
@@ -61,7 +66,7 @@ where
         item: &H::Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
-        self.drop(item, membership_proof)
+        self.set_commitment.drop(item, membership_proof)
     }
 
     fn add(&mut self, addition_record: &mut AdditionRecord<H>) {

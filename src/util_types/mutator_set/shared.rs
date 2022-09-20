@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr::{self, mmr_membership_proof::MmrMembershipProof},
+        mmr::mmr_membership_proof::MmrMembershipProof,
         simple_hasher::{Hashable, Hasher},
     },
 };
@@ -31,7 +31,6 @@ pub fn bit_indices_to_hash_map(all_bit_indices: &[u128; NUM_TRIALS]) -> HashMap<
     chunk_index_to_bit_indices
 }
 
-/// Get an argument to the MMR `batch_update_from_batch_leaf_mutation`,
 /// and mutate the chunk dictionary chunk values.
 /// This function is factored out because it is shared by `update_from_remove`
 /// and `batch_update_from_remove`.

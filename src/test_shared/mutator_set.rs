@@ -1,4 +1,4 @@
-use rand::{thread_rng, RngCore};
+use rand::thread_rng;
 use rusty_leveldb::DB;
 
 use crate::util_types::mutator_set::{
@@ -18,6 +18,7 @@ where
     H: Hasher,
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
     let chunks_db = DB::open("chunks", opt.clone()).unwrap();
@@ -33,6 +34,7 @@ where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     <H as Hasher>::T: GetRandomElements,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let mut prng = thread_rng();
     let hasher = H::new();
@@ -57,6 +59,7 @@ pub fn remove_item<H, M>(
     M: Mmr<H>,
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let removal_record: RemovalRecord<H> = mutator_set.drop(item, mp);
     mutator_set.remove_helper(&removal_record);

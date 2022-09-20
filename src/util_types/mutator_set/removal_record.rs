@@ -51,6 +51,7 @@ impl<H: Hasher> RemovalRecord<H>
 where
     u128: Hashable<<H as Hasher>::T>,
     Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
+    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         removal_records: &mut [&mut Self],
@@ -220,11 +221,11 @@ where
         // then this method's output will not be deterministic. So we need a test for that,
         // that the bit indices are sorted. This is what `verify_that_bit_indices_are_sorted_test`
         // verifies.
-        H::new().hash_sequence(&mut self.get_preimage())
+        H::new().hash_sequence(&self.get_preimage())
     }
 
     fn get_preimage(&self) -> Vec<H::T> {
-        let mut preimage: Vec<H::T> = self
+        let preimage: Vec<H::T> = self
             .bit_indices
             .iter()
             .flat_map(|bi| bi.to_sequence())
@@ -239,7 +240,7 @@ where
 mod removal_record_tests {
     use super::*;
     use itertools::Itertools;
-    use rand::{seq::SliceRandom, thread_rng, RngCore};
+    use rand::{seq::SliceRandom, thread_rng};
 
     use crate::util_types::mutator_set::{
         addition_record::AdditionRecord,
@@ -249,12 +250,8 @@ mod removal_record_tests {
         shared::{CHUNK_SIZE, NUM_TRIALS},
     };
     use twenty_first::{
-        shared_math::{
-            b_field_element::BFieldElement,
-            rescue_prime_regular::{RescuePrimeRegular, DIGEST_LENGTH},
-            traits::GetRandomElements,
-        },
-        util_types::{blake3_wrapper, simple_hasher::Hasher},
+        shared_math::{rescue_prime_regular::RescuePrimeRegular, traits::GetRandomElements},
+        util_types::simple_hasher::Hasher,
         utils::{self, has_unique_elements},
     };
 
@@ -456,7 +453,7 @@ mod removal_record_tests {
                         .iter_mut()
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
-                    &mut accumulator,
+                    &mut accumulator.set_commitment,
                 );
                 assert!(
                     update_res_rr.is_ok(),
@@ -466,7 +463,7 @@ mod removal_record_tests {
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut accumulator,
+                    &mut accumulator.set_commitment,
                     &addition_record,
                 );
                 assert!(
@@ -480,7 +477,7 @@ mod removal_record_tests {
 
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
-                        removal_record.validate(&mut accumulator),
+                        removal_record.validate(&mut accumulator.set_commitment),
                         "removal records must validate, i = {}",
                         i
                     );
@@ -529,7 +526,7 @@ mod removal_record_tests {
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
-                &mut accumulator,
+                &mut accumulator.set_commitment,
             );
             assert!(
                 update_res_rr.is_ok(),
@@ -539,7 +536,7 @@ mod removal_record_tests {
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut accumulator,
+                &mut accumulator.set_commitment,
                 &addition_record,
             );
             assert!(
@@ -553,7 +550,7 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator),
+                    removal_record.validate(&mut accumulator.set_commitment),
                     "removal records must validate, i = {}",
                     i
                 );
@@ -586,7 +583,7 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator),
+                    removal_record.validate(&mut accumulator.set_commitment),
                     "removal records must validate, i = {}",
                     i
                 );
