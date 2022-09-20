@@ -4,7 +4,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
-    util_types::simple_hasher::{self, ToDigest},
+    util_types::simple_hasher::{Hashable, Hasher},
 };
 
 use super::shared::{BITS_PER_U32, CHUNK_SIZE};
@@ -48,27 +48,33 @@ impl Chunk {
     }
 
     #[inline]
-    fn hash_preimage(&self) -> Vec<BFieldElement> {
-        self.bits.iter().map(|&val| val.into()).collect()
+    fn hash_preimage<H: Hasher>(&self) -> Vec<H::T>
+    where
+        // FIXME: Change 'usize' back into 'u32' when trait impl is available on twenty-first
+        usize: Hashable<<H as Hasher>::T>,
+    {
+        self.bits
+            .iter()
+            .flat_map(|&val| (val as usize).to_sequence())
+            .collect()
     }
 
-    pub fn hash<H: simple_hasher::Hasher>(&self, hasher: &H) -> H::Digest
+    pub fn hash<H: Hasher>(&self, hasher: &H) -> H::Digest
     where
-        Vec<BFieldElement>: ToDigest<H::Digest>,
+        usize: Hashable<<H as Hasher>::T>,
+        u128: Hashable<<H as Hasher>::T>,
+        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     {
-        let preimage = self.hash_preimage();
-
-        hasher.hash(&preimage.to_digest())
+        hasher.hash_sequence(&self.hash_preimage::<H>())
     }
 }
 
 #[cfg(test)]
 mod chunk_tests {
-    use rand::{thread_rng, RngCore};
-
-    use twenty_first::shared_math::traits::IdentityValues;
-
     use super::*;
+    use num_traits::{One, Zero};
+    use rand::{thread_rng, RngCore};
+    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
     impl Chunk {
         fn default() -> Self {
@@ -127,10 +133,12 @@ mod chunk_tests {
 
     #[test]
     fn chunk_hashpreimage_test() {
+        type H = RescuePrimeRegular;
+
         let zero_chunk = Chunk {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
-        let zero_chunk_hash_preimage = zero_chunk.hash_preimage();
+        let zero_chunk_hash_preimage = zero_chunk.hash_preimage::<H>();
         assert_eq!(get_hashpreimage_length(), zero_chunk_hash_preimage.len());
         for elem in zero_chunk_hash_preimage {
             assert!(elem.is_zero());
@@ -140,7 +148,7 @@ mod chunk_tests {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
         one_one.set_bit(32);
-        let one_one_preimage = one_one.hash_preimage();
+        let one_one_preimage = one_one.hash_preimage::<H>();
         assert_eq!(get_hashpreimage_length(), one_one_preimage.len());
         assert!(one_one_preimage[0].is_zero());
         assert!(one_one_preimage[1].is_one());
@@ -153,7 +161,7 @@ mod chunk_tests {
         };
         two_ones.set_bit(32);
         two_ones.set_bit(33);
-        let two_ones_preimage = two_ones.hash_preimage();
+        let two_ones_preimage = two_ones.hash_preimage::<H>();
         assert!(two_ones_preimage[0].is_zero());
         assert_eq!(3, two_ones_preimage[1].value());
         for i in 2..get_hashpreimage_length() {
@@ -163,14 +171,16 @@ mod chunk_tests {
 
     #[test]
     fn chunk_hashpreimage_big_test() {
+        type H = RescuePrimeRegular;
+
         let mut chunk = Chunk {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
 
         // Verify that the hash preimage is producted according to expectations.
         chunk.set_bit(CHUNK_SIZE - 1 - BITS_PER_U32);
-        let hashpreimage = chunk.hash_preimage();
-        let mut expected = [BFieldElement::ring_zero(); get_hashpreimage_length()];
+        let hashpreimage = chunk.hash_preimage::<H>();
+        let mut expected = [BFieldElement::zero(); get_hashpreimage_length()];
         expected[get_hashpreimage_length() - 2] = BFieldElement::new(1u64 << 31);
         assert_eq!(expected.to_vec(), hashpreimage);
     }

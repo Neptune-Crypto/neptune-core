@@ -2,9 +2,12 @@ use num_traits::identities::Zero;
 use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use twenty_first::util_types::{
-    database_array::DatabaseArray,
-    simple_hasher::{self, Hasher, ToDigest},
+use twenty_first::{
+    shared_math::b_field_element::BFieldElement,
+    util_types::{
+        database_array::DatabaseArray,
+        simple_hasher::{Hashable, Hasher},
+    },
 };
 
 use super::{
@@ -14,7 +17,7 @@ use super::{
 use crate::util_types::mutator_set::boxed_big_array::CompositeBigArray;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ActiveWindow<H: simple_hasher::Hasher> {
+pub struct ActiveWindow<H: Hasher> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     // The byte array is boxed to prevent stack-overflows when deserializing this data
     // structure. Cf. https://neptune.builders/core-team/neptune-core/issues/32
@@ -25,16 +28,9 @@ pub struct ActiveWindow<H: simple_hasher::Hasher> {
 
 impl<H: Hasher> ActiveWindow<H>
 where
-    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    u128: Hashable<<H as Hasher>::T>,
+    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
-    /// The default instance has no bits set in the active window
-    pub fn default() -> Self {
-        Self {
-            bits: Box::new([0u32; WINDOW_SIZE / BITS_PER_U32]),
-            _hasher: PhantomData,
-        }
-    }
-
     pub fn get_sliding_chunk_bits(&self) -> [u32; CHUNK_SIZE / BITS_PER_U32] {
         self.bits[0..CHUNK_SIZE / BITS_PER_U32].try_into().unwrap()
     }
@@ -133,6 +129,7 @@ where
         }
     }
 
+    /// FIXME: Explain what a u128 is in the context of an ActiveWindow.
     fn get_u128s(&self) -> Vec<u128> {
         let mut u128s: Vec<u128> = vec![0u128; Self::get_u128s_length()];
         for i in 0..(WINDOW_SIZE / BITS_PER_U32) {
@@ -145,27 +142,31 @@ where
 
     /// Get a commitment for the active part of the sliding-window bloom filter
     pub fn hash(&self) -> H::Digest {
-        // This function is made more complicated by the support of generic hash functions.
-        // You could simplify it a lot if it only had to support B field element hashes like
-        // Rescue Prime.
-        // In other words: When implementing this in Triton, another, probably simpler, implementation
-        // might be possible.
-        let u128s: Vec<u128> = self.get_u128s();
+        let seq: Vec<H::T> = self
+            .get_u128s()
+            .into_iter()
+            .flat_map(|u128| u128.to_sequence())
+            .collect();
 
-        let digests: Vec<H::Digest> = u128s.iter().map(|x| x.to_digest()).collect();
-        let hasher: H = H::new();
+        H::new().hash_sequence(&seq)
+    }
+}
 
-        hasher.hash_many(&digests)
+impl<H: Hasher> Default for ActiveWindow<H> {
+    /// The default instance has no bits set in the active window
+    fn default() -> Self {
+        Self {
+            bits: Box::new([0u32; WINDOW_SIZE / BITS_PER_U32]),
+            _hasher: PhantomData,
+        }
     }
 }
 
 #[cfg(test)]
 mod active_window_tests {
-    use rand::{thread_rng, RngCore};
-
-    use twenty_first::shared_math::rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH};
-
     use super::*;
+    use rand::{thread_rng, RngCore};
+    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
     impl<H: Hasher> ActiveWindow<H> {
         fn new(bits: Box<[u32; WINDOW_SIZE / BITS_PER_U32]>) -> Self {
@@ -306,10 +307,7 @@ mod active_window_tests {
     #[test]
     fn u128s_length_test() {
         // Let's just compare the output of this function to the result from my calculator
-        assert_eq!(
-            250,
-            ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::get_u128s_length()
-        );
+        assert_eq!(250, ActiveWindow::<RescuePrimeRegular>::get_u128s_length());
     }
 
     #[test]
@@ -318,7 +316,7 @@ mod active_window_tests {
         bytes[0] = 124 + 125 * (1u32 << 8) + 127 * (1u32 << 16);
         bytes[3] = 144 * (1u32 << 16) + 65 * (1u32 << 24);
         bytes[5] = 98 * (1u32 << 8);
-        let aw = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(Box::new(bytes));
+        let aw = ActiveWindow::<RescuePrimeRegular>::new(Box::new(bytes));
         let u128s = aw.get_u128s();
         assert_eq!(250, u128s.len());
         assert_eq!(98 * (1 << (5 * 8)), u128s[1]);
@@ -332,8 +330,8 @@ mod active_window_tests {
     fn hash_no_crash_test() {
         // This is just a test to ensure that the hashing of the active part of the SWBF
         // works in the runtime, for relevant hash functions
-        let hash_0 = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default().hash();
-        let hash_1 = ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::new(Box::new(
+        let hash_0 = ActiveWindow::<RescuePrimeRegular>::default().hash();
+        let hash_1 = ActiveWindow::<RescuePrimeRegular>::new(Box::new(
             [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32],
         ))
         .hash();
@@ -349,12 +347,9 @@ mod active_window_tests {
 
     #[test]
     fn active_window_serialize_test() {
-        let aw0: ActiveWindow<RescuePrimeXlix<RP_DEFAULT_WIDTH>> =
-            ActiveWindow::<RescuePrimeXlix<RP_DEFAULT_WIDTH>>::default();
+        let aw0 = ActiveWindow::<RescuePrimeRegular>::default();
         let json_aw0 = serde_json::to_string(&aw0).unwrap();
-        let aw0_back =
-            serde_json::from_str::<ActiveWindow<RescuePrimeXlix<RP_DEFAULT_WIDTH>>>(&json_aw0)
-                .unwrap();
+        let aw0_back = serde_json::from_str::<ActiveWindow<RescuePrimeRegular>>(&json_aw0).unwrap();
         assert_eq!(aw0.bits, aw0_back.bits);
     }
 }

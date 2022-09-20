@@ -9,7 +9,7 @@ use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
         mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        simple_hasher::{self, ToDigest},
+        simple_hasher::{Hashable, Hasher},
     },
 };
 
@@ -59,7 +59,7 @@ pub struct MsMembershipProof<H: simple_hasher::Hasher> {
 
 /// Convert a transfer version of the membership proof to one for internal use.
 /// The important thing here is that `cached_bits` is not shared between peers.
-impl<H: simple_hasher::Hasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
+impl<H: Hasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
     fn from(transfer: TransferMsMembershipProof<H>) -> Self {
         Self {
             randomness: transfer.randomness,
@@ -72,7 +72,7 @@ impl<H: simple_hasher::Hasher> From<TransferMsMembershipProof<H>> for MsMembersh
 
 // This conversion is kept here to avoid circular dependencies -- not sure if we have
 // to avoid that, though.
-impl<H: simple_hasher::Hasher> From<MsMembershipProof<H>> for TransferMsMembershipProof<H> {
+impl<H: Hasher> From<MsMembershipProof<H>> for TransferMsMembershipProof<H> {
     fn from(mp: MsMembershipProof<H>) -> Self {
         Self {
             randomness: mp.randomness,
@@ -82,7 +82,7 @@ impl<H: simple_hasher::Hasher> From<MsMembershipProof<H>> for TransferMsMembersh
     }
 }
 
-impl<H: simple_hasher::Hasher> PartialEq for MsMembershipProof<H> {
+impl<H: Hasher> PartialEq for MsMembershipProof<H> {
     // Equality for a membership proof does not look at cached bits, as they are just cached data
     // Whether they are set or not, does not change the membership proof.
     fn eq(&self, other: &Self) -> bool {
@@ -92,11 +92,10 @@ impl<H: simple_hasher::Hasher> PartialEq for MsMembershipProof<H> {
     }
 }
 
-impl<H> MsMembershipProof<H>
+impl<H: Hasher> MsMembershipProof<H>
 where
-    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    H: simple_hasher::Hasher,
+    u128: Hashable<<H as Hasher>::T>,
+    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
     pub fn cache_indices(&mut self, item: &H::Digest) {
@@ -494,6 +493,10 @@ mod ms_proof_tests {
         util_types::{
             blake3_wrapper::{self, Blake3Hash},
             mmr,
+        shared_math::{rescue_prime_regular::RescuePrimeRegular, traits::GetRandomElements},
+        util_types::{
+            blake3_wrapper::{self, Blake3Hash},
+            mmr::{self, mmr_membership_proof::MmrMembershipProof},
             simple_hasher::Hasher,
         },
     };
@@ -502,14 +505,12 @@ mod ms_proof_tests {
 
     #[test]
     fn mp_cache_bits_test() {
-        type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
+        type H = RescuePrimeRegular;
         let hasher = H::new();
         let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
-        let randomness =
-            hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
+        let item = hasher.hash_sequence(&BFieldElement::random_elements(1, &mut prng));
+        let randomness = hasher.hash_sequence(&BFieldElement::random_elements(1, &mut prng));
         let mut mp = accumulator.prove(&item, &randomness, false);
 
         // Verify that bits are not cached, then cache them with the helper function
@@ -525,50 +526,43 @@ mod ms_proof_tests {
 
     #[test]
     fn mp_equality_test() {
-        type Hasher = blake3::Hasher;
-        type Digest = Blake3Hash;
-        let hasher: Hasher = blake3::Hasher::new();
+        type H = RescuePrimeRegular;
+        let hasher = H::new();
         let mut rng = thread_rng();
-        let randomness = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(rng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
-        let other_randomness = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(rng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
-        let mp_with_cached_bits = MsMembershipProof::<Hasher> {
+        let random_elements = <H as Hasher>::T::random_elements(9, &mut rng);
+        let item = hasher.hash_sequence(&random_elements[0..3]);
+        let randomness = hasher.hash_sequence(&random_elements[3..6]);
+        let other_randomness = hasher.hash_sequence(&random_elements[6..9]);
+        let mp_with_cached_bits = MsMembershipProof::<H> {
             randomness: randomness,
-            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
+            auth_path_aocl: MmrMembershipProof::<H> {
                 data_index: 0,
                 authentication_path: vec![],
             },
             target_chunks: ChunkDictionary::default(),
             cached_bits: Some([1u128; NUM_TRIALS]),
         };
-        let mp_without_cached_bits = MsMembershipProof::<Hasher> {
+        let mp_without_cached_bits = MsMembershipProof::<H> {
             randomness: randomness,
-            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
+            auth_path_aocl: MmrMembershipProof::<H> {
                 data_index: 0,
                 authentication_path: vec![],
             },
             target_chunks: ChunkDictionary::default(),
             cached_bits: None,
         };
-        let mp_with_different_data_index = MsMembershipProof::<Hasher> {
+        let mp_with_different_data_index = MsMembershipProof::<H> {
             randomness: randomness,
-            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
+            auth_path_aocl: MmrMembershipProof::<H> {
                 data_index: 100073,
                 authentication_path: vec![],
             },
             target_chunks: ChunkDictionary::default(),
             cached_bits: None,
         };
-        let mp_with_different_randomness = MsMembershipProof::<Hasher> {
+        let mp_with_different_randomness = MsMembershipProof::<H> {
             randomness: other_randomness,
-            auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof::<Hasher> {
+            auth_path_aocl: MmrMembershipProof::<H> {
                 data_index: 0,
                 authentication_path: vec![],
             },
@@ -589,8 +583,8 @@ mod ms_proof_tests {
         // For this test to be performed, we first need an MMR membership proof and a chunk.
 
         // Construct an MMR with 7 leafs
-        let mmr_digests: Vec<Digest> = (10u128..17).map(|i| i.into()).collect::<Vec<_>>();
-        let mut mmra: MmrAccumulator<Hasher> = MmrAccumulator::new(mmr_digests);
+        let mmr_digests = hasher.get_n_hash_rounds(&randomness, 7);
+        let mut mmra: MmrAccumulator<H> = MmrAccumulator::new(mmr_digests);
 
         // Get an MMR membership proof by adding the 8th leaf
         let zero_chunk = Chunk {
@@ -603,7 +597,7 @@ mod ms_proof_tests {
 
         // Create a new mutator set membership proof with a non-empty chunk dictionary
         // and verify that it is considered a different membership proof
-        let mut mp_mutated: MsMembershipProof<Hasher> = mp_with_cached_bits.clone();
+        let mut mp_mutated: MsMembershipProof<H> = mp_with_cached_bits.clone();
         mp_mutated
             .target_chunks
             .dictionary

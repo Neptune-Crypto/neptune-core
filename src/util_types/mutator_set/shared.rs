@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
-        mmr,
-        simple_hasher::{self, ToDigest},
+        mmr::{self, mmr_membership_proof::MmrMembershipProof},
+        simple_hasher::{Hashable, Hasher},
     },
 };
 
@@ -36,23 +36,19 @@ pub fn bit_indices_to_hash_map(all_bit_indices: &[u128; NUM_TRIALS]) -> HashMap<
 /// This function is factored out because it is shared by `update_from_remove`
 /// and `batch_update_from_remove`.
 #[allow(clippy::type_complexity)]
-pub fn get_batch_mutation_argument_for_removal_record<H>(
+pub fn get_batch_mutation_argument_for_removal_record<H: Hasher>(
     removal_record: &RemovalRecord<H>,
     chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
-) -> (
-    HashSet<usize>,
-    Vec<(mmr::mmr_membership_proof::MmrMembershipProof<H>, H::Digest)>,
-)
+) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, H::Digest)>)
 where
-    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    H: simple_hasher::Hasher,
+    // FIXME: Change 'usize' back into 'u32' when trait impl is available on twenty-first
+    usize: Hashable<<H as Hasher>::T>,
+    u128: Hashable<<H as Hasher>::T>,
+    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
     let hasher = H::new();
-    let mut mutation_argument_hash_map: HashMap<
-        u128,
-        (mmr::mmr_membership_proof::MmrMembershipProof<H>, H::Digest),
-    > = HashMap::new();
+    let mut mutation_argument_hash_map: HashMap<u128, (MmrMembershipProof<H>, H::Digest)> =
+        HashMap::new();
     let rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> =
         removal_record.get_chunk_index_to_bit_indices();
 
