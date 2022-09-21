@@ -439,7 +439,9 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
-    use crate::test_shared::mutator_set::{empty_archival_ms, insert_item, remove_item};
+    use crate::test_shared::mutator_set::{
+        empty_archival_ms, insert_item, make_item_and_randomness, remove_item,
+    };
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -518,14 +520,7 @@ mod accumulation_scheme_tests {
         // Test that `get_indices` behaves as expected. I.e. that it does not return any
         // duplicates, and always returns something of length `NUM_TRIALS`.
         type Hasher = RescuePrimeRegular;
-        let hasher = Hasher::new();
-        let mut prng = rand::thread_rng();
-        let item = hasher
-            .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
-            .into();
-        let randomness = hasher
-            .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
-            .into();
+        let (item, randomness) = make_item_and_randomness();
         let ret: [u128; NUM_TRIALS] = get_swbf_indices::<Hasher>(&item, &randomness, 0);
         assert_eq!(NUM_TRIALS, ret.len());
         assert!(has_unique_elements(ret));
@@ -548,15 +543,8 @@ mod accumulation_scheme_tests {
         let mut mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
         let mut empty_mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
 
-        let hasher = H::new();
-        let mut prng = rand::thread_rng();
         for _ in 0..2 * BATCH_SIZE + 2 {
-            let item = hasher
-                .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
-                .into();
-            let randomness = hasher
-                .hash_sequence(&BFieldElement::random_elements(3, &mut prng))
-                .into();
+            let (item, randomness) = make_item_and_randomness();
 
             let mut addition_record: AdditionRecord<RescuePrimeRegular> =
                 mutator_set.commit(&item, &randomness);
@@ -722,14 +710,8 @@ mod accumulation_scheme_tests {
         // verify that it works throughout. The reason we insert this many
         // is that we want to make sure that the window slides into a new
         // position.
-        let mut prng = thread_rng();
         for _ in 0..2 * BATCH_SIZE + 4 {
-            let item = hasher
-                .hash_sequence(&BFieldElement::random_elements(2, &mut prng).clone())
-                .into();
-            let randomness = hasher
-                .hash_sequence(&BFieldElement::random_elements(2, &mut prng).clone())
-                .into();
+            let (item, randomness) = make_item_and_randomness();
             let mut addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
             assert!(!mutator_set.verify(&item, &membership_proof));

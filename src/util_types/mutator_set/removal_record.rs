@@ -240,32 +240,29 @@ where
 mod removal_record_tests {
     use super::*;
     use itertools::Itertools;
-    use rand::{seq::SliceRandom, thread_rng};
+    use rand::seq::SliceRandom;
 
-    use crate::util_types::mutator_set::{
-        addition_record::AdditionRecord,
-        ms_membership_proof::MsMembershipProof,
-        mutator_set_accumulator::MutatorSetAccumulator,
-        mutator_set_trait::MutatorSet,
-        shared::{CHUNK_SIZE, NUM_TRIALS},
+    use crate::{
+        test_shared::mutator_set::make_item_and_randomness,
+        util_types::mutator_set::{
+            addition_record::AdditionRecord,
+            ms_membership_proof::MsMembershipProof,
+            mutator_set_accumulator::MutatorSetAccumulator,
+            mutator_set_trait::MutatorSet,
+            shared::{CHUNK_SIZE, NUM_TRIALS},
+        },
     };
     use twenty_first::{
-        shared_math::{rescue_prime_regular::RescuePrimeRegular, traits::GetRandomElements},
-        util_types::simple_hasher::Hasher,
+        shared_math::rescue_prime_regular::RescuePrimeRegular,
         utils::{self, has_unique_elements},
     };
 
     #[test]
     fn verify_that_hash_preimage_elements_are_unique_test() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
-
+        let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
 
@@ -277,13 +274,9 @@ mod removal_record_tests {
     #[test]
     fn verify_that_bit_indices_are_sorted_test() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+        let (item, randomness) = make_item_and_randomness();
 
         let mp = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
@@ -306,14 +299,9 @@ mod removal_record_tests {
     #[test]
     fn hash_test() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
-
+        let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
         let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
@@ -340,14 +328,9 @@ mod removal_record_tests {
     fn get_chunk_index_to_bit_indices_test() {
         // Create a removal record
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
-
+        let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
         let chunks2bits = removal_record.get_chunk_index_to_bit_indices();
@@ -376,14 +359,9 @@ mod removal_record_tests {
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
-
+        let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
 
@@ -397,14 +375,9 @@ mod removal_record_tests {
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
-
+        let (item, randomness) = make_item_and_randomness();
         let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
         let mp = accumulator.prove(&item, &randomness, true);
 
@@ -429,8 +402,6 @@ mod removal_record_tests {
     fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let test_iterations = 10;
@@ -439,10 +410,7 @@ mod removal_record_tests {
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
-                let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-                let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-                let randomness: <H as Hasher>::Digest =
-                    hasher.hash_sequence(&random_elements[3..6]);
+                let (item, randomness) = make_item_and_randomness();
 
                 let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
                 let mp = accumulator.prove(&item, &randomness, true);
@@ -505,17 +473,13 @@ mod removal_record_tests {
     fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
-            let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-            let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-            let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+            let (item, randomness) = make_item_and_randomness();
 
             let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
             let mp = accumulator.prove(&item, &randomness, true);

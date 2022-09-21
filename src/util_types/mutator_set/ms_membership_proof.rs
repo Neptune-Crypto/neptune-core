@@ -467,6 +467,7 @@ where
 #[cfg(test)]
 mod ms_proof_tests {
     use super::*;
+    use crate::test_shared::mutator_set::make_item_and_randomness;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::BITS_PER_U32;
@@ -480,11 +481,8 @@ mod ms_proof_tests {
     #[test]
     fn mp_cache_bits_test() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash_sequence(&BFieldElement::random_elements(1, &mut prng));
-        let randomness = hasher.hash_sequence(&BFieldElement::random_elements(1, &mut prng));
+        let (item, randomness) = make_item_and_randomness();
         let mut mp = accumulator.prove(&item, &randomness, false);
 
         // Verify that bits are not cached, then cache them with the helper function
@@ -584,13 +582,9 @@ mod ms_proof_tests {
         // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
         // in this code base as a macro. So this is basically a test of that macro.
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         for _ in 0..10 {
-            let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
-            let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-            let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+            let (item, randomness) = make_item_and_randomness();
 
             let mp_with_cached_bits = accumulator.prove(&item, &randomness, true);
             assert!(mp_with_cached_bits.cached_bits.is_some());

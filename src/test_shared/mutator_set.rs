@@ -1,17 +1,28 @@
-use rand::thread_rng;
-use rusty_leveldb::DB;
-
 use crate::util_types::mutator_set::{
     archival_mutator_set::ArchivalMutatorSet, ms_membership_proof::MsMembershipProof,
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
+use rand::thread_rng;
+use rusty_leveldb::DB;
+use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+use twenty_first::shared_math::traits::GetRandomElements;
+use twenty_first::util_types::simple_hasher::Hasher;
 use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, traits::GetRandomElements},
-    util_types::{
-        mmr::mmr_trait::Mmr,
-        simple_hasher::{Hashable, Hasher},
-    },
+    shared_math::b_field_element::BFieldElement,
+    util_types::{mmr::mmr_trait::Mmr, simple_hasher::Hashable},
 };
+
+pub fn make_item_and_randomness() -> ([BFieldElement; 5], [BFieldElement; 5]) {
+    type H = RescuePrimeRegular;
+    let mut rng = rand::thread_rng();
+    let hasher = H::new();
+
+    let random_elements = <H as Hasher>::T::random_elements(6, &mut rng);
+    let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
+    let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+
+    (item, randomness)
+}
 
 pub fn empty_archival_ms<H>() -> ArchivalMutatorSet<H>
 where

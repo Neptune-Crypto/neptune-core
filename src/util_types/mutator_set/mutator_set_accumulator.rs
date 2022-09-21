@@ -91,12 +91,10 @@ where
 
 #[cfg(test)]
 mod accumulation_scheme_tests {
-    use crate::test_shared::mutator_set::empty_archival_ms;
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use proptest::prelude::Rng;
-    // use rand::prelude::*;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::shared_math::traits::GetRandomElements;
     use twenty_first::util_types::simple_hasher::Hasher;
 
     use super::*;
@@ -112,7 +110,6 @@ mod accumulation_scheme_tests {
         // It *may* be considered bad style to do it this way, but there is a
         // lot of code duplication that is avoided by doing that.
         type H = RescuePrimeRegular;
-        let hasher = H::new();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let mut archival_after_remove: ArchivalMutatorSet<H> = empty_archival_ms();
         let mut archival_before_remove: ArchivalMutatorSet<H> = empty_archival_ms();
@@ -148,10 +145,7 @@ mod accumulation_scheme_tests {
 
                 if prng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
-                    let random_elements = <H as Hasher>::T::random_elements(3, &mut prng);
-                    let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-                    let randomness: <H as Hasher>::Digest =
-                        hasher.hash_sequence(&random_elements[3..6]);
+                    let (item, randomness) = make_item_and_randomness();
 
                     let mut addition_record: AdditionRecord<H> =
                         accumulator.commit(&item, &randomness);

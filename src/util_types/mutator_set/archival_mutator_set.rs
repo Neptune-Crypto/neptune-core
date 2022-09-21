@@ -364,7 +364,7 @@ where
 #[cfg(test)]
 mod archival_mutator_set_tests {
     use super::*;
-    use crate::test_shared::mutator_set::empty_archival_ms;
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::shared_math::traits::GetRandomElements;
     use twenty_first::util_types::simple_hasher::Hasher;
@@ -372,7 +372,6 @@ mod archival_mutator_set_tests {
     #[test]
     fn new_or_restore_test() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
         let opt = rusty_leveldb::in_memory();
         let chunks_db = DB::open("chunks", opt.clone()).unwrap();
         let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
@@ -386,10 +385,7 @@ mod archival_mutator_set_tests {
             active_window_db,
         );
 
-        let mut rng = rand::thread_rng();
-        let random_elements = <H as Hasher>::T::random_elements(3, &mut rng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+        let (item, randomness) = make_item_and_randomness();
 
         let mut addition_record = archival_mutator_set.commit(&item, &randomness);
         let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -429,19 +425,15 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_commitment_test() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
         let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
         let num_additions = 65;
 
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
         let mut items: Vec<<H as Hasher>::Digest> = vec![];
-        let mut rng = rand::thread_rng();
 
         for i in 0..num_additions {
-            let random_elements = <H as Hasher>::T::random_elements(6, &mut rng);
-            let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-            let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+            let (item, randomness) = make_item_and_randomness();
 
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
