@@ -265,7 +265,7 @@ mod removal_record_tests {
 
         let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
 
         let preimage = removal_record.get_preimage();
         assert_eq!((NUM_TRIALS + 1) * DIGEST_LENGTH, preimage.len());
@@ -280,10 +280,10 @@ mod removal_record_tests {
         let (item, randomness) = make_item_and_randomness();
 
         let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
 
         let bit_indices = removal_record.bit_indices;
-        let mut bit_indices_sorted = bit_indices.clone();
+        let mut bit_indices_sorted = bit_indices;
         bit_indices_sorted.sort_unstable();
         assert_eq!(
             bit_indices, bit_indices_sorted,
@@ -304,7 +304,7 @@ mod removal_record_tests {
 
         let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
         assert_eq!(
             removal_record.hash(),
@@ -333,7 +333,7 @@ mod removal_record_tests {
 
         let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         let chunks2bits = removal_record.get_chunk_index_to_bit_indices();
 
         // Verify that no indices are repeated in the hash map
@@ -364,7 +364,7 @@ mod removal_record_tests {
 
         let (item, randomness) = make_item_and_randomness();
         let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
@@ -465,7 +465,7 @@ mod removal_record_tests {
             let (chosen_index, random_removal_record) =
                 removal_records.choose(&mut rand::thread_rng()).unwrap();
             assert!(accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
-            accumulator.remove(&random_removal_record);
+            accumulator.remove(random_removal_record);
             assert!(!accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
         }
     }

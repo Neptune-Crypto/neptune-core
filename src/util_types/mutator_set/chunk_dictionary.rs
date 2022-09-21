@@ -83,7 +83,7 @@ mod chunk_dict_tests {
             hasher.hash_sequence(&[1002u32.into(); DIGEST_LENGTH]),
             hasher.hash_sequence(&[1003u32.into(); DIGEST_LENGTH]),
         ];
-        let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes.clone());
+        let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
         let mp0: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk0 = Chunk {
             bits: [0xFFFFFFFFu32; CHUNK_SIZE / BITS_PER_U32],
@@ -121,8 +121,8 @@ mod chunk_dict_tests {
         // Construct similar data structure to `two_elements` but insert key/value pairs in opposite order
         let mut new_hash_map = HM::new();
         new_hash_map.insert(key1, (mp1.clone(), chunk1));
-        new_hash_map.insert(key2, (mp1.clone(), chunk1));
-        new_hash_map.insert(key0, (mp0.clone(), chunk0));
+        new_hash_map.insert(key2, (mp1, chunk1));
+        new_hash_map.insert(key0, (mp0, chunk0));
         let three_elements_alt: ChunkDictionary<H> = ChunkDictionary {
             dictionary: new_hash_map.clone(),
         };
@@ -157,7 +157,7 @@ mod chunk_dict_tests {
             hasher.hash_sequence(&[1002u32.into(); DIGEST_LENGTH]),
             hasher.hash_sequence(&[1003u32.into(); DIGEST_LENGTH]),
         ];
-        let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes.clone());
+        let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
             bits: [0xFFFFFFFFu32; CHUNK_SIZE / BITS_PER_U32],

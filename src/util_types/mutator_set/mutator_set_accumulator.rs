@@ -222,8 +222,8 @@ mod accumulation_scheme_tests {
                     let _removal_rand = rands.remove(item_index);
 
                     // generate removal record
-                    let mut removal_record: RemovalRecord<H> =
-                        accumulator.drop(&removal_item.into(), &removal_mp);
+                    let removal_record: RemovalRecord<H> =
+                        accumulator.drop(&removal_item, &removal_mp);
                     assert!(removal_record.validate(&mut accumulator.set_commitment));
 
                     // update membership proofs
@@ -246,18 +246,18 @@ mod accumulation_scheme_tests {
                     }
 
                     // remove item from set
-                    assert!(accumulator.verify(&removal_item.into(), &removal_mp));
-                    let mut removal_record_copy = removal_record.clone();
-                    accumulator.remove(&mut removal_record);
+                    assert!(accumulator.verify(&removal_item, &removal_mp));
+                    let removal_record_copy = removal_record.clone();
+                    accumulator.remove(&removal_record);
                     let diff_indices: Vec<u128> =
-                        archival_after_remove.remove(&mut removal_record).unwrap();
+                        archival_after_remove.remove(&removal_record).unwrap();
                     for diff_index in diff_indices {
                         println!("diff_index = {}", diff_index);
                         assert!(archival_after_remove.get_bloom_filter_bit(diff_index));
                         assert!(!archival_before_remove.get_bloom_filter_bit(diff_index));
                     }
-                    archival_before_remove.remove(&mut removal_record_copy);
-                    assert!(!accumulator.verify(&removal_item.into(), &removal_mp));
+                    archival_before_remove.remove(&removal_record_copy);
+                    assert!(!accumulator.verify(&removal_item, &removal_mp));
 
                     // Verify that the sequential `update_from_remove` return value is correct
                     // The return value from `update_from_remove` shows if the membership proof

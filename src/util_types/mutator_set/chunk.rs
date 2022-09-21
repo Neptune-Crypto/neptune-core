@@ -152,9 +152,9 @@ mod chunk_tests {
         assert_eq!(get_hashpreimage_length(), one_one_preimage.len());
         assert!(one_one_preimage[0].is_zero());
         assert!(one_one_preimage[1].is_one());
-        for i in 2..get_hashpreimage_length() {
+        (2..get_hashpreimage_length()).for_each(|i| {
             assert!(one_one_preimage[i].is_zero());
-        }
+        });
 
         let mut two_ones = Chunk {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
@@ -164,9 +164,9 @@ mod chunk_tests {
         let two_ones_preimage = two_ones.hash_preimage::<H>();
         assert!(two_ones_preimage[0].is_zero());
         assert_eq!(3, two_ones_preimage[1].value());
-        for i in 2..get_hashpreimage_length() {
+        (2..get_hashpreimage_length()).for_each(|i| {
             assert!(two_ones_preimage[i].is_zero());
-        }
+        });
     }
 
     #[test]

@@ -392,9 +392,8 @@ mod archival_mutator_set_tests {
         archival_mutator_set.add(&mut addition_record);
         assert!(archival_mutator_set.verify(&item, &membership_proof));
 
-        let mut removal_record: RemovalRecord<H> =
-            archival_mutator_set.drop(&item.into(), &membership_proof);
-        let diff_bits: Vec<u128> = archival_mutator_set.remove(&mut removal_record).unwrap();
+        let removal_record: RemovalRecord<H> = archival_mutator_set.drop(&item, &membership_proof);
+        let diff_bits: Vec<u128> = archival_mutator_set.remove(&removal_record).unwrap();
         assert_eq!(
             removal_record.bit_indices.to_vec(),
             diff_bits,
@@ -412,7 +411,7 @@ mod archival_mutator_set_tests {
         drop(archival_mutator_set);
         let chunks_db = DB::open("chunks", opt.clone()).unwrap();
         let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
-        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
+        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt).unwrap();
         let mut archival_mutator_set = ArchivalMutatorSet::new_or_restore(
             aocl_mmr_db,
             swbf_inactive_mmr_db,

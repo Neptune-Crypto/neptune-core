@@ -467,10 +467,7 @@ mod accumulation_scheme_tests {
         // Add one element to append-only commitment list
         let mut set_with_aocl_append = MutatorSetAccumulator::<H>::default();
         let item0 = hasher.hash_sequence(&BFieldElement::random_elements(3, &mut prng));
-        set_with_aocl_append
-            .set_commitment
-            .aocl
-            .append(item0.clone());
+        set_with_aocl_append.set_commitment.aocl.append(item0);
         let commitment_to_aocl_append = set_with_aocl_append.get_commitment();
 
         assert_ne!(
@@ -564,16 +561,16 @@ mod accumulation_scheme_tests {
         let hasher = H::new();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
-        let own_item = hasher.hash_sequence(&vec![BFieldElement::new(1215)]).into();
-        let randomness = hasher.hash_sequence(&vec![BFieldElement::new(1776)]).into();
+        let own_item = hasher.hash_sequence(&[BFieldElement::new(1215)]);
+        let randomness = hasher.hash_sequence(&[BFieldElement::new(1776)]);
 
         let mut addition_record = mutator_set.commit(&own_item, &randomness);
         let mut membership_proof = mutator_set.prove(&own_item, &randomness, false);
         mutator_set.set_commitment.add_helper(&mut addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
-        let new_item = hasher.hash_sequence(&vec![BFieldElement::new(1648)]).into();
-        let new_randomness = hasher.hash_sequence(&vec![BFieldElement::new(1807)]).into();
+        let new_item = hasher.hash_sequence(&[BFieldElement::new(1648)]);
+        let new_randomness = hasher.hash_sequence(&[BFieldElement::new(1807)]);
         let mut new_addition_record = mutator_set.commit(&new_item, &new_randomness);
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
@@ -674,7 +671,7 @@ mod accumulation_scheme_tests {
             assert!(membership_proofs_and_items
                 .clone()
                 .into_iter()
-                .all(|(mp, item)| mutator_set.verify(&item.into(), &mp)));
+                .all(|(mp, item)| mutator_set.verify(&item, &mp)));
         }
     }
 
@@ -684,8 +681,8 @@ mod accumulation_scheme_tests {
         let hasher = H::new();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
-        let item0 = hasher.hash_sequence(&vec![BFieldElement::new(1215)]).into();
-        let randomness0 = hasher.hash_sequence(&vec![BFieldElement::new(1776)]).into();
+        let item0 = hasher.hash_sequence(&[BFieldElement::new(1215)]);
+        let randomness0 = hasher.hash_sequence(&[BFieldElement::new(1776)]);
 
         let mut addition_record = mutator_set.commit(&item0, &randomness0);
         let membership_proof = mutator_set.prove(&item0, &randomness0, false);
@@ -697,8 +694,8 @@ mod accumulation_scheme_tests {
         assert!(mutator_set.verify(&item0, &membership_proof));
 
         // Insert a new item and verify that this still works
-        let item1 = hasher.hash_sequence(&vec![BFieldElement::new(1846)]).into();
-        let randomness1 = hasher.hash_sequence(&vec![BFieldElement::new(2009)]).into();
+        let item1 = hasher.hash_sequence(&[BFieldElement::new(1846)]);
+        let randomness1 = hasher.hash_sequence(&[BFieldElement::new(2009)]);
         let mut addition_record = mutator_set.commit(&item1, &randomness1);
         let membership_proof = mutator_set.prove(&item1, &randomness1, false);
         assert!(!mutator_set.verify(&item1, &membership_proof));
@@ -747,20 +744,16 @@ mod accumulation_scheme_tests {
 
         for num_additions in num_additions_list {
             for _ in 0..num_additions {
-                let new_item = hasher
-                    .hash_sequence(
-                        &(0..3)
-                            .map(|_| BFieldElement::new(rng.next_u64()))
-                            .collect::<Vec<_>>(),
-                    )
-                    .into();
-                let randomness = hasher
-                    .hash_sequence(
-                        &(0..3)
-                            .map(|_| BFieldElement::new(rng.next_u64()))
-                            .collect::<Vec<_>>(),
-                    )
-                    .into();
+                let new_item = hasher.hash_sequence(
+                    &(0..3)
+                        .map(|_| BFieldElement::new(rng.next_u64()))
+                        .collect::<Vec<_>>(),
+                );
+                let randomness = hasher.hash_sequence(
+                    &(0..3)
+                        .map(|_| BFieldElement::new(rng.next_u64()))
+                        .collect::<Vec<_>>(),
+                );
 
                 let mut addition_record = mutator_set.commit(&new_item, &randomness);
                 let membership_proof = mutator_set.prove(&new_item, &randomness, true);
@@ -778,7 +771,7 @@ mod accumulation_scheme_tests {
                 assert!(mutator_set.verify(&new_item, &membership_proof));
 
                 for (_, (mp, item)) in membership_proofs.iter().zip(items.iter()).enumerate() {
-                    assert!(mutator_set.verify(&item, &mp));
+                    assert!(mutator_set.verify(item, mp));
                 }
 
                 membership_proofs.push(membership_proof);
@@ -792,7 +785,7 @@ mod accumulation_scheme_tests {
                 assert!(mutator_set.verify(&item, &mp));
 
                 // generate removal record
-                let mut removal_record: RemovalRecord<H> = mutator_set.drop(&item.into(), &mp);
+                let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
                 assert!(removal_record.validate(&mut mutator_set.set_commitment));
 
                 // update membership proofs
@@ -803,10 +796,8 @@ mod accumulation_scheme_tests {
                 assert!(res.is_ok());
 
                 // remove item from set
-                mutator_set
-                    .set_commitment
-                    .remove_helper(&mut removal_record);
-                assert!(!mutator_set.verify(&item.into(), &mp));
+                mutator_set.set_commitment.remove_helper(&removal_record);
+                assert!(!mutator_set.verify(&item, &mp));
 
                 for (item, mp) in items.iter().zip(membership_proofs.iter()) {
                     assert!(mutator_set.verify(item, mp));
@@ -852,7 +843,7 @@ mod accumulation_scheme_tests {
                 let original_mp = mp.clone();
                 assert!(mutator_set.verify(updatee_item, mp));
                 let changed_res = mp.update_from_addition(
-                    &updatee_item,
+                    updatee_item,
                     &mut mutator_set.set_commitment,
                     &addition_record,
                 );
@@ -865,46 +856,46 @@ mod accumulation_scheme_tests {
             mutator_set.set_commitment.add_helper(&mut addition_record);
             assert!(mutator_set.verify(&new_item, &membership_proof));
 
-            for j in 0..items_and_membership_proofs.len() {
+            (0..items_and_membership_proofs.len()).for_each(|j| {
                 let (old_item, mp) = &items_and_membership_proofs[j];
-                assert!(mutator_set.verify(&old_item, &mp))
-            }
+                assert!(mutator_set.verify(old_item, mp))
+            });
 
             items_and_membership_proofs.push((new_item, membership_proof));
         }
 
         // Verify all membership proofs
-        for k in 0..items_and_membership_proofs.len() {
+        (0..items_and_membership_proofs.len()).for_each(|k| {
             assert!(mutator_set.verify(
                 &items_and_membership_proofs[k].0,
                 &items_and_membership_proofs[k].1,
             ));
-        }
+        });
 
         // Remove items from MS, and verify correct updating of membership proof
-        for i in 0..num_additions {
-            for k in i..items_and_membership_proofs.len() {
+        (0..num_additions).for_each(|i| {
+            (i..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[k].0,
                     &items_and_membership_proofs[k].1,
                 ));
-            }
+            });
             let (item, mp) = items_and_membership_proofs[i].clone();
 
             assert!(mutator_set.verify(&item, &mp));
 
             // generate removal record
-            let mut removal_record: RemovalRecord<H> = mutator_set.drop(&item.into(), &mp);
+            let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
             assert!(removal_record.validate(&mut mutator_set.set_commitment));
-            for k in i..items_and_membership_proofs.len() {
+            (i..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[k].0,
                     &items_and_membership_proofs[k].1,
                 ));
-            }
+            });
 
             // update membership proofs
-            for j in (i + 1)..num_additions {
+            ((i + 1)..num_additions).for_each(|j| {
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[j].0,
                     &items_and_membership_proofs[j].1
@@ -915,21 +906,19 @@ mod accumulation_scheme_tests {
                     .update_from_remove(&removal_record.clone());
                 assert!(update_res.is_ok());
                 assert!(removal_record.validate(&mut mutator_set.set_commitment));
-            }
+            });
 
             // remove item from set
-            mutator_set
-                .set_commitment
-                .remove_helper(&mut removal_record);
-            assert!(!mutator_set.verify(&item.into(), &mp));
+            mutator_set.set_commitment.remove_helper(&removal_record);
+            assert!(!mutator_set.verify(&item, &mp));
 
-            for k in (i + 1)..items_and_membership_proofs.len() {
+            ((i + 1)..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[k].0,
                     &items_and_membership_proofs[k].1,
                 ));
-            }
-        }
+            });
+        });
     }
 
     #[test]

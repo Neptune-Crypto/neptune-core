@@ -514,7 +514,7 @@ mod ms_proof_tests {
             cached_bits: Some([1u128; NUM_TRIALS]),
         };
         let mp_without_cached_bits = MsMembershipProof::<H> {
-            randomness: randomness,
+            randomness,
             auth_path_aocl: MmrMembershipProof::<H> {
                 data_index: 0,
                 authentication_path: vec![],
@@ -523,7 +523,7 @@ mod ms_proof_tests {
             cached_bits: None,
         };
         let mp_with_different_data_index = MsMembershipProof::<H> {
-            randomness: randomness,
+            randomness,
             auth_path_aocl: MmrMembershipProof::<H> {
                 data_index: 100073,
                 authentication_path: vec![],
