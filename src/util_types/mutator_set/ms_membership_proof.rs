@@ -44,7 +44,7 @@ pub enum MembershipProofError {
 // In order to store this structure in the database, it needs to be serializable. But it should not be
 // transferred between peers as the `cached_bits` fields cannot be trusted and must be calculated by each peer
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MsMembershipProof<H: simple_hasher::Hasher> {
+pub struct MsMembershipProof<H: Hasher> {
     pub randomness: H::Digest,
     pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
@@ -466,26 +466,16 @@ where
 
 #[cfg(test)]
 mod ms_proof_tests {
-
-    use crate::util_types::mutator_set::{
-        mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
-        shared::BITS_PER_U32,
-    };
+    use super::*;
+    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use crate::util_types::mutator_set::shared::BITS_PER_U32;
     use num_traits::Zero;
     use rand::thread_rng;
-    use twenty_first::{
-        shared_math::{
-            rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH},
-            traits::GetRandomElements,
-        },
-        util_types::{
-            blake3_wrapper::{self, Blake3Hash},
-            mmr,
-        shared_math::{rescue_prime_regular::RescuePrimeRegular, traits::GetRandomElements},
-        util_types::{mmr::mmr_membership_proof::MmrMembershipProof, simple_hasher::Hasher},
-    };
-
-    use super::*;
+    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::traits::GetRandomElements;
+    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+    use twenty_first::util_types::simple_hasher::Hasher;
 
     #[test]
     fn mp_cache_bits_test() {
@@ -593,19 +583,15 @@ mod ms_proof_tests {
     fn serialization_test() {
         // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
         // in this code base as a macro. So this is basically a test of that macro.
-        type H = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
+        type H = RescuePrimeRegular;
         let hasher = H::new();
         let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         for _ in 0..10 {
-            let item = hasher.hash(
-                &BFieldElement::random_elements(3, &mut prng),
-                RP_DEFAULT_OUTPUT_SIZE,
-            );
-            let randomness = hasher.hash(
-                &BFieldElement::random_elements(3, &mut prng),
-                RP_DEFAULT_OUTPUT_SIZE,
-            );
+            let random_elements = <H as Hasher>::T::random_elements(6, &mut prng);
+            let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
+            let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+
             let mp_with_cached_bits = accumulator.prove(&item, &randomness, true);
             assert!(mp_with_cached_bits.cached_bits.is_some());
 
