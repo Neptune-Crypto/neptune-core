@@ -41,32 +41,6 @@ pub struct SetCommitment<H: Hasher, MMR: Mmr<H>> {
     pub swbf_active: ActiveWindow<H>,
 }
 
-impl<H: Hasher, MMR: Mmr<H>> Default for SetCommitment<H, MMR> {
-    fn default() -> Self {
-        Self {
-            //FIXME implement this, or find some other way to construct SetCommitment's in general.
-            aocl: todo!(),
-            swbf_inactive: todo!(),
-            swbf_active: Default::default(),
-        }
-    }
-}
-
-impl<H: Hasher, MMR: Mmr<H>> SetCommitment<H, MMR>
-where
-    u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
-{
-    #[allow(dead_code)]
-    fn get_commitment(&mut self) -> <H as Hasher>::Digest {
-        let aocl_mmr_bagged = self.aocl.bag_peaks();
-        let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
-        let hasher = H::new();
-        let active_swbf_bagged: <H as Hasher>::Digest = self.swbf_active.hash();
-        hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
-    }
-}
-
 /// Helper function. Computes the bloom filter bit indices of the
 /// item, randomness, index triple.
 pub fn get_swbf_indices<H: Hasher>(
@@ -82,6 +56,7 @@ where
     let hasher = H::new();
 
     let batch_index = aocl_leaf_index / BATCH_SIZE as u128;
+    let item_seq: Vec<H::T> = item.to_sequence();
     let timestamp_seq: Vec<H::T> = aocl_leaf_index.to_sequence();
     let randomness_seq: Vec<H::T> = randomness.to_sequence();
 
@@ -90,14 +65,18 @@ where
     // Collect all indices, using counter-mode
     for i in 0_usize..NUM_TRIALS {
         let counter: Vec<H::T> = (i as u128).to_sequence();
-        let randomness_with_counter: H::Digest = hasher
-            .hash_sequence(&vec![timestamp_seq.clone(), randomness_seq.clone(), counter].concat());
-        let randomness_with_counter_and_item: H::Digest =
-            hasher.hash_pair(&randomness_with_counter, item); //FIXME: this cant really be the right approach
-        let sample_index = hasher
-            .sample_index_not_power_of_two(&randomness_with_counter_and_item, WINDOW_SIZE)
-            as u128;
-        let sample_swbf_index: u128 = sample_index + batch_index * CHUNK_SIZE as u128;
+        let randomness_with_counter: H::Digest = hasher.hash_sequence(
+            &vec![
+                item_seq.clone(),
+                timestamp_seq.clone(),
+                randomness_seq.clone(),
+                counter,
+            ]
+            .concat(),
+        );
+        let sample_index =
+            hasher.sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
+        let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
         indices.push(sample_swbf_index);
     }
 
@@ -107,12 +86,19 @@ where
     let mut j = NUM_TRIALS;
     while indices.len() < NUM_TRIALS {
         let counter: Vec<H::T> = (j as u128).to_sequence();
-        let randomness_with_counter: H::Digest = hasher
-            .hash_sequence(&vec![timestamp_seq.clone(), randomness_seq.clone(), counter].concat());
-        let index = hasher.sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE)
-            as u128
-            + batch_index * CHUNK_SIZE as u128;
-        indices.push(index);
+        let randomness_with_counter: H::Digest = hasher.hash_sequence(
+            &vec![
+                item_seq.clone(),
+                timestamp_seq.clone(),
+                randomness_seq.clone(),
+                counter,
+            ]
+            .concat(),
+        );
+        let sample_index =
+            hasher.sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
+        let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
+        indices.push(sample_swbf_index);
         indices.sort_unstable();
         indices.dedup();
         j += 1;
@@ -470,37 +456,44 @@ mod accumulation_scheme_tests {
     #[test]
     fn mutator_set_commitment_test() {
         type H = RescuePrimeRegular;
-
+        let mut prng = rand::thread_rng();
         let hasher = H::new();
-        let mut empty = MutatorSetAccumulator::<H>::default();
-        let commitment_to_empty = empty.get_commitment();
+
+        let mut empty_set = MutatorSetAccumulator::<H>::default();
+        let commitment_to_empty = empty_set.get_commitment();
 
         // Add one element to append-only commitment list
-        let mut one_in_aocl = empty.set_commitment.clone();
-        let mut prng = rand::thread_rng();
+        let mut set_with_aocl_append = MutatorSetAccumulator::<H>::default();
         let item0 = hasher.hash_sequence(&BFieldElement::random_elements(3, &mut prng));
-        one_in_aocl.aocl.append(item0.clone());
-        let commitment_to_one_aocl = one_in_aocl.get_commitment();
+        set_with_aocl_append
+            .set_commitment
+            .aocl
+            .append(item0.clone());
+        let commitment_to_aocl_append = set_with_aocl_append.get_commitment();
+
         assert_ne!(
-            commitment_to_empty, commitment_to_one_aocl,
-            "Changing AOCL must change MS commitment"
+            commitment_to_empty, commitment_to_aocl_append,
+            "Appending to AOCL must change MutatorSet commitment"
         );
 
         // Manipulate inactive SWBF
-        let mut one_in_inactive_window = empty.set_commitment.clone();
-        one_in_inactive_window.swbf_inactive.append(item0);
-        let commitment_to_one_in_inactive = one_in_inactive_window.get_commitment();
+        let mut set_with_swbf_inactive_append = MutatorSetAccumulator::<H>::default();
+        set_with_swbf_inactive_append
+            .set_commitment
+            .swbf_inactive
+            .append(item0);
+        let commitment_to_one_in_inactive = set_with_swbf_inactive_append.get_commitment();
         assert_ne!(
             commitment_to_empty, commitment_to_one_in_inactive,
             "Changing inactive must change MS commitment"
         );
         assert_ne!(
-            commitment_to_one_aocl, commitment_to_one_in_inactive,
+            commitment_to_aocl_append, commitment_to_one_in_inactive,
             "One in AOCL and one in inactive must hash to different digests"
         );
 
         // Manipulate active window
-        let mut active_window_changed = empty;
+        let mut active_window_changed = empty_set;
         active_window_changed.set_commitment.swbf_active.set_bit(42);
         assert_ne!(
             commitment_to_empty,
@@ -541,20 +534,21 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn init_test() {
-        SetCommitment::<RescuePrimeRegular, MmrAccumulator<RescuePrimeRegular>>::default();
-        let _val: ArchivalMutatorSet<RescuePrimeRegular> = empty_archival_ms();
+        type H = RescuePrimeRegular;
+
+        let _accumulator = MutatorSetAccumulator::<H>::default().set_commitment;
+        let _archival: ArchivalMutatorSet<RescuePrimeRegular> = empty_archival_ms();
     }
 
     #[test]
     fn verify_future_bits_test() {
         // Ensure that `verify` does not crash when given a membership proof
         // that represents a future addition to the AOCL.
-        type Hasher = RescuePrimeRegular;
-        let mut mutator_set =
-            SetCommitment::<Hasher, MmrAccumulator<RescuePrimeRegular>>::default();
-        let mut empty_mutator_set =
-            SetCommitment::<Hasher, MmrAccumulator<RescuePrimeRegular>>::default();
-        let hasher = Hasher::new();
+        type H = RescuePrimeRegular;
+        let mut mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
+        let mut empty_mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
+
+        let hasher = H::new();
         let mut prng = rand::thread_rng();
         for _ in 0..2 * BATCH_SIZE + 2 {
             let item = hasher
@@ -578,16 +572,16 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_membership_proof_update_from_add() {
-        type Hasher = RescuePrimeRegular;
+        type H = RescuePrimeRegular;
+        let hasher = H::new();
 
-        let mut mutator_set = SetCommitment::<Hasher, MmrAccumulator<Hasher>>::default();
-        let hasher = Hasher::new();
+        let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let own_item = hasher.hash_sequence(&vec![BFieldElement::new(1215)]).into();
         let randomness = hasher.hash_sequence(&vec![BFieldElement::new(1776)]).into();
 
         let mut addition_record = mutator_set.commit(&own_item, &randomness);
         let mut membership_proof = mutator_set.prove(&own_item, &randomness, false);
-        mutator_set.add_helper(&mut addition_record);
+        mutator_set.set_commitment.add_helper(&mut addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
         let new_item = hasher.hash_sequence(&vec![BFieldElement::new(1648)]).into();
@@ -596,7 +590,7 @@ mod accumulation_scheme_tests {
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
             &own_item,
-            &mut mutator_set,
+            &mut mutator_set.set_commitment,
             &new_addition_record,
         ) {
             Ok(changed) => changed,
@@ -621,7 +615,9 @@ mod accumulation_scheme_tests {
 
         // Insert the new element into the mutator set, then verify that the membership proof works and
         // that the original membership proof is invalid.
-        mutator_set.add_helper(&mut new_addition_record);
+        mutator_set
+            .set_commitment
+            .add_helper(&mut new_addition_record);
         assert!(
             !mutator_set.verify(&own_item, &original_membership_proof),
             "Original membership proof must fail to verify after addition"
@@ -634,11 +630,11 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn membership_proof_updating_from_add_pbt() {
-        type Hasher = RescuePrimeRegular;
+        type H = RescuePrimeRegular;
         let mut rng = thread_rng();
 
-        let mut mutator_set = SetCommitment::<Hasher, MmrAccumulator<Hasher>>::default();
-        let hasher: Hasher = RescuePrimeRegular::new();
+        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let hasher: H = RescuePrimeRegular::new();
 
         let num_additions = rng.gen_range(0..=100i32);
         println!(
@@ -669,7 +665,11 @@ mod accumulation_scheme_tests {
             // Update all membership proofs
             for (mp, item) in membership_proofs_and_items.iter_mut() {
                 let original_mp = mp.clone();
-                let changed_res = mp.update_from_addition(item, &mut mutator_set, &addition_record);
+                let changed_res = mp.update_from_addition(
+                    item,
+                    &mut mutator_set.set_commitment,
+                    &addition_record,
+                );
                 assert!(changed_res.is_ok());
 
                 // verify that the boolean returned value from the updater method is set correctly
@@ -678,7 +678,7 @@ mod accumulation_scheme_tests {
 
             // Add the element
             assert!(!mutator_set.verify(&item, &membership_proof));
-            mutator_set.add_helper(&mut addition_record);
+            mutator_set.set_commitment.add_helper(&mut addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
             membership_proofs_and_items.push((membership_proof, item));
 
@@ -692,10 +692,10 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_add_and_prove() {
-        type Hasher = RescuePrimeRegular;
-        type Mmr = MmrAccumulator<Hasher>;
-        let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
-        let hasher = Hasher::new();
+        type H = RescuePrimeRegular;
+        let hasher = H::new();
+
+        let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let item0 = hasher.hash_sequence(&vec![BFieldElement::new(1215)]).into();
         let randomness0 = hasher.hash_sequence(&vec![BFieldElement::new(1776)]).into();
 
@@ -704,7 +704,7 @@ mod accumulation_scheme_tests {
 
         assert!(!mutator_set.verify(&item0, &membership_proof));
 
-        mutator_set.add_helper(&mut addition_record);
+        mutator_set.set_commitment.add_helper(&mut addition_record);
 
         assert!(mutator_set.verify(&item0, &membership_proof));
 
@@ -714,7 +714,8 @@ mod accumulation_scheme_tests {
         let mut addition_record = mutator_set.commit(&item1, &randomness1);
         let membership_proof = mutator_set.prove(&item1, &randomness1, false);
         assert!(!mutator_set.verify(&item1, &membership_proof));
-        mutator_set.add_helper(&mut addition_record);
+
+        mutator_set.set_commitment.add_helper(&mut addition_record);
         assert!(mutator_set.verify(&item1, &membership_proof));
 
         // Insert ~2*BATCH_SIZE  more elements and
@@ -732,21 +733,19 @@ mod accumulation_scheme_tests {
             let mut addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
             assert!(!mutator_set.verify(&item, &membership_proof));
-            mutator_set.add_helper(&mut addition_record);
+
+            mutator_set.set_commitment.add_helper(&mut addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
         }
     }
 
     #[test]
     fn batch_update_from_addition_and_removal_test() {
-        // set up rng
+        type H = RescuePrimeRegular;
         let mut rng = thread_rng();
 
-        type Hasher = RescuePrimeRegular;
-        type Mmr = MmrAccumulator<Hasher>;
-
-        let hasher = Hasher::new();
-        let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
+        let hasher = H::new();
+        let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
         // It's important to test number of additions around the shifting of the window,
         // i.e. around batch size.
@@ -761,7 +760,7 @@ mod accumulation_scheme_tests {
             6 * BATCH_SIZE + 1,
         ];
 
-        let mut membership_proofs: Vec<MsMembershipProof<Hasher>> = vec![];
+        let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
         let mut items = vec![];
 
         for num_additions in num_additions_list {
@@ -785,15 +784,15 @@ mod accumulation_scheme_tests {
                 let membership_proof = mutator_set.prove(&new_item, &randomness, true);
 
                 // Update *all* membership proofs with newly added item
-                let batch_update_res = MsMembershipProof::<Hasher>::batch_update_from_addition(
+                let batch_update_res = MsMembershipProof::<H>::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut mutator_set,
+                    &mut mutator_set.set_commitment,
                     &addition_record,
                 );
                 assert!(batch_update_res.is_ok());
 
-                mutator_set.add_helper(&mut addition_record);
+                mutator_set.set_commitment.add_helper(&mut addition_record);
                 assert!(mutator_set.verify(&new_item, &membership_proof));
 
                 for (_, (mp, item)) in membership_proofs.iter().zip(items.iter()).enumerate() {
@@ -811,8 +810,8 @@ mod accumulation_scheme_tests {
                 assert!(mutator_set.verify(&item, &mp));
 
                 // generate removal record
-                let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
-                assert!(removal_record.validate(&mut mutator_set));
+                let mut removal_record: RemovalRecord<H> = mutator_set.drop(&item.into(), &mp);
+                assert!(removal_record.validate(&mut mutator_set.set_commitment));
 
                 // update membership proofs
                 let res = MsMembershipProof::batch_update_from_remove(
@@ -822,7 +821,9 @@ mod accumulation_scheme_tests {
                 assert!(res.is_ok());
 
                 // remove item from set
-                mutator_set.remove_helper(&mut removal_record);
+                mutator_set
+                    .set_commitment
+                    .remove_helper(&mut removal_record);
                 assert!(!mutator_set.verify(&item.into(), &mp));
 
                 for (item, mp) in items.iter().zip(membership_proofs.iter()) {
@@ -834,13 +835,11 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_multiple_adds() {
-        // set up rng
+        type H = RescuePrimeRegular;
+        let hasher = H::new();
         let mut rng = thread_rng();
 
-        type Hasher = RescuePrimeRegular;
-        type Mmr = MmrAccumulator<Hasher>;
-        let hasher = Hasher::new();
-        let mut mutator_set = SetCommitment::<Hasher, Mmr>::default();
+        let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
         let num_additions = 65;
 
@@ -870,15 +869,18 @@ mod accumulation_scheme_tests {
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
                 let original_mp = mp.clone();
                 assert!(mutator_set.verify(updatee_item, mp));
-                let changed_res =
-                    mp.update_from_addition(&updatee_item, &mut mutator_set, &addition_record);
+                let changed_res = mp.update_from_addition(
+                    &updatee_item,
+                    &mut mutator_set.set_commitment,
+                    &addition_record,
+                );
                 assert!(changed_res.is_ok());
 
                 // verify that the boolean returned value from the updater method is set correctly
                 assert_eq!(changed_res.unwrap(), original_mp != *mp);
             }
 
-            mutator_set.add_helper(&mut addition_record);
+            mutator_set.set_commitment.add_helper(&mut addition_record);
             assert!(mutator_set.verify(&new_item, &membership_proof));
 
             for j in 0..items_and_membership_proofs.len() {
@@ -910,8 +912,8 @@ mod accumulation_scheme_tests {
             assert!(mutator_set.verify(&item, &mp));
 
             // generate removal record
-            let mut removal_record: RemovalRecord<Hasher> = mutator_set.drop(&item.into(), &mp);
-            assert!(removal_record.validate(&mut mutator_set));
+            let mut removal_record: RemovalRecord<H> = mutator_set.drop(&item.into(), &mp);
+            assert!(removal_record.validate(&mut mutator_set.set_commitment));
             for k in i..items_and_membership_proofs.len() {
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[k].0,
@@ -925,16 +927,18 @@ mod accumulation_scheme_tests {
                     &items_and_membership_proofs[j].0,
                     &items_and_membership_proofs[j].1
                 ));
-                assert!(removal_record.validate(&mut mutator_set));
+                assert!(removal_record.validate(&mut mutator_set.set_commitment));
                 let update_res = items_and_membership_proofs[j]
                     .1
                     .update_from_remove(&removal_record.clone());
                 assert!(update_res.is_ok());
-                assert!(removal_record.validate(&mut mutator_set));
+                assert!(removal_record.validate(&mut mutator_set.set_commitment));
             }
 
             // remove item from set
-            mutator_set.remove_helper(&mut removal_record);
+            mutator_set
+                .set_commitment
+                .remove_helper(&mut removal_record);
             assert!(!mutator_set.verify(&item.into(), &mp));
 
             for k in (i + 1)..items_and_membership_proofs.len() {
@@ -954,10 +958,10 @@ mod accumulation_scheme_tests {
         // in the runtime. This test is to verify that that does not happen.
         // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
         // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
-        type Hasher = RescuePrimeRegular;
-        type Mmr = MmrAccumulator<Hasher>;
-        type Ms = SetCommitment<Hasher, Mmr>;
-        let mut mutator_set = Ms::default();
+        type H = RescuePrimeRegular;
+        type Mmr = MmrAccumulator<H>;
+        type Ms = SetCommitment<H, Mmr>;
+        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
 
         let json_empty = serde_json::to_string(&mutator_set).unwrap();
         println!("json = \n{}", json_empty);
