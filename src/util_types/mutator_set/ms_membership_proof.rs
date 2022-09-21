@@ -472,9 +472,7 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::BITS_PER_U32;
     use num_traits::Zero;
-    use rand::thread_rng;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::shared_math::traits::GetRandomElements;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
     use twenty_first::util_types::simple_hasher::Hasher;
 
@@ -500,10 +498,9 @@ mod ms_proof_tests {
     fn mp_equality_test() {
         type H = RescuePrimeRegular;
         let hasher = H::new();
-        let mut rng = thread_rng();
-        let random_elements = <H as Hasher>::T::random_elements(9, &mut rng);
-        let randomness = hasher.hash_sequence(&random_elements[3..6]);
-        let other_randomness = hasher.hash_sequence(&random_elements[6..9]);
+
+        let (randomness, other_randomness) = make_item_and_randomness();
+
         let mp_with_cached_bits = MsMembershipProof::<H> {
             randomness,
             auth_path_aocl: MmrMembershipProof::<H> {

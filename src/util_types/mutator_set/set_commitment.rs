@@ -445,12 +445,10 @@ mod accumulation_scheme_tests {
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use rand::prelude::*;
     use rand::Rng;
-    use rand::{prelude::*, RngCore};
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::shared_math::traits::GetRandomElements;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-    use twenty_first::util_types::simple_hasher::Hasher;
     use twenty_first::utils::has_unique_elements;
 
     use super::*;
@@ -458,15 +456,15 @@ mod accumulation_scheme_tests {
     #[test]
     fn mutator_set_commitment_test() {
         type H = RescuePrimeRegular;
-        let mut prng = rand::thread_rng();
-        let hasher = H::new();
 
         let mut empty_set = MutatorSetAccumulator::<H>::default();
         let commitment_to_empty = empty_set.get_commitment();
 
         // Add one element to append-only commitment list
         let mut set_with_aocl_append = MutatorSetAccumulator::<H>::default();
-        let item0 = hasher.hash_sequence(&BFieldElement::random_elements(3, &mut prng));
+
+        let (item0, _randomness) = make_item_and_randomness();
+
         set_with_aocl_append.set_commitment.aocl.append(item0);
         let commitment_to_aocl_append = set_with_aocl_append.get_commitment();
 
@@ -558,19 +556,16 @@ mod accumulation_scheme_tests {
     #[test]
     fn test_membership_proof_update_from_add() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
-        let own_item = hasher.hash_sequence(&[BFieldElement::new(1215)]);
-        let randomness = hasher.hash_sequence(&[BFieldElement::new(1776)]);
+        let (own_item, randomness) = make_item_and_randomness();
 
         let mut addition_record = mutator_set.commit(&own_item, &randomness);
         let mut membership_proof = mutator_set.prove(&own_item, &randomness, false);
         mutator_set.set_commitment.add_helper(&mut addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
-        let new_item = hasher.hash_sequence(&[BFieldElement::new(1648)]);
-        let new_randomness = hasher.hash_sequence(&[BFieldElement::new(1807)]);
+        let (new_item, new_randomness) = make_item_and_randomness();
         let mut new_addition_record = mutator_set.commit(&new_item, &new_randomness);
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
@@ -619,7 +614,6 @@ mod accumulation_scheme_tests {
         let mut rng = thread_rng();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
-        let hasher: H = RescuePrimeRegular::new();
 
         let num_additions = rng.gen_range(0..=100i32);
         println!(
@@ -633,16 +627,8 @@ mod accumulation_scheme_tests {
         )> = vec![];
         for i in 0..num_additions {
             println!("loop iteration {}", i);
-            let item = hasher.hash_sequence(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
-            );
-            let randomness = hasher.hash_sequence(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
-            );
+
+            let (item, randomness) = make_item_and_randomness();
 
             let mut addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
@@ -678,11 +664,9 @@ mod accumulation_scheme_tests {
     #[test]
     fn test_add_and_prove() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
-        let item0 = hasher.hash_sequence(&[BFieldElement::new(1215)]);
-        let randomness0 = hasher.hash_sequence(&[BFieldElement::new(1776)]);
+        let (item0, randomness0) = make_item_and_randomness();
 
         let mut addition_record = mutator_set.commit(&item0, &randomness0);
         let membership_proof = mutator_set.prove(&item0, &randomness0, false);
@@ -694,8 +678,7 @@ mod accumulation_scheme_tests {
         assert!(mutator_set.verify(&item0, &membership_proof));
 
         // Insert a new item and verify that this still works
-        let item1 = hasher.hash_sequence(&[BFieldElement::new(1846)]);
-        let randomness1 = hasher.hash_sequence(&[BFieldElement::new(2009)]);
+        let (item1, randomness1) = make_item_and_randomness();
         let mut addition_record = mutator_set.commit(&item1, &randomness1);
         let membership_proof = mutator_set.prove(&item1, &randomness1, false);
         assert!(!mutator_set.verify(&item1, &membership_proof));
@@ -721,9 +704,6 @@ mod accumulation_scheme_tests {
     #[test]
     fn batch_update_from_addition_and_removal_test() {
         type H = RescuePrimeRegular;
-        let mut rng = thread_rng();
-
-        let hasher = H::new();
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
         // It's important to test number of additions around the shifting of the window,
@@ -744,16 +724,7 @@ mod accumulation_scheme_tests {
 
         for num_additions in num_additions_list {
             for _ in 0..num_additions {
-                let new_item = hasher.hash_sequence(
-                    &(0..3)
-                        .map(|_| BFieldElement::new(rng.next_u64()))
-                        .collect::<Vec<_>>(),
-                );
-                let randomness = hasher.hash_sequence(
-                    &(0..3)
-                        .map(|_| BFieldElement::new(rng.next_u64()))
-                        .collect::<Vec<_>>(),
-                );
+                let (new_item, randomness) = make_item_and_randomness();
 
                 let mut addition_record = mutator_set.commit(&new_item, &randomness);
                 let membership_proof = mutator_set.prove(&new_item, &randomness, true);
@@ -809,8 +780,6 @@ mod accumulation_scheme_tests {
     #[test]
     fn test_multiple_adds() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
-        let mut rng = thread_rng();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
@@ -822,18 +791,7 @@ mod accumulation_scheme_tests {
         )> = vec![];
 
         for _ in 0..num_additions {
-            let new_item = hasher.hash_sequence(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>()
-                    .clone(),
-            );
-            let randomness = hasher.hash_sequence(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>()
-                    .clone(),
-            );
+            let (new_item, randomness) = make_item_and_randomness();
 
             let mut addition_record = mutator_set.commit(&new_item, &randomness);
             let membership_proof = mutator_set.prove(&new_item, &randomness, false);

@@ -258,14 +258,21 @@ mod removal_record_tests {
         utils::{self, has_unique_elements},
     };
 
-    #[test]
-    fn verify_that_hash_preimage_elements_are_unique_test() {
+    fn get_mp_and_removal_record() -> (
+        MsMembershipProof<RescuePrimeRegular>,
+        RemovalRecord<RescuePrimeRegular>,
+    ) {
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-
         let (item, randomness) = make_item_and_randomness();
-        let mp = accumulator.prove(&item, &randomness, true);
+        let mp: MsMembershipProof<RescuePrimeRegular> = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
+        (mp, removal_record)
+    }
+
+    #[test]
+    fn verify_that_hash_preimage_elements_are_unique_test() {
+        let (_mp, removal_record) = get_mp_and_removal_record();
 
         let preimage = removal_record.get_preimage();
         assert_eq!((NUM_TRIALS + 1) * DIGEST_LENGTH, preimage.len());
@@ -274,13 +281,7 @@ mod removal_record_tests {
 
     #[test]
     fn verify_that_bit_indices_are_sorted_test() {
-        type H = RescuePrimeRegular;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-
-        let (item, randomness) = make_item_and_randomness();
-
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
+        let (_mp, removal_record) = get_mp_and_removal_record();
 
         let bit_indices = removal_record.bit_indices;
         let mut bit_indices_sorted = bit_indices;
@@ -300,11 +301,9 @@ mod removal_record_tests {
     #[test]
     fn hash_test() {
         type H = RescuePrimeRegular;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let (item, randomness) = make_item_and_randomness();
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
+        let (_mp, removal_record) = get_mp_and_removal_record();
+
         let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
         assert_eq!(
             removal_record.hash(),
@@ -327,13 +326,8 @@ mod removal_record_tests {
 
     #[test]
     fn get_chunk_index_to_bit_indices_test() {
-        // Create a removal record
-        type H = RescuePrimeRegular;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let (mp, removal_record) = get_mp_and_removal_record();
 
-        let (item, randomness) = make_item_and_randomness();
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         let chunks2bits = removal_record.get_chunk_index_to_bit_indices();
 
         // Verify that no indices are repeated in the hash map
@@ -360,11 +354,8 @@ mod removal_record_tests {
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
         type H = RescuePrimeRegular;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let (item, randomness) = make_item_and_randomness();
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
+        let (_mp, removal_record) = get_mp_and_removal_record();
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
@@ -377,7 +368,6 @@ mod removal_record_tests {
         // Verify that a single element can be added to and removed from the mutator set
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-
         let (item, randomness) = make_item_and_randomness();
         let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
         let mp = accumulator.prove(&item, &randomness, true);
