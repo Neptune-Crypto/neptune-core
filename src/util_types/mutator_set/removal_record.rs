@@ -254,6 +254,7 @@ mod removal_record_tests {
     };
     use twenty_first::{
         shared_math::rescue_prime_regular::RescuePrimeRegular,
+        shared_math::rescue_prime_regular::DIGEST_LENGTH,
         utils::{self, has_unique_elements},
     };
 
@@ -267,7 +268,7 @@ mod removal_record_tests {
         let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
 
         let preimage = removal_record.get_preimage();
-        assert_eq!(NUM_TRIALS + 1, preimage.len());
+        assert_eq!((NUM_TRIALS + 1) * DIGEST_LENGTH, preimage.len());
         assert!(utils::has_unique_elements(preimage));
     }
 
