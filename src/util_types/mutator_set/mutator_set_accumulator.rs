@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{
@@ -12,6 +13,7 @@ use super::{
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct MutatorSetAccumulator<H: Hasher>
 where
     usize: Hashable<<H as Hasher>::T>,
