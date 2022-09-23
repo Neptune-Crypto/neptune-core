@@ -2,12 +2,9 @@ use num_traits::identities::Zero;
 use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        database_array::DatabaseArray,
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    database_array::DatabaseArray,
+    simple_hasher::{Hashable, Hasher},
 };
 
 use super::{
@@ -29,7 +26,6 @@ pub struct ActiveWindow<H: Hasher> {
 impl<H: Hasher> ActiveWindow<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
     pub fn get_sliding_chunk_bits(&self) -> [u32; CHUNK_SIZE / BITS_PER_U32] {
         self.bits[0..CHUNK_SIZE / BITS_PER_U32].try_into().unwrap()

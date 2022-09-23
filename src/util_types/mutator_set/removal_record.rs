@@ -17,12 +17,9 @@ use super::{
         CHUNK_SIZE, NUM_TRIALS,
     },
 };
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 impl Error for RemovalRecordError {}
@@ -50,7 +47,6 @@ pub struct RemovalRecord<H: Hasher> {
 impl<H: Hasher> RemovalRecord<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
@@ -243,7 +239,9 @@ mod removal_record_tests {
     use rand::seq::SliceRandom;
 
     use crate::{
-        test_shared::mutator_set::make_item_and_randomness,
+        test_shared::mutator_set::{
+            make_item_and_randomness_for_blake3, make_item_and_randomness_for_rp,
+        },
         util_types::mutator_set::{
             addition_record::AdditionRecord,
             ms_membership_proof::MsMembershipProof,
@@ -254,7 +252,6 @@ mod removal_record_tests {
     };
     use twenty_first::{
         shared_math::rescue_prime_regular::RescuePrimeRegular,
-        shared_math::rescue_prime_regular::DIGEST_LENGTH,
         utils::{self, has_unique_elements},
     };
 
@@ -359,7 +356,7 @@ mod removal_record_tests {
         // Verify that a single element can be added to and removed from the mutator set
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness();
+        let (item, randomness) = make_item_and_randomness_for_rp();
         let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
         let mp = accumulator.prove(&item, &randomness, true);
 
@@ -392,7 +389,7 @@ mod removal_record_tests {
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
-                let (item, randomness) = make_item_and_randomness();
+                let (item, randomness) = make_item_and_randomness_for_rp();
 
                 let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
                 let mp = accumulator.prove(&item, &randomness, true);
@@ -454,14 +451,14 @@ mod removal_record_tests {
     #[test]
     fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = RescuePrimeRegular;
+        type H = blake3::Hasher;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, randomness) = make_item_and_randomness_for_blake3();
 
             let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
             let mp = accumulator.prove(&item, &randomness, true);

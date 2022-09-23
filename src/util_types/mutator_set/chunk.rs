@@ -2,10 +2,7 @@ use serde_big_array;
 use serde_big_array::BigArray;
 use serde_derive::{Deserialize, Serialize};
 
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::simple_hasher::{Hashable, Hasher},
-};
+use twenty_first::util_types::simple_hasher::{Hashable, Hasher};
 
 use super::shared::{BITS_PER_U32, CHUNK_SIZE};
 
@@ -63,7 +60,6 @@ impl Chunk {
     where
         usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
-        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     {
         hasher.hash_sequence(&self.hash_preimage::<H>())
     }
@@ -74,6 +70,7 @@ mod chunk_tests {
     use super::*;
     use num_traits::{One, Zero};
     use rand::{thread_rng, RngCore};
+    use twenty_first::shared_math::b_field_element::BFieldElement;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
     impl Chunk {

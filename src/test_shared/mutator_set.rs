@@ -40,7 +40,6 @@ pub fn empty_archival_ms<H>() -> ArchivalMutatorSet<H>
 where
     H: Hasher,
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
@@ -55,7 +54,6 @@ where
     H: Hasher,
     M: Mmr<H>,
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     <H as Hasher>::T: GetRandomElements,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
@@ -81,7 +79,6 @@ pub fn remove_item<H, M>(
     H: Hasher,
     M: Mmr<H>,
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let removal_record: RemovalRecord<H> = mutator_set.drop(item, mp);

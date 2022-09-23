@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 use super::{
@@ -18,7 +15,6 @@ pub struct MutatorSetAccumulator<H: Hasher>
 where
     usize: Hashable<<H as Hasher>::T>,
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
     pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
 }
@@ -27,7 +23,6 @@ impl<H: Hasher> MutatorSetAccumulator<H>
 where
     u128: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn default() -> Self {
         let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
@@ -43,7 +38,6 @@ where
 impl<H: Hasher> MutatorSet<H> for MutatorSetAccumulator<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     fn prove(
@@ -92,11 +86,10 @@ where
 }
 
 #[cfg(test)]
-mod accumulation_scheme_tests {
-    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
+mod ms_accumulator_tests {
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness_for_blake3};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use proptest::prelude::Rng;
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::simple_hasher::Hasher;
 
     use super::*;
@@ -111,7 +104,7 @@ mod accumulation_scheme_tests {
         // This function mixes both archival and accumulator testing.
         // It *may* be considered bad style to do it this way, but there is a
         // lot of code duplication that is avoided by doing that.
-        type H = RescuePrimeRegular;
+        type H = blake3::Hasher;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let mut archival_after_remove: ArchivalMutatorSet<H> = empty_archival_ms();
         let mut archival_before_remove: ArchivalMutatorSet<H> = empty_archival_ms();
@@ -147,7 +140,7 @@ mod accumulation_scheme_tests {
 
                 if prng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
-                    let (item, randomness) = make_item_and_randomness();
+                    let (item, randomness) = make_item_and_randomness_for_blake3();
 
                     let mut addition_record: AdditionRecord<H> =
                         accumulator.commit(&item, &randomness);

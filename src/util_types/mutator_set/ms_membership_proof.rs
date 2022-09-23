@@ -5,12 +5,9 @@ use std::{
     fmt,
     ops::IndexMut,
 };
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 use super::{
@@ -95,7 +92,6 @@ impl<H: Hasher> PartialEq for MsMembershipProof<H> {
 impl<H: Hasher> MsMembershipProof<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
@@ -467,7 +463,7 @@ where
 #[cfg(test)]
 mod ms_proof_tests {
     use super::*;
-    use crate::test_shared::mutator_set::make_item_and_randomness;
+    use crate::test_shared::mutator_set::make_item_and_randomness_for_rp;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::BITS_PER_U32;
@@ -480,7 +476,7 @@ mod ms_proof_tests {
     fn mp_cache_bits_test() {
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness();
+        let (item, randomness) = make_item_and_randomness_for_rp();
         let mut mp = accumulator.prove(&item, &randomness, false);
 
         // Verify that bits are not cached, then cache them with the helper function
@@ -499,7 +495,7 @@ mod ms_proof_tests {
         type H = RescuePrimeRegular;
         let hasher = H::new();
 
-        let (randomness, other_randomness) = make_item_and_randomness();
+        let (randomness, other_randomness) = make_item_and_randomness_for_rp();
 
         let mp_with_cached_bits = MsMembershipProof::<H> {
             randomness,
@@ -581,7 +577,7 @@ mod ms_proof_tests {
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         for _ in 0..10 {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, randomness) = make_item_and_randomness_for_rp();
 
             let mp_with_cached_bits = accumulator.prove(&item, &randomness, true);
             assert!(mp_with_cached_bits.cached_bits.is_some());

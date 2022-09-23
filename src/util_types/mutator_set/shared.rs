@@ -1,11 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::mmr_membership_proof::MmrMembershipProof,
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    mmr::mmr_membership_proof::MmrMembershipProof,
+    simple_hasher::{Hashable, Hasher},
 };
 
 use super::{chunk_dictionary::ChunkDictionary, removal_record::RemovalRecord};
@@ -43,7 +40,6 @@ where
     // FIXME: Change 'usize' back into 'u32' when trait impl is available on twenty-first
     usize: Hashable<<H as Hasher>::T>,
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
     let hasher = H::new();
     let mut mutation_argument_hash_map: HashMap<u128, (MmrMembershipProof<H>, H::Digest)> =

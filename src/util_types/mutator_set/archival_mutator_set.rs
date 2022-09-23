@@ -3,13 +3,10 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
 };
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        database_vector::DatabaseVector,
-        mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    database_vector::DatabaseVector,
+    mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 use super::{
@@ -27,7 +24,6 @@ use super::{
 pub struct ArchivalMutatorSet<H: Hasher>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     u128: Hashable<<H as Hasher>::T>,
 {
     pub set_commitment: SetCommitment<H, ArchivalMmr<H>>,
@@ -37,7 +33,6 @@ where
 impl<H: Hasher> MutatorSet<H> for ArchivalMutatorSet<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     fn prove(
@@ -112,7 +107,6 @@ where
 impl<H: Hasher> ArchivalMutatorSet<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn new_empty(aocl_mmr_db: DB, swbf_inactive_mmr_db: DB, chunks_db: DB) -> Self {
@@ -364,7 +358,7 @@ where
 #[cfg(test)]
 mod archival_mutator_set_tests {
     use super::*;
-    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness_for_rp};
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::shared_math::traits::GetRandomElements;
     use twenty_first::util_types::simple_hasher::Hasher;
@@ -385,7 +379,7 @@ mod archival_mutator_set_tests {
             active_window_db,
         );
 
-        let (item, randomness) = make_item_and_randomness();
+        let (item, randomness) = make_item_and_randomness_for_rp();
 
         let mut addition_record = archival_mutator_set.commit(&item, &randomness);
         let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -432,7 +426,7 @@ mod archival_mutator_set_tests {
         let mut items: Vec<<H as Hasher>::Digest> = vec![];
 
         for i in 0..num_additions {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, randomness) = make_item_and_randomness_for_rp();
 
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -582,7 +576,6 @@ mod archival_mutator_set_tests {
     ) -> (H::Digest, AdditionRecord<H>, MsMembershipProof<H>)
     where
         u128: Hashable<<H as Hasher>::T>,
-        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
         <H as Hasher>::T: GetRandomElements,
         usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {

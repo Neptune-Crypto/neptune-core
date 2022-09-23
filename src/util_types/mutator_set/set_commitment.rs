@@ -10,12 +10,9 @@ use super::{
     shared::{bit_indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
 };
 use crate::util_types::mutator_set::chunk::Chunk;
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::{self, mmr_trait::Mmr},
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    mmr::{self, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 impl Error for SetCommitmentError {}
@@ -50,7 +47,6 @@ pub fn get_swbf_indices<H: Hasher>(
 ) -> [u128; NUM_TRIALS]
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let hasher = H::new();
@@ -110,7 +106,6 @@ where
 impl<H: Hasher, M: Mmr<H>> SetCommitment<H, M>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
 {
     /// Generates an addition record from an item and explicit random-
     /// ness. The addition record is itself a commitment to the item,
@@ -134,7 +129,6 @@ where
     ) -> RemovalRecord<H>
     where
         u128: Hashable<<H as Hasher>::T>,
-        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
         usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {
         let bit_indices = membership_proof.cached_bits.unwrap_or_else(|| {
@@ -175,7 +169,6 @@ where
     where
         usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
-        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
@@ -222,7 +215,6 @@ where
     where
         usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
-        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     {
         let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let active_window_start = batch_index * CHUNK_SIZE as u128;
@@ -310,7 +302,6 @@ where
     ) -> MsMembershipProof<H>
     where
         u128: Hashable<<H as Hasher>::T>,
-        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
         usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {
         // compute commitment
@@ -345,7 +336,6 @@ where
     where
         usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
-        Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     {
         // If data index does not exist in AOCL, return false
         // This also ensures that no "future" bit indices will be
@@ -440,7 +430,8 @@ where
 #[cfg(test)]
 mod accumulation_scheme_tests {
     use crate::test_shared::mutator_set::{
-        empty_archival_ms, insert_item, make_item_and_randomness, remove_item,
+        empty_archival_ms, insert_item, make_item_and_randomness_for_blake3,
+        make_item_and_randomness_for_rp, remove_item,
     };
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -448,6 +439,7 @@ mod accumulation_scheme_tests {
     use rand::prelude::*;
     use rand::Rng;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::util_types::blake3_wrapper::Blake3Hash;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::utils::has_unique_elements;
 
@@ -463,7 +455,7 @@ mod accumulation_scheme_tests {
         // Add one element to append-only commitment list
         let mut set_with_aocl_append = MutatorSetAccumulator::<H>::default();
 
-        let (item0, _randomness) = make_item_and_randomness();
+        let (item0, _randomness) = make_item_and_randomness_for_rp();
 
         set_with_aocl_append.set_commitment.aocl.append(item0);
         let commitment_to_aocl_append = set_with_aocl_append.get_commitment();
@@ -515,7 +507,7 @@ mod accumulation_scheme_tests {
         // Test that `get_indices` behaves as expected. I.e. that it does not return any
         // duplicates, and always returns something of length `NUM_TRIALS`.
         type Hasher = RescuePrimeRegular;
-        let (item, randomness) = make_item_and_randomness();
+        let (item, randomness) = make_item_and_randomness_for_rp();
         let ret: [u128; NUM_TRIALS] = get_swbf_indices::<Hasher>(&item, &randomness, 0);
         assert_eq!(NUM_TRIALS, ret.len());
         assert!(has_unique_elements(ret));
@@ -539,7 +531,7 @@ mod accumulation_scheme_tests {
         let mut empty_mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
 
         for _ in 0..2 * BATCH_SIZE + 2 {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, randomness) = make_item_and_randomness_for_rp();
 
             let mut addition_record: AdditionRecord<RescuePrimeRegular> =
                 mutator_set.commit(&item, &randomness);
@@ -558,14 +550,14 @@ mod accumulation_scheme_tests {
         type H = RescuePrimeRegular;
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
-        let (own_item, randomness) = make_item_and_randomness();
+        let (own_item, randomness) = make_item_and_randomness_for_rp();
 
         let mut addition_record = mutator_set.commit(&own_item, &randomness);
         let mut membership_proof = mutator_set.prove(&own_item, &randomness, false);
         mutator_set.set_commitment.add_helper(&mut addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
-        let (new_item, new_randomness) = make_item_and_randomness();
+        let (new_item, new_randomness) = make_item_and_randomness_for_rp();
         let mut new_addition_record = mutator_set.commit(&new_item, &new_randomness);
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
@@ -610,7 +602,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn membership_proof_updating_from_add_pbt() {
-        type H = RescuePrimeRegular;
+        type H = blake3::Hasher;
         let mut rng = thread_rng();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
@@ -621,14 +613,11 @@ mod accumulation_scheme_tests {
             num_additions
         );
 
-        let mut membership_proofs_and_items: Vec<(
-            MsMembershipProof<RescuePrimeRegular>,
-            [BFieldElement; 5],
-        )> = vec![];
+        let mut membership_proofs_and_items: Vec<(MsMembershipProof<H>, Blake3Hash)> = vec![];
         for i in 0..num_additions {
             println!("loop iteration {}", i);
 
-            let (item, randomness) = make_item_and_randomness();
+            let (item, randomness) = make_item_and_randomness_for_blake3();
 
             let mut addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
@@ -666,7 +655,7 @@ mod accumulation_scheme_tests {
         type H = RescuePrimeRegular;
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
-        let (item0, randomness0) = make_item_and_randomness();
+        let (item0, randomness0) = make_item_and_randomness_for_rp();
 
         let mut addition_record = mutator_set.commit(&item0, &randomness0);
         let membership_proof = mutator_set.prove(&item0, &randomness0, false);
@@ -678,7 +667,7 @@ mod accumulation_scheme_tests {
         assert!(mutator_set.verify(&item0, &membership_proof));
 
         // Insert a new item and verify that this still works
-        let (item1, randomness1) = make_item_and_randomness();
+        let (item1, randomness1) = make_item_and_randomness_for_rp();
         let mut addition_record = mutator_set.commit(&item1, &randomness1);
         let membership_proof = mutator_set.prove(&item1, &randomness1, false);
         assert!(!mutator_set.verify(&item1, &membership_proof));
@@ -691,7 +680,7 @@ mod accumulation_scheme_tests {
         // is that we want to make sure that the window slides into a new
         // position.
         for _ in 0..2 * BATCH_SIZE + 4 {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, randomness) = make_item_and_randomness_for_rp();
             let mut addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
             assert!(!mutator_set.verify(&item, &membership_proof));
@@ -703,7 +692,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn batch_update_from_addition_and_removal_test() {
-        type H = RescuePrimeRegular;
+        type H = blake3::Hasher;
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
         // It's important to test number of additions around the shifting of the window,
@@ -724,7 +713,7 @@ mod accumulation_scheme_tests {
 
         for num_additions in num_additions_list {
             for _ in 0..num_additions {
-                let (new_item, randomness) = make_item_and_randomness();
+                let (new_item, randomness) = make_item_and_randomness_for_blake3();
 
                 let mut addition_record = mutator_set.commit(&new_item, &randomness);
                 let membership_proof = mutator_set.prove(&new_item, &randomness, true);
@@ -779,19 +768,16 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_multiple_adds() {
-        type H = RescuePrimeRegular;
+        type H = blake3::Hasher;
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
         let num_additions = 65;
 
-        let mut items_and_membership_proofs: Vec<(
-            [BFieldElement; 5],
-            MsMembershipProof<RescuePrimeRegular>,
-        )> = vec![];
+        let mut items_and_membership_proofs: Vec<(Blake3Hash, MsMembershipProof<H>)> = vec![];
 
         for _ in 0..num_additions {
-            let (new_item, randomness) = make_item_and_randomness();
+            let (new_item, randomness) = make_item_and_randomness_for_blake3();
 
             let mut addition_record = mutator_set.commit(&new_item, &randomness);
             let membership_proof = mutator_set.prove(&new_item, &randomness, false);

@@ -2,12 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::chunk::Chunk;
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr,
-        simple_hasher::{Hashable, Hasher},
-    },
+use twenty_first::util_types::{
+    mmr,
+    simple_hasher::{Hashable, Hasher},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,7 +22,6 @@ impl<H: Hasher> PartialEq for ChunkDictionary<H> {
 impl<H: Hasher> ChunkDictionary<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    Vec<BFieldElement>: Hashable<<H as Hasher>::T>,
     usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn default() -> ChunkDictionary<H> {
