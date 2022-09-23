@@ -509,6 +509,20 @@ mod accumulation_scheme_tests {
     }
 
     #[test]
+    fn ms_get_indices_test_big() {
+        // Test that `get_indices` behaves as expected. I.e. that it does not return any
+        // duplicates, and always returns something of length `NUM_TRIALS`.
+        type Hasher = blake3::Hasher;
+        for _ in 0..1000 {
+            let (item, randomness) = make_item_and_randomness_for_blake3();
+            let ret: [u128; NUM_TRIALS] = get_swbf_indices::<Hasher>(&item, &randomness, 0);
+            assert_eq!(NUM_TRIALS, ret.len());
+            assert!(has_unique_elements(ret));
+            assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
+        }
+    }
+
+    #[test]
     fn init_test() {
         type H = RescuePrimeRegular;
 
