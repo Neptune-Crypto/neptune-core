@@ -92,7 +92,6 @@ impl<H: Hasher> PartialEq for MsMembershipProof<H> {
 impl<H: Hasher> MsMembershipProof<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
     pub fn cache_indices(&mut self, item: &H::Digest) {

@@ -32,7 +32,6 @@ where
 impl<H: Hasher> MutatorSet<H> for ArchivalMutatorSet<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     fn prove(
         &mut self,
@@ -106,7 +105,6 @@ where
 impl<H: Hasher> ArchivalMutatorSet<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn new_empty(aocl_mmr_db: DB, swbf_inactive_mmr_db: DB, chunks_db: DB) -> Self {
         let aocl: ArchivalMmr<H> = ArchivalMmr::new(aocl_mmr_db);
@@ -576,7 +574,6 @@ mod archival_mutator_set_tests {
     where
         u128: Hashable<<H as Hasher>::T>,
         <H as Hasher>::T: GetRandomElements,
-        usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {
         let mut rng = rand::thread_rng();
         let hasher = H::new();

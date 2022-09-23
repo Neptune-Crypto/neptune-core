@@ -37,8 +37,6 @@ pub fn get_batch_mutation_argument_for_removal_record<H: Hasher>(
     chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
 ) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, H::Digest)>)
 where
-    // FIXME: Change 'usize' back into 'u32' when trait impl is available on twenty-first
-    usize: Hashable<<H as Hasher>::T>,
     u128: Hashable<<H as Hasher>::T>,
 {
     let hasher = H::new();

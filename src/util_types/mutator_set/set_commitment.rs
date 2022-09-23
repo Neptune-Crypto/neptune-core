@@ -47,7 +47,6 @@ pub fn get_swbf_indices<H: Hasher>(
 ) -> [u128; NUM_TRIALS]
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     let hasher = H::new();
 
@@ -129,7 +128,6 @@ where
     ) -> RemovalRecord<H>
     where
         u128: Hashable<<H as Hasher>::T>,
-        usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {
         let bit_indices = membership_proof.cached_bits.unwrap_or_else(|| {
             get_swbf_indices::<H>(
@@ -167,7 +165,6 @@ where
     /// since this is needed by the archival version of the mutator set.
     pub fn add_helper(&mut self, addition_record: &mut AdditionRecord<H>) -> Option<(u128, Chunk)>
     where
-        usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
     {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
@@ -213,7 +210,6 @@ where
         removal_record: &RemovalRecord<H>,
     ) -> (HashMap<u128, Chunk>, Vec<u128>)
     where
-        usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
     {
         let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
@@ -302,7 +298,6 @@ where
     ) -> MsMembershipProof<H>
     where
         u128: Hashable<<H as Hasher>::T>,
-        usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
     {
         // compute commitment
         let hasher = H::new();
@@ -334,7 +329,6 @@ where
 
     pub fn verify(&mut self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool
     where
-        usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
     {
         // If data index does not exist in AOCL, return false

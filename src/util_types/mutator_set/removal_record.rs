@@ -47,7 +47,6 @@ pub struct RemovalRecord<H: Hasher> {
 impl<H: Hasher> RemovalRecord<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         removal_records: &mut [&mut Self],

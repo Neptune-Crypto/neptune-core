@@ -22,7 +22,6 @@ impl<H: Hasher> PartialEq for ChunkDictionary<H> {
 impl<H: Hasher> ChunkDictionary<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn default() -> ChunkDictionary<H> {
         Self {

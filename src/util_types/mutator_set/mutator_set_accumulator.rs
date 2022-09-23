@@ -13,7 +13,6 @@ use super::{
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct MutatorSetAccumulator<H: Hasher>
 where
-    usize: Hashable<<H as Hasher>::T>,
     u128: Hashable<<H as Hasher>::T>,
 {
     pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
@@ -22,7 +21,6 @@ where
 impl<H: Hasher> MutatorSetAccumulator<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     pub fn default() -> Self {
         let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
@@ -38,7 +36,6 @@ where
 impl<H: Hasher> MutatorSet<H> for MutatorSetAccumulator<H>
 where
     u128: Hashable<<H as Hasher>::T>,
-    usize: Hashable<<H as twenty_first::util_types::simple_hasher::Hasher>::T>,
 {
     fn prove(
         &mut self,
