@@ -44,31 +44,53 @@ impl Chunk {
         self.bits[index / BITS_PER_U32] & (1u32 << (index % BITS_PER_U32)) != 0
     }
 
+    /// Return the length of the Vec<u128>-representation of the active window
+    const fn get_u128s_length() -> usize {
+        if CHUNK_SIZE % (8 * 16) == 0 {
+            CHUNK_SIZE / (8 * 16)
+        } else {
+            CHUNK_SIZE / (8 * 16) + 1
+        }
+    }
+
+    /// Return the Vec<u128> representation of the bits in ActiveWindow.
+    fn get_u128s(&self) -> Vec<u128> {
+        let mut u128s: Vec<u128> = vec![0u128; Self::get_u128s_length()];
+        for i in 0..(CHUNK_SIZE / BITS_PER_U32) {
+            let shift = 32 * (i % 4) as u128;
+            u128s[i / 4] += (self.bits[i] as u128 * (1 << shift)) as u128;
+        }
+
+        u128s
+    }
+
     #[inline]
     fn hash_preimage<H: Hasher>(&self) -> Vec<H::T>
     where
-        // FIXME: Change 'usize' back into 'u32' when trait impl is available on twenty-first
-        usize: Hashable<<H as Hasher>::T>,
+        u128: Hashable<<H as Hasher>::T>,
     {
-        self.bits
+        self.get_u128s()
             .iter()
-            .flat_map(|&val| (val as usize).to_sequence())
+            .flat_map(|&val| val.to_sequence())
             .collect()
     }
 
     pub fn hash<H: Hasher>(&self, hasher: &H) -> H::Digest
     where
-        usize: Hashable<<H as Hasher>::T>,
         u128: Hashable<<H as Hasher>::T>,
     {
-        hasher.hash_sequence(&self.hash_preimage::<H>())
+        let seq: Vec<H::T> = self.hash_preimage::<H>();
+
+        hasher.hash_sequence(&seq)
     }
 }
 
 #[cfg(test)]
 mod chunk_tests {
+    use std::collections::HashSet;
+
     use super::*;
-    use num_traits::{One, Zero};
+    use num_traits::Zero;
     use rand::{thread_rng, RngCore};
     use twenty_first::shared_math::b_field_element::BFieldElement;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
@@ -83,8 +105,8 @@ mod chunk_tests {
 
     #[inline]
     const fn get_hashpreimage_length() -> usize {
-        // This assumes that CHUNK_SIZE is a multiple of 32
-        CHUNK_SIZE / BITS_PER_U32
+        // This assumes that CHUNK_SIZE is not a multiple of 128
+        CHUNK_SIZE / BITS_PER_U32 / 4 * 5 + 5
     }
 
     #[test]
@@ -137,7 +159,7 @@ mod chunk_tests {
         };
         let zero_chunk_hash_preimage = zero_chunk.hash_preimage::<H>();
         assert_eq!(get_hashpreimage_length(), zero_chunk_hash_preimage.len());
-        for elem in zero_chunk_hash_preimage {
+        for elem in zero_chunk_hash_preimage.iter() {
             assert!(elem.is_zero());
         }
 
@@ -146,12 +168,9 @@ mod chunk_tests {
         };
         one_one.set_bit(32);
         let one_one_preimage = one_one.hash_preimage::<H>();
+
+        assert_ne!(zero_chunk_hash_preimage, one_one_preimage);
         assert_eq!(get_hashpreimage_length(), one_one_preimage.len());
-        assert!(one_one_preimage[0].is_zero());
-        assert!(one_one_preimage[1].is_one());
-        (2..get_hashpreimage_length()).for_each(|i| {
-            assert!(one_one_preimage[i].is_zero());
-        });
 
         let mut two_ones = Chunk {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
@@ -159,27 +178,19 @@ mod chunk_tests {
         two_ones.set_bit(32);
         two_ones.set_bit(33);
         let two_ones_preimage = two_ones.hash_preimage::<H>();
-        assert!(two_ones_preimage[0].is_zero());
-        assert_eq!(3, two_ones_preimage[1].value());
-        (2..get_hashpreimage_length()).for_each(|i| {
-            assert!(two_ones_preimage[i].is_zero());
-        });
-    }
 
-    #[test]
-    fn chunk_hashpreimage_big_test() {
-        type H = RescuePrimeRegular;
+        assert_ne!(two_ones_preimage, one_one_preimage);
+        assert_ne!(two_ones_preimage, zero_chunk_hash_preimage);
 
-        let mut chunk = Chunk {
-            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
-        };
-
-        // Verify that the hash preimage is producted according to expectations.
-        chunk.set_bit(CHUNK_SIZE - 1 - BITS_PER_U32);
-        let hashpreimage = chunk.hash_preimage::<H>();
-        let mut expected = [BFieldElement::zero(); get_hashpreimage_length()];
-        expected[get_hashpreimage_length() - 2] = BFieldElement::new(1u64 << 31);
-        assert_eq!(expected.to_vec(), hashpreimage);
+        // Verify that setting any bit produces a unique hash-preimage value
+        let mut previous_values: HashSet<Vec<BFieldElement>> = HashSet::new();
+        for i in 0..CHUNK_SIZE {
+            let mut chunk = Chunk {
+                bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
+            };
+            chunk.set_bit(i);
+            assert!(previous_values.insert(chunk.hash_preimage::<H>()));
+        }
     }
 
     #[test]
