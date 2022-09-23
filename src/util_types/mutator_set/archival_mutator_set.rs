@@ -3,13 +3,10 @@ use std::{
     collections::{HashMap, HashSet},
     error::Error,
 };
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        database_vector::DatabaseVector,
-        mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
-        simple_hasher::{Hasher, ToDigest},
-    },
+use twenty_first::util_types::{
+    database_vector::DatabaseVector,
+    mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 use super::{
@@ -24,21 +21,17 @@ use super::{
     shared::{BATCH_SIZE, CHUNK_SIZE},
 };
 
-pub struct ArchivalMutatorSet<H>
+pub struct ArchivalMutatorSet<H: Hasher>
 where
-    u128: ToDigest<<H as Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
-    H: Hasher,
+    u128: Hashable<<H as Hasher>::T>,
 {
     pub set_commitment: SetCommitment<H, ArchivalMmr<H>>,
     pub chunks: DatabaseVector<Chunk>,
 }
 
-impl<H> MutatorSet<H> for ArchivalMutatorSet<H>
+impl<H: Hasher> MutatorSet<H> for ArchivalMutatorSet<H>
 where
-    u128: ToDigest<<H as Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
-    H: Hasher,
+    u128: Hashable<<H as Hasher>::T>,
 {
     fn prove(
         &mut self,
@@ -109,11 +102,9 @@ where
 }
 
 /// Methods that only work when implementing using archival MMRs as the underlying two MMRs
-impl<H> ArchivalMutatorSet<H>
+impl<H: Hasher> ArchivalMutatorSet<H>
 where
-    u128: ToDigest<<H as Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
-    H: Hasher,
+    u128: Hashable<<H as Hasher>::T>,
 {
     pub fn new_empty(aocl_mmr_db: DB, swbf_inactive_mmr_db: DB, chunks_db: DB) -> Self {
         let aocl: ArchivalMmr<H> = ArchivalMmr::new(aocl_mmr_db);
@@ -234,7 +225,7 @@ where
         }
 
         let auth_path_aocl = self.get_aocl_authentication_path(index)?;
-        let bits = get_swbf_indices(&H::new(), item, randomness, index);
+        let bits = get_swbf_indices::<H>(item, randomness, index);
 
         let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let window_start = batch_index * CHUNK_SIZE as u128;
@@ -363,50 +354,37 @@ where
 
 #[cfg(test)]
 mod archival_mutator_set_tests {
-    use crate::test_shared::mutator_set::empty_archival_ms;
-    use rand::prelude::*;
-    use twenty_first::util_types::{blake3_wrapper, simple_hasher::Hasher};
-
     use super::*;
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness_for_rp};
+    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::traits::GetRandomElements;
+    use twenty_first::util_types::simple_hasher::Hasher;
 
     #[test]
     fn new_or_restore_test() {
-        type Hasher = blake3::Hasher;
-        let hasher = Hasher::new();
+        type H = RescuePrimeRegular;
         let opt = rusty_leveldb::in_memory();
         let chunks_db = DB::open("chunks", opt.clone()).unwrap();
         let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
         let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
         let active_window_db = DB::open("active_window", opt.clone()).unwrap();
 
-        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> =
-            ArchivalMutatorSet::new_or_restore(
-                aocl_mmr_db,
-                swbf_inactive_mmr_db,
-                chunks_db,
-                active_window_db,
-            );
+        let mut archival_mutator_set = ArchivalMutatorSet::<H>::new_or_restore(
+            aocl_mmr_db,
+            swbf_inactive_mmr_db,
+            chunks_db,
+            active_window_db,
+        );
 
-        let mut rng = thread_rng();
-        let item = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(rng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
-        let randomness = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(rng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
+        let (item, randomness) = make_item_and_randomness_for_rp();
 
         let mut addition_record = archival_mutator_set.commit(&item, &randomness);
         let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
         archival_mutator_set.add(&mut addition_record);
         assert!(archival_mutator_set.verify(&item, &membership_proof));
 
-        let mut removal_record: RemovalRecord<Hasher> =
-            archival_mutator_set.drop(&item.into(), &membership_proof);
-        let diff_bits: Vec<u128> = archival_mutator_set.remove(&mut removal_record).unwrap();
+        let removal_record: RemovalRecord<H> = archival_mutator_set.drop(&item, &membership_proof);
+        let diff_bits: Vec<u128> = archival_mutator_set.remove(&removal_record).unwrap();
         assert_eq!(
             removal_record.bit_indices.to_vec(),
             diff_bits,
@@ -424,7 +402,7 @@ mod archival_mutator_set_tests {
         drop(archival_mutator_set);
         let chunks_db = DB::open("chunks", opt.clone()).unwrap();
         let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
-        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
+        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt).unwrap();
         let mut archival_mutator_set = ArchivalMutatorSet::new_or_restore(
             aocl_mmr_db,
             swbf_inactive_mmr_db,
@@ -436,28 +414,16 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_set_commitment_test() {
-        type Hasher = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = Hasher::new();
-        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+        type H = RescuePrimeRegular;
+        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
         let num_additions = 65;
 
-        let mut membership_proofs: Vec<MsMembershipProof<Hasher>> = vec![];
-        let mut items: Vec<Digest> = vec![];
-        let mut rng = thread_rng();
+        let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
+        let mut items: Vec<<H as Hasher>::Digest> = vec![];
 
         for i in 0..num_additions {
-            let item = hasher.hash(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
-            );
-            let randomness = hasher.hash(
-                &(0..3)
-                    .map(|_| BFieldElement::new(rng.next_u64()))
-                    .collect::<Vec<_>>(),
-            );
+            let (item, randomness) = make_item_and_randomness_for_rp();
 
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -501,9 +467,9 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_mutator_set_revert_add_test() {
-        type Hasher = blake3::Hasher;
+        type H = RescuePrimeRegular;
 
-        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
         // Repeatedly insert `AdditionRecord` into empty MutatorSet and revert it
         //
@@ -558,9 +524,9 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_mutator_set_revert_remove_test() {
-        type Hasher = blake3::Hasher;
+        type H = RescuePrimeRegular;
 
-        let mut archival_mutator_set: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
         let n_iterations = 10 * BATCH_SIZE;
         let mut records = Vec::with_capacity(n_iterations);
@@ -602,28 +568,23 @@ mod archival_mutator_set_tests {
         }
     }
 
-    fn make_random_addition<H>(
+    fn make_random_addition<H: Hasher>(
         archival_mutator_set: &mut ArchivalMutatorSet<H>,
     ) -> (H::Digest, AdditionRecord<H>, MsMembershipProof<H>)
     where
-        H: Hasher,
-        Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
-        u128: ToDigest<<H as Hasher>::Digest>,
+        u128: Hashable<<H as Hasher>::T>,
+        <H as Hasher>::T: GetRandomElements,
     {
         let mut rng = rand::thread_rng();
         let hasher = H::new();
-        let item = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(rng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
-        let randomness = hasher.hash(
-            &(0..3)
-                .map(|_| BFieldElement::new(rng.next_u64()))
-                .collect::<Vec<_>>(),
-        );
 
-        let addition_record = archival_mutator_set.commit(&item, &randomness);
+        let random_elements = <H as Hasher>::T::random_elements(6, &mut rng);
+        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
+        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+
+        let addition_record = archival_mutator_set
+            .set_commitment
+            .commit(&item, &randomness);
         let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
 
         (item, addition_record, membership_proof)

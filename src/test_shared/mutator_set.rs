@@ -1,22 +1,45 @@
-use rand::{thread_rng, RngCore};
-use rusty_leveldb::DB;
-
 use crate::util_types::mutator_set::{
     archival_mutator_set::ArchivalMutatorSet, ms_membership_proof::MsMembershipProof,
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
+use rand::{thread_rng, RngCore};
+use rusty_leveldb::DB;
+use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+use twenty_first::shared_math::traits::GetRandomElements;
+use twenty_first::util_types::blake3_wrapper::Blake3Hash;
+use twenty_first::util_types::simple_hasher::Hasher;
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::mmr_trait::Mmr,
-        simple_hasher::{self, ToDigest},
-    },
+    util_types::{mmr::mmr_trait::Mmr, simple_hasher::Hashable},
 };
 
-pub fn empty_archival_ms<H: simple_hasher::Hasher>() -> ArchivalMutatorSet<H>
+pub fn make_item_and_randomness_for_blake3() -> (Blake3Hash, Blake3Hash) {
+    let mut rng = rand::thread_rng();
+
+    let mut entropy1: [u8; 32] = [0u8; 32];
+    rng.fill_bytes(&mut entropy1);
+    let mut entropy2: [u8; 32] = [0u8; 32];
+    rng.fill_bytes(&mut entropy2);
+
+    (entropy1.into(), entropy2.into())
+}
+
+pub fn make_item_and_randomness_for_rp() -> ([BFieldElement; 5], [BFieldElement; 5]) {
+    type H = RescuePrimeRegular;
+    let mut rng = rand::thread_rng();
+    let hasher = H::new();
+
+    let random_elements = <H as Hasher>::T::random_elements(6, &mut rng);
+    let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
+    let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+
+    (item, randomness)
+}
+
+pub fn empty_archival_ms<H>() -> ArchivalMutatorSet<H>
 where
-    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    H: Hasher,
+    u128: Hashable<<H as Hasher>::T>,
 {
     let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
     let chunks_db = DB::open("chunks", opt.clone()).unwrap();
@@ -25,25 +48,19 @@ where
     ArchivalMutatorSet::new_empty(aocl_db, swbf_db, chunks_db)
 }
 
-pub fn insert_item<H: simple_hasher::Hasher, M: Mmr<H>>(
-    mutator_set: &mut SetCommitment<H, M>,
-) -> (MsMembershipProof<H>, H::Digest)
+pub fn insert_item<H, M>(mutator_set: &mut SetCommitment<H, M>) -> (MsMembershipProof<H>, H::Digest)
 where
-    u128: ToDigest<H::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    H: Hasher,
+    M: Mmr<H>,
+    u128: Hashable<<H as Hasher>::T>,
+    <H as Hasher>::T: GetRandomElements,
 {
     let mut prng = thread_rng();
     let hasher = H::new();
-    let new_item = hasher.hash(
-        &(0..3)
-            .map(|_| BFieldElement::new(prng.next_u64()))
-            .collect::<Vec<_>>(),
-    );
-    let randomness = hasher.hash(
-        &(0..3)
-            .map(|_| BFieldElement::new(prng.next_u64()))
-            .collect::<Vec<_>>(),
-    );
+
+    let random_elements = H::T::random_elements(6, &mut prng);
+    let new_item: H::Digest = hasher.hash_sequence(&random_elements[0..3]);
+    let randomness: H::Digest = hasher.hash_sequence(&random_elements[3..6]);
 
     let mut addition_record = mutator_set.commit(&new_item, &randomness);
     let membership_proof = mutator_set.prove(&new_item, &randomness, true);
@@ -52,13 +69,14 @@ where
     (membership_proof, new_item)
 }
 
-pub fn remove_item<H: simple_hasher::Hasher, M: Mmr<H>>(
+pub fn remove_item<H, M>(
     mutator_set: &mut SetCommitment<H, M>,
     item: &H::Digest,
     mp: &MsMembershipProof<H>,
 ) where
-    u128: ToDigest<H::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
+    H: Hasher,
+    M: Mmr<H>,
+    u128: Hashable<<H as Hasher>::T>,
 {
     let removal_record: RemovalRecord<H> = mutator_set.drop(item, mp);
     mutator_set.remove_helper(&removal_record);

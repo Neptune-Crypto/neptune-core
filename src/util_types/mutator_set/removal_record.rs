@@ -17,12 +17,9 @@ use super::{
         CHUNK_SIZE, NUM_TRIALS,
     },
 };
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        simple_hasher::{self, ToDigest},
-    },
+use twenty_first::util_types::{
+    mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 impl Error for RemovalRecordError {}
@@ -41,17 +38,15 @@ pub enum RemovalRecordError {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct RemovalRecord<H: simple_hasher::Hasher> {
+pub struct RemovalRecord<H: Hasher> {
     #[serde(with = "BigArray")]
     pub bit_indices: [u128; NUM_TRIALS],
     pub target_chunks: ChunkDictionary<H>,
 }
 
-impl<H> RemovalRecord<H>
+impl<H: Hasher> RemovalRecord<H>
 where
-    u128: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as simple_hasher::Hasher>::Digest>,
-    H: simple_hasher::Hasher,
+    u128: Hashable<<H as Hasher>::T>,
 {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         removal_records: &mut [&mut Self],
@@ -221,19 +216,16 @@ where
         // then this method's output will not be deterministic. So we need a test for that,
         // that the bit indices are sorted. This is what `verify_that_bit_indices_are_sorted_test`
         // verifies.
-
-        let preimage: Vec<H::Digest> = self.get_preimage();
-        let hasher = H::new();
-
-        hasher.hash_many(&preimage)
+        H::new().hash_sequence(&self.get_preimage())
     }
 
-    fn get_preimage(&self) -> Vec<H::Digest> {
-        let mut preimage: Vec<H::Digest> = vec![];
-        for bi in self.bit_indices.iter() {
-            preimage.push(bi.to_digest());
-        }
-        preimage.push(self.target_chunks.hash());
+    fn get_preimage(&self) -> Vec<H::T> {
+        let preimage: Vec<H::T> = self
+            .bit_indices
+            .iter()
+            .flat_map(|bi| bi.to_sequence())
+            .chain(self.target_chunks.hash().to_sequence())
+            .collect();
 
         preimage
     }
@@ -243,56 +235,43 @@ where
 mod removal_record_tests {
     use super::*;
     use itertools::Itertools;
-    use rand::{seq::SliceRandom, thread_rng, RngCore};
+    use rand::seq::SliceRandom;
 
-    use crate::util_types::mutator_set::{
-        addition_record::AdditionRecord,
-        ms_membership_proof::MsMembershipProof,
-        mutator_set_accumulator::MutatorSetAccumulator,
-        mutator_set_trait::MutatorSet,
-        shared::{CHUNK_SIZE, NUM_TRIALS},
+    use crate::{
+        test_shared::mutator_set::{
+            make_item_and_randomness_for_blake3, make_item_and_randomness_for_rp,
+        },
+        util_types::mutator_set::{
+            addition_record::AdditionRecord,
+            ms_membership_proof::MsMembershipProof,
+            mutator_set_accumulator::MutatorSetAccumulator,
+            mutator_set_trait::MutatorSet,
+            shared::{CHUNK_SIZE, NUM_TRIALS},
+        },
     };
     use twenty_first::{
-        shared_math::{
-            b_field_element::BFieldElement,
-            rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_OUTPUT_SIZE, RP_DEFAULT_WIDTH},
-            traits::GetRandomElements,
-        },
-        util_types::{blake3_wrapper, simple_hasher::Hasher},
+        shared_math::rescue_prime_regular::RescuePrimeRegular,
         utils::{self, has_unique_elements},
     };
 
-    #[test]
-    fn verify_that_hash_preimage_elements_are_unique_test() {
-        type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = H::new();
-        let mut prng = thread_rng();
+    fn get_mp_and_removal_record() -> (
+        MsMembershipProof<RescuePrimeRegular>,
+        RemovalRecord<RescuePrimeRegular>,
+    ) {
+        type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
-
-        let preimage = removal_record.get_preimage();
-        assert_eq!(NUM_TRIALS + 1, preimage.len());
-        assert!(utils::has_unique_elements(preimage));
+        let (item, randomness) = make_item_and_randomness_for_rp();
+        let mp: MsMembershipProof<RescuePrimeRegular> = accumulator.prove(&item, &randomness, true);
+        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
+        (mp, removal_record)
     }
 
     #[test]
     fn verify_that_bit_indices_are_sorted_test() {
-        type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = H::new();
-        let mut prng = thread_rng();
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let (_mp, removal_record) = get_mp_and_removal_record();
 
         let bit_indices = removal_record.bit_indices;
-        let mut bit_indices_sorted = bit_indices.clone();
+        let mut bit_indices_sorted = bit_indices;
         bit_indices_sorted.sort_unstable();
         assert_eq!(
             bit_indices, bit_indices_sorted,
@@ -308,15 +287,10 @@ mod removal_record_tests {
 
     #[test]
     fn hash_test() {
-        type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = H::new();
-        let mut prng = thread_rng();
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        type H = RescuePrimeRegular;
+
+        let (_mp, removal_record) = get_mp_and_removal_record();
+
         let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
         assert_eq!(
             removal_record.hash(),
@@ -339,16 +313,8 @@ mod removal_record_tests {
 
     #[test]
     fn get_chunk_index_to_bit_indices_test() {
-        // Create a removal record
-        type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = H::new();
-        let mut prng = thread_rng();
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
+        let (mp, removal_record) = get_mp_and_removal_record();
+
         let chunks2bits = removal_record.get_chunk_index_to_bit_indices();
 
         // Verify that no indices are repeated in the hash map
@@ -370,16 +336,26 @@ mod removal_record_tests {
     }
 
     #[test]
+    fn serialization_test() {
+        // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
+        // an imported library. I included it here, though, because the setup seems a bit clumsy
+        // to me so far.
+        type H = RescuePrimeRegular;
+
+        let (_mp, removal_record) = get_mp_and_removal_record();
+
+        let json: String = serde_json::to_string(&removal_record).unwrap();
+        let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
+        assert_eq!(s_back.bit_indices, removal_record.bit_indices);
+        assert_eq!(s_back.target_chunks, removal_record.target_chunks);
+    }
+
+    #[test]
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = H::new();
-        let mut prng = thread_rng();
+        type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
-        let randomness =
-            hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
+        let (item, randomness) = make_item_and_randomness_for_rp();
         let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
         let mp = accumulator.prove(&item, &randomness, true);
 
@@ -403,10 +379,7 @@ mod removal_record_tests {
     #[test]
     fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = H::new();
-        let mut prng = thread_rng();
+        type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let test_iterations = 10;
@@ -415,10 +388,8 @@ mod removal_record_tests {
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
-                let item =
-                    hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
-                let randomness =
-                    hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
+                let (item, randomness) = make_item_and_randomness_for_rp();
+
                 let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
                 let mp = accumulator.prove(&item, &randomness, true);
 
@@ -428,7 +399,7 @@ mod removal_record_tests {
                         .iter_mut()
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
-                    &mut accumulator,
+                    &mut accumulator.set_commitment,
                 );
                 assert!(
                     update_res_rr.is_ok(),
@@ -438,7 +409,7 @@ mod removal_record_tests {
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut accumulator,
+                    &mut accumulator.set_commitment,
                     &addition_record,
                 );
                 assert!(
@@ -452,7 +423,7 @@ mod removal_record_tests {
 
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
-                        removal_record.validate(&mut accumulator),
+                        removal_record.validate(&mut accumulator.set_commitment),
                         "removal records must validate, i = {}",
                         i
                     );
@@ -471,7 +442,7 @@ mod removal_record_tests {
             let (chosen_index, random_removal_record) =
                 removal_records.choose(&mut rand::thread_rng()).unwrap();
             assert!(accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
-            accumulator.remove(&random_removal_record);
+            accumulator.remove(random_removal_record);
             assert!(!accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
         }
     }
@@ -480,18 +451,14 @@ mod removal_record_tests {
     fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = H::new();
-        let mut prng = thread_rng();
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
-            let item = hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
-            let randomness =
-                hasher.hash::<Digest>(&(rand::RngCore::next_u64(&mut prng) as u128).into());
+            let (item, randomness) = make_item_and_randomness_for_blake3();
+
             let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
             let mp = accumulator.prove(&item, &randomness, true);
 
@@ -501,7 +468,7 @@ mod removal_record_tests {
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
-                &mut accumulator,
+                &mut accumulator.set_commitment,
             );
             assert!(
                 update_res_rr.is_ok(),
@@ -511,7 +478,7 @@ mod removal_record_tests {
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut accumulator,
+                &mut accumulator.set_commitment,
                 &addition_record,
             );
             assert!(
@@ -525,7 +492,7 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator),
+                    removal_record.validate(&mut accumulator.set_commitment),
                     "removal records must validate, i = {}",
                     i
                 );
@@ -558,37 +525,11 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator),
+                    removal_record.validate(&mut accumulator.set_commitment),
                     "removal records must validate, i = {}",
                     i
                 );
             }
         }
-    }
-
-    #[test]
-    fn serialization_test() {
-        // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
-        // an imported library. I included it here, though, because the setup seems a bit clumsy
-        // to me so far.
-        type H = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
-        let hasher = H::new();
-        let mut prng = thread_rng();
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let item = hasher.hash(
-            &BFieldElement::random_elements(3, &mut prng),
-            RP_DEFAULT_OUTPUT_SIZE,
-        );
-        let randomness = hasher.hash(
-            &BFieldElement::random_elements(3, &mut prng),
-            RP_DEFAULT_OUTPUT_SIZE,
-        );
-        let mp = accumulator.prove(&item, &randomness, true);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item.into(), &mp);
-
-        let json: String = serde_json::to_string(&removal_record).unwrap();
-        let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
-        assert_eq!(s_back.bit_indices, removal_record.bit_indices);
-        assert_eq!(s_back.target_chunks, removal_record.target_chunks);
     }
 }

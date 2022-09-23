@@ -1,9 +1,7 @@
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{
-        mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-        simple_hasher::{Hasher, ToDigest},
-    },
+use serde::{Deserialize, Serialize};
+use twenty_first::util_types::{
+    mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+    simple_hasher::{Hashable, Hasher},
 };
 
 use super::{
@@ -12,26 +10,32 @@ use super::{
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
 
-pub type MutatorSetAccumulator<H> = SetCommitment<H, MmrAccumulator<H>>;
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct MutatorSetAccumulator<H: Hasher>
+where
+    u128: Hashable<<H as Hasher>::T>,
+{
+    pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
+}
 
 impl<H: Hasher> MutatorSetAccumulator<H>
 where
-    u128: ToDigest<<H as Hasher>::Digest>,
+    u128: Hashable<<H as Hasher>::T>,
 {
     pub fn default() -> Self {
-        Self {
-            aocl: MmrAccumulator::new(vec![]),
-            swbf_inactive: MmrAccumulator::new(vec![]),
+        let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
+            aocl: MmrAccumulator::<H>::new(vec![]),
+            swbf_inactive: MmrAccumulator::<H>::new(vec![]),
             swbf_active: ActiveWindow::default(),
-        }
+        };
+
+        Self { set_commitment }
     }
 }
 
 impl<H: Hasher> MutatorSet<H> for MutatorSetAccumulator<H>
 where
-    u128: ToDigest<<H as Hasher>::Digest>,
-    Vec<BFieldElement>: ToDigest<<H as Hasher>::Digest>,
-    H: Hasher,
+    u128: Hashable<<H as Hasher>::T>,
 {
     fn prove(
         &mut self,
@@ -39,15 +43,15 @@ where
         randomness: &H::Digest,
         store_bits: bool,
     ) -> MsMembershipProof<H> {
-        self.prove(item, randomness, store_bits)
+        self.set_commitment.prove(item, randomness, store_bits)
     }
 
     fn verify(&mut self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool {
-        self.verify(item, membership_proof)
+        self.set_commitment.verify(item, membership_proof)
     }
 
     fn commit(&mut self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H> {
-        self.commit(item, randomness)
+        self.set_commitment.commit(item, randomness)
     }
 
     fn drop(
@@ -55,35 +59,35 @@ where
         item: &H::Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
-        self.drop(item, membership_proof)
+        self.set_commitment.drop(item, membership_proof)
     }
 
     fn add(&mut self, addition_record: &mut AdditionRecord<H>) {
-        self.add_helper(addition_record);
+        self.set_commitment.add_helper(addition_record);
     }
 
     fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>> {
-        self.remove_helper(removal_record);
+        self.set_commitment.remove_helper(removal_record);
 
         // Only an ArchivalMutatorSet can calculate the diff indices
         None
     }
 
     fn get_commitment(&mut self) -> <H as Hasher>::Digest {
-        let aocl_mmr_bagged = self.aocl.bag_peaks();
-        let inactive_swbf_bagged = self.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = self.swbf_active.hash();
+        let aocl_mmr_bagged = self.set_commitment.aocl.bag_peaks();
+        let inactive_swbf_bagged = self.set_commitment.swbf_inactive.bag_peaks();
+        let active_swbf_bagged = self.set_commitment.swbf_active.hash();
         let hasher = H::new();
         hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
     }
 }
 
 #[cfg(test)]
-mod accumulation_scheme_tests {
-    use crate::test_shared::mutator_set::empty_archival_ms;
+mod ms_accumulator_tests {
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness_for_blake3};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
-    use rand::{prelude::*, RngCore};
-    use twenty_first::util_types::{blake3_wrapper, simple_hasher::Hasher};
+    use proptest::prelude::Rng;
+    use twenty_first::util_types::simple_hasher::Hasher;
 
     use super::*;
 
@@ -97,25 +101,23 @@ mod accumulation_scheme_tests {
         // This function mixes both archival and accumulator testing.
         // It *may* be considered bad style to do it this way, but there is a
         // lot of code duplication that is avoided by doing that.
-        type Hasher = blake3::Hasher;
-        type Digest = blake3_wrapper::Blake3Hash;
-        let hasher = Hasher::new();
-        let mut accumulator: MutatorSetAccumulator<Hasher> = MutatorSetAccumulator::default();
-        let mut archival_after_remove: ArchivalMutatorSet<Hasher> = empty_archival_ms();
-        let mut archival_before_remove: ArchivalMutatorSet<Hasher> = empty_archival_ms();
+        type H = blake3::Hasher;
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut archival_after_remove: ArchivalMutatorSet<H> = empty_archival_ms();
+        let mut archival_before_remove: ArchivalMutatorSet<H> = empty_archival_ms();
         let number_of_interactions = 100;
-        let mut prng = thread_rng();
+        let mut prng = rand::thread_rng();
 
         // The outer loop runs two times:
         // 1. insert `number_of_interactions / 2` items, then randomly insert and remove `number_of_interactions / 2` times
         // 2. Randomly insert and remove `number_of_interactions` times
         // This should test both inserting/removing in an empty MS and in a non-empty MS
         for start_fill in [false, true] {
-            let mut membership_proofs_batch: Vec<MsMembershipProof<Hasher>> = vec![];
-            let mut membership_proofs_sequential: Vec<MsMembershipProof<Hasher>> = vec![];
-            let mut items: Vec<Digest> = vec![];
-            let mut rands: Vec<Digest> = vec![];
-            let mut last_ms_commitment: Option<Digest> = None;
+            let mut membership_proofs_batch: Vec<MsMembershipProof<H>> = vec![];
+            let mut membership_proofs_sequential: Vec<MsMembershipProof<H>> = vec![];
+            let mut items: Vec<<H as Hasher>::Digest> = vec![];
+            let mut rands: Vec<<H as Hasher>::Digest> = vec![];
+            let mut last_ms_commitment: Option<<H as Hasher>::Digest> = None;
             for i in 0..number_of_interactions {
                 // Verify that commitment to both the accumulator and archival data structure agree
                 let new_commitment = accumulator.get_commitment();
@@ -135,9 +137,9 @@ mod accumulation_scheme_tests {
 
                 if prng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
-                    let item = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-                    let randomness = hasher.hash::<Digest>(&(prng.next_u64() as u128).into());
-                    let mut addition_record: AdditionRecord<Hasher> =
+                    let (item, randomness) = make_item_and_randomness_for_blake3();
+
+                    let mut addition_record: AdditionRecord<H> =
                         accumulator.commit(&item, &randomness);
                     let membership_proof_acc = accumulator.prove(&item, &randomness, true);
 
@@ -147,7 +149,7 @@ mod accumulation_scheme_tests {
                     let update_result = MsMembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
-                        &mut accumulator,
+                        &mut accumulator.set_commitment,
                         &addition_record,
                     );
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
@@ -155,8 +157,11 @@ mod accumulation_scheme_tests {
                     // Update membership proofs sequentially
                     for (mp, own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
                     {
-                        let update_res_seq =
-                            mp.update_from_addition(own_item, &mut accumulator, &addition_record);
+                        let update_res_seq = mp.update_from_addition(
+                            own_item,
+                            &mut accumulator.set_commitment,
+                            &addition_record,
+                        );
                         assert!(update_res_seq.is_ok());
                     }
 
@@ -209,9 +214,9 @@ mod accumulation_scheme_tests {
                     let _removal_rand = rands.remove(item_index);
 
                     // generate removal record
-                    let mut removal_record: RemovalRecord<Hasher> =
-                        accumulator.drop(&removal_item.into(), &removal_mp);
-                    assert!(removal_record.validate(&mut accumulator));
+                    let removal_record: RemovalRecord<H> =
+                        accumulator.drop(&removal_item, &removal_mp);
+                    assert!(removal_record.validate(&mut accumulator.set_commitment));
 
                     // update membership proofs
                     // Uppdate membership proofs in batch
@@ -233,18 +238,18 @@ mod accumulation_scheme_tests {
                     }
 
                     // remove item from set
-                    assert!(accumulator.verify(&removal_item.into(), &removal_mp));
-                    let mut removal_record_copy = removal_record.clone();
-                    accumulator.remove(&mut removal_record);
+                    assert!(accumulator.verify(&removal_item, &removal_mp));
+                    let removal_record_copy = removal_record.clone();
+                    accumulator.remove(&removal_record);
                     let diff_indices: Vec<u128> =
-                        archival_after_remove.remove(&mut removal_record).unwrap();
+                        archival_after_remove.remove(&removal_record).unwrap();
                     for diff_index in diff_indices {
                         println!("diff_index = {}", diff_index);
                         assert!(archival_after_remove.get_bloom_filter_bit(diff_index));
                         assert!(!archival_before_remove.get_bloom_filter_bit(diff_index));
                     }
-                    archival_before_remove.remove(&mut removal_record_copy);
-                    assert!(!accumulator.verify(&removal_item.into(), &removal_mp));
+                    archival_before_remove.remove(&removal_record_copy);
+                    assert!(!accumulator.verify(&removal_item, &removal_mp));
 
                     // Verify that the sequential `update_from_remove` return value is correct
                     // The return value from `update_from_remove` shows if the membership proof

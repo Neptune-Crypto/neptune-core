@@ -2,10 +2,7 @@ use serde_big_array;
 use serde_big_array::BigArray;
 use serde_derive::{Deserialize, Serialize};
 
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::simple_hasher::{self, ToDigest},
-};
+use twenty_first::util_types::simple_hasher::{Hashable, Hasher};
 
 use super::shared::{BITS_PER_U32, CHUNK_SIZE};
 
@@ -47,28 +44,56 @@ impl Chunk {
         self.bits[index / BITS_PER_U32] & (1u32 << (index % BITS_PER_U32)) != 0
     }
 
-    #[inline]
-    fn hash_preimage(&self) -> Vec<BFieldElement> {
-        self.bits.iter().map(|&val| val.into()).collect()
+    /// Return the length of the Vec<u128>-representation of the active window
+    const fn get_u128s_length() -> usize {
+        if CHUNK_SIZE % (8 * 16) == 0 {
+            CHUNK_SIZE / (8 * 16)
+        } else {
+            CHUNK_SIZE / (8 * 16) + 1
+        }
     }
 
-    pub fn hash<H: simple_hasher::Hasher>(&self, hasher: &H) -> H::Digest
-    where
-        Vec<BFieldElement>: ToDigest<H::Digest>,
-    {
-        let preimage = self.hash_preimage();
+    /// Return the Vec<u128> representation of the bits in ActiveWindow.
+    fn get_u128s(&self) -> Vec<u128> {
+        let mut u128s: Vec<u128> = vec![0u128; Self::get_u128s_length()];
+        for i in 0..(CHUNK_SIZE / BITS_PER_U32) {
+            let shift = 32 * (i % 4) as u128;
+            u128s[i / 4] += (self.bits[i] as u128 * (1 << shift)) as u128;
+        }
 
-        hasher.hash(&preimage.to_digest())
+        u128s
+    }
+
+    #[inline]
+    fn hash_preimage<H: Hasher>(&self) -> Vec<H::T>
+    where
+        u128: Hashable<<H as Hasher>::T>,
+    {
+        self.get_u128s()
+            .iter()
+            .flat_map(|&val| val.to_sequence())
+            .collect()
+    }
+
+    pub fn hash<H: Hasher>(&self, hasher: &H) -> H::Digest
+    where
+        u128: Hashable<<H as Hasher>::T>,
+    {
+        let seq: Vec<H::T> = self.hash_preimage::<H>();
+
+        hasher.hash_sequence(&seq)
     }
 }
 
 #[cfg(test)]
 mod chunk_tests {
-    use rand::{thread_rng, RngCore};
-
-    use twenty_first::shared_math::traits::IdentityValues;
+    use std::collections::HashSet;
 
     use super::*;
+    use num_traits::Zero;
+    use rand::{thread_rng, RngCore};
+    use twenty_first::shared_math::b_field_element::BFieldElement;
+    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
     impl Chunk {
         fn default() -> Self {
@@ -80,8 +105,8 @@ mod chunk_tests {
 
     #[inline]
     const fn get_hashpreimage_length() -> usize {
-        // This assumes that CHUNK_SIZE is a multiple of 32
-        CHUNK_SIZE / BITS_PER_U32
+        // This assumes that CHUNK_SIZE is not a multiple of 128
+        CHUNK_SIZE / BITS_PER_U32 / 4 * 5 + 5
     }
 
     #[test]
@@ -127,12 +152,14 @@ mod chunk_tests {
 
     #[test]
     fn chunk_hashpreimage_test() {
+        type H = RescuePrimeRegular;
+
         let zero_chunk = Chunk {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
-        let zero_chunk_hash_preimage = zero_chunk.hash_preimage();
+        let zero_chunk_hash_preimage = zero_chunk.hash_preimage::<H>();
         assert_eq!(get_hashpreimage_length(), zero_chunk_hash_preimage.len());
-        for elem in zero_chunk_hash_preimage {
+        for elem in zero_chunk_hash_preimage.iter() {
             assert!(elem.is_zero());
         }
 
@@ -140,39 +167,30 @@ mod chunk_tests {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
         one_one.set_bit(32);
-        let one_one_preimage = one_one.hash_preimage();
+        let one_one_preimage = one_one.hash_preimage::<H>();
+
+        assert_ne!(zero_chunk_hash_preimage, one_one_preimage);
         assert_eq!(get_hashpreimage_length(), one_one_preimage.len());
-        assert!(one_one_preimage[0].is_zero());
-        assert!(one_one_preimage[1].is_one());
-        for i in 2..get_hashpreimage_length() {
-            assert!(one_one_preimage[i].is_zero());
-        }
 
         let mut two_ones = Chunk {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
         two_ones.set_bit(32);
         two_ones.set_bit(33);
-        let two_ones_preimage = two_ones.hash_preimage();
-        assert!(two_ones_preimage[0].is_zero());
-        assert_eq!(3, two_ones_preimage[1].value());
-        for i in 2..get_hashpreimage_length() {
-            assert!(two_ones_preimage[i].is_zero());
+        let two_ones_preimage = two_ones.hash_preimage::<H>();
+
+        assert_ne!(two_ones_preimage, one_one_preimage);
+        assert_ne!(two_ones_preimage, zero_chunk_hash_preimage);
+
+        // Verify that setting any bit produces a unique hash-preimage value
+        let mut previous_values: HashSet<Vec<BFieldElement>> = HashSet::new();
+        for i in 0..CHUNK_SIZE {
+            let mut chunk = Chunk {
+                bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
+            };
+            chunk.set_bit(i);
+            assert!(previous_values.insert(chunk.hash_preimage::<H>()));
         }
-    }
-
-    #[test]
-    fn chunk_hashpreimage_big_test() {
-        let mut chunk = Chunk {
-            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
-        };
-
-        // Verify that the hash preimage is producted according to expectations.
-        chunk.set_bit(CHUNK_SIZE - 1 - BITS_PER_U32);
-        let hashpreimage = chunk.hash_preimage();
-        let mut expected = [BFieldElement::ring_zero(); get_hashpreimage_length()];
-        expected[get_hashpreimage_length() - 2] = BFieldElement::new(1u64 << 31);
-        assert_eq!(expected.to_vec(), hashpreimage);
     }
 
     #[test]
