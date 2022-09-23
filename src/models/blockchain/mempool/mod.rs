@@ -11,9 +11,11 @@
 //! The `Mempool` type is a thread-safe wrapper around `MempoolInternal`, and
 //! all interaction should go through the wrapper.
 
+use crate::models::shared::SIZE_1GB;
+
 use super::{
     digest::Hashable,
-    transaction::{utxo::Utxo, Amount, Transaction, TransactionDigest, TransactionId},
+    transaction::{utxo::Utxo, Amount, Transaction, TransactionDigest},
 };
 use get_size::GetSize;
 use num_traits::Zero;
@@ -81,7 +83,13 @@ impl Default for Mempool {
 
 impl Mempool {
     /// Computes in O(1) from HashMap
-    pub fn get(&self, transaction_id: TransactionId) -> Option<Transaction> {
+    pub fn contains(&self, transaction_id: &TransactionDigest) -> bool {
+        let lock = self.internal.read().unwrap();
+        lock.contains(transaction_id)
+    }
+
+    /// Computes in O(1) from HashMap
+    pub fn get(&self, transaction_id: &TransactionDigest) -> Option<Transaction> {
         let lock = self.internal.read().unwrap();
         lock.get(transaction_id).cloned()
     }
@@ -96,7 +104,7 @@ impl Mempool {
 
     /// The operation is performed in Ο(log(N)) time (worst case).
     /// Computes in θ(lg N)
-    pub fn remove(&self, transaction_id: TransactionId) -> Option<Transaction> {
+    pub fn remove(&self, transaction_id: &TransactionDigest) -> Option<Transaction> {
         let mut lock = self.internal.write().unwrap();
         lock.remove(transaction_id)
     }
@@ -218,13 +226,17 @@ impl Default for MempoolInternal {
             table: LookupTable::default(),
             queue: PriorityQueue::default(),
             // 1GB in bytes
-            max_size: 1_000_000_000,
+            max_size: SIZE_1GB,
         }
     }
 }
 
 impl MempoolInternal {
-    fn get(&self, transaction_id: TransactionId) -> Option<&Transaction> {
+    fn contains(&self, transaction_id: &TransactionDigest) -> bool {
+        self.table.contains_key(transaction_id)
+    }
+
+    fn get(&self, transaction_id: &TransactionDigest) -> Option<&Transaction> {
         self.table.get(transaction_id)
     }
 
@@ -253,7 +265,7 @@ impl MempoolInternal {
         }
     }
 
-    fn remove(&mut self, transaction_id: TransactionId) -> Option<Transaction> {
+    fn remove(&mut self, transaction_id: &TransactionDigest) -> Option<Transaction> {
         if let rv @ Some(_) = self.table.remove(transaction_id) {
             self.queue.remove(transaction_id);
             debug_assert_eq!(self.table.len(), self.queue.len());
@@ -403,41 +415,55 @@ impl MempoolInternal {
 mod tests {
     use super::*;
     use crate::{
-        mine_loop::_1MB,
-        models::blockchain::transaction::{Amount, Transaction},
-        tests::shared::{get_mock_wallet_state, make_mock_transaction2},
+        models::{
+            blockchain::transaction::{Amount, Transaction},
+            shared::SIZE_1MB,
+        },
+        tests::shared::{get_mock_wallet_state, make_mock_transaction_with_wallet},
     };
     use num_bigint::BigInt;
     use num_traits::Zero;
 
     #[test]
     pub fn insert_then_get_then_remove_then_get() {
-        let m = Mempool::default();
+        let mempool = Mempool::default();
         let wallet_state = get_mock_wallet_state();
-        let t1 = make_mock_transaction2(vec![], vec![], Amount::zero(), &wallet_state, None);
-        let t1_id = &<Transaction as Hashable>::hash(&t1);
-        m.insert(&t1);
+        let transaction =
+            make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
+        let transaction_digest = &<Transaction as Hashable>::hash(&transaction);
+        assert!(!mempool.contains(transaction_digest));
+        mempool.insert(&transaction);
+        assert!(mempool.contains(transaction_digest));
 
-        let t1_get_option = m.get(t1_id);
-        assert_eq!(Some(t1.clone()), t1_get_option);
+        let transaction_get_option = mempool.get(transaction_digest);
+        assert_eq!(Some(transaction.clone()), transaction_get_option);
+        assert!(mempool.contains(transaction_digest));
 
-        let t1_remove_option = m.remove(t1_id);
-        assert_eq!(Some(t1), t1_remove_option);
+        let transaction_remove_option = mempool.remove(transaction_digest);
+        assert_eq!(Some(transaction), transaction_remove_option);
+        assert!(!mempool.contains(transaction_digest));
 
-        let t1_second_remove_option = m.remove(t1_id);
-        assert_eq!(None, t1_second_remove_option);
+        let transaction_second_remove_option = mempool.remove(transaction_digest);
+        assert_eq!(None, transaction_second_remove_option);
+        assert!(!mempool.contains(transaction_digest))
     }
 
     // Create a mempool with 10 transactions.
     fn setup(transactions_count: u32) -> Mempool {
-        let m = Mempool::default();
+        let mempool = Mempool::default();
         let wallet_state = get_mock_wallet_state();
         for i in 0..transactions_count {
-            let t = make_mock_transaction2(vec![], vec![], Amount::from(i), &wallet_state, None);
-            m.insert(&t);
+            let t = make_mock_transaction_with_wallet(
+                vec![],
+                vec![],
+                Amount::from(i),
+                &wallet_state,
+                None,
+            );
+            mempool.insert(&t);
         }
-        println!("Mempool size: {}", m.len());
-        m
+        println!("Mempool size: {}", mempool.len());
+        mempool
     }
 
     #[test]
@@ -446,7 +472,7 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in mempool.get_densest_transactions(_1MB) {
+        for curr_transaction in mempool.get_densest_transactions(SIZE_1MB) {
             let curr_fee_density = curr_transaction.fee_density();
             println!("curr:{} <= prev: {}", curr_fee_density, prev_fee_density);
             assert!(curr_fee_density <= prev_fee_density);
@@ -464,13 +490,24 @@ mod tests {
         let timestamp = Some(BFieldElement::new(eight_days_ago.as_secs()));
 
         for i in 0u32..5 {
-            let t =
-                make_mock_transaction2(vec![], vec![], Amount::from(i), &wallet_state, timestamp);
+            let t = make_mock_transaction_with_wallet(
+                vec![],
+                vec![],
+                Amount::from(i),
+                &wallet_state,
+                timestamp,
+            );
             mempool.insert(&t);
         }
 
         for i in 0u32..5 {
-            let t = make_mock_transaction2(vec![], vec![], Amount::from(i), &wallet_state, None);
+            let t = make_mock_transaction_with_wallet(
+                vec![],
+                vec![],
+                Amount::from(i),
+                &wallet_state,
+                None,
+            );
             mempool.insert(&t);
         }
         println!("Mempool size: {}", mempool.len());
@@ -499,7 +536,7 @@ mod tests {
 
             // Insert partially related transactions.
             for i in 0u32..2 {
-                let t = make_mock_transaction2(
+                let t = make_mock_transaction_with_wallet(
                     vec![unrelated_utxo, related_utxo],
                     vec![],
                     Amount::from(i),
@@ -510,7 +547,7 @@ mod tests {
             }
 
             for i in 0u32..3 {
-                let t = make_mock_transaction2(
+                let t = make_mock_transaction_with_wallet(
                     vec![unrelated_utxo],
                     vec![related_utxo],
                     Amount::from(i),
@@ -522,7 +559,7 @@ mod tests {
 
             // Insert unrelated transtions.
             for i in 0u32..5 {
-                let t = make_mock_transaction2(
+                let t = make_mock_transaction_with_wallet(
                     vec![unrelated_utxo, unrelated_utxo],
                     vec![],
                     Amount::from(i),
@@ -535,7 +572,7 @@ mod tests {
             m
         };
 
-        let canonicalized_transaction = make_mock_transaction2(
+        let canonicalized_transaction = make_mock_transaction_with_wallet(
             vec![related_utxo],
             vec![],
             Amount::from(454542u32),

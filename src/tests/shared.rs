@@ -585,7 +585,7 @@ pub fn make_mock_transaction(
 
 // `make_mock_transaction2`, in contrast to `make_mock_transaction`, allows you
 // to choose signing wallet, fee, and timestamp.
-pub fn make_mock_transaction2(
+pub fn make_mock_transaction_with_wallet(
     inputs: Vec<Utxo>,
     outputs: Vec<Utxo>,
     fee: Amount,

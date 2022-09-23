@@ -4,7 +4,6 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::mempool::TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS;
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -17,7 +16,7 @@ use futures::stream::{TryStream, TryStreamExt};
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
@@ -673,33 +672,23 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionNotification(transaction_notification) => {
-                // 1. Ignore if transaction is stale.
-                // TODO: This is also done by `Mempool::insert()`
-                let age_limit = Duration::from_secs(TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS);
-                if transaction_notification.timestamp < SystemTime::now() + age_limit {
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                };
-
-                // 2. Ignore if we already know this transaction.
-                if self
+                // 1. Ignore if we already know this transaction.
+                let transaction_is_known = self
                     .state
                     .mempool
-                    .get(&transaction_notification.transaction_digest)
-                    .is_some()
-                {
+                    .contains(&transaction_notification.transaction_digest);
+                if transaction_is_known {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // We now have a notification about an unseen `Transaction`.
-
-                // 3. Broadcast notification to peers through main.
+                // 2. Broadcast notification to peers through main.
                 self.to_main_tx
                     .send(PeerThreadToMain::TransactionNotification(
                         transaction_notification,
                     ))
                     .await?;
 
-                // 4. For now, always request the actual `Transaction`.
+                // 3. For now, always request the actual `Transaction`.
                 peer.send(PeerMessage::TransactionRequest(
                     transaction_notification.transaction_digest,
                 ))
@@ -709,8 +698,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
                 if let Some(transaction) = self.state.mempool.get(&transaction_identifier) {
-                    peer.send(PeerMessage::Transaction(transaction.clone()))
-                        .await?;
+                    peer.send(PeerMessage::Transaction(transaction)).await?;
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)

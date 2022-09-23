@@ -15,7 +15,6 @@ use super::{
 pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
-    //Transaction(Transaction), // TODO: This is deprecated as transactions should go through the mempool.
     Shutdown,
     // StopMining,
     // StartMining,

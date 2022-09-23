@@ -28,3 +28,6 @@ impl From<Block> for LatestBlockInfo {
         }
     }
 }
+
+pub const SIZE_1MB: usize = 1_000_000;
+pub const SIZE_1GB: usize = 1_000_000_000;

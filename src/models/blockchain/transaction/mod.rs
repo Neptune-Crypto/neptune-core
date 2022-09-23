@@ -8,8 +8,11 @@ use num_rational::BigRational;
 use num_traits::Zero;
 use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+use std::{
+    convert::TryInto,
+    hash::{Hash as StdHash, Hasher as StdHasher},
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tracing::warn;
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
@@ -26,7 +29,6 @@ use super::{
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
 pub type TransactionDigest = Digest;
-pub type TransactionId<'a> = &'a TransactionDigest;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Transaction {
@@ -46,6 +48,7 @@ impl GetSize for Transaction {
     }
 
     fn get_heap_size(&self) -> usize {
+        // TODO:  This is wrong and `GetSize` needs to be implemeted recursively.
         42
     }
 
@@ -109,12 +112,7 @@ impl Hashable for Transaction {
     }
 }
 
-// This implements the std hash trait by hashing our digest.
-// This allows us to use it in HashMap.
-use std::{
-    convert::TryInto,
-    hash::{Hash as StdHash, Hasher as StdHasher},
-};
+/// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Transaction {
     fn hash<H: StdHasher>(&self, state: &mut H) {
@@ -264,11 +262,13 @@ impl Transaction {
         merged_transaction
     }
 
+    /// Calculates a fraction representing the fee-density, defined as:
+    /// `transaction_fee/transaction_size`.
     pub fn fee_density(&self) -> BigRational {
-        let self_as_bytes = bincode::serialize(&self).unwrap();
-        let volume = BigInt::from(self_as_bytes.get_size());
-        let numer = BigInt::from(BigUint::from(self.fee));
-        BigRational::new_raw(numer, volume)
+        let transaction_as_bytes = bincode::serialize(&self).unwrap();
+        let transaction_size = BigInt::from(transaction_as_bytes.get_size());
+        let transaction_fee = BigInt::from(BigUint::from(self.fee));
+        BigRational::new_raw(transaction_fee, transaction_size)
     }
 }
 

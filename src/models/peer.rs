@@ -224,11 +224,19 @@ pub enum PeerMessage {
     BlockRequestByHash(Digest),
     BlockRequestBatch(Vec<Digest>, usize), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
+    /// Send a full transaction object to a peer.
     Transaction(Transaction),
+    /// Send a notification to a peer, informing it that this node stores the
+    /// transaction with digest and timestamp specified in
+    /// `TransactionNotification`.
     TransactionNotification(TransactionNotification),
+    /// Send a request that this node would like a copy of the transaction with
+    /// digest as specified by the argument.
     TransactionRequest(TransactionDigest),
-    PeerListRequest, // Argument indicates distance in graph.
-    PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
+    PeerListRequest, // TODO: Argument indicates distance in graph. What argument?
+    /// (socket address, instance_id)
+    PeerListResponse(Vec<(SocketAddr, u128)>),
+    /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(ConnectionStatus),
 }

@@ -22,7 +22,8 @@ impl GetSize for Digest {
     }
 
     fn get_heap_size(&self) -> usize {
-        42
+        // This seems to be the case, see test `get_size`.
+        0
     }
 
     fn get_size(&self) -> usize {
@@ -140,5 +141,29 @@ mod digest_tests {
         let rescue_prime_digest_type_from_array: Digest = bfe_vec.into();
         let _shorter: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] =
             rescue_prime_digest_type_from_array.into();
+    }
+
+    #[test]
+    pub fn get_size() {
+        let stack = crate::models::blockchain::digest::Digest::get_stack_size();
+
+        let bfe_vec = vec![
+            BFieldElement::new(12),
+            BFieldElement::new(24),
+            BFieldElement::new(36),
+            BFieldElement::new(48),
+            BFieldElement::new(60),
+            BFieldElement::new(70),
+        ];
+        let rescue_prime_digest_type_from_array: crate::models::blockchain::digest::Digest =
+            bfe_vec.into();
+
+        let heap = rescue_prime_digest_type_from_array.get_heap_size();
+
+        let total = rescue_prime_digest_type_from_array.get_size();
+
+        println!("stack: {stack} + heap: {heap} = {total}");
+
+        assert_eq!(stack + heap, total)
     }
 }

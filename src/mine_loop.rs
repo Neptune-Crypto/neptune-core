@@ -9,6 +9,7 @@ use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
+use crate::models::shared::SIZE_1MB;
 use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
@@ -27,7 +28,6 @@ use twenty_first::shared_math::traits::GetRandomElements;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
-pub const _1MB: usize = 1_000_000;
 
 /// Prepare a Block for Devnet mining
 fn make_devnet_block_template(
@@ -197,17 +197,20 @@ pub async fn mock_regtest_mine(
             let coinbase_transaction =
                 make_coinbase_transaction(own_public_key, &latest_block.header);
 
-            let block_capacity_for_transactions = _1MB;
-            let _transactions = state
+            let block_capacity_for_transactions = SIZE_1MB;
+            let transactions = state
                 .mempool
                 .get_densest_transactions(block_capacity_for_transactions);
 
             // Merge incoming transactions with the coinbase transaction
-            // let transaction =
-            //     Transaction::merge_transaction(&coinbase_transaction, &incoming_transaction);
+            let merged_transaction = transactions
+                .into_iter()
+                .fold(coinbase_transaction.clone(), |acc, transaction| {
+                    Transaction::merge_with(acc, transaction)
+                });
 
             let (block_header, block_body) =
-                make_devnet_block_template(&latest_block, coinbase_transaction);
+                make_devnet_block_template(&latest_block, merged_transaction);
             let miner_task = mine_devnet_block(block_header, block_body, sender, state.clone());
             Some(tokio::spawn(miner_task))
         };
@@ -238,10 +241,6 @@ pub async fn mock_regtest_mine(
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
-                    // MainToMiner::Transaction(incoming_transaction) => {
-                    //     debug!("Miner thread received incoming transaction from main: {:?}", incoming_transaction);
-                    //     // TODO: Replace this message with a transaction pool (mempool).
-                    // },
                 }
             }
             new_fake_block_res = receiver => {
