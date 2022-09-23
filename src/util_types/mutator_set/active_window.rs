@@ -116,8 +116,8 @@ where
         self.bits[index / BITS_PER_U32] & (1u32 << (index % BITS_PER_U32)) != 0
     }
 
-    /// Return the number of u128s that are required to represent the active window
-    fn get_u128s_length() -> usize {
+    /// Return the length of the Vec<u128>-representation of the active window
+    const fn get_u128s_length() -> usize {
         if WINDOW_SIZE % (8 * 16) == 0 {
             WINDOW_SIZE / (8 * 16)
         } else {
@@ -125,7 +125,7 @@ where
         }
     }
 
-    /// FIXME: Explain what a u128 is in the context of an ActiveWindow.
+    /// Return the Vec<u128> representation of the bits in ActiveWindow.
     fn get_u128s(&self) -> Vec<u128> {
         let mut u128s: Vec<u128> = vec![0u128; Self::get_u128s_length()];
         for i in 0..(WINDOW_SIZE / BITS_PER_U32) {
@@ -136,7 +136,7 @@ where
         u128s
     }
 
-    /// Get a commitment for the active part of the sliding-window bloom filter
+    /// Get a commitment to the active part of the sliding-window bloom filter
     pub fn hash(&self) -> H::Digest {
         let seq: Vec<H::T> = self
             .get_u128s()
@@ -325,7 +325,8 @@ mod active_window_tests {
     #[test]
     fn hash_no_crash_test() {
         // This is just a test to ensure that the hashing of the active part of the SWBF
-        // works in the runtime, for relevant hash functions
+        // works in the runtime, for relevant hash functions. It also tests that different
+        // bits being set results in different digests.
         let hash_0 = ActiveWindow::<RescuePrimeRegular>::default().hash();
         let hash_1 = ActiveWindow::<RescuePrimeRegular>::new(Box::new(
             [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32],

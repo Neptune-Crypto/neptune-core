@@ -24,7 +24,6 @@ use super::{
 pub struct ArchivalMutatorSet<H: Hasher>
 where
     u128: Hashable<<H as Hasher>::T>,
-    u128: Hashable<<H as Hasher>::T>,
 {
     pub set_commitment: SetCommitment<H, ArchivalMmr<H>>,
     pub chunks: DatabaseVector<Chunk>,
