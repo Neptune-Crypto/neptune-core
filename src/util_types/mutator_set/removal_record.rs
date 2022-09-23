@@ -264,19 +264,10 @@ mod removal_record_tests {
     ) {
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness();
+        let (item, randomness) = make_item_and_randomness_for_rp();
         let mp: MsMembershipProof<RescuePrimeRegular> = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         (mp, removal_record)
-    }
-
-    #[test]
-    fn verify_that_hash_preimage_elements_are_unique_test() {
-        let (_mp, removal_record) = get_mp_and_removal_record();
-
-        let preimage = removal_record.get_preimage();
-        assert_eq!((NUM_TRIALS + 1) * DIGEST_LENGTH, preimage.len());
-        assert!(utils::has_unique_elements(preimage));
     }
 
     #[test]
