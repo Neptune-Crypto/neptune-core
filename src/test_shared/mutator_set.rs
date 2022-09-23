@@ -2,17 +2,29 @@ use crate::util_types::mutator_set::{
     archival_mutator_set::ArchivalMutatorSet, ms_membership_proof::MsMembershipProof,
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
-use rand::thread_rng;
+use rand::{thread_rng, RngCore};
 use rusty_leveldb::DB;
 use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 use twenty_first::shared_math::traits::GetRandomElements;
+use twenty_first::util_types::blake3_wrapper::Blake3Hash;
 use twenty_first::util_types::simple_hasher::Hasher;
 use twenty_first::{
     shared_math::b_field_element::BFieldElement,
     util_types::{mmr::mmr_trait::Mmr, simple_hasher::Hashable},
 };
 
-pub fn make_item_and_randomness() -> ([BFieldElement; 5], [BFieldElement; 5]) {
+pub fn make_item_and_randomness_for_blake3() -> (Blake3Hash, Blake3Hash) {
+    let mut rng = rand::thread_rng();
+
+    let mut entropy1: [u8; 32] = [0u8; 32];
+    rng.fill_bytes(&mut entropy1);
+    let mut entropy2: [u8; 32] = [0u8; 32];
+    rng.fill_bytes(&mut entropy2);
+
+    (entropy1.into(), entropy2.into())
+}
+
+pub fn make_item_and_randomness_for_rp() -> ([BFieldElement; 5], [BFieldElement; 5]) {
     type H = RescuePrimeRegular;
     let mut rng = rand::thread_rng();
     let hasher = H::new();
