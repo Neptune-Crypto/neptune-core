@@ -59,13 +59,13 @@ where
 
     // Collect all indices, using counter-mode
     for i in 0_usize..NUM_TRIALS {
-        let counter: Vec<H::T> = (i as u128).to_sequence();
+        let counter_seq: Vec<H::T> = (i as u128).to_sequence();
         let randomness_with_counter: H::Digest = hasher.hash_sequence(
             &vec![
                 item_seq.clone(),
                 timestamp_seq.clone(),
                 randomness_seq.clone(),
-                counter,
+                counter_seq,
             ]
             .concat(),
         );
@@ -80,13 +80,13 @@ where
     indices.dedup();
     let mut j = NUM_TRIALS;
     while indices.len() < NUM_TRIALS {
-        let counter: Vec<H::T> = (j as u128).to_sequence();
+        let counter_seq: Vec<H::T> = (j as u128).to_sequence();
         let randomness_with_counter: H::Digest = hasher.hash_sequence(
             &vec![
                 item_seq.clone(),
                 timestamp_seq.clone(),
                 randomness_seq.clone(),
-                counter,
+                counter_seq,
             ]
             .concat(),
         );
