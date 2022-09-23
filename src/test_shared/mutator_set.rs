@@ -62,7 +62,7 @@ where
     let mut prng = thread_rng();
     let hasher = H::new();
 
-    let random_elements = H::T::random_elements(3, &mut prng);
+    let random_elements = H::T::random_elements(6, &mut prng);
     let new_item: H::Digest = hasher.hash_sequence(&random_elements[0..3]);
     let randomness: H::Digest = hasher.hash_sequence(&random_elements[3..6]);
 
