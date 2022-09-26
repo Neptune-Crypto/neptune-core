@@ -33,11 +33,12 @@ impl Digest {
     }
 }
 
-const DIGEST_SEPPARATOR: &str = ",";
+const DIGEST_SEPARATOR: &str = ",";
 
+//TODO: Use emojihash
 impl fmt::Display for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let string = self.0.map(|elem| elem.to_string()).join(DIGEST_SEPPARATOR);
+        let string = self.0.map(|elem| elem.to_string()).join(DIGEST_SEPARATOR);
         write!(f, "{}", string)
     }
 }
@@ -48,7 +49,7 @@ impl FromStr for Digest {
     fn from_str(string: &str) -> Result<Self, Self::Err> {
         let digest = Digest::from(
             string
-                .split(DIGEST_SEPPARATOR)
+                .split(DIGEST_SEPARATOR)
                 .map(|substring| BFieldElement::new(substring.parse::<u64>().unwrap()))
                 .collect::<Vec<_>>(),
         );
