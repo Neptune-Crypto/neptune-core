@@ -350,6 +350,13 @@ where
             was_set
         }
     }
+
+    /// Flush the DatabaseVector (chunks)
+    pub fn flush(&mut self) {
+        self.chunks.flush();
+        self.set_commitment.aocl.flush();
+        self.set_commitment.swbf_inactive.flush();
+    }
 }
 
 #[cfg(test)]
