@@ -5,7 +5,7 @@ use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::blockchain::mempool::{
-    MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_STALE_AFTER_THIS_MANY_SECS,
+    MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_TX_THRESHOLD_AGE_IN_SECS,
 };
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
@@ -674,7 +674,7 @@ impl PeerLoopHandler {
                     + std::time::Duration::from_secs(transaction.timestamp.value());
                 if tx_timestamp
                     < SystemTime::now()
-                        - std::time::Duration::from_secs(MEMPOOL_STALE_AFTER_THIS_MANY_SECS)
+                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
                 {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
@@ -713,7 +713,7 @@ impl PeerLoopHandler {
                 // 2. Ignore if transaction is too old
                 if transaction_notification.timestamp
                     < SystemTime::now()
-                        - std::time::Duration::from_secs(MEMPOOL_STALE_AFTER_THIS_MANY_SECS)
+                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
                 {
                     // TODO: Consider punishing here
                     return Ok(KEEP_CONNECTION_ALIVE);

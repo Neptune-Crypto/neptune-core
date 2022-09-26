@@ -30,7 +30,6 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use twenty_first::shared_math::b_field_element::BFieldElement;
 
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
 /// transactions.  Different strategies are possible for selecting transactions
@@ -52,12 +51,11 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use num_rational::BigRational as FeeDensity;
 
 // 72 hours in secs
-pub const MEMPOOL_STALE_AFTER_THIS_MANY_SECS: u64 = 72 * 60 * 60;
+pub const MEMPOOL_TX_THRESHOLD_AGE_IN_SECS: u64 = 72 * 60 * 60;
 // 5 minutes in secs
 pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
-const _MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 
 type LookupItem<'a> = (TransactionDigest, &'a Transaction);
 
@@ -357,11 +355,10 @@ impl MempoolInternal {
     }
 
     fn prune_stale_transactions(&mut self) {
-        let cutoff = now() - Duration::from_secs(MEMPOOL_STALE_AFTER_THIS_MANY_SECS);
-        let cutoff_timestamp = BFieldElement::new(cutoff.as_secs());
+        let cutoff = now() - Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
-            cutoff_timestamp.value() < transaction.timestamp.value()
+            cutoff.as_secs() < transaction.timestamp.value()
         };
 
         self.retain(keep);
@@ -419,6 +416,7 @@ mod tests {
     };
     use num_bigint::BigInt;
     use num_traits::Zero;
+    use twenty_first::shared_math::b_field_element::BFieldElement;
 
     #[test]
     pub fn insert_then_get_then_remove_then_get() {
@@ -481,6 +479,10 @@ mod tests {
     pub fn prune_stale_transactions() {
         let wallet_state = get_mock_wallet_state();
         let mempool = Mempool::default();
+        assert!(
+            mempool.is_empty(),
+            "Mempool must be empty after initialization"
+        );
 
         let eight_days_ago = now() - Duration::from_secs(8 * 24 * 60 * 60);
         let timestamp = Some(BFieldElement::new(eight_days_ago.as_secs()));

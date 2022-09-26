@@ -30,6 +30,7 @@ use crate::models::channel::{
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
+const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
@@ -462,15 +463,15 @@ impl MainLoopHandler {
                             .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                     }
 
-                    for block in blocks {
-                        debug!("Storing block {:?} in database", block.hash);
+                    for new_block in blocks {
+                        debug!("Storing block {:?} in database", new_block.hash);
                         self.global_state
                             .chain
                             .archival_state
                             .as_ref()
                             .unwrap()
                             .write_block(
-                                Box::new(block.clone()),
+                                Box::new(new_block.clone()),
                                 &mut block_db_lock,
                                 Some(light_state_locked.proof_of_work_family),
                             )?;
@@ -485,13 +486,13 @@ impl MainLoopHandler {
                                 &mut block_db_lock,
                                 &mut ams_lock,
                                 &mut ms_block_sync_lock,
-                                &block,
+                                &new_block,
                             )?;
 
                         // update wallet state with relevant UTXOs from this block
                         self.global_state
                             .wallet_state
-                            .update_wallet_state_with_new_block(&block, &mut wallet_state_db)?;
+                            .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
                     }
 
                     // Update information about latest header
@@ -812,6 +813,11 @@ impl MainLoopHandler {
         let synchronization_timer = time::sleep(sync_timer_interval);
         tokio::pin!(synchronization_timer);
 
+        // Set removal of transactions from mempool that have timed out to run every P seconds
+        let mempool_cleanup_timer_interval = Duration::from_secs(MEMPOOL_PRUNE_INTERVAL_IN_SECS);
+        let mempool_cleanup_timer = time::sleep(mempool_cleanup_timer_interval);
+        tokio::pin!(mempool_cleanup_timer);
+
         loop {
             // Set a timer to run peer discovery process every N seconds
 
@@ -873,18 +879,29 @@ impl MainLoopHandler {
                 _ = &mut peer_discovery_timer => {
                     // Check number of peers we are connected to and connect to more peers
                     // if needed.
+                    debug!("Running peer discovery job");
                     self.peer_discovery_handler(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in N seconds
                     peer_discovery_timer.as_mut().reset(tokio::time::Instant::now() + peer_discovery_timer_interval);
                 }
 
-                // Handle synchronization
+                // Handle synchronization (i.e. batch-downloading of blocks)
                 _ = &mut synchronization_timer => {
+                    debug!("Running block-synchronization job");
                     self.sync(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in M seconds
                     synchronization_timer.as_mut().reset(tokio::time::Instant::now() + sync_timer_interval);
+                }
+
+                // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
+                _ = &mut mempool_cleanup_timer => {
+                    debug!("Running mempool-cleaner job");
+                    self.global_state.mempool.prune_stale_transactions();
+
+                    // Reset the timer to run this branch again in P seconds
+                    mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
                 }
             }
         }
