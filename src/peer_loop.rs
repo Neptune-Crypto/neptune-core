@@ -4,6 +4,9 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::mempool::{
+    MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_STALE_AFTER_THIS_MANY_SECS,
+};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -659,9 +662,35 @@ impl PeerLoopHandler {
                     transaction
                 );
 
+                // If transaction is invalid, punish
                 if !transaction.devnet_is_valid(None) {
+                    warn!("Received invalid tx");
                     self.punish(PeerSanctionReason::InvalidTransaction)?;
-                    return Ok(false);
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 2. Ignore if transaction is too old
+                let tx_timestamp: SystemTime = std::time::UNIX_EPOCH
+                    + std::time::Duration::from_secs(transaction.timestamp.value());
+                if tx_timestamp
+                    < SystemTime::now()
+                        - std::time::Duration::from_secs(MEMPOOL_STALE_AFTER_THIS_MANY_SECS)
+                {
+                    // TODO: Consider punishing here
+                    warn!("Received too old tx");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 3. Ignore if transaction is too far into the future
+                if tx_timestamp
+                    > SystemTime::now()
+                        + std::time::Duration::from_secs(
+                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
+                        )
+                {
+                    // TODO: Consider punishing here
+                    warn!("Received tx too far into the future");
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Otherwise relay to main
@@ -681,14 +710,27 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 2. Broadcast notification to peers through main.
-                self.to_main_tx
-                    .send(PeerThreadToMain::TransactionNotification(
-                        transaction_notification,
-                    ))
-                    .await?;
+                // 2. Ignore if transaction is too old
+                if transaction_notification.timestamp
+                    < SystemTime::now()
+                        - std::time::Duration::from_secs(MEMPOOL_STALE_AFTER_THIS_MANY_SECS)
+                {
+                    // TODO: Consider punishing here
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
-                // 3. For now, always request the actual `Transaction`.
+                // 3. Ignore if transaction is too far into the future
+                if transaction_notification.timestamp
+                    > SystemTime::now()
+                        + std::time::Duration::from_secs(
+                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
+                        )
+                {
+                    // TODO: Consider punishing here
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 4. Request the actual `Transaction` from peer
                 peer.send(PeerMessage::TransactionRequest(
                     transaction_notification.transaction_digest,
                 ))
