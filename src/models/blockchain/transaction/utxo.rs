@@ -1,13 +1,13 @@
-use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::simple_hasher::Hasher;
-
 use super::{Amount, AMOUNT_SIZE_FOR_U32};
 use crate::models::blockchain::{
     digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
 };
+use serde::{Deserialize, Serialize};
+use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use std::str::FromStr;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::util_types::simple_hasher::Hasher;
 
 pub const PUBLIC_KEY_LENGTH_IN_BYTES: usize = 33;
 pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
@@ -48,5 +48,17 @@ impl Hashable for Utxo {
                 .try_into()
                 .unwrap(),
         )
+    }
+}
+
+// This implements the `std::hash::Hash` trait by hashing our digest type.  This
+// allows us to use it as keys in `HashMap`.  We must implement `Hash` manually,
+// but we must also derive `Eq`.  The Clippy warning is safe to suppress,
+// because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
+#[allow(clippy::derive_hash_xor_eq)]
+impl StdHash for Utxo {
+    fn hash<H: StdHasher>(&self, state: &mut H) {
+        let our_hash = <Utxo as Hashable>::hash(self);
+        <Digest as StdHash>::hash(&our_hash, state);
     }
 }

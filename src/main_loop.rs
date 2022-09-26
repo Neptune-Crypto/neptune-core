@@ -3,6 +3,7 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::mempool::MempoolInternal;
 use crate::models::blockchain::wallet::WalletBlockUtxos;
 use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
 use crate::models::peer::{
@@ -30,6 +31,7 @@ use crate::models::channel::{
 
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
+const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
@@ -289,13 +291,13 @@ fn stay_in_sync_mode(
 impl MainLoopHandler {
     async fn handle_miner_thread_message(&self, msg: MinerToMain) -> Result<()> {
         match msg {
-            MinerToMain::NewBlock(block) => {
+            MinerToMain::NewBlock(new_block) => {
                 // When receiving a block from the miner thread, we assume it is valid
                 // and we assume it is the longest chain even though we could have received
                 // a block from a peer thread before this event is triggered.
-                info!("Miner found new block: {}", block.header.height);
+                info!("Miner found new block: {}", new_block.header.height);
                 self.main_to_peer_broadcast_tx
-                .send(MainToPeerThread::BlockFromMiner(block.clone()))
+                .send(MainToPeerThread::BlockFromMiner(new_block.clone()))
                 .expect(
                     "Peer handler broadcast channel prematurely closed. This should never happen.",
                 );
@@ -341,13 +343,21 @@ impl MainLoopHandler {
                     .latest_block_header
                     .lock()
                     .unwrap();
+                let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
+                    .global_state
+                    .mempool
+                    .internal
+                    .write()
+                    .expect("Locking mempool for write must succeed");
+
+                // Apply the updates
                 self.global_state
                     .chain
                     .archival_state
                     .as_ref()
                     .unwrap()
                     .write_block(
-                        block.clone(),
+                        new_block.clone(),
                         &mut db_lock,
                         Some(light_state_locked.proof_of_work_family),
                     )?;
@@ -362,15 +372,19 @@ impl MainLoopHandler {
                         &mut db_lock,
                         &mut ams_lock,
                         &mut ms_block_sync_lock,
-                        &block,
+                        &new_block,
                     )?;
 
                 // update wallet state with relevant UTXOs from this block
                 self.global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(&block, &mut wallet_state_db)?;
+                    .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
 
-                *light_state_locked = block.header.clone();
+                self.global_state
+                    .mempool
+                    .remove_transactions_with(&new_block.body.transaction, &mut mempool_write_lock);
+
+                *light_state_locked = new_block.header.clone();
             }
         }
 
@@ -428,6 +442,12 @@ impl MainLoopHandler {
                         .latest_block_header
                         .lock()
                         .unwrap();
+                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
+                        .global_state
+                        .mempool
+                        .internal
+                        .write()
+                        .expect("Locking mempool for write must succeed");
 
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
@@ -462,15 +482,15 @@ impl MainLoopHandler {
                             .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                     }
 
-                    for block in blocks {
-                        debug!("Storing block {:?} in database", block.hash);
+                    for new_block in blocks {
+                        debug!("Storing block {:?} in database", new_block.hash);
                         self.global_state
                             .chain
                             .archival_state
                             .as_ref()
                             .unwrap()
                             .write_block(
-                                Box::new(block.clone()),
+                                Box::new(new_block.clone()),
                                 &mut block_db_lock,
                                 Some(light_state_locked.proof_of_work_family),
                             )?;
@@ -485,13 +505,20 @@ impl MainLoopHandler {
                                 &mut block_db_lock,
                                 &mut ams_lock,
                                 &mut ms_block_sync_lock,
-                                &block,
+                                &new_block,
                             )?;
 
                         // update wallet state with relevant UTXOs from this block
                         self.global_state
                             .wallet_state
-                            .update_wallet_state_with_new_block(&block, &mut wallet_state_db)?;
+                            .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+
+                        // Update mempool with UTXOs from this block. This is done by removing all transaction
+                        // that became invalid/was mined by this block.
+                        self.global_state.mempool.remove_transactions_with(
+                            &new_block.body.transaction,
+                            &mut mempool_write_lock,
+                        );
                     }
 
                     // Update information about latest header
@@ -585,19 +612,11 @@ impl MainLoopHandler {
                     transaction
                 );
 
-                // send notification to peers
-                let transaction_notification = TransactionNotification::new(&transaction);
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::TransactionNotification(
-                        transaction_notification,
-                    ))?;
+                // Insert into mempool
+                self.global_state.mempool.insert(&transaction);
 
-                // relay to miner
-                self.main_to_miner_tx
-                    .send(MainToMiner::Transaction(transaction))?;
-            }
-            PeerThreadToMain::TransactionNotification(transaction_notification) => {
-                // Relay notification to all peers.  Originating peer will just ignore this.
+                // send notification to peers
+                let transaction_notification: TransactionNotification = transaction.into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(
                         transaction_notification,
@@ -820,6 +839,11 @@ impl MainLoopHandler {
         let synchronization_timer = time::sleep(sync_timer_interval);
         tokio::pin!(synchronization_timer);
 
+        // Set removal of transactions from mempool that have timed out to run every P seconds
+        let mempool_cleanup_timer_interval = Duration::from_secs(MEMPOOL_PRUNE_INTERVAL_IN_SECS);
+        let mempool_cleanup_timer = time::sleep(mempool_cleanup_timer_interval);
+        tokio::pin!(mempool_cleanup_timer);
+
         loop {
             // Set a timer to run peer discovery process every N seconds
 
@@ -881,18 +905,29 @@ impl MainLoopHandler {
                 _ = &mut peer_discovery_timer => {
                     // Check number of peers we are connected to and connect to more peers
                     // if needed.
+                    debug!("Running peer discovery job");
                     self.peer_discovery_handler(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in N seconds
                     peer_discovery_timer.as_mut().reset(tokio::time::Instant::now() + peer_discovery_timer_interval);
                 }
 
-                // Handle synchronization
+                // Handle synchronization (i.e. batch-downloading of blocks)
                 _ = &mut synchronization_timer => {
+                    debug!("Running block-synchronization job");
                     self.sync(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in M seconds
                     synchronization_timer.as_mut().reset(tokio::time::Instant::now() + sync_timer_interval);
+                }
+
+                // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
+                _ = &mut mempool_cleanup_timer => {
+                    debug!("Running mempool-cleaner job");
+                    self.global_state.mempool.prune_stale_transactions();
+
+                    // Reset the timer to run this branch again in P seconds
+                    mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
                 }
             }
         }
@@ -911,13 +946,12 @@ impl MainLoopHandler {
                 );
 
                 // send notification to peers
-                let notification = TransactionNotification::new(&transaction);
+                let notification: TransactionNotification = transaction.clone().into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(notification))?;
 
-                // send transaction to miner
-                self.main_to_miner_tx
-                    .send(MainToMiner::Transaction(transaction))?;
+                // insert transaction into
+                self.global_state.mempool.insert(&transaction);
 
                 // do not shut down
                 Ok(false)

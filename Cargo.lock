@@ -637,6 +637,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "get-size"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffff7b577402f46b6e0069ae9c31a7859ab3f2abe7ff0fb614fe6441a1d6c306"
+dependencies = [
+ "get-size-derive",
+]
+
+[[package]]
+name = "get-size-derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "316da74ccd236d0915a5793f3cb37b1154cc41857373d9a7334053294c933f70"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,8 +906,8 @@ dependencies = [
  "blake3",
  "itertools",
  "num-traits",
- "rand 0.7.3",
- "rand_core 0.5.1",
+ "rand 0.8.5",
+ "rand_core 0.6.3",
  "rayon",
  "rusty-leveldb",
  "serde",
@@ -910,11 +929,14 @@ dependencies = [
  "clap 3.2.17",
  "directories",
  "futures",
+ "get-size",
  "memmap2",
  "mutator-set-tf",
  "num-bigint",
+ "num-rational",
  "num-traits",
  "pin-project-lite",
+ "priority-queue",
  "rand 0.8.5",
  "rusty-leveldb",
  "secp256k1",
@@ -961,6 +983,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "225d3389fb3509a24c93f5c29eb6bde2586b98d9f016636dff58d7c6f7569cd9"
 dependencies = [
  "autocfg",
+ "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0638a1c9d0a3c0914158145bc76cff373a75a627e6ecbfb71cbe6f453a5a19b0"
+dependencies = [
+ "autocfg",
+ "num-bigint",
+ "num-integer",
  "num-traits",
 ]
 
@@ -1198,6 +1232,16 @@ dependencies = [
  "impl-codec",
  "impl-serde",
  "uint",
+]
+
+[[package]]
+name = "priority-queue"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "815082d99af3acc75a3e67efd2a07f72e67b4e81b4344eb8ca34c6ebf3dfa9c5"
+dependencies = [
+ "autocfg",
+ "indexmap",
 ]
 
 [[package]]
@@ -2033,8 +2077,8 @@ dependencies = [
  "phf",
  "primitive-types",
  "rand 0.8.5",
- "rand_chacha 0.2.2",
- "rand_core 0.5.1",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.3",
  "rand_distr",
  "rand_pcg",
  "rayon",

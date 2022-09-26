@@ -2,11 +2,17 @@ pub mod devnet_input;
 pub mod transaction_kernel;
 pub mod utxo;
 
+use get_size::GetSize;
+use num_bigint::{BigInt, BigUint};
+use num_rational::BigRational;
 use num_traits::Zero;
 use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
+use std::{
+    convert::TryInto,
+    hash::{Hash as StdHash, Hasher as StdHasher},
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tracing::warn;
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
@@ -22,9 +28,9 @@ use super::{
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
-pub type TransactionId = Digest;
+pub type TransactionDigest = Digest;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Transaction {
     pub inputs: Vec<DevNetInput>,
 
@@ -36,6 +42,21 @@ pub struct Transaction {
     pub authority_proof: Option<ecdsa::Signature>,
 }
 
+impl GetSize for Transaction {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        // TODO:  This is wrong and `GetSize` needs to be implemeted recursively.
+        42
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
+
 impl Hashable for Transaction {
     fn hash(&self) -> Digest {
         // TODO: Consider using a Merkle tree construction here instead
@@ -45,14 +66,14 @@ impl Hashable for Transaction {
         let outputs_preimage: Vec<Vec<BFieldElement>> = self
             .outputs
             .iter()
-            .map(|(output_utxo, _)| output_utxo.hash().into())
+            .map(|(output_utxo, _)| <Utxo as Hashable>::hash(output_utxo).into())
             .collect();
         let outputs_digest = hasher.hash_many(&outputs_preimage);
 
         // Hash inputs
         let mut inputs_preimage: Vec<Vec<BFieldElement>> = vec![];
         for input in self.inputs.iter() {
-            inputs_preimage.push(input.utxo.hash().into());
+            inputs_preimage.push(<Utxo as Hashable>::hash(&input.utxo).into());
             // We don't hash the membership proofs as they aren't part of the main net blocks
             inputs_preimage.push(input.removal_record.hash());
         }
@@ -91,13 +112,26 @@ impl Hashable for Transaction {
     }
 }
 
+/// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
+#[allow(clippy::derive_hash_xor_eq)]
+impl StdHash for Transaction {
+    fn hash<H: StdHasher>(&self, state: &mut H) {
+        let our_hash = <Transaction as Hashable>::hash(self);
+        <Digest as StdHash>::hash(&our_hash, state);
+    }
+}
+
 impl Transaction {
+    pub fn get_input_utxos(&self) -> Vec<Utxo> {
+        self.inputs.iter().map(|dni| dni.utxo).collect()
+    }
+
     pub fn get_input_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<Utxo> {
         self.inputs
             .iter()
             .map(|dni| dni.utxo)
             .filter(|utxo| utxo.public_key == pub_key)
-            .collect::<Vec<_>>()
+            .collect()
     }
 
     pub fn get_output_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
@@ -226,6 +260,15 @@ impl Transaction {
 
         merged_transaction.devnet_authority_sign();
         merged_transaction
+    }
+
+    /// Calculates a fraction representing the fee-density, defined as:
+    /// `transaction_fee/transaction_size`.
+    pub fn fee_density(&self) -> BigRational {
+        let transaction_as_bytes = bincode::serialize(&self).unwrap();
+        let transaction_size = BigInt::from(transaction_as_bytes.get_size());
+        let transaction_fee = BigInt::from(BigUint::from(self.fee));
+        BigRational::new_raw(transaction_fee, transaction_size)
     }
 }
 

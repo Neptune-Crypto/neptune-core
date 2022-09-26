@@ -15,7 +15,6 @@ use super::{
 pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
-    Transaction(Transaction),
     Shutdown,
     // StopMining,
     // StartMining,
@@ -67,7 +66,6 @@ pub enum PeerThreadToMain {
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
     Transaction(Transaction),
-    TransactionNotification(TransactionNotification), // Relay `TransactionNotification` through main.
 }
 
 impl PeerThreadToMain {
@@ -80,7 +78,6 @@ impl PeerThreadToMain {
             }
             PeerThreadToMain::PeerDiscoveryAnswer(_) => "peer discovery answer".to_string(),
             PeerThreadToMain::Transaction(_) => "transaction".to_string(),
-            PeerThreadToMain::TransactionNotification(_) => "transaction notification".to_string(),
         }
     }
 }

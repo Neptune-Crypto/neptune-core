@@ -6,7 +6,7 @@ use super::blockchain::{
         Block,
     },
     digest::{Digest, Hashable},
-    transaction::{Transaction, TransactionId},
+    transaction::{Transaction, TransactionDigest},
 };
 use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
@@ -201,16 +201,18 @@ pub enum ConnectionStatus {
 /// sender.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionNotification {
-    pub transaction_identifier: TransactionId,
-    // It may be relevant to know w.r.t relaying if this transaction is current.
+    pub transaction_digest: TransactionDigest,
+    // The timestamp of a transaction notification is the associated transaction's timestamp.
+    // The timestamp is used for mempool purposes.
     pub timestamp: SystemTime,
 }
 
-impl TransactionNotification {
-    pub fn new(transaction: &Transaction) -> Self {
+impl From<Transaction> for TransactionNotification {
+    fn from(transaction: Transaction) -> Self {
         Self {
-            transaction_identifier: transaction.hash(),
-            timestamp: SystemTime::now(),
+            transaction_digest: transaction.hash(),
+            timestamp: std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(transaction.timestamp.value()),
         }
     }
 }
@@ -224,11 +226,19 @@ pub enum PeerMessage {
     BlockRequestByHash(Digest),
     BlockRequestBatch(Vec<Digest>, usize), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
+    /// Send a full transaction object to a peer.
     Transaction(Transaction),
+    /// Send a notification to a peer, informing it that this node stores the
+    /// transaction with digest and timestamp specified in
+    /// `TransactionNotification`.
     TransactionNotification(TransactionNotification),
-    TransactionRequest(TransactionId),
-    PeerListRequest, // Argument indicates distance in graph.
-    PeerListResponse(Vec<(SocketAddr, u128)>), // (socket address, instance_id)
+    /// Send a request that this node would like a copy of the transaction with
+    /// digest as specified by the argument.
+    TransactionRequest(TransactionDigest),
+    PeerListRequest,
+    /// (socket address, instance_id)
+    PeerListResponse(Vec<(SocketAddr, u128)>),
+    /// Inform peer that we are disconnecting them.
     Bye,
     ConnectionStatus(ConnectionStatus),
 }

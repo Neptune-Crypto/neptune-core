@@ -4,7 +4,9 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::transaction::{Transaction, TransactionId};
+use crate::models::blockchain::mempool::{
+    MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_TX_THRESHOLD_AGE_IN_SECS,
+};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -15,10 +17,9 @@ use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
 use std::cmp;
-use std::collections::HashMap;
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
@@ -29,8 +30,6 @@ const MINIMUM_BLOCK_BATCH_SIZE: usize = 10;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const _DISCONNECT_CONNECTION: bool = true;
-
-pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 /// Contains the immutable data that this peer-loop needs. Does not contain the `peer` variable
 /// since this needs to be a mutable variable in most methods.
@@ -663,9 +662,35 @@ impl PeerLoopHandler {
                     transaction
                 );
 
+                // If transaction is invalid, punish
                 if !transaction.devnet_is_valid(None) {
+                    warn!("Received invalid tx");
                     self.punish(PeerSanctionReason::InvalidTransaction)?;
-                    return Ok(false);
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 2. Ignore if transaction is too old
+                let tx_timestamp: SystemTime = std::time::UNIX_EPOCH
+                    + std::time::Duration::from_secs(transaction.timestamp.value());
+                if tx_timestamp
+                    < SystemTime::now()
+                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
+                {
+                    // TODO: Consider punishing here
+                    warn!("Received too old tx");
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // 3. Ignore if transaction is too far into the future
+                if tx_timestamp
+                    > SystemTime::now()
+                        + std::time::Duration::from_secs(
+                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
+                        )
+                {
+                    // TODO: Consider punishing here
+                    warn!("Received tx too far into the future");
+                    return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Otherwise relay to main
@@ -676,47 +701,46 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionNotification(transaction_notification) => {
-                // 1. Ignore if transaction is stale.
-                let age_limit = Duration::from_secs(TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS);
-                if transaction_notification.timestamp < SystemTime::now() + age_limit {
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                };
-
-                // 2. Ignore if we already know this transaction.
-                // TODO: substitute with real mempool
-                let mempool = HashMap::<TransactionId, Transaction>::new();
-                if mempool
-                    .get(&transaction_notification.transaction_identifier)
-                    .is_some()
-                {
+                // 1. Ignore if we already know this transaction.
+                let transaction_is_known = self
+                    .state
+                    .mempool
+                    .contains(&transaction_notification.transaction_digest);
+                if transaction_is_known {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // We now have a notification of an unseen `Transaction`.
+                // 2. Ignore if transaction is too old
+                if transaction_notification.timestamp
+                    < SystemTime::now()
+                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
+                {
+                    // TODO: Consider punishing here
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
-                // 3. Broadcast notification to peers through main.
-                self.to_main_tx
-                    .send(PeerThreadToMain::TransactionNotification(
-                        transaction_notification,
-                    ))
-                    .await?;
+                // 3. Ignore if transaction is too far into the future
+                if transaction_notification.timestamp
+                    > SystemTime::now()
+                        + std::time::Duration::from_secs(
+                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
+                        )
+                {
+                    // TODO: Consider punishing here
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
 
-                // 4. For now, always request the actual `Transaction`.
+                // 4. Request the actual `Transaction` from peer
                 peer.send(PeerMessage::TransactionRequest(
-                    transaction_notification.transaction_identifier,
+                    transaction_notification.transaction_digest,
                 ))
                 .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
-                // TODO: substitute with real mempool
-                let mempool = HashMap::<TransactionId, Transaction>::new();
-
-                if let Some(transaction) = mempool.get(&transaction_identifier) {
-                    // 2. Otherwise
-                    peer.send(PeerMessage::Transaction(transaction.clone()))
-                        .await?;
+                if let Some(transaction) = self.state.mempool.get(&transaction_identifier) {
+                    peer.send(PeerMessage::Transaction(transaction)).await?;
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -1027,15 +1051,19 @@ mod peer_loop_tests {
     use clap::Parser;
     use rand::thread_rng;
     use secp256k1::Secp256k1;
+    use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
     use twenty_first::amount::u32s::U32s;
 
     use crate::{
         config_models::{cli_args, network::Network},
-        models::blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
+        models::{
+            blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
+            peer::TransactionNotification,
+        },
         tests::shared::{
             add_block, get_dummy_address, get_dummy_peer_connection_data, get_test_genesis_setup,
-            make_mock_block, Action, Mock,
+            make_mock_block, make_mock_signed_valid_tx, Action, Mock,
         },
     };
 
@@ -2055,6 +2083,100 @@ mod peer_loop_tests {
             state.net.peer_map.lock().unwrap().len(),
             "One peer must remain in peer list after peer_1 closed gracefully"
         );
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn empty_mempool_request_tx_test() -> Result<()> {
+        // In this scenerio the client receives a transaction from a peer, requests it back
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Main, 1).await?;
+
+        let transaction_1 = make_mock_signed_valid_tx();
+
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Write(PeerMessage::TransactionRequest(
+                tx_notification.transaction_digest,
+            )),
+            Action::Read(PeerMessage::Transaction(transaction_1)),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state.clone(),
+            get_dummy_address(0),
+            hsd_1.clone(),
+            true,
+            1,
+        );
+        let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+
+        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
+        peer_loop_handler
+            .run(mock, from_main_rx_clone, &mut peer_state)
+            .await?;
+
+        // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
+        // by the `main_loop`.
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::Transaction(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn populated_mempool_request_tx_test() -> Result<()> {
+        // In this scenario the peer is informed of a transaction that it already knows
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Main, 1).await?;
+
+        let transaction_1 = make_mock_signed_valid_tx();
+
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state.clone(),
+            get_dummy_address(0),
+            hsd_1.clone(),
+            true,
+            1,
+        );
+        let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+
+        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
+        state.mempool.insert(&transaction_1);
+        assert!(
+            !state.mempool.is_empty(),
+            "Mempool must be non-empty after insertion"
+        );
+
+        peer_loop_handler
+            .run(mock, from_main_rx_clone, &mut peer_state)
+            .await?;
+
+        // nothing may be sent to `main_loop`
+        match to_main_rx1.try_recv() {
+            Err(TryRecvError::Empty) => (),
+            Err(TryRecvError::Disconnected) => bail!("to_main channel must still be open"),
+            Ok(_) => bail!("to_main channel must be empty"),
+        }
 
         Ok(())
     }

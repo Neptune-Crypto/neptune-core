@@ -1,8 +1,9 @@
 pub mod ordered_digest;
 
-use std::{fmt, str::FromStr};
-
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
 
 pub const BYTES_PER_BFE: usize = 8;
@@ -14,6 +15,21 @@ pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Digest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+
+impl GetSize for Digest {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        // This seems to be the case, see test `get_size`.
+        0
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
 
 pub trait Hashable {
     fn hash(&self) -> Digest;
@@ -125,5 +141,29 @@ mod digest_tests {
         let rescue_prime_digest_type_from_array: Digest = bfe_vec.into();
         let _shorter: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] =
             rescue_prime_digest_type_from_array.into();
+    }
+
+    #[test]
+    pub fn get_size() {
+        let stack = crate::models::blockchain::digest::Digest::get_stack_size();
+
+        let bfe_vec = vec![
+            BFieldElement::new(12),
+            BFieldElement::new(24),
+            BFieldElement::new(36),
+            BFieldElement::new(48),
+            BFieldElement::new(60),
+            BFieldElement::new(70),
+        ];
+        let rescue_prime_digest_type_from_array: crate::models::blockchain::digest::Digest =
+            bfe_vec.into();
+
+        let heap = rescue_prime_digest_type_from_array.get_heap_size();
+
+        let total = rescue_prime_digest_type_from_array.get_size();
+
+        println!("stack: {stack} + heap: {heap} = {total}");
+
+        assert_eq!(stack + heap, total)
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     VERSION,
 };
 
-use super::blockchain::wallet::WalletState;
+use super::blockchain::{mempool::Mempool, wallet::WalletState};
 
 pub mod archival_state;
 pub mod blockchain_state;
@@ -32,6 +32,9 @@ pub struct GlobalState {
 
     /// The `cli_args::Args` are read-only and accessible by all threads.
     pub cli: cli_args::Args,
+
+    /// The `Mempool` may only be updated by the main thread.
+    pub mempool: Mempool,
 }
 
 impl GlobalState {

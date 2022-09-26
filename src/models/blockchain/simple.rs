@@ -1,101 +1,10 @@
 // Mock datatypes to fascilitate progress.
 use super::{
     digest::Hashable,
-    transaction::{devnet_input::DevNetInput, utxo::Utxo},
+    transaction::{utxo::Utxo, Amount},
 };
-use crate::models::blockchain::transaction::AMOUNT_SIZE_FOR_U32;
-use mutator_set_tf::util_types::mutator_set::{
-    chunk::Chunk, chunk_dictionary::ChunkDictionary, removal_record::RemovalRecord,
-    shared::NUM_TRIALS, transfer_ms_membership_proof::TransferMsMembershipProof,
-};
-use num_traits::Zero;
 use secp256k1::ecdsa::Signature;
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
-use twenty_first::{
-    amount::u32s::U32s,
-    shared_math::{
-        b_field_element::BFieldElement,
-        rescue_prime_xlix::{RescuePrimeXlix, RP_DEFAULT_WIDTH},
-    },
-    util_types::{
-        mmr::{self, mmr_membership_proof::MmrMembershipProof},
-        simple_hasher::Hasher,
-    },
-};
-
-pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
-
-impl super::transaction::devnet_input::DevNetInput {
-    pub fn new(input_utxo: &Utxo, wallet: &SimpleWallet) -> Self {
-        // This is utterly rubbish to generate a valid dummy type.
-        type Hash = RescuePrimeXlix<RP_DEFAULT_WIDTH>;
-        let hasher = Hash::new();
-
-        let target_chunks = ChunkDictionary::<Hash> {
-            // {chunk index => (membership proof for the whole chunk to which bit belongs, chunk value)}
-            dictionary:
-                HashMap::<u128, (mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Chunk)>::new(),
-        };
-
-        let removal_record = RemovalRecord::<Hash> {
-            bit_indices: [0u128; NUM_TRIALS],
-            target_chunks: target_chunks.clone(),
-        };
-
-        let random_digest = hasher.hash(&[BFieldElement::new(42)], 42);
-
-        let mmp = MmrMembershipProof::<Hash> {
-            data_index: 42,
-            authentication_path: vec![random_digest.clone(); 42],
-        };
-
-        let membership_proof = TransferMsMembershipProof::<Hash> {
-            randomness: random_digest,
-            auth_path_aocl: mmp,
-            target_chunks,
-        };
-
-        Self {
-            utxo: *input_utxo,
-            membership_proof,
-            removal_record,
-            signature: wallet.sign(input_utxo),
-        }
-    }
-}
-
-impl super::transaction::Transaction {
-    pub fn new(inputs: Vec<Utxo>, outputs: Vec<Utxo>, wallet: &SimpleWallet) -> Self {
-        let input_utxos_with_signature = inputs
-            .iter()
-            .map(|in_utxo| DevNetInput::new(in_utxo, wallet))
-            .collect::<Vec<_>>();
-
-        // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
-        let output_utxos_with_digest = outputs
-            .into_iter()
-            .map(|out_utxo| (out_utxo, out_utxo.hash()))
-            .collect::<Vec<_>>();
-
-        let timestamp = BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Timestamping failed")
-                .as_secs(),
-        );
-
-        Self {
-            inputs: input_utxos_with_signature,
-            outputs: output_utxos_with_digest,
-            public_scripts: vec![],
-            fee: U32s::zero(),
-            timestamp,
-        }
-    }
-}
+use twenty_first::amount::u32s::U32s;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleWallet {
