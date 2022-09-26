@@ -974,7 +974,12 @@ impl MainLoopHandler {
         // to prevent new peers joining while shutting down.
 
         // flush walletblock db
-        self.global_state.wallet_state.db.lock().unwrap().flush();
+        self.global_state
+            .wallet_state
+            .wallet_block_db
+            .lock()
+            .await
+            .flush();
 
         // flush peer_standings
         self.global_state
@@ -998,17 +1003,16 @@ impl MainLoopHandler {
             .block_index
             .flush();
 
-        // flush archival_mutator_set
-        // self.global_state
-        //     .chain
-        //     .archival_state
-        //     .as_ref()
-        //     .unwrap()
-        //     .archival_mutator_set
-        //     .lock()
-        //     .await
-        //     .chunks
-        //     .flush(); // TODO: implement flush in database vector in twenty-first?
+        //flush archival_mutator_set
+        self.global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .archival_mutator_set
+            .lock()
+            .await
+            .flush(); // TODO: implement flush in database vector in twenty-first?
 
         // flush ms_block_sync_db
         self.global_state
