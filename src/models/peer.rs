@@ -202,15 +202,17 @@ pub enum ConnectionStatus {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionNotification {
     pub transaction_digest: TransactionDigest,
-    // It may be relevant to know w.r.t relaying if this transaction is current.
+    // The timestamp of a transaction notification is the associated transaction's timestamp.
+    // The timestamp is used for mempool purposes.
     pub timestamp: SystemTime,
 }
 
-impl TransactionNotification {
-    pub fn new(transaction: &Transaction) -> Self {
+impl From<Transaction> for TransactionNotification {
+    fn from(transaction: Transaction) -> Self {
         Self {
             transaction_digest: transaction.hash(),
-            timestamp: SystemTime::now(),
+            timestamp: std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(transaction.timestamp.value()),
         }
     }
 }
@@ -233,7 +235,7 @@ pub enum PeerMessage {
     /// Send a request that this node would like a copy of the transaction with
     /// digest as specified by the argument.
     TransactionRequest(TransactionDigest),
-    PeerListRequest, // TODO: Argument indicates distance in graph. What argument?
+    PeerListRequest,
     /// (socket address, instance_id)
     PeerListResponse(Vec<(SocketAddr, u128)>),
     /// Inform peer that we are disconnecting them.

@@ -9,7 +9,7 @@ use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
-use crate::models::shared::SIZE_1MB;
+use crate::models::shared::SIZE_1MB_IN_BYTES;
 use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
@@ -197,7 +197,7 @@ pub async fn mock_regtest_mine(
             let coinbase_transaction =
                 make_coinbase_transaction(own_public_key, &latest_block.header);
 
-            let block_capacity_for_transactions = SIZE_1MB;
+            let block_capacity_for_transactions = SIZE_1MB_IN_BYTES;
             let transactions = state
                 .mempool
                 .get_densest_transactions(block_capacity_for_transactions);

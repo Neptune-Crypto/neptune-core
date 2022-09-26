@@ -33,7 +33,7 @@ pub struct GlobalState {
     /// The `cli_args::Args` are read-only and accessible by all threads.
     pub cli: cli_args::Args,
 
-    /// The `Mempool`
+    /// The `Mempool` may only be updated by the main thread.
     pub mempool: Mempool,
 }
 

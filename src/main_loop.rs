@@ -585,18 +585,11 @@ impl MainLoopHandler {
                     transaction
                 );
 
-                // send notification to peers
-                let transaction_notification = TransactionNotification::new(&transaction);
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::TransactionNotification(
-                        transaction_notification,
-                    ))?;
-
-                // relay to mempool
+                // Insert into mempool
                 self.global_state.mempool.insert(&transaction);
-            }
-            PeerThreadToMain::TransactionNotification(transaction_notification) => {
-                // Relay notification to all peers.  Originating peer will just ignore this.
+
+                // send notification to peers
+                let transaction_notification: TransactionNotification = transaction.into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(
                         transaction_notification,
@@ -910,11 +903,11 @@ impl MainLoopHandler {
                 );
 
                 // send notification to peers
-                let notification = TransactionNotification::new(&transaction);
+                let notification: TransactionNotification = transaction.clone().into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(notification))?;
 
-                // send transaction to mempool
+                // insert transaction into
                 self.global_state.mempool.insert(&transaction);
 
                 // do not shut down

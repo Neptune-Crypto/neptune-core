@@ -11,7 +11,7 @@
 //! The `Mempool` type is a thread-safe wrapper around `MempoolInternal`, and
 //! all interaction should go through the wrapper.
 
-use crate::models::shared::SIZE_1GB;
+use crate::models::shared::SIZE_1GB_IN_BYTES;
 
 use super::{
     digest::Hashable,
@@ -52,15 +52,13 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use num_rational::BigRational as FeeDensity;
 
 // 72 hours in secs
-const MEMPOOL_STALE_AFTER_THIS_MANY_SECS: u64 = 72 * 60 * 60;
+pub const MEMPOOL_STALE_AFTER_THIS_MANY_SECS: u64 = 72 * 60 * 60;
 // 5 minutes in secs
-const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
+pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
-const _MEMPOOL_PRUNE_EVERY: u64 = 30 * 60; // 30mins
+const _MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 
-type PriorityQueue = DoublePriorityQueue<TransactionDigest, FeeDensity>;
-type LookupTable = HashMap<TransactionDigest, Transaction>;
 type LookupItem<'a> = (TransactionDigest, &'a Transaction);
 
 /// Timestamp of 'now' encoded as the duration since epoch.
@@ -214,19 +212,19 @@ impl Mempool {
 struct MempoolInternal {
     max_size: usize,
     // Maintain for constant lookup
-    table: LookupTable,
+    table: HashMap<TransactionDigest, Transaction>,
     // Maintain for fast min and max
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
-    queue: PriorityQueue,
+    queue: DoublePriorityQueue<TransactionDigest, FeeDensity>,
 }
 
 impl Default for MempoolInternal {
     fn default() -> Self {
         Self {
-            table: LookupTable::default(),
-            queue: PriorityQueue::default(),
+            table: HashMap::default(),
+            queue: DoublePriorityQueue::default(),
             // 1GB in bytes
-            max_size: SIZE_1GB,
+            max_size: SIZE_1GB_IN_BYTES,
         }
     }
 }
@@ -245,9 +243,8 @@ impl MempoolInternal {
             // Early exit on transactions too long into the future.
             let horizon =
                 now() + Duration::from_secs(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD);
-            let horizon_timestamp = BFieldElement::new(horizon.as_secs());
 
-            if transaction.timestamp.value() > horizon_timestamp.value() {
+            if transaction.timestamp.value() > horizon.as_secs() {
                 return None;
             }
         }
@@ -255,8 +252,8 @@ impl MempoolInternal {
         let transaction_id: TransactionDigest = <Transaction as Hashable>::hash(transaction);
 
         if let Entry::Vacant(slot) = self.table.entry(transaction_id) {
-            slot.insert(transaction.clone());
             self.queue.push(transaction_id, transaction.fee_density());
+            slot.insert(transaction.to_owned());
             debug_assert_eq!(self.table.len(), self.queue.len());
             self.shrink_to_max_size();
             None
@@ -271,6 +268,7 @@ impl MempoolInternal {
             debug_assert_eq!(self.table.len(), self.queue.len());
             return rv;
         }
+
         None
     }
 
@@ -315,8 +313,7 @@ impl MempoolInternal {
     #[allow(dead_code)]
     fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
-            let transaction = self.table.get(&transaction_digest.clone()).unwrap().clone();
-            self.table.remove(&transaction_digest);
+            let transaction = self.table.remove(&transaction_digest).unwrap();
             debug_assert_eq!(self.table.len(), self.queue.len());
             Some((transaction, fee_density))
         } else {
@@ -327,8 +324,7 @@ impl MempoolInternal {
     /// Computes in θ(lg N)
     fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
-            let transaction = self.table.get(&transaction_digest.clone()).unwrap().clone();
-            self.table.remove(&transaction_digest);
+            let transaction = self.table.remove(&transaction_digest).unwrap();
             debug_assert_eq!(self.table.len(), self.queue.len());
             Some((transaction, fee_density))
         } else {
@@ -417,7 +413,7 @@ mod tests {
     use crate::{
         models::{
             blockchain::transaction::{Amount, Transaction},
-            shared::SIZE_1MB,
+            shared::SIZE_1MB_IN_BYTES,
         },
         tests::shared::{get_mock_wallet_state, make_mock_transaction_with_wallet},
     };
@@ -472,7 +468,7 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in mempool.get_densest_transactions(SIZE_1MB) {
+        for curr_transaction in mempool.get_densest_transactions(SIZE_1MB_IN_BYTES) {
             let curr_fee_density = curr_transaction.fee_density();
             println!("curr:{} <= prev: {}", curr_fee_density, prev_fee_density);
             assert!(curr_fee_density <= prev_fee_density);
