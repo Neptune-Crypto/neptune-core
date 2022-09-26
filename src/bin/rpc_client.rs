@@ -74,9 +74,13 @@ async fn main() -> Result<()> {
             println!("{}", head_hash);
         }
         Command::Heads { n } => {
-            let head_hashes = client.heads(context::current(), n).await?;
-            for hash in head_hashes {
-                println!("{}", hash);
+            if n > 0 {
+                let head_hashes = client.heads(context::current(), n).await?;
+                for hash in head_hashes {
+                    println!("{}", hash);
+                }
+            } else {
+                println!("You asked for zero hashes, so here they are:");
             }
         }
         Command::ClearAllStandings => {
