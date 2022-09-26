@@ -77,6 +77,10 @@ impl Default for Mempool {
 }
 
 impl Mempool {
+    pub fn get_size(&self) -> usize {
+        self.internal.get_size()
+    }
+
     /// Computes in O(1) from HashMap
     pub fn contains(&self, transaction_id: &TransactionDigest) -> bool {
         let lock = self.internal.read().unwrap();
@@ -599,5 +603,27 @@ mod tests {
             prev_fee_density = curr_fee_density;
         }
         assert!(!mempool.is_empty())
+    }
+
+    #[test]
+    pub fn get_mempool_size() {
+        // Verify that the `get_size` method on mempool returns sane results
+        let mempool_small = setup(10);
+        let size_gs_small = mempool_small.get_size();
+        let size_serialized_small =
+            bincode::serialize(&mempool_small.internal.read().unwrap().table)
+                .unwrap()
+                .len();
+        println!("size_gs_small = {}", size_gs_small);
+        assert!(size_gs_small >= size_serialized_small);
+
+        let mempool_big = setup(100);
+        let size_gs_big = mempool_big.get_size();
+        let size_serialized_big = bincode::serialize(&mempool_big.internal.read().unwrap().table)
+            .unwrap()
+            .len();
+        println!("size_gs_big = {}", size_gs_big);
+        assert!(size_gs_big >= size_serialized_big);
+        assert!(size_gs_big >= 5 * size_gs_small);
     }
 }
