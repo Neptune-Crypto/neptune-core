@@ -560,6 +560,25 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
     }
 }
 
+pub fn make_mock_signed_valid_tx() -> Transaction {
+    // Build a transaction
+    let mut rng = thread_rng();
+    let wallet_1 = new_random_wallet();
+    let output_amount_1: Amount = 42.into();
+    let output_1 = Utxo {
+        amount: output_amount_1,
+        public_key: wallet_1.get_public_key(),
+    };
+    let randomness: Digest =
+        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into();
+
+    let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
+    let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
+    transaction_1.sign(&wallet_1);
+
+    transaction_1
+}
+
 // `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
 // already have created `DevNetInput`s.
 pub fn make_mock_transaction(

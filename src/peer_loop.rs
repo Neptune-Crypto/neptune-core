@@ -1051,15 +1051,19 @@ mod peer_loop_tests {
     use clap::Parser;
     use rand::thread_rng;
     use secp256k1::Secp256k1;
+    use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
     use twenty_first::amount::u32s::U32s;
 
     use crate::{
         config_models::{cli_args, network::Network},
-        models::blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
+        models::{
+            blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
+            peer::TransactionNotification,
+        },
         tests::shared::{
             add_block, get_dummy_address, get_dummy_peer_connection_data, get_test_genesis_setup,
-            make_mock_block, Action, Mock,
+            make_mock_block, make_mock_signed_valid_tx, Action, Mock,
         },
     };
 
@@ -2079,6 +2083,100 @@ mod peer_loop_tests {
             state.net.peer_map.lock().unwrap().len(),
             "One peer must remain in peer list after peer_1 closed gracefully"
         );
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn empty_mempool_request_tx_test() -> Result<()> {
+        // In this scenerio the client receives a transaction from a peer, requests it back
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Main, 1).await?;
+
+        let transaction_1 = make_mock_signed_valid_tx();
+
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Write(PeerMessage::TransactionRequest(
+                tx_notification.transaction_digest,
+            )),
+            Action::Read(PeerMessage::Transaction(transaction_1)),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state.clone(),
+            get_dummy_address(0),
+            hsd_1.clone(),
+            true,
+            1,
+        );
+        let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+
+        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
+        peer_loop_handler
+            .run(mock, from_main_rx_clone, &mut peer_state)
+            .await?;
+
+        // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
+        // by the `main_loop`.
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::Transaction(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn populated_mempool_request_tx_test() -> Result<()> {
+        // In this scenario the peer is informed of a transaction that it already knows
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Main, 1).await?;
+
+        let transaction_1 = make_mock_signed_valid_tx();
+
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Read(PeerMessage::Bye),
+        ]);
+
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state.clone(),
+            get_dummy_address(0),
+            hsd_1.clone(),
+            true,
+            1,
+        );
+        let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+
+        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
+        state.mempool.insert(&transaction_1);
+        assert!(
+            !state.mempool.is_empty(),
+            "Mempool must be non-empty after insertion"
+        );
+
+        peer_loop_handler
+            .run(mock, from_main_rx_clone, &mut peer_state)
+            .await?;
+
+        // nothing may be sent to `main_loop`
+        match to_main_rx1.try_recv() {
+            Err(TryRecvError::Empty) => (),
+            Err(TryRecvError::Disconnected) => bail!("to_main channel must still be open"),
+            Ok(_) => bail!("to_main channel must be empty"),
+        }
 
         Ok(())
     }
