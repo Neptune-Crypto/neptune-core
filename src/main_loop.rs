@@ -3,6 +3,7 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::mempool::MempoolInternal;
 use crate::models::blockchain::wallet::WalletBlockUtxos;
 use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
 use crate::models::peer::{
@@ -290,13 +291,13 @@ fn stay_in_sync_mode(
 impl MainLoopHandler {
     async fn handle_miner_thread_message(&self, msg: MinerToMain) -> Result<()> {
         match msg {
-            MinerToMain::NewBlock(block) => {
+            MinerToMain::NewBlock(new_block) => {
                 // When receiving a block from the miner thread, we assume it is valid
                 // and we assume it is the longest chain even though we could have received
                 // a block from a peer thread before this event is triggered.
-                info!("Miner found new block: {}", block.header.height);
+                info!("Miner found new block: {}", new_block.header.height);
                 self.main_to_peer_broadcast_tx
-                .send(MainToPeerThread::BlockFromMiner(block.clone()))
+                .send(MainToPeerThread::BlockFromMiner(new_block.clone()))
                 .expect(
                     "Peer handler broadcast channel prematurely closed. This should never happen.",
                 );
@@ -342,13 +343,21 @@ impl MainLoopHandler {
                     .latest_block_header
                     .lock()
                     .unwrap();
+                let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
+                    .global_state
+                    .mempool
+                    .internal
+                    .write()
+                    .expect("Locking mempool for write must succeed");
+
+                // Apply the updates
                 self.global_state
                     .chain
                     .archival_state
                     .as_ref()
                     .unwrap()
                     .write_block(
-                        block.clone(),
+                        new_block.clone(),
                         &mut db_lock,
                         Some(light_state_locked.proof_of_work_family),
                     )?;
@@ -363,15 +372,19 @@ impl MainLoopHandler {
                         &mut db_lock,
                         &mut ams_lock,
                         &mut ms_block_sync_lock,
-                        &block,
+                        &new_block,
                     )?;
 
                 // update wallet state with relevant UTXOs from this block
                 self.global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(&block, &mut wallet_state_db)?;
+                    .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
 
-                *light_state_locked = block.header.clone();
+                self.global_state
+                    .mempool
+                    .remove_transactions_with(&new_block.body.transaction, &mut mempool_write_lock);
+
+                *light_state_locked = new_block.header.clone();
             }
         }
 
@@ -429,6 +442,12 @@ impl MainLoopHandler {
                         .latest_block_header
                         .lock()
                         .unwrap();
+                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
+                        .global_state
+                        .mempool
+                        .internal
+                        .write()
+                        .expect("Locking mempool for write must succeed");
 
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
@@ -493,6 +512,13 @@ impl MainLoopHandler {
                         self.global_state
                             .wallet_state
                             .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+
+                        // Update mempool with UTXOs from this block. This is done by removing all transaction
+                        // that became invalid/was mined by this block.
+                        self.global_state.mempool.remove_transactions_with(
+                            &new_block.body.transaction,
+                            &mut mempool_write_lock,
+                        );
                     }
 
                     // Update information about latest header

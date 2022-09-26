@@ -66,7 +66,7 @@ fn now() -> Duration {
 
 #[derive(Debug, Clone)]
 pub struct Mempool {
-    internal: Arc<StdRwLock<MempoolInternal>>,
+    pub internal: Arc<StdRwLock<MempoolInternal>>,
 }
 
 impl Default for Mempool {
@@ -133,12 +133,14 @@ impl Mempool {
         lock.prune_stale_transactions()
     }
 
-    /// Remove any transaction from the mempool that would have spent an `input_utxo`
-    /// that `canonoicalized_transaction` just spent.
-    /// Likely computes in O(n)
-    pub fn displace_by(&self, canonicalized_transaction: &Transaction) {
-        let mut lock = self.internal.write().unwrap();
-        lock.displace_by(canonicalized_transaction)
+    /// Remove any transaction from the mempool that are invalid due to the latest block
+    /// containing a new transaction.
+    pub fn remove_transactions_with(
+        &self,
+        transaction: &Transaction,
+        lock: &mut std::sync::RwLockWriteGuard<MempoolInternal>,
+    ) {
+        lock.remove_transactions_with(transaction)
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -207,7 +209,7 @@ impl Mempool {
 /// assert_eq!(transaction, stored_transaction)
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
-struct MempoolInternal {
+pub struct MempoolInternal {
     max_size: usize,
     // Maintain for constant lookup
     table: HashMap<TransactionDigest, Transaction>,
@@ -289,7 +291,7 @@ impl MempoolInternal {
             }
 
             if let Some(transaction_ptr) = self.get(&transaction_digest.clone()) {
-                let transaction_copy = transaction_ptr.clone();
+                let transaction_copy = transaction_ptr.to_owned();
                 let transaction_size = transaction_copy.get_size();
 
                 // Current transaction is too big
@@ -364,21 +366,17 @@ impl MempoolInternal {
         self.retain(keep);
     }
 
-    fn displace_by(&mut self, canonicalized_transaction: &Transaction) {
+    fn remove_transactions_with(&mut self, transaction: &Transaction) {
         //! Checks if the `input_utxos` in `canonical_transaction`
         //! and any `transaction` in the mempool is disjoint.
         //! Removes the `transaction` from mempool otherwise.
 
-        let canonical_transaction_set: HashSet<Utxo> = canonicalized_transaction
-            .get_input_utxos()
-            .into_iter()
-            .collect();
+        let mined_utxos: HashSet<Utxo> = transaction.get_input_utxos().into_iter().collect();
 
-        let keep = |(_transaction_id, transaction): LookupItem| -> bool {
-            let transaction_set: HashSet<Utxo> =
-                transaction.get_input_utxos().into_iter().collect();
+        let keep = |(_transaction_id, tx): LookupItem| -> bool {
+            let transaction_set: HashSet<Utxo> = tx.get_input_utxos().into_iter().collect();
 
-            transaction_set.is_disjoint(&canonical_transaction_set)
+            transaction_set.is_disjoint(&mined_utxos)
         };
 
         self.retain(keep);
@@ -515,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    pub fn displace_by() {
+    pub fn remove_transactions_with_test() {
         let wallet_state = get_mock_wallet_state();
         let wallet_state_unrelated = get_mock_wallet_state();
 
@@ -579,7 +577,11 @@ mod tests {
         );
 
         assert_eq!(mempool.len(), 10);
-        mempool.displace_by(&canonicalized_transaction);
+        {
+            let mut m_lock: std::sync::RwLockWriteGuard<MempoolInternal> =
+                mempool.internal.write().unwrap();
+            mempool.remove_transactions_with(&canonicalized_transaction, &mut m_lock);
+        }
         assert_eq!(mempool.len(), 8)
     }
 
