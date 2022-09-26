@@ -200,7 +200,7 @@ impl RPC for NeptuneRPCServer {
                 .chain
                 .archival_state
                 .as_ref()
-                .unwrap()
+                .expect("Can not give ancestor hash unless there is an archival state.")
                 .get_block_header(block_digest),
         );
         future::ready(res)
