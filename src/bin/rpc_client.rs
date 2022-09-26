@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use neptune_core::models::blockchain::digest::Digest;
 use neptune_core::models::blockchain::transaction::utxo::Utxo;
 use neptune_core::rpc_server::RPCClient;
 use num_bigint::BigUint;
@@ -13,6 +14,8 @@ enum Command {
     BlockHeight,
     GetPeerInfo,
     Head,
+    Heads { n: usize },
+    GetHeader { hash: Digest },
     ClearAllStandings,
     ClearIpStanding { ip: IpAddr },
     Send { unparsed_send_argument: String },
@@ -58,9 +61,23 @@ async fn main() -> Result<()> {
             println!("{} connected peers", peers.len());
             println!("{}", serde_json::to_string(&peers)?);
         }
+        Command::GetHeader { hash } => {
+            let res = client.get_header(context::current(), hash).await?;
+            if res.is_none() {
+                println!("Block did not exist in database.");
+            } else {
+                println!("{}", res.unwrap());
+            }
+        }
         Command::Head => {
             let head_hash = client.head(context::current()).await?;
             println!("{}", head_hash);
+        }
+        Command::Heads { n } => {
+            let head_hashes = client.heads(context::current(), n).await?;
+            for hash in head_hashes {
+                println!("{}", hash);
+            }
         }
         Command::ClearAllStandings => {
             client.clear_all_standings(context::current()).await?;

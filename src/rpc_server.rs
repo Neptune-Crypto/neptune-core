@@ -1,3 +1,4 @@
+use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -22,6 +23,11 @@ pub trait RPC {
 
     /// Returns the digest of the latest block
     async fn head() -> Digest;
+
+    /// Returns the digest of the latest n blocks
+    async fn heads(n: usize) -> Vec<Digest>;
+
+    async fn get_header(hash: Digest) -> Option<BlockHeader>;
 
     /// Clears standing for all peers, connected or not
     async fn clear_all_standings();
@@ -50,11 +56,13 @@ impl RPC for NeptuneRPCServer {
     type BlockHeightFut = Ready<BlockHeight>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
     type HeadFut = Ready<Digest>;
+    type HeadsFut = Ready<Vec<Digest>>;
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
     type SendFut = Ready<bool>;
     type ShutdownFut = Ready<bool>;
     type GetBalanceFut = Ready<Amount>;
+    type GetHeaderFut = Ready<Option<BlockHeader>>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
@@ -63,9 +71,29 @@ impl RPC for NeptuneRPCServer {
         future::ready(latest_block.height)
     }
 
-    fn head(self, _: context::Context) -> Ready<Digest> {
-        let latest_block = self.state.chain.light_state.get_latest_block_header();
-        future::ready(latest_block.hash())
+    fn head(self, _: context::Context) -> Self::HeadFut {
+        let latest_block_header = self.state.chain.light_state.get_latest_block_header();
+        future::ready(latest_block_header.hash())
+    }
+
+    fn heads(self, _context: tarpc::context::Context, n: usize) -> Self::HeadsFut {
+        let latest_block_header = self
+            .state
+            .chain
+            .light_state
+            .get_latest_block_header()
+            .hash();
+
+        let head_hashes = executor::block_on(
+            self.state
+                .chain
+                .archival_state
+                .as_ref()
+                .expect("Can not give multiple ancestor hashes unless there is an archival state.")
+                .get_ancestor_block_digests(latest_block_header, n),
+        );
+
+        future::ready(head_hashes)
     }
 
     fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
@@ -159,6 +187,22 @@ impl RPC for NeptuneRPCServer {
 
     fn get_balance(self, _context: tarpc::context::Context) -> Self::GetBalanceFut {
         let res = executor::block_on(self.state.wallet_state.get_balance());
+        future::ready(res)
+    }
+
+    fn get_header(
+        self,
+        _context: tarpc::context::Context,
+        block_digest: Digest,
+    ) -> Self::GetHeaderFut {
+        let res = executor::block_on(
+            self.state
+                .chain
+                .archival_state
+                .as_ref()
+                .expect("Can not give ancestor hash unless there is an archival state.")
+                .get_block_header(block_digest),
+        );
         future::ready(res)
     }
 }
