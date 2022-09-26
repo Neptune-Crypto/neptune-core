@@ -11,12 +11,11 @@
 //! The `Mempool` type is a thread-safe wrapper around `MempoolInternal`, and
 //! all interaction should go through the wrapper.
 
+use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::{Amount, Transaction, TransactionDigest};
 use crate::models::shared::SIZE_1GB_IN_BYTES;
 
-use super::{
-    digest::Hashable,
-    transaction::{utxo::Utxo, Amount, Transaction, TransactionDigest},
-};
 use get_size::GetSize;
 use num_traits::Zero;
 use priority_queue::{double_priority_queue::iterators::IntoSortedIter, DoublePriorityQueue};
@@ -162,7 +161,7 @@ impl Mempool {
     /// # Example
     ///
     /// ```
-    /// use neptune_core::models::blockchain::mempool::Mempool;
+    /// use neptune_core::models::state::mempool::Mempool;
     ///
     /// let mempool = Mempool::default();
     /// // insert transactions here.
@@ -190,7 +189,8 @@ impl Mempool {
 ///
 /// ```
 /// // Instantiate Mempool, insert and get a transaction.
-/// use neptune_core::models::blockchain::{mempool::{Mempool}, transaction::Transaction, digest::Hashable};
+/// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
+/// use neptune_core::models::state::mempool::Mempool;
 /// use twenty_first::{shared_math::b_field_element::BFieldElement, amount::u32s::U32s};
 ///
 /// let mempool = Mempool::default();

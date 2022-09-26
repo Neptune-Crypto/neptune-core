@@ -3,12 +3,12 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::mempool::MempoolInternal;
 use crate::models::blockchain::wallet::WalletBlockUtxos;
 use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
+use crate::models::state::mempool::MempoolInternal;
 use crate::models::state::GlobalState;
 use crate::Hash;
 use anyhow::Result;

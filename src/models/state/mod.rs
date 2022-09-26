@@ -1,6 +1,8 @@
 use std::net::{IpAddr, SocketAddr};
 
-use self::{blockchain_state::BlockchainState, networking_state::NetworkingState};
+use self::{
+    blockchain_state::BlockchainState, mempool::Mempool, networking_state::NetworkingState,
+};
 use crate::{
     config_models::cli_args,
     database::{leveldb::LevelDB, rusty::RustyLevelDBIterator},
@@ -8,13 +10,14 @@ use crate::{
     VERSION,
 };
 
-use super::blockchain::{mempool::Mempool, wallet::WalletState};
-
 pub mod archival_state;
 pub mod blockchain_state;
 pub mod light_state;
+pub mod mempool;
 pub mod networking_state;
 pub mod shared;
+
+use super::blockchain::wallet::WalletState;
 
 /// `GlobalState` handles all state of a Neptune node that is shared across its threads.
 ///

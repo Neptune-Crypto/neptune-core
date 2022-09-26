@@ -4,13 +4,13 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::mempool::{
-    MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_TX_THRESHOLD_AGE_IN_SECS,
-};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
     PeerSanctionReason, PeerStanding,
+};
+use crate::models::state::mempool::{
+    MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_TX_THRESHOLD_AGE_IN_SECS,
 };
 use crate::models::state::GlobalState;
 use anyhow::{bail, Result};
