@@ -366,6 +366,8 @@ impl MempoolInternal {
         self.retain(keep);
     }
 
+    // TODO: This function remove from the mempool all those transactions that become invalid because
+    // of this newly mined block.
     fn remove_transactions_with(&mut self, transaction: &Transaction) {
         //! Checks if the `input_utxos` in `canonical_transaction`
         //! and any `transaction` in the mempool is disjoint.
