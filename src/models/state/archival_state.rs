@@ -9,7 +9,6 @@ use rusty_leveldb::DB;
 use std::{
     fs,
     io::{Seek, SeekFrom, Write},
-    net::IpAddr,
     ops::DerefMut,
     path::{Path, PathBuf},
     sync::Arc,
@@ -36,15 +35,13 @@ use crate::{
         },
         database::{
             BlockDatabases, BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord,
-            FileRecord, LastFileRecord, MsBlockSyncKey, MsBlockSyncValue, PeerDatabases,
+            FileRecord, LastFileRecord, MsBlockSyncKey, MsBlockSyncValue,
+            DATABASE_DIRECTORY_ROOT_NAME,
         },
-        peer::PeerStanding,
     },
 };
 
 const BLOCK_INDEX_DB_NAME: &str = "block_index";
-const BANNED_IPS_DB_NAME: &str = "banned_ips";
-const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 const MS_AOCL_MMR_DB_NAME: &str = "aocl_mmr";
 const MS_SWBF_INACTIVE_MMR_DB_NAME: &str = "swbfi_mmr";
@@ -69,30 +66,6 @@ pub struct ArchivalState {
 }
 
 impl ArchivalState {
-    // TODO: This function belongs in NetworkState
-    /// Create databases for peer standings
-    pub fn initialize_peer_databases(root_path: &Path) -> Result<PeerDatabases> {
-        let mut path = root_path.to_owned();
-        path.push(DATABASE_DIRECTORY_ROOT_NAME);
-
-        // Create root directory for all databases if it does not exist
-        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
-            panic!(
-                "Failed to create database directory in {}",
-                path.to_string_lossy()
-            )
-        });
-
-        let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(
-            &path,
-            BANNED_IPS_DB_NAME,
-            default_options(),
-        )?;
-        Ok(PeerDatabases {
-            peer_standings: banned_peers,
-        })
-    }
-
     /// Create databases for block persistence
     pub fn initialize_block_databases(root_path: &Path) -> Result<BlockDatabases> {
         let mut path = root_path.to_owned();

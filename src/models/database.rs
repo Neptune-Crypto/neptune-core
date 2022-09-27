@@ -11,6 +11,8 @@ use super::{
     peer::PeerStanding,
 };
 
+pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockFileLocation {
     pub file_index: u32,

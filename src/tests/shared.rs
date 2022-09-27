@@ -111,7 +111,7 @@ pub fn unit_test_databases(
     // The `initialize_databases` function call should create a new directory for the databases
     // meaning that all directories above this are also created.
     let block_dbs = ArchivalState::initialize_block_databases(&database_dir)?;
-    let peer_dbs = ArchivalState::initialize_peer_databases(&database_dir)?;
+    let peer_dbs = NetworkingState::initialize_peer_databases(&database_dir)?;
 
     Ok((
         Arc::new(tokio::sync::Mutex::new(block_dbs)),

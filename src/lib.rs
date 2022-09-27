@@ -83,7 +83,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Connect to or create databases for block state, and for peer state
     let block_databases = ArchivalState::initialize_block_databases(root_data_dir_path)?;
-    let peer_databases = ArchivalState::initialize_peer_databases(root_data_dir_path)?;
+    let peer_databases = NetworkingState::initialize_peer_databases(root_data_dir_path)?;
     let block_databases: Arc<tokio::sync::Mutex<BlockDatabases>> =
         Arc::new(tokio::sync::Mutex::new(block_databases));
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =

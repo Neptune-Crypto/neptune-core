@@ -1,8 +1,15 @@
-use crate::models::database::PeerDatabases;
-use crate::models::peer;
+use crate::database::leveldb::LevelDB;
+use crate::database::rusty::{default_options, RustyLevelDB};
+use crate::models::database::{PeerDatabases, DATABASE_DIRECTORY_ROOT_NAME};
+use crate::models::peer::{self, PeerStanding};
+use anyhow::Result;
+use std::net::IpAddr;
+use std::path::Path;
 use std::sync::Mutex as StdMutex;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex as TokioMutex;
+
+const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
 type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
 
@@ -40,5 +47,28 @@ impl NetworkingState {
             syncing,
             instance_id: rand::random(),
         }
+    }
+
+    /// Create databases for peer standings
+    pub fn initialize_peer_databases(root_path: &Path) -> Result<PeerDatabases> {
+        let mut path = root_path.to_owned();
+        path.push(DATABASE_DIRECTORY_ROOT_NAME);
+
+        // Create root directory for all databases if it does not exist
+        std::fs::create_dir_all(path.clone()).unwrap_or_else(|_| {
+            panic!(
+                "Failed to create database directory in {}",
+                path.to_string_lossy()
+            )
+        });
+
+        let banned_peers = RustyLevelDB::<IpAddr, PeerStanding>::new(
+            &path,
+            BANNED_IPS_DB_NAME,
+            default_options(),
+        )?;
+        Ok(PeerDatabases {
+            peer_standings: banned_peers,
+        })
     }
 }
