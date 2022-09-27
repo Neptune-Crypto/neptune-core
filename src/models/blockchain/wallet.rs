@@ -10,6 +10,7 @@ use crate::config_models::data_directory::get_data_directory;
 use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
+use crate::models::database::{WalletDbKey, WalletDbValue};
 use crate::Hash;
 use anyhow::Result;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -28,10 +29,9 @@ use twenty_first::util_types::simple_hasher::Hasher;
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
 const STANDARD_WALLET_VERSION: u8 = 0;
-const WALLET_BLOCK_DB_NAME: &str = "wallet_block_db";
+const WALLET_DB_NAME: &str = "wallet_block_db";
 const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
-type BlockHash = Digest;
 /// The parts of a block that this wallet wants to keep track of,
 /// ie. the input and output UTXOs that share this wallet's public key.
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
@@ -262,24 +262,21 @@ pub struct WalletState {
     // new output.
     pub outgoing_utxo_counter_db: Arc<TokioMutex<RustyLevelDB<(), u128>>>,
 
-    pub wallet_block_db: Arc<TokioMutex<RustyLevelDB<BlockHash, WalletBlockUtxos>>>,
+    pub wallet_db: Arc<TokioMutex<RustyLevelDB<WalletDbKey, WalletDbValue>>>,
     pub wallet: Wallet,
-    // This `secret_key` corresponds to a `master_private_key` for Bitcoin wallet.
-    // From this master key several individual UTXO private keys can be derived using this [scheme][scheme]
-    // [scheme]: https://learnmeabitcoin.com/technical/derivation-paths
 }
 
 impl WalletState {
     pub fn new_from_wallet(wallet: Wallet, network: Network) -> Self {
         // Create or connect to wallet block DB
-        let wallet_block_db: RustyLevelDB<BlockHash, WalletBlockUtxos> =
-            RustyLevelDB::<BlockHash, WalletBlockUtxos>::new(
+        let wallet_db: RustyLevelDB<WalletDbKey, WalletDbValue> =
+            RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
                 get_data_directory(network).unwrap(),
-                WALLET_BLOCK_DB_NAME,
+                WALLET_DB_NAME,
                 rusty_leveldb::Options::default(),
             )
             .unwrap();
-        let wallet_block_db = Arc::new(TokioMutex::new(wallet_block_db));
+        let wallet_db = Arc::new(TokioMutex::new(wallet_db));
 
         // Create or connect to DB for output count
         let outgoing_utxo_count_db: RustyLevelDB<(), u128> = RustyLevelDB::<(), u128>::new(
@@ -292,7 +289,7 @@ impl WalletState {
 
         Self {
             outgoing_utxo_counter_db,
-            wallet_block_db,
+            wallet_db,
             wallet,
         }
     }
@@ -302,7 +299,7 @@ impl WalletState {
     pub fn update_wallet_state_with_new_block(
         &self,
         block: &Block,
-        wallet_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<Digest, WalletBlockUtxos>>,
+        wallet_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<WalletDbKey, WalletDbValue>>,
     ) -> Result<()> {
         // A wallet contains a set of input and output UTXOs,
         // each of which contains an address (public key),
@@ -314,10 +311,9 @@ impl WalletState {
 
         let my_pub_key = self.wallet.get_public_key();
 
-        let input_utxos: Vec<Utxo> = transaction.get_input_utxos_with_pub_key(my_pub_key);
+        let input_utxos: Vec<Utxo> = transaction.get_own_input_utxos(my_pub_key);
 
-        let output_utxos: Vec<(Utxo, Digest)> =
-            transaction.get_output_utxos_with_pub_key(my_pub_key);
+        let output_utxos: Vec<(Utxo, Digest)> = transaction.get_own_output_utxos(my_pub_key);
 
         // Let's not store the UTXOs of blocks that don't affect our balance
         if input_utxos.is_empty() && output_utxos.is_empty() {
@@ -326,18 +322,25 @@ impl WalletState {
 
         let next_block_of_relevant_utxos = WalletBlockUtxos::new(input_utxos, output_utxos);
 
-        wallet_db_lock.put(block.hash, next_block_of_relevant_utxos);
+        let new_wallet_db_values: Vec<(WalletDbKey, WalletDbValue)> = vec![(
+            WalletDbKey::WalletBlockUtxos(block.hash),
+            WalletDbValue::WalletBlockUtxos(next_block_of_relevant_utxos),
+        )];
+
+        wallet_db_lock.batch_write(&new_wallet_db_values);
 
         Ok(())
     }
 
     pub async fn get_balance(&self) -> Amount {
         let sums: WalletBlockIOSums = self
-            .wallet_block_db
+            .wallet_db
             .lock()
             .await
             .new_iter()
-            .map(|(_block_hash, wallet_block)| wallet_block.get_io_sums())
+            .filter(|(_key, value)| value.is_wallet_block_utxos())
+            .map(|(_key, value)| value.as_wallet_block_utxos())
+            .map(|wallet_block| wallet_block.get_io_sums())
             .reduce(|a, b| a + b)
             .unwrap();
         sums.output_sum - sums.input_sum
@@ -345,7 +348,10 @@ impl WalletState {
 
     #[allow(dead_code)]
     async fn forget_block(&self, block_hash: Digest) {
-        self.wallet_block_db.lock().await.delete(block_hash);
+        self.wallet_db
+            .lock()
+            .await
+            .delete(WalletDbKey::WalletBlockUtxos(block_hash));
     }
 
     /// Fetch the output counter from the database and increase the counter by one

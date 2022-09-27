@@ -126,7 +126,7 @@ impl Transaction {
         self.inputs.iter().map(|dni| dni.utxo).collect()
     }
 
-    pub fn get_input_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<Utxo> {
+    pub fn get_own_input_utxos(&self, pub_key: PublicKey) -> Vec<Utxo> {
         self.inputs
             .iter()
             .map(|dni| dni.utxo)
@@ -134,7 +134,7 @@ impl Transaction {
             .collect()
     }
 
-    pub fn get_output_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
+    pub fn get_own_output_utxos(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
         self.outputs
             .iter()
             .filter(|(utxo, _randomness)| utxo.public_key == pub_key)

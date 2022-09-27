@@ -44,9 +44,11 @@ use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
 use crate::models::blockchain::wallet;
 use crate::models::blockchain::wallet::Wallet;
-use crate::models::blockchain::wallet::WalletBlockUtxos;
+
 use crate::models::blockchain::wallet::WalletState;
 use crate::models::database::BlockIndexKey;
+use crate::models::database::WalletDbKey;
+use crate::models::database::WalletDbValue;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
@@ -720,8 +722,8 @@ pub fn get_mock_wallet_state() -> WalletState {
     let test_path = get_data_director_for_unit_tests().unwrap();
     let wallet_block_db_name = "mock_wallet_block_db";
 
-    let wallet_block_db = Arc::new(TokioMutex::new(
-        RustyLevelDB::<Digest, WalletBlockUtxos>::new(
+    let wallet_db = Arc::new(TokioMutex::new(
+        RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
             &test_path,
             wallet_block_db_name,
             rusty_leveldb::in_memory(),
@@ -740,7 +742,7 @@ pub fn get_mock_wallet_state() -> WalletState {
 
     WalletState {
         outgoing_utxo_counter_db,
-        wallet_block_db,
+        wallet_db,
         wallet,
     }
 }

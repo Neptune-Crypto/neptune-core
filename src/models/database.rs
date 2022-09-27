@@ -1,17 +1,26 @@
-use crate::database::rusty::RustyLevelDB;
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
-use std::{fmt, net::IpAddr};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt,
+    net::IpAddr,
+};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use super::{
     blockchain::{
         block::{block_header::BlockHeader, block_height::BlockHeight},
         digest::Digest,
+        transaction::utxo::Utxo,
+        wallet::WalletBlockUtxos,
     },
     peer::PeerStanding,
 };
+use crate::database::rusty::RustyLevelDB;
+use crate::Hash;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
+const MAX_NUMBER_OF_MPS_STORED: usize = 500; // TODO: Move this to CLI config
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockFileLocation {
@@ -187,5 +196,104 @@ impl fmt::Debug for BlockDatabases {
 impl fmt::Debug for PeerDatabases {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("").finish()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum WalletDbKey {
+    SyncDigest,
+
+    // digest represents a block hash
+    WalletBlockUtxos(Digest),
+
+    UnspentUtxos,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitoredUtxo {
+    pub utxo: Utxo,
+
+    // Record a mapping from block hash to membership proof
+    // We're using this as a FIFO queue, and using `VecDeque` for this allows us to pop
+    // from the front of the vector in constant time.
+    pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof<Hash>)>,
+
+    pub max_number_of_mps_stored: usize,
+
+    pub has_valid_membership_proof: bool,
+}
+
+impl MonitoredUtxo {
+    pub fn new(utxo: Utxo) -> Self {
+        Self {
+            utxo,
+            blockhash_to_membership_proof: VecDeque::from([]),
+            max_number_of_mps_stored: MAX_NUMBER_OF_MPS_STORED,
+            has_valid_membership_proof: true,
+        }
+    }
+
+    pub fn add_membership_proof_for_tip(
+        &mut self,
+        block_digest: Digest,
+        updated_membership_proof: MsMembershipProof<Hash>,
+    ) {
+        while self.blockhash_to_membership_proof.len() >= self.max_number_of_mps_stored {
+            self.blockhash_to_membership_proof.pop_front();
+        }
+
+        self.blockhash_to_membership_proof
+            .push_back((block_digest, updated_membership_proof));
+    }
+
+    pub fn get_membership_proof_for_block(
+        &self,
+        block_digest: &Digest,
+    ) -> Option<MsMembershipProof<Hash>> {
+        self.blockhash_to_membership_proof
+            .iter()
+            .find(|x| x.0 == *block_digest)
+            .map(|x| x.1.clone())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WalletDbValue {
+    // Stores the block hash representing the state of the wallet
+    SyncDigest(Digest),
+
+    // Stores the relevant (own) UTXOs associated with a block
+    WalletBlockUtxos(WalletBlockUtxos),
+
+    // Stores all confirmed and unspent UTXOs controlled by this wallet, and the associated membership proofs
+    UnspentUtxos(Vec<MonitoredUtxo>), // (UTXO, associated membership proof)
+}
+
+impl WalletDbValue {
+    pub fn as_sync_digest(&self) -> Digest {
+        match self {
+            WalletDbValue::SyncDigest(digest) => *digest,
+            _val => panic!("Requested sync digest, found {:?}", self),
+        }
+    }
+
+    /// Returns true iff value is a wallet block UTXO entry
+    /// Intended to be used when all balance changes are presented
+    pub fn is_wallet_block_utxos(&self) -> bool {
+        matches!(self, WalletDbValue::WalletBlockUtxos(_))
+    }
+
+    pub fn as_wallet_block_utxos(&self) -> WalletBlockUtxos {
+        match self {
+            WalletDbValue::WalletBlockUtxos(wb_utxos) => wb_utxos.to_owned(),
+            _val => panic!("Requested wallet block UTXOs, found {:?}", self),
+        }
+    }
+
+    pub fn as_unspent_utxos(&self) -> Vec<MonitoredUtxo> {
+        match self {
+            WalletDbValue::UnspentUtxos(vals) => vals.to_vec(),
+            _val => panic!("Requested unspent UTXOs, found {:?}", self),
+        }
     }
 }

@@ -2,9 +2,10 @@ use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::wallet::WalletBlockUtxos;
-use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
+use crate::models::blockchain::digest::Hashable;
+use crate::models::database::{
+    BlockDatabases, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
+};
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
@@ -305,8 +306,8 @@ impl MainLoopHandler {
                 // Store block in database
                 // Acquire both locks before updating
                 let mut wallet_state_db: tokio::sync::MutexGuard<
-                    RustyLevelDB<Digest, WalletBlockUtxos>,
-                > = self.global_state.wallet_state.wallet_block_db.lock().await;
+                    RustyLevelDB<WalletDbKey, WalletDbValue>,
+                > = self.global_state.wallet_state.wallet_db.lock().await;
                 let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                     .global_state
                     .chain
@@ -404,8 +405,8 @@ impl MainLoopHandler {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
                     let mut wallet_state_db: tokio::sync::MutexGuard<
-                        RustyLevelDB<Digest, WalletBlockUtxos>,
-                    > = self.global_state.wallet_state.wallet_block_db.lock().await;
+                        RustyLevelDB<WalletDbKey, WalletDbValue>,
+                    > = self.global_state.wallet_state.wallet_db.lock().await;
                     let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain
