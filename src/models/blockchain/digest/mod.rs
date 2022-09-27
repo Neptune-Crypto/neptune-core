@@ -63,13 +63,25 @@ impl FromStr for Digest {
     type Err = String;
 
     fn from_str(string: &str) -> Result<Self, Self::Err> {
-        let digest = Digest::from(
-            string
-                .split(DIGEST_SEPARATOR)
-                .map(|substring| BFieldElement::new(substring.parse::<u64>().unwrap()))
-                .collect::<Vec<_>>(),
-        );
-        Ok(digest)
+        let parsed_u64s: Vec<Result<u64, _>> = string
+            .split(DIGEST_SEPARATOR)
+            .map(|substring| substring.parse::<u64>())
+            .collect();
+        if parsed_u64s.len() != RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
+            Err("Given invalid number of BFieldElements in string.".to_owned())
+        } else {
+            let mut bf_elms: Vec<BFieldElement> =
+                Vec::with_capacity(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+            for parse_result in parsed_u64s {
+                if let Ok(content) = parse_result {
+                    bf_elms.push(BFieldElement::new(content));
+                } else {
+                    return Err("Given invalid BFieldElement in string.".to_owned());
+                }
+            }
+            let digest = Digest::from(bf_elms);
+            Ok(digest)
+        }
     }
 }
 
@@ -77,7 +89,7 @@ impl From<Vec<BFieldElement>> for Digest {
     fn from(vals: Vec<BFieldElement>) -> Self {
         Self(
             vals.try_into()
-                .expect("Hash function returned bad number of B field elements"),
+                .expect("Hash function returned bad number of B field elements."),
         )
     }
 }
@@ -165,5 +177,23 @@ mod digest_tests {
         println!("stack: {stack} + heap: {heap} = {total}");
 
         assert_eq!(stack + heap, total)
+    }
+
+    #[test]
+    pub fn digest_from_str() {
+        // This tests a valid digest. It will fail when we change RESCUE_PRIME_OUTPUT_SIZE_IN_BFES.
+        let valid_digest_string = "00059361073062755064,05168490802189810700,02524349865623165603,04907779149954626615,01487912569022462807,00000104867047771348";
+        let valid_digest = Digest::from_str(valid_digest_string);
+        assert!(valid_digest.is_ok());
+
+        // This ensures that it can fail when given a wrong number of BFieldElements.
+        let invalid_digest_string = "00059361073062755064,05168490802189810700";
+        let invalid_digest = Digest::from_str(invalid_digest_string);
+        assert!(invalid_digest.is_err());
+
+        // This ensures that it can fail if given something that isn't a valid string of a BFieldElement.
+        let second_invalid_digest_string = "this_is_not_a_bfield_element,05168490802189810700";
+        let second_invalid_digest = Digest::from_str(second_invalid_digest_string);
+        assert!(second_invalid_digest.is_err());
     }
 }
