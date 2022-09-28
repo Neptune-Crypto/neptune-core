@@ -381,6 +381,8 @@ impl MainLoopHandler {
                     .wallet_state
                     .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
 
+                // Update mempool with UTXOs from this block. This is done by removing all transaction
+                // that became invalid/was mined by this block.
                 self.global_state
                     .mempool
                     .remove_transactions_with(&new_block.body.transaction, &mut mempool_write_lock);
