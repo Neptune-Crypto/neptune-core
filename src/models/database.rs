@@ -1,10 +1,6 @@
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt,
-    net::IpAddr,
-};
+use std::{collections::VecDeque, fmt, net::IpAddr};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use super::{

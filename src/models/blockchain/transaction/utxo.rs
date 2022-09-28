@@ -30,6 +30,10 @@ impl Utxo {
         Self { amount, public_key }
     }
 
+    pub fn matches_pubkey(&self, public_key: secp256k1::PublicKey) -> bool {
+        self.public_key == public_key
+    }
+
     fn accumulate(&self) -> Vec<BFieldElement> {
         let amount_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.amount.into();
         let bytes: [u8; PUBLIC_KEY_LENGTH_IN_BYTES] = self.public_key.serialize();
