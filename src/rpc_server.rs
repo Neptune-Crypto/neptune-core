@@ -73,7 +73,7 @@ impl RPC for NeptuneRPCServer {
 
     fn head(self, _: context::Context) -> Self::HeadFut {
         let latest_block_header = self.state.chain.light_state.get_latest_block_header();
-        future::ready(latest_block_header.hash())
+        future::ready(latest_block_header.neptune_hash())
     }
 
     fn heads(self, _context: tarpc::context::Context, n: usize) -> Self::HeadsFut {
@@ -82,7 +82,7 @@ impl RPC for NeptuneRPCServer {
             .chain
             .light_state
             .get_latest_block_header()
-            .hash();
+            .neptune_hash();
 
         let head_hashes = executor::block_on(
             self.state

@@ -410,7 +410,7 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     let addition_record: AdditionRecord<Hash> = block
         .body
         .previous_mutator_set_accumulator
-        .commit(&utxo.hash().into(), &output_randomness);
+        .commit(&utxo.neptune_hash().into(), &output_randomness);
     tx.outputs.push((utxo, output_randomness.into()));
 
     // Add addition record for this output
@@ -433,7 +433,7 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
         .next_mutator_set_accumulator
         .get_commitment()
         .into();
-    block.header.block_body_merkle_root = block.body.hash();
+    block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
 /// Add an unsigned (incorrectly signed) devnet input to a transaction
@@ -478,7 +478,7 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
         .next_mutator_set_accumulator
         .get_commitment()
         .into();
-    block.header.block_body_merkle_root = block.body.hash();
+    block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
 /// Helper function to add an unsigned input to a block's transaction
@@ -489,7 +489,7 @@ pub async fn add_unsigned_input_to_block(
     ams: &Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>>,
     aocl_leaf_index: u128,
 ) {
-    let item = consumed_utxo.hash();
+    let item = consumed_utxo.neptune_hash();
     let input_membership_proof = ams
         .lock()
         .await
@@ -621,7 +621,7 @@ pub fn make_mock_transaction_with_wallet(
     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
     let output_utxos_with_digest = outputs
         .into_iter()
-        .map(|out_utxo| (out_utxo, <Utxo as Hashable>::hash(&out_utxo)))
+        .map(|out_utxo| (out_utxo, <Utxo as Hashable>::neptune_hash(&out_utxo)))
         .collect::<Vec<_>>();
 
     let timestamp = timestamp.unwrap_or_else(|| {
@@ -663,7 +663,7 @@ pub fn make_mock_block(
     );
     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
-    let coinbase_digest: Digest = coinbase_utxo.hash();
+    let coinbase_digest: Digest = coinbase_utxo.neptune_hash();
 
     let mut coinbase_addition_record: AdditionRecord<Hash> =
         new_ms.commit(&coinbase_digest.into(), &output_randomness);
@@ -700,7 +700,7 @@ pub fn make_mock_block(
             Some(td) => td,
             None => U32s::one(),
         },
-        block_body_merkle_root: block_body.hash(),
+        block_body_merkle_root: block_body.neptune_hash(),
         uncles: vec![],
     };
 

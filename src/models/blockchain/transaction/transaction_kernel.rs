@@ -19,14 +19,14 @@ pub struct TransactionKernel {
 }
 
 impl Hashable for TransactionKernel {
-    fn hash(&self) -> Digest {
+    fn neptune_hash(&self) -> Digest {
         let mut leafs: Vec<Vec<BFieldElement>> = vec![];
 
         // Hash all inputs
         let input_digests: Vec<Vec<BFieldElement>> = self
             .input_utxos
             .iter()
-            .map(|inp| inp.hash().into())
+            .map(|inp| inp.neptune_hash().into())
             .collect();
         leafs.push(MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(
             &input_digests,
@@ -36,7 +36,7 @@ impl Hashable for TransactionKernel {
         let output_digests: Vec<Vec<BFieldElement>> = self
             .output_utxos
             .iter()
-            .map(|inp| inp.hash().into())
+            .map(|inp| inp.neptune_hash().into())
             .collect();
         leafs.push(MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(
             &output_digests,

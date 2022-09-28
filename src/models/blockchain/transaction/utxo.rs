@@ -40,7 +40,7 @@ impl Utxo {
 }
 
 impl Hashable for Utxo {
-    fn hash(&self) -> Digest {
+    fn neptune_hash(&self) -> Digest {
         let hasher = Hash::new();
         Digest::new(
             hasher
@@ -58,7 +58,7 @@ impl Hashable for Utxo {
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = <Utxo as Hashable>::hash(self);
+        let our_hash = <Utxo as Hashable>::neptune_hash(self);
         <Digest as StdHash>::hash(&our_hash, state);
     }
 }

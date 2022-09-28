@@ -210,7 +210,7 @@ pub struct TransactionNotification {
 impl From<Transaction> for TransactionNotification {
     fn from(transaction: Transaction) -> Self {
         Self {
-            transaction_digest: transaction.hash(),
+            transaction_digest: transaction.neptune_hash(),
             timestamp: std::time::UNIX_EPOCH
                 + std::time::Duration::from_secs(transaction.timestamp.value()),
         }

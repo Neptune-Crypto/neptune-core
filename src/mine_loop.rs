@@ -40,8 +40,8 @@ fn make_devnet_block_template(
         previous_block.body.next_mutator_set_accumulator.clone();
 
     for (output_utxo, randomness) in transaction.outputs.iter() {
-        let addition_record =
-            next_mutator_set_accumulator.commit(&output_utxo.hash().into(), &(*randomness).into());
+        let addition_record = next_mutator_set_accumulator
+            .commit(&output_utxo.neptune_hash().into(), &(*randomness).into());
         additions.push(addition_record);
     }
 
@@ -83,14 +83,14 @@ fn make_devnet_block_template(
         version: zero,
         height: next_block_height,
         mutator_set_commitment,
-        prev_block_digest: previous_block.header.hash(),
+        prev_block_digest: previous_block.header.neptune_hash(),
         timestamp: block_timestamp,
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
         proof_of_work_line: new_pow_line,
         proof_of_work_family: new_pow_line,
         target_difficulty: difficulty,
-        block_body_merkle_root: block_body.hash(),
+        block_body_merkle_root: block_body.neptune_hash(),
         uncles: vec![],
     };
 
@@ -106,7 +106,7 @@ async fn mine_devnet_block(
     state: GlobalState,
 ) {
     // Mining takes place here
-    while Into::<OrderedDigest>::into(block_header.hash())
+    while Into::<OrderedDigest>::into(block_header.neptune_hash())
         >= OrderedDigest::to_digest_threshold(block_header.target_difficulty)
     {
         // If the sender is cancelled, the parent to this thread most

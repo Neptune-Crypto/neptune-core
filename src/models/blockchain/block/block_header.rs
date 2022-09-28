@@ -62,7 +62,7 @@ impl Display for BlockHeader {
 }
 
 impl Hashable for BlockHeader {
-    fn hash(&self) -> Digest {
+    fn neptune_hash(&self) -> Digest {
         let hasher = Hash::new();
         Digest::new(
             hasher

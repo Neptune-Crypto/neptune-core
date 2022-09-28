@@ -36,7 +36,7 @@ pub struct Block {
 impl From<TransferBlock> for Block {
     fn from(t_block: TransferBlock) -> Self {
         Self {
-            hash: t_block.header.hash(),
+            hash: t_block.header.neptune_hash(),
             header: t_block.header,
             body: t_block.body,
         }
@@ -82,7 +82,7 @@ impl Block {
 
         for premine_utxo in Self::premine_utxos() {
             // A commitment to the pre-mine UTXO
-            let utxo_commitment = premine_utxo.hash();
+            let utxo_commitment = premine_utxo.neptune_hash();
 
             // This isn't random.
             let bad_randomness = Digest::default();
@@ -122,7 +122,7 @@ impl Block {
             proof_of_work_line: U32s::zero(),
             proof_of_work_family: U32s::zero(),
             target_difficulty: U32s::one(),
-            block_body_merkle_root: body.hash(),
+            block_body_merkle_root: body.neptune_hash(),
             uncles: vec![],
         };
 
@@ -140,7 +140,7 @@ impl Block {
     }
 
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {
-        let digest = header.hash();
+        let digest = header.neptune_hash();
         Self {
             body,
             header,
@@ -203,7 +203,7 @@ impl Block {
         for (i, input) in block_copy.body.transaction.inputs.iter().enumerate() {
             // 1.a) Verify validity of membership proofs
             if !block_copy.body.previous_mutator_set_accumulator.verify(
-                &input.utxo.hash().into(),
+                &input.utxo.neptune_hash().into(),
                 &input.membership_proof.clone().into(),
             ) {
                 warn!("Invalid membership proof found in block for input {}", i);
@@ -239,7 +239,7 @@ impl Block {
         let hasher = Hash::new();
         for (utxo, randomness) in block_copy.body.transaction.outputs.iter() {
             let expected_commitment =
-                hasher.hash_pair(&utxo.hash().into(), &randomness.to_owned().into());
+                hasher.hash_pair(&utxo.neptune_hash().into(), &randomness.to_owned().into());
             if block_copy.body.mutator_set_update.additions[i].canonical_commitment
                 != expected_commitment
             {
@@ -321,7 +321,7 @@ impl Block {
         //  4.2. verify that all uncles' hash are below parent's target_difficulty
 
         // 5. `block_body_merkle_root`
-        if block_copy.header.block_body_merkle_root != block_copy.body.hash() {
+        if block_copy.header.block_body_merkle_root != block_copy.body.neptune_hash() {
             warn!("Block body does not match referenced block body Merkle root");
             return false;
         }

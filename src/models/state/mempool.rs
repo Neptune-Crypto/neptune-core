@@ -208,7 +208,7 @@ impl Mempool {
 ///     authority_proof: None,
 /// };
 /// mempool.insert(&transaction);
-/// let transaction_digest = transaction.hash();
+/// let transaction_digest = transaction.neptune_hash();
 /// let stored_transaction = mempool.get(&transaction_digest).unwrap();
 /// assert_eq!(transaction, stored_transaction)
 /// ```
@@ -253,7 +253,8 @@ impl MempoolInternal {
             }
         }
 
-        let transaction_id: TransactionDigest = <Transaction as Hashable>::hash(transaction);
+        let transaction_id: TransactionDigest =
+            <Transaction as Hashable>::neptune_hash(transaction);
 
         if let Entry::Vacant(slot) = self.table.entry(transaction_id) {
             self.queue.push(transaction_id, transaction.fee_density());
@@ -428,7 +429,7 @@ mod tests {
         let wallet_state = get_mock_wallet_state();
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
-        let transaction_digest = &<Transaction as Hashable>::hash(&transaction);
+        let transaction_digest = &<Transaction as Hashable>::neptune_hash(&transaction);
         assert!(!mempool.contains(transaction_digest));
         mempool.insert(&transaction);
         assert!(mempool.contains(transaction_digest));

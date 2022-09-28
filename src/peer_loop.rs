@@ -452,7 +452,7 @@ impl PeerLoopHandler {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .get_block(header_of_canonical_child.hash())
+                        .get_block(header_of_canonical_child.neptune_hash())
                         .await?
                         .unwrap();
 
@@ -637,7 +637,7 @@ impl PeerLoopHandler {
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .get_block(canonical_chain_block_header.hash())
+                    .get_block(canonical_chain_block_header.neptune_hash())
                     .await?
                     .unwrap();
                 let block_response: PeerMessage =
@@ -1162,7 +1162,7 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
         different_genesis_block.header.nonce[2].increment();
-        different_genesis_block.hash = different_genesis_block.header.hash();
+        different_genesis_block.hash = different_genesis_block.header.neptune_hash();
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
             Secp256k1::new().generate_keypair(&mut thread_rng());
         let block_1_with_different_genesis =

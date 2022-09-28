@@ -791,7 +791,7 @@ impl MainLoopHandler {
         );
 
         // Find the blocks to request
-        let tip_digest = current_block_header.hash();
+        let tip_digest = current_block_header.neptune_hash();
         let most_canonical_digests = self
             .global_state
             .chain
@@ -799,7 +799,7 @@ impl MainLoopHandler {
             .as_ref()
             .unwrap()
             .get_ancestor_block_digests(
-                current_block_header.hash(),
+                current_block_header.neptune_hash(),
                 STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE,
             )
             .await;

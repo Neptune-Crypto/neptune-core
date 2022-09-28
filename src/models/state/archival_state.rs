@@ -519,7 +519,7 @@ impl ArchivalState {
         // Filter out those that don't have the right parent
         blocks_from_childrens_generation
             .into_iter()
-            .filter(|x| x.prev_block_digest == block_header.hash())
+            .filter(|x| x.prev_block_digest == block_header.neptune_hash())
             .collect()
     }
 
@@ -541,7 +541,8 @@ impl ArchivalState {
         // If tip header height is less than this block, or the same but with a different hash,
         // then it cannot belong to the canonical chain
         if tip_header.height < block_height
-            || tip_header.height == block_height && tip_header.hash() != block_header.hash()
+            || tip_header.height == block_height
+                && tip_header.neptune_hash() != block_header.neptune_hash()
         {
             return false;
         }
@@ -563,14 +564,14 @@ impl ArchivalState {
 
         if previous_generation_blocks
             .iter()
-            .any(|x| x.hash() == tip_header.hash())
+            .any(|x| x.neptune_hash() == tip_header.neptune_hash())
         {
             return true;
         }
 
         if offspring_of_generation_x
             .iter()
-            .any(|x| x.hash() == tip_header.hash())
+            .any(|x| x.neptune_hash() == tip_header.neptune_hash())
         {
             return true;
         }
@@ -603,7 +604,7 @@ impl ArchivalState {
                         .unwrap();
                 }
 
-                return tip_ancestor.hash() == offspring_candidate.hash();
+                return tip_ancestor.neptune_hash() == offspring_candidate.neptune_hash();
             }
         }
 
@@ -628,7 +629,7 @@ impl ArchivalState {
         let mut parent_digest = input_block_header.prev_block_digest;
         let mut ret = vec![];
         while let Some(parent) = self.get_block_header(parent_digest).await {
-            ret.push(parent.hash());
+            ret.push(parent.neptune_hash());
             parent_digest = parent.prev_block_digest;
             count -= 1;
             if count == 0 {
@@ -2208,8 +2209,8 @@ mod archival_state_tests {
             .get_ancestor_block_digests(mock_block_2.hash, 10)
             .await;
         assert_eq!(2, ancestor_digests.len());
-        assert_eq!(mock_block_1.header.hash(), ancestor_digests[0]);
-        assert_eq!(genesis.header.hash(), ancestor_digests[1]);
+        assert_eq!(mock_block_1.header.neptune_hash(), ancestor_digests[0]);
+        assert_eq!(genesis.header.neptune_hash(), ancestor_digests[1]);
 
         Ok(())
     }
