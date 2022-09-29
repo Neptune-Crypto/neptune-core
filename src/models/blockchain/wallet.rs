@@ -652,9 +652,20 @@ impl WalletState {
 mod wallet_tests {
     use super::*;
     use crate::{
-        models::blockchain::{digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES, shared::Hash},
-        tests::shared::{get_mock_wallet_state, make_mock_block},
+        models::{
+            blockchain::{
+                block::block_height::BlockHeight, digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES,
+                shared::Hash,
+            },
+            state::archival_state::ArchivalState,
+        },
+        tests::shared::{
+            add_output_to_block, add_unsigned_input_to_block, get_mock_wallet_state,
+            make_mock_block, make_unit_test_archival_state,
+        },
     };
+    use num_traits::One;
+    use tracing_test::traced_test;
     use twenty_first::{
         shared_math::rescue_prime_xlix::RP_DEFAULT_OUTPUT_SIZE, util_types::simple_hasher::Hasher,
     };
@@ -818,6 +829,141 @@ mod wallet_tests {
             ),
             "Membership proof must be valid after updating wallet state with generated blocks"
         );
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
+        // an archival state is needed for how we currently add inputs to a transaction.
+        // So it's just used to generate test data, not in any of the functions that are
+        // actually tested.
+        let archival_state: ArchivalState = make_unit_test_archival_state().await;
+        let own_wallet = Wallet::new(generate_secret_key());
+        let own_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
+        let premine_wallet = get_mock_wallet_state(None).await.wallet;
+        let genesis_block = Block::genesis_block();
+
+        let mut block_1 = make_mock_block(
+            &genesis_block,
+            None,
+            own_wallet_state.wallet.get_public_key(),
+        );
+
+        // Add a valid input to the block transaction
+        let consumed_utxo = genesis_block.body.transaction.outputs[0].0;
+        let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
+        add_unsigned_input_to_block(
+            &mut block_1,
+            consumed_utxo,
+            premine_output_randomness,
+            &archival_state.archival_mutator_set,
+            0,
+        )
+        .await;
+
+        // Add one output to the block's transaction
+        let output_utxo_0: Utxo =
+            Utxo::new(Amount::one(), own_wallet_state.wallet.get_public_key());
+        add_output_to_block(&mut block_1, output_utxo_0);
+
+        // Add three more outputs, two of them to self
+        let output_utxo_1: Utxo = Utxo::new(
+            Amount::one() + Amount::one(),
+            own_wallet_state.wallet.get_public_key(),
+        );
+        add_output_to_block(&mut block_1, output_utxo_1);
+        let output_utxo_2: Utxo = Utxo::new(
+            Amount::one() + Amount::one() + Amount::one(),
+            premine_wallet.get_public_key(),
+        );
+        add_output_to_block(&mut block_1, output_utxo_2);
+        let output_utxo_3: Utxo = Utxo::new(
+            Amount::one() + Amount::one() + Amount::one() + Amount::one() + Amount::one(),
+            own_wallet_state.wallet.get_public_key(),
+        );
+        add_output_to_block(&mut block_1, output_utxo_3);
+
+        // Sign the transaction and verify validity
+        block_1.body.transaction.sign(&premine_wallet);
+        assert!(block_1.devnet_is_valid(&genesis_block));
+
+        // Update wallet state with block_1
+        let mut monitored_utxos = own_wallet_state.get_monitored_utxos().await;
+        assert!(
+            monitored_utxos.is_empty(),
+            "List of monitored UTXOs must be empty prior to updating wallet state"
+        );
+        own_wallet_state.update_wallet_state_with_new_block(
+            &block_1,
+            &mut own_wallet_state.wallet_db.lock().await,
+        )?;
+
+        // Verify that update added 4 UTXOs to list of monitored transactions:
+        // three as regular outputs, and one as coinbase UTXO
+        monitored_utxos = own_wallet_state.get_monitored_utxos().await;
+        assert_eq!(
+            4,
+            monitored_utxos.len(),
+            "List of monitored UTXOs have length 4 after updating wallet state"
+        );
+
+        // Verify that all monitored UTXOs have valid membership proofs
+        for monitored_utxo in monitored_utxos {
+            assert!(
+                block_1.body.next_mutator_set_accumulator.verify(
+                    &monitored_utxo.utxo.neptune_hash().into(),
+                    &monitored_utxo
+                        .get_membership_proof_for_block(&block_1.hash)
+                        .unwrap()
+                ),
+                "All membership proofs must be valid after block 1"
+            )
+        }
+
+        // Add 17 blocks (mined by us)
+        // and verify that all membership proofs are still valid
+        let mut next_block = block_1.clone();
+        for _ in 0..17 {
+            let previous_block = next_block;
+            next_block = make_mock_block(
+                &previous_block,
+                None,
+                own_wallet_state.wallet.get_public_key(),
+            );
+            own_wallet_state.update_wallet_state_with_new_block(
+                &next_block,
+                &mut own_wallet_state.wallet_db.lock().await,
+            )?;
+        }
+
+        monitored_utxos = own_wallet_state.get_monitored_utxos().await;
+        assert_eq!(
+            4 + 17,
+            monitored_utxos.len(),
+            "List of monitored UTXOs have length 21 after updating wallet state and mining 17 blocks"
+        );
+        for monitored_utxo in monitored_utxos {
+            assert!(
+                next_block.body.next_mutator_set_accumulator.verify(
+                    &monitored_utxo.utxo.neptune_hash().into(),
+                    &monitored_utxo
+                        .get_membership_proof_for_block(&next_block.hash)
+                        .unwrap()
+                ),
+                "All membership proofs must be valid after block 18"
+            )
+        }
+
+        // Sanity check
+        assert_eq!(
+            Into::<BlockHeight>::into(18u64),
+            next_block.header.height,
+            "Block height must be 18 after genesis and 18 blocks being mined"
+        );
+
+        // TODO: Add some fork-logic to verify that membership proofs are valid after forks
 
         Ok(())
     }
