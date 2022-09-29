@@ -327,8 +327,18 @@ impl WalletState {
         let output_utxos_commitment_randomness: Vec<(Utxo, Digest)> =
             transaction.get_own_output_utxos_and_comrands(my_pub_key);
 
+        // Derive the membership proofs for new input UTXOs, *and* in the process update existing membership
+        // proofs with updates from this block
+        let mut monitored_utxos: Vec<MonitoredUtxo> = wallet_db_lock
+            .get(WalletDbKey::UnspentUtxos)
+            .map(|x| x.as_unspent_utxos())
+            .unwrap_or_default();
+
         // Let's not store the UTXOs of blocks that don't affect our balance
-        if input_utxos.is_empty() && output_utxos_commitment_randomness.is_empty() {
+        if input_utxos.is_empty()
+            && output_utxos_commitment_randomness.is_empty()
+            && monitored_utxos.is_empty()
+        {
             return Ok(());
         }
 
@@ -339,13 +349,6 @@ impl WalletState {
             WalletDbKey::WalletBlockUtxos(block.hash),
             WalletDbValue::WalletBlockUtxos(next_block_of_relevant_utxos),
         )];
-
-        // Derive the membership proofs for new input UTXOs, *and* in the process update existing membership
-        // proofs with updates from this block
-        let mut monitored_utxos: Vec<MonitoredUtxo> = wallet_db_lock
-            .get(WalletDbKey::UnspentUtxos)
-            .map(|x| x.as_unspent_utxos())
-            .unwrap_or_default();
 
         // Find the versions of the membership proofs that are from the latest block
         let mut own_membership_proofs: Vec<MsMembershipProof<Hash>> = vec![];
@@ -650,7 +653,7 @@ mod wallet_tests {
     use super::*;
     use crate::{
         models::blockchain::{digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES, shared::Hash},
-        tests::shared::get_mock_wallet_state,
+        tests::shared::{get_mock_wallet_state, make_mock_block},
     };
     use twenty_first::{
         shared_math::rescue_prime_xlix::RP_DEFAULT_OUTPUT_SIZE, util_types::simple_hasher::Hasher,
@@ -686,9 +689,8 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn wallet_state_constructor_with_genesis_block_test() {
-        // In this scenario a block that has an output belonging
-        // to a wallet is mined. We want to check that this UTXO
-        // is recognized by the `WalletState` logic
+        // This test is designed to verify that the genesis block is applied
+        // to the wallet state at initialization.
         let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
         let monitored_utxos_premine_wallet =
             wallet_state_premine_recipient.get_monitored_utxos().await;
@@ -710,6 +712,74 @@ mod wallet_tests {
             monitored_utxos_other.is_empty(),
             "Monitored UTXO list must be empty at init if wallet is not premine-wallet"
         );
+    }
+
+    #[tokio::test]
+    async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
+        let wallet = Wallet::new(generate_secret_key());
+        let wallet_state = get_mock_wallet_state(Some(wallet.clone())).await;
+        let other_wallet = Wallet::new(generate_secret_key());
+
+        let mut monitored_utxos = wallet_state.get_monitored_utxos().await;
+        assert!(
+            monitored_utxos.is_empty(),
+            "Monitored UTXO list must be empty at init"
+        );
+
+        let genesis_block = Block::genesis_block();
+        let mut block_1 = make_mock_block(&genesis_block, None, wallet.get_public_key());
+        wallet_state.update_wallet_state_with_new_block(
+            &block_1,
+            &mut wallet_state.wallet_db.lock().await,
+        )?;
+        monitored_utxos = wallet_state.get_monitored_utxos().await;
+        assert_eq!(
+            1,
+            monitored_utxos.len(),
+            "Monitored UTXO list be one after we mined a block"
+        );
+
+        // Ensure that the membership proof is valid
+        assert!(block_1.body.next_mutator_set_accumulator.verify(
+            &block_1.body.transaction.outputs[0].0.neptune_hash().into(),
+            &monitored_utxos[0]
+                .get_membership_proof_for_block(&block_1.hash)
+                .unwrap()
+        ));
+
+        // Create new blocks, verify that the membership proofs are *not* valid
+        // under this block as tip
+        let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+        let mut block_3 = make_mock_block(&block_2, None, other_wallet.get_public_key());
+        monitored_utxos = wallet_state.get_monitored_utxos().await;
+        assert!(
+            !block_3.body.next_mutator_set_accumulator.verify(
+                &block_1.body.transaction.outputs[0].0.neptune_hash().into(),
+                &monitored_utxos[0]
+                    .get_membership_proof_for_block(&block_1.hash)
+                    .unwrap()
+            ),
+            "membership proof must be invalid before updating wallet state"
+        );
+
+        // Verify that the membership proof is valid *after* running the updater
+        wallet_state.update_wallet_state_with_new_block(
+            &block_2,
+            &mut wallet_state.wallet_db.lock().await,
+        )?;
+        wallet_state.update_wallet_state_with_new_block(
+            &block_3,
+            &mut wallet_state.wallet_db.lock().await,
+        )?;
+        monitored_utxos = wallet_state.get_monitored_utxos().await;
+        assert!(block_3.body.next_mutator_set_accumulator.verify(
+            &block_1.body.transaction.outputs[0].0.neptune_hash().into(),
+            &monitored_utxos[0]
+                .get_membership_proof_for_block(&block_3.hash)
+                .unwrap()
+        ));
+
+        Ok(())
     }
 
     #[tokio::test]
