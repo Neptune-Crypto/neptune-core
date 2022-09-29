@@ -868,7 +868,7 @@ mod archival_state_tests {
         println!("root_data_dir_path = {:?}", root_data_dir_path);
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None);
         let genesis_wallet = genesis_wallet_state.wallet;
         let ams = Arc::new(TokioMutex::new(ams));
         let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
@@ -1037,7 +1037,7 @@ mod archival_state_tests {
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks.
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None);
         let genesis_wallet = genesis_wallet_state.wallet;
 
         // 1. Create new block 1 with two inputs and three outputs and store it to disk
@@ -1149,7 +1149,7 @@ mod archival_state_tests {
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None);
         let genesis_wallet = genesis_wallet_state.wallet;
 
         let genesis_block: Block = *archival_state.genesis_block.to_owned();
@@ -1283,7 +1283,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None);
         let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1_a = make_mock_block(
             &archival_state.genesis_block,
@@ -1387,7 +1387,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None);
         let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1 = make_mock_block(
             &archival_state.genesis_block,

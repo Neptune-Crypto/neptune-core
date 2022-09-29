@@ -641,7 +641,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn increase_output_counter_test() {
         // Verify that output counter is incremented when the counter value is fetched
-        let wallet_state = get_mock_wallet_state();
+        let wallet_state = get_mock_wallet_state(None);
         for i in 0..12 {
             assert_eq!(
                 i,
@@ -654,7 +654,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn output_digest_changes_test() {
         // Verify that output randomness is not repeated
-        let wallet_state = get_mock_wallet_state();
+        let wallet_state = get_mock_wallet_state(None);
         let mut previous_digest = wallet_state.next_output_randomness().await;
         for _ in 0..12 {
             let next_output_randomness = wallet_state.next_output_randomness().await;
@@ -668,9 +668,8 @@ mod wallet_tests {
 
     #[test]
     fn new_random_wallet_base_test() {
-        let network = Network::Testnet;
-        let secret = generate_secret_key();
-        let wallet_state = WalletState::new_from_wallet(Wallet::new(secret), network);
+        let random_wallet = Wallet::new(generate_secret_key());
+        let wallet_state = get_mock_wallet_state(Some(random_wallet));
         let pk = wallet_state.wallet.get_public_key();
         let msg_vec: Vec<BFieldElement> = wallet_state.wallet.secret_seed.values().to_vec();
         let digest_vec: Vec<BFieldElement> = Hash::new().hash(&msg_vec, RP_DEFAULT_OUTPUT_SIZE);

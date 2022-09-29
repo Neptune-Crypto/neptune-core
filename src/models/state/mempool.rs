@@ -426,7 +426,7 @@ mod tests {
     #[test]
     pub fn insert_then_get_then_remove_then_get() {
         let mempool = Mempool::default();
-        let wallet_state = get_mock_wallet_state();
+        let wallet_state = get_mock_wallet_state(None);
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
         let transaction_digest = &<Transaction as Hashable>::neptune_hash(&transaction);
@@ -450,7 +450,7 @@ mod tests {
     // Create a mempool with 10 transactions.
     fn setup(transactions_count: u32) -> Mempool {
         let mempool = Mempool::default();
-        let wallet_state = get_mock_wallet_state();
+        let wallet_state = get_mock_wallet_state(None);
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
                 vec![],
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     pub fn prune_stale_transactions() {
-        let wallet_state = get_mock_wallet_state();
+        let wallet_state = get_mock_wallet_state(None);
         let mempool = Mempool::default();
         assert!(
             mempool.is_empty(),
@@ -521,8 +521,8 @@ mod tests {
 
     #[test]
     pub fn remove_transactions_with_test() {
-        let wallet_state = get_mock_wallet_state();
-        let wallet_state_unrelated = get_mock_wallet_state();
+        let wallet_state = get_mock_wallet_state(None);
+        let wallet_state_unrelated = get_mock_wallet_state(None);
 
         let related_utxo = Utxo {
             amount: Amount::from(13u32),

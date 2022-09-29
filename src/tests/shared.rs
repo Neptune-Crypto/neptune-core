@@ -236,7 +236,7 @@ pub async fn get_test_genesis_setup(
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
-        wallet_state: get_mock_wallet_state(),
+        wallet_state: get_mock_wallet_state(None),
         mempool,
     };
     Ok((
@@ -708,16 +708,11 @@ pub fn make_mock_block(
 }
 
 /// Return a dummy-wallet used for testing
-pub fn get_mock_wallet_state() -> WalletState {
-    let dummy_secret_for_genesis_wallet = Digest::new([
-        BFieldElement::new(14683724377595469133),
-        BFieldElement::new(4905634007273628284),
-        BFieldElement::new(2544353828551980854),
-        BFieldElement::new(9457203229242732950),
-        BFieldElement::new(5097796649750941488),
-        BFieldElement::new(12701344140082211424),
-    ]);
-    let wallet = Wallet::new(dummy_secret_for_genesis_wallet);
+pub fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
+    let wallet = match wallet {
+        Some(wallet) => wallet,
+        None => Wallet::devnet_authority_wallet(),
+    };
 
     let test_path = get_data_director_for_unit_tests().unwrap();
     let wallet_block_db_name = "mock_wallet_block_db";
