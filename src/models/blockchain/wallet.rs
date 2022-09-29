@@ -688,7 +688,7 @@ mod wallet_tests {
     }
 
     #[tokio::test]
-    async fn wallet_state_constructor_with_genesis_block_test() {
+    async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
         let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
@@ -712,6 +712,43 @@ mod wallet_tests {
             monitored_utxos_other.is_empty(),
             "Monitored UTXO list must be empty at init if wallet is not premine-wallet"
         );
+
+        // Add 12 blocks and verify that membership proofs are still valid
+        let genesis_block = Block::genesis_block();
+        let mut next_block = genesis_block.clone();
+        for _ in 0..12 {
+            let previous_block = next_block;
+            next_block = make_mock_block(
+                &previous_block,
+                None,
+                wallet_state_other.wallet.get_public_key(),
+            );
+            wallet_state_premine_recipient.update_wallet_state_with_new_block(
+                &next_block,
+                &mut wallet_state_premine_recipient.wallet_db.lock().await,
+            )?;
+        }
+
+        let monitored_utxos = wallet_state_premine_recipient.get_monitored_utxos().await;
+        assert_eq!(
+            1,
+            monitored_utxos.len(),
+            "monitored UTXOs must be 1 after applying N blocks not mined by wallet"
+        );
+        assert!(
+            next_block.body.next_mutator_set_accumulator.verify(
+                &genesis_block.body.transaction.outputs[0]
+                    .0
+                    .neptune_hash()
+                    .into(),
+                &monitored_utxos[0]
+                    .get_membership_proof_for_block(&next_block.hash)
+                    .unwrap()
+            ),
+            "Membership proof must be valid after updating wallet state with generated blocks"
+        );
+
+        Ok(())
     }
 
     #[tokio::test]
@@ -772,12 +809,15 @@ mod wallet_tests {
             &mut wallet_state.wallet_db.lock().await,
         )?;
         monitored_utxos = wallet_state.get_monitored_utxos().await;
-        assert!(block_3.body.next_mutator_set_accumulator.verify(
-            &block_1.body.transaction.outputs[0].0.neptune_hash().into(),
-            &monitored_utxos[0]
-                .get_membership_proof_for_block(&block_3.hash)
-                .unwrap()
-        ));
+        assert!(
+            block_3.body.next_mutator_set_accumulator.verify(
+                &block_1.body.transaction.outputs[0].0.neptune_hash().into(),
+                &monitored_utxos[0]
+                    .get_membership_proof_for_block(&block_3.hash)
+                    .unwrap()
+            ),
+            "Membership proof must be valid after updating wallet state with generated blocks"
+        );
 
         Ok(())
     }
