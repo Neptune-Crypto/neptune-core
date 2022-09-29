@@ -216,7 +216,10 @@ pub struct MonitoredUtxo {
 
     pub max_number_of_mps_stored: usize,
 
-    pub has_valid_membership_proof: bool,
+    pub has_synced_membership_proof: bool,
+
+    // TODO: Change last type to whatever we use for timestamp in the block header.
+    pub spent_in_block: Option<(Digest, BlockHeight, BFieldElement)>,
 }
 
 impl MonitoredUtxo {
@@ -225,7 +228,8 @@ impl MonitoredUtxo {
             utxo,
             blockhash_to_membership_proof: VecDeque::from([]),
             max_number_of_mps_stored: MAX_NUMBER_OF_MPS_STORED,
-            has_valid_membership_proof: true,
+            has_synced_membership_proof: true,
+            spent_in_block: None,
         }
     }
 
@@ -259,6 +263,11 @@ pub enum WalletDbValue {
     SyncDigest(Digest),
 
     // Stores the relevant (own) UTXOs associated with a block
+    // TODO: Alan wants this gone bc. transaction histories don't need to be
+    // part of the client's functionality -- that can be handled by
+    // an overlay program. Alan suggests that we instead record
+    // "initiated transactions". That doesn't, however, record historic
+    // *incoming* transactions (i.e. spent UTXOs).
     WalletBlockUtxos(WalletBlockUtxos),
 
     // Stores all confirmed and unspent UTXOs controlled by this wallet, and the associated membership proofs

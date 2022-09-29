@@ -82,7 +82,7 @@ impl WalletBlockUtxos {
     }
 }
 
-/// Gets a new secret.
+/// Generate a new secret
 pub fn generate_secret_key() -> Digest {
     let mut rng = thread_rng();
     BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into()
@@ -307,9 +307,8 @@ impl WalletState {
         block: &Block,
         wallet_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<WalletDbKey, WalletDbValue>>,
     ) -> Result<()> {
-        // A wallet contains a set of input and output UTXOs,
+        // A transaction contains a set of input and output UTXOs,
         // each of which contains an address (public key),
-        // which inform the balance of the wallet.
 
         let transaction: Transaction = block.body.transaction.clone();
 
@@ -317,14 +316,16 @@ impl WalletState {
 
         let input_utxos: Vec<Utxo> = transaction.get_own_input_utxos(my_pub_key);
 
-        let output_utxos: Vec<(Utxo, Digest)> = transaction.get_own_output_utxos(my_pub_key);
+        let output_utxos_commitment_randomness: Vec<(Utxo, Digest)> =
+            transaction.get_own_output_utxos_and_comrands(my_pub_key);
 
         // Let's not store the UTXOs of blocks that don't affect our balance
-        if input_utxos.is_empty() && output_utxos.is_empty() {
+        if input_utxos.is_empty() && output_utxos_commitment_randomness.is_empty() {
             return Ok(());
         }
 
-        let next_block_of_relevant_utxos = WalletBlockUtxos::new(input_utxos, output_utxos);
+        let next_block_of_relevant_utxos =
+            WalletBlockUtxos::new(input_utxos, output_utxos_commitment_randomness);
 
         let mut new_wallet_db_values: Vec<(WalletDbKey, WalletDbValue)> = vec![(
             WalletDbKey::WalletBlockUtxos(block.hash),
@@ -349,20 +350,21 @@ impl WalletState {
                     debug!("Found valid mp for UTXO");
                     own_membership_proofs.push(ms_mp.to_owned());
                     own_items_as_digests.push(monitored_utxo.utxo.neptune_hash().into());
-                    monitored_utxo.has_valid_membership_proof = true;
+                    monitored_utxo.has_synced_membership_proof = true;
                 }
                 None => {
                     warn!(
                         "Unable to find membership proof for UTXO with digest {}",
                         monitored_utxo.utxo.neptune_hash()
                     );
-                    monitored_utxo.has_valid_membership_proof = false;
+                    monitored_utxo.has_synced_membership_proof = false;
                 }
             }
         }
+
         // Loop over all input UTXOs, applying all addition records
         let mut changed_mps = vec![];
-        let mut ms_state: MutatorSetAccumulator<Hash> =
+        let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
         let mut removal_records = block.body.mutator_set_update.removals.clone();
         removal_records.reverse();
@@ -380,7 +382,7 @@ impl WalletState {
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut own_membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &own_items_as_digests,
-                &mut ms_state,
+                &mut msa_state,
                 &addition_record,
             );
             match res {
@@ -389,29 +391,51 @@ impl WalletState {
             };
 
             // Batch update removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut ms_state)
+            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state)
                 .expect("MS removal record update from add must succeed in wallet handler");
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
             if utxo.matches_pubkey(self.wallet.get_public_key()) {
                 let new_own_membership_proof =
-                    ms_state.prove(&utxo.neptune_hash().into(), &commitment_randomness, true);
+                    msa_state.prove(&utxo.neptune_hash().into(), &commitment_randomness, true);
 
                 own_membership_proofs.push(new_own_membership_proof);
                 own_items_as_digests.push(utxo.neptune_hash().into());
-                monitored_utxos.push(MonitoredUtxo::new(utxo))
+
+                // In case of forks, it can happen that a UTXO is dropped from the abandoned chain
+                // but exists in the new chain. If that's the case, then the membership proof was marked
+                // as invalid above, but the membership proof in scope here is actually its real
+                // membership proof. We fix this problem by deleting the old entry for monitored UTXO
+                // (if it exists) and then just add the new one.
+                let mut new_monitored_utxo = MonitoredUtxo::new(utxo);
+                let matched_monitored_utxo_index: Option<usize> = monitored_utxos
+                    .iter()
+                    .find_position(|x| !x.has_synced_membership_proof && x.utxo == utxo)
+                    .map(|x| x.0);
+                if let Some(index_of_forked_utxo) = matched_monitored_utxo_index {
+                    // If this is a forked UTXO (removed in abandoned chain, added in this)
+                    // then we make sure to both remove the old entry from the `monitored_utxos`
+                    // list *but* preserve the membership proofs associated with this old entry
+                    // since we might have to fork back to this chain that is being abandoned.
+                    // We remove the old entry since we are adding a new entry immediately
+                    // below this if-block and we don't want to include this monitored UTXO twice.
+                    new_monitored_utxo = monitored_utxos.remove(index_of_forked_utxo);
+                    new_monitored_utxo.has_synced_membership_proof = true;
+                }
+
+                monitored_utxos.push(new_monitored_utxo);
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
-            ms_state.add(&mut addition_record);
+            msa_state.add(&mut addition_record);
         }
 
         // sanity checks
         assert_eq!(
             monitored_utxos
                 .iter()
-                .filter(|x| x.has_valid_membership_proof)
+                .filter(|x| x.has_synced_membership_proof)
                 .count(),
             own_membership_proofs.len(),
             "Monitored UTXO count must match number of managed membership proofs"
@@ -423,7 +447,7 @@ impl WalletState {
         );
 
         // Loop over all output UTXOs, applying all removal records
-        // for removal_record in block.body.mutator_set_update.removals.iter() {
+        let mut i = 0;
         while let Some(removal_record) = removal_records.pop() {
             let res = MsMembershipProof::batch_update_from_remove(
                 &mut own_membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -438,17 +462,38 @@ impl WalletState {
             RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record)
                 .expect("MS removal record update from remove must succeed in wallet handler");
 
-            ms_state.remove(removal_record);
+            // TODO: We mark membership proofs as spent, so they can be deleted. But
+            // how do we ensure that we can recover them in case of a fork? For now we maintain
+            // them even if the are spent, and then, later, we can add logic to remove these
+            // membership proofs of spent UTXOs once they have been spent for M blocks.
+            let input_utxo = block.body.transaction.inputs[i].utxo;
+            if input_utxo.matches_pubkey(my_pub_key) {
+                match monitored_utxos
+                    .iter_mut()
+                    .find(|x| x.utxo.neptune_hash() == input_utxo.neptune_hash())
+                {
+                    Some(mut monitored_utxo_spent) => {
+                        monitored_utxo_spent.spent_in_block =
+                            Some((block.hash, block.header.height, block.header.timestamp));
+                    }
+                    None => {
+                        panic!("Discovered own input UTXO in block that did not match a monitored UTXO");
+                    }
+                }
+            }
+
+            msa_state.remove(removal_record);
+            i += 1;
         }
 
-        // Sanity check that `ms_state` agrees with the mutator set from the applied block
+        // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
             block
                 .body
                 .next_mutator_set_accumulator
                 .clone()
                 .get_commitment(),
-            ms_state.get_commitment(),
+            msa_state.get_commitment(),
             "Mutator set in wallet-handler must agree with that from applied block"
         );
 
@@ -456,14 +501,15 @@ impl WalletState {
 
         for (monitored_utxo, updated_mp) in monitored_utxos
             .iter_mut()
-            .filter(|x| x.has_valid_membership_proof)
+            .filter(|x| x.has_synced_membership_proof)
             .zip_eq(own_membership_proofs)
         {
             // Sanity check that all membership proofs are valid for the next mutator set defined
             // by this block
             assert!(
-                ms_state.verify(&monitored_utxo.utxo.neptune_hash().into(), &updated_mp),
-                "Update membership proof for mutator set must be valid"
+                monitored_utxo.spent_in_block.is_some()
+                    || msa_state.verify(&monitored_utxo.utxo.neptune_hash().into(), &updated_mp),
+                "Updated membership proof for unspent UTXO must be valid"
             );
 
             // Add the new membership proof to the list of membership proofs for this UTXO

@@ -134,7 +134,7 @@ impl Transaction {
             .collect()
     }
 
-    pub fn get_own_output_utxos(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
+    pub fn get_own_output_utxos_and_comrands(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
         self.outputs
             .iter()
             .filter(|(utxo, _randomness)| utxo.public_key == pub_key)
