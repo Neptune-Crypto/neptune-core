@@ -481,8 +481,26 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
+pub fn add_unsigned_input_to_block(
+    block: &mut Block,
+    consumed_utxo: Utxo,
+    membership_proof: MsMembershipProof<Hash>,
+) {
+    let item = consumed_utxo.neptune_hash();
+    let input_removal_record = block
+        .body
+        .previous_mutator_set_accumulator
+        .drop(&item.into(), &membership_proof);
+    add_unsigned_dev_net_input_to_block_transaction(
+        block,
+        consumed_utxo,
+        membership_proof,
+        input_removal_record,
+    );
+}
+
 /// Helper function to add an unsigned input to a block's transaction
-pub async fn add_unsigned_input_to_block(
+pub async fn add_unsigned_input_to_block_ams(
     block: &mut Block,
     consumed_utxo: Utxo,
     randomness: Digest,

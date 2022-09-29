@@ -271,6 +271,7 @@ pub enum WalletDbValue {
     WalletBlockUtxos(WalletBlockUtxos),
 
     // Stores all confirmed and unspent UTXOs controlled by this wallet, and the associated membership proofs
+    // TODO: Consider making this a hash map from AOCL leaf-index to MonitoredUtxo
     UnspentUtxos(Vec<MonitoredUtxo>), // (UTXO, associated membership proof)
 }
 

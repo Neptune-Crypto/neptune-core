@@ -794,7 +794,7 @@ mod archival_state_tests {
             state::{blockchain_state::BlockchainState, light_state::LightState},
         },
         tests::shared::{
-            add_block_to_archival_state, add_output_to_block, add_unsigned_input_to_block,
+            add_block_to_archival_state, add_output_to_block, add_unsigned_input_to_block_ams,
             get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
             unit_test_databases,
         },
@@ -932,7 +932,7 @@ mod archival_state_tests {
             make_mock_block(&mock_block_1, None, genesis_wallet.get_public_key());
         let consumed_utxo = mock_block_1.body.transaction.outputs[0].0;
         let output_randomness = mock_block_1.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut mock_block_2,
             consumed_utxo,
             output_randomness,
@@ -1049,7 +1049,7 @@ mod archival_state_tests {
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut block_1a,
             consumed_utxo,
             premine_output_randomness,
@@ -1162,7 +1162,7 @@ mod archival_state_tests {
             // Create next block with inputs and outputs
             let mut next_block =
                 make_mock_block(&previous_block, None, genesis_wallet.get_public_key());
-            add_unsigned_input_to_block(
+            add_unsigned_input_to_block_ams(
                 &mut next_block,
                 consumed_utxo,
                 output_randomness,
@@ -1298,7 +1298,7 @@ mod archival_state_tests {
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut block_1_a,
             consumed_utxo,
             premine_output_randomness,
@@ -1399,7 +1399,7 @@ mod archival_state_tests {
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut block_1,
             consumed_utxo,
             premine_output_randomness,
