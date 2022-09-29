@@ -273,7 +273,7 @@ pub struct WalletState {
 }
 
 impl WalletState {
-    pub fn new_from_wallet(wallet: Wallet, network: Network) -> Self {
+    pub async fn new_from_wallet(wallet: Wallet, network: Network) -> Self {
         // Create or connect to wallet block DB
         let wallet_db: RustyLevelDB<WalletDbKey, WalletDbValue> =
             RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
@@ -293,11 +293,19 @@ impl WalletState {
         .unwrap();
         let outgoing_utxo_counter_db = Arc::new(TokioMutex::new(outgoing_utxo_count_db));
 
-        Self {
+        let ret = Self {
             outgoing_utxo_counter_db,
-            wallet_db,
+            wallet_db: wallet_db.clone(),
             wallet,
-        }
+        };
+
+        // Wallet state has to be initialized with the genesis block, otherwise the outputs
+        // from it would be unspendable.
+        let mut wallet_db_lock = wallet_db.lock().await;
+        ret.update_wallet_state_with_new_block(&Block::genesis_block(), &mut wallet_db_lock)
+            .expect("Updating wallet state with genesis block must succeed");
+
+        ret
     }
 }
 
@@ -526,6 +534,16 @@ impl WalletState {
         Ok(())
     }
 
+    // Blocking call to get the monitored UTXOs.
+    pub async fn get_monitored_utxos(&self) -> Vec<MonitoredUtxo> {
+        self.wallet_db
+            .lock()
+            .await
+            .get(WalletDbKey::UnspentUtxos)
+            .map(|x| x.as_unspent_utxos())
+            .unwrap_or_default()
+    }
+
     pub async fn get_balance(&self) -> Amount {
         let sums: WalletBlockIOSums = self
             .wallet_db
@@ -641,7 +659,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn increase_output_counter_test() {
         // Verify that output counter is incremented when the counter value is fetched
-        let wallet_state = get_mock_wallet_state(None);
+        let wallet_state = get_mock_wallet_state(None).await;
         for i in 0..12 {
             assert_eq!(
                 i,
@@ -654,7 +672,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn output_digest_changes_test() {
         // Verify that output randomness is not repeated
-        let wallet_state = get_mock_wallet_state(None);
+        let wallet_state = get_mock_wallet_state(None).await;
         let mut previous_digest = wallet_state.next_output_randomness().await;
         for _ in 0..12 {
             let next_output_randomness = wallet_state.next_output_randomness().await;
@@ -666,10 +684,38 @@ mod wallet_tests {
         }
     }
 
-    #[test]
-    fn new_random_wallet_base_test() {
+    #[tokio::test]
+    async fn wallet_state_constructor_with_genesis_block_test() {
+        // In this scenario a block that has an output belonging
+        // to a wallet is mined. We want to check that this UTXO
+        // is recognized by the `WalletState` logic
+        let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
+        let monitored_utxos_premine_wallet =
+            wallet_state_premine_recipient.get_monitored_utxos().await;
+        assert_eq!(
+            1,
+            monitored_utxos_premine_wallet.len(),
+            "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
+        );
+        assert_eq!(
+            monitored_utxos_premine_wallet[0].utxo,
+            Block::premine_utxos()[0],
+            "Auth wallet's monitored UTXO must match that from genesis block at initialization"
+        );
+
         let random_wallet = Wallet::new(generate_secret_key());
-        let wallet_state = get_mock_wallet_state(Some(random_wallet));
+        let wallet_state_other = get_mock_wallet_state(Some(random_wallet)).await;
+        let monitored_utxos_other = wallet_state_other.get_monitored_utxos().await;
+        assert!(
+            monitored_utxos_other.is_empty(),
+            "Monitored UTXO list must be empty at init if wallet is not premine-wallet"
+        );
+    }
+
+    #[tokio::test]
+    async fn new_random_wallet_base_test() {
+        let random_wallet = Wallet::new(generate_secret_key());
+        let wallet_state = get_mock_wallet_state(Some(random_wallet)).await;
         let pk = wallet_state.wallet.get_public_key();
         let msg_vec: Vec<BFieldElement> = wallet_state.wallet.secret_seed.values().to_vec();
         let digest_vec: Vec<BFieldElement> = Hash::new().hash(&msg_vec, RP_DEFAULT_OUTPUT_SIZE);

@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
     let wallet_file = Wallet::wallet_path(&root_data_dir_path);
     let wallet = Wallet::read_from_file_or_create(&wallet_file);
 
-    let wallet_state = WalletState::new_from_wallet(wallet, network);
+    let wallet_state: WalletState = WalletState::new_from_wallet(wallet, network).await;
 
     println!("Wallet stored in: {}", wallet_file.display());
     println!(

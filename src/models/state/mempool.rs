@@ -423,10 +423,10 @@ mod tests {
     use num_traits::Zero;
     use twenty_first::shared_math::b_field_element::BFieldElement;
 
-    #[test]
-    pub fn insert_then_get_then_remove_then_get() {
+    #[tokio::test]
+    pub async fn insert_then_get_then_remove_then_get() {
         let mempool = Mempool::default();
-        let wallet_state = get_mock_wallet_state(None);
+        let wallet_state = get_mock_wallet_state(None).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
         let transaction_digest = &<Transaction as Hashable>::neptune_hash(&transaction);
@@ -448,9 +448,9 @@ mod tests {
     }
 
     // Create a mempool with 10 transactions.
-    fn setup(transactions_count: u32) -> Mempool {
+    async fn setup(transactions_count: u32) -> Mempool {
         let mempool = Mempool::default();
-        let wallet_state = get_mock_wallet_state(None);
+        let wallet_state = get_mock_wallet_state(None).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
                 vec![],
@@ -465,9 +465,9 @@ mod tests {
         mempool
     }
 
-    #[test]
-    pub fn get_densest_transactions() {
-        let mempool = setup(10);
+    #[tokio::test]
+    pub async fn get_densest_transactions() {
+        let mempool = setup(10).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -480,9 +480,9 @@ mod tests {
         assert!(!mempool.is_empty())
     }
 
-    #[test]
-    pub fn prune_stale_transactions() {
-        let wallet_state = get_mock_wallet_state(None);
+    #[tokio::test]
+    pub async fn prune_stale_transactions() {
+        let wallet_state = get_mock_wallet_state(None).await;
         let mempool = Mempool::default();
         assert!(
             mempool.is_empty(),
@@ -519,10 +519,10 @@ mod tests {
         assert_eq!(mempool.len(), 5)
     }
 
-    #[test]
-    pub fn remove_transactions_with_test() {
-        let wallet_state = get_mock_wallet_state(None);
-        let wallet_state_unrelated = get_mock_wallet_state(None);
+    #[tokio::test]
+    pub async fn remove_transactions_with_test() {
+        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state_unrelated = get_mock_wallet_state(None).await;
 
         let related_utxo = Utxo {
             amount: Amount::from(13u32),
@@ -592,9 +592,9 @@ mod tests {
         assert_eq!(mempool.len(), 8)
     }
 
-    #[test]
-    pub fn get_sorted_iter() {
-        let mempool = setup(10);
+    #[tokio::test]
+    pub async fn get_sorted_iter() {
+        let mempool = setup(10).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -606,10 +606,10 @@ mod tests {
         assert!(!mempool.is_empty())
     }
 
-    #[test]
-    pub fn get_mempool_size() {
+    #[tokio::test]
+    pub async fn get_mempool_size() {
         // Verify that the `get_size` method on mempool returns sane results
-        let mempool_small = setup(10);
+        let mempool_small = setup(10).await;
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small =
             bincode::serialize(&mempool_small.internal.read().unwrap().table)
@@ -618,7 +618,7 @@ mod tests {
         println!("size_gs_small = {}", size_gs_small);
         assert!(size_gs_small >= size_serialized_small);
 
-        let mempool_big = setup(100);
+        let mempool_big = setup(100).await;
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big = bincode::serialize(&mempool_big.internal.read().unwrap().table)
             .unwrap()

@@ -236,7 +236,7 @@ pub async fn get_test_genesis_setup(
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
-        wallet_state: get_mock_wallet_state(None),
+        wallet_state: get_mock_wallet_state(None).await,
         mempool,
     };
     Ok((
@@ -708,7 +708,7 @@ pub fn make_mock_block(
 }
 
 /// Return a dummy-wallet used for testing
-pub fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
+pub async fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
     let wallet = match wallet {
         Some(wallet) => wallet,
         None => Wallet::devnet_authority_wallet(),
@@ -735,11 +735,19 @@ pub fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
         .unwrap(),
     ));
 
-    WalletState {
+    let ret = WalletState {
         outgoing_utxo_counter_db,
-        wallet_db,
+        wallet_db: wallet_db.clone(),
         wallet,
-    }
+    };
+
+    // Wallet state has to be initialized with the genesis block, otherwise the outputs
+    // from it would be unspendable.
+    let mut wallet_db_lock = wallet_db.lock().await;
+    ret.update_wallet_state_with_new_block(&Block::genesis_block(), &mut wallet_db_lock)
+        .expect("Applying genesis block in unit test setup must succeed");
+
+    ret
 }
 
 pub async fn make_unit_test_archival_state() -> ArchivalState {

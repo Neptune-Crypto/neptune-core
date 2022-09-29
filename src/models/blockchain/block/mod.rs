@@ -129,7 +129,7 @@ impl Block {
         Self::new(header, body)
     }
 
-    fn premine_utxos() -> Vec<Utxo> {
+    pub fn premine_utxos() -> Vec<Utxo> {
         // The premine UTXOs can be hardcoded here.
         // let devnet_authority_wallet = Wallet::devnet_authority_wallet();
         vec![Utxo::new_from_hex(

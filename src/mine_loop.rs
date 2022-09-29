@@ -268,10 +268,10 @@ mod mine_loop_tests {
 
     use super::*;
 
-    #[test]
-    fn make_devnet_block_template_is_valid_test() {
+    #[tokio::test]
+    async fn make_devnet_block_template_is_valid_test() {
         let previous_block = Block::genesis_block();
-        let wallet_state = get_mock_wallet_state(None);
+        let wallet_state = get_mock_wallet_state(None).await;
         let coinbase_tx =
             make_coinbase_transaction(wallet_state.wallet.get_public_key(), &previous_block.header);
         let (block_header, block_body) = make_devnet_block_template(&previous_block, coinbase_tx);

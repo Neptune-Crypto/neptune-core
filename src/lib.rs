@@ -79,7 +79,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     debug!("Data root path is {:?}", root_data_dir_path_buf);
     let wallet_file = Wallet::wallet_path(root_data_dir_path);
     let wallet: Wallet = Wallet::read_from_file_or_create(&wallet_file);
-    let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network);
+    let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network).await;
 
     // Connect to or create databases for block state, and for peer state
     let block_databases = ArchivalState::initialize_block_databases(root_data_dir_path)?;
