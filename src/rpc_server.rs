@@ -3,6 +3,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction};
+use crate::models::blockchain::wallet::WalletStatus;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::GlobalState;
@@ -43,6 +44,8 @@ pub trait RPC {
 
     // Get sum of unspent UTXOs.
     async fn get_balance() -> Amount;
+
+    async fn get_wallet_status() -> WalletStatus;
 }
 
 #[derive(Clone)]
@@ -62,6 +65,7 @@ impl RPC for NeptuneRPCServer {
     type SendFut = Ready<bool>;
     type ShutdownFut = Ready<bool>;
     type GetBalanceFut = Ready<Amount>;
+    type GetWalletStatusFut = Ready<WalletStatus>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
@@ -187,6 +191,11 @@ impl RPC for NeptuneRPCServer {
 
     fn get_balance(self, _context: tarpc::context::Context) -> Self::GetBalanceFut {
         let res = executor::block_on(self.state.wallet_state.get_balance());
+        future::ready(res)
+    }
+
+    fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {
+        let res = executor::block_on(self.state.wallet_state.get_wallet_status());
         future::ready(res)
     }
 

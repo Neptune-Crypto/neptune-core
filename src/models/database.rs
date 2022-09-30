@@ -255,6 +255,12 @@ impl MonitoredUtxo {
             .find(|x| x.0 == *block_digest)
             .map(|x| x.1.clone())
     }
+
+    pub fn get_latest_membership_proof(&self) -> MsMembershipProof<Hash> {
+        self.blockhash_to_membership_proof[self.blockhash_to_membership_proof.len() - 1]
+            .1
+            .clone()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
