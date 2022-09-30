@@ -300,10 +300,12 @@ impl WalletState {
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
-        // from it would be unspendable.
+        // from it would be unspendable. This should only be done *once* though
         let mut wallet_db_lock = wallet_db.lock().await;
-        ret.update_wallet_state_with_new_block(&Block::genesis_block(), &mut wallet_db_lock)
-            .expect("Updating wallet state with genesis block must succeed");
+        if wallet_db_lock.get(WalletDbKey::SyncDigest).is_none() {
+            ret.update_wallet_state_with_new_block(&Block::genesis_block(), &mut wallet_db_lock)
+                .expect("Updating wallet state with genesis block must succeed");
+        }
 
         ret
     }
@@ -408,6 +410,11 @@ impl WalletState {
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
             if utxo.matches_pubkey(self.wallet.get_public_key()) {
+                // TODO: Change this logging to use `Display` for `Amount` once functionality is merged from t-f
+                info!(
+                    "Received UTXO in block {}, height {}: value = {:?}",
+                    block.hash, block.header.height, utxo.amount
+                );
                 let new_own_membership_proof =
                     msa_state.prove(&utxo.neptune_hash().into(), &commitment_randomness, true);
 
@@ -533,6 +540,12 @@ impl WalletState {
         new_wallet_db_values.push((
             WalletDbKey::UnspentUtxos,
             WalletDbValue::UnspentUtxos(monitored_utxos),
+        ));
+
+        // Push block hash for which wallet has been updated
+        new_wallet_db_values.push((
+            WalletDbKey::SyncDigest,
+            WalletDbValue::SyncDigest(block.hash),
         ));
 
         wallet_db_lock.batch_write(&new_wallet_db_values);
