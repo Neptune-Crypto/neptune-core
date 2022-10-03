@@ -1,3 +1,6 @@
+use self::wallet_block_utxos::WalletBlockIOSums;
+use self::wallet_status::{WalletStatus, WalletStatusElement};
+
 use super::block::Block;
 use super::digest::{
     Digest, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
@@ -11,6 +14,7 @@ use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
 use crate::Hash;
 use anyhow::{bail, Result};
@@ -23,9 +27,7 @@ use num_traits::Zero;
 use rand::thread_rng;
 use secp256k1::{ecdsa, Secp256k1};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 use std::fs;
-use std::ops::Add;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
@@ -33,118 +35,14 @@ use tracing::{debug, info, warn};
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 use twenty_first::util_types::simple_hasher::Hasher;
 
+pub mod wallet_block_utxos;
+pub mod wallet_status;
+
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
 const STANDARD_WALLET_VERSION: u8 = 0;
 const WALLET_DB_NAME: &str = "wallet_block_db";
 const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
-
-/// The parts of a block that this wallet wants to keep track of,
-/// ie. the input and output UTXOs that share this wallet's public key.
-#[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
-pub struct WalletBlockUtxos {
-    pub input_utxos: Vec<Utxo>,
-    pub output_utxos: Vec<(Utxo, Digest)>,
-}
-
-struct WalletBlockIOSums {
-    pub input_sum: Amount,
-    pub output_sum: Amount,
-}
-
-impl Add for WalletBlockIOSums {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            input_sum: self.input_sum + other.input_sum,
-            output_sum: self.output_sum + other.output_sum,
-        }
-    }
-}
-
-impl WalletBlockUtxos {
-    fn new(input_utxos: Vec<Utxo>, output_utxos: Vec<(Utxo, Digest)>) -> Self {
-        Self {
-            input_utxos,
-            output_utxos,
-        }
-    }
-
-    fn get_io_sums(&self) -> WalletBlockIOSums {
-        WalletBlockIOSums {
-            input_sum: self.input_utxos.iter().map(|utxo| utxo.amount).sum(),
-            output_sum: self
-                .output_utxos
-                .iter()
-                .map(|(utxo, _digest)| utxo.amount)
-                .sum(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct WalletStatusElement(u128, Amount);
-
-impl Display for WalletStatusElement {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string: String = format!("({}, {:?})", self.0, self.1);
-        write!(f, "{}", string)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct WalletStatus {
-    synced_unspent: Vec<WalletStatusElement>, // (leaf index, amount)
-    unsynced_unspent: Vec<WalletStatusElement>, // (leaf index, amount)
-    synced_spent: Vec<WalletStatusElement>,   // (leaf index, amount)
-    unsynced_spent: Vec<WalletStatusElement>, // (leaf index, amount)
-}
-
-impl Display for WalletStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let synced_unspent_count: usize = self.synced_unspent.len();
-        let synced_unspent_amount: Amount = self.synced_unspent.iter().map(|x| x.1).sum();
-        let synced_unspent: String = format!(
-            "synced, unspent UTXOS: count: {}, amount: {:?}\n[{}]",
-            synced_unspent_count,
-            synced_unspent_amount,
-            self.synced_unspent.iter().map(|x| x.to_string()).join(",")
-        );
-        let unsynced_unspent_count: usize = self.unsynced_unspent.len();
-        let unsynced_unspent_amount: Amount = self.unsynced_unspent.iter().map(|x| x.1).sum();
-        let unsynced_unspent: String = format!(
-            "unsynced, unspent UTXOS: count: {}, amount: {:?}\n[{}]",
-            unsynced_unspent_count,
-            unsynced_unspent_amount,
-            self.unsynced_unspent
-                .iter()
-                .map(|x| x.to_string())
-                .join(",")
-        );
-        let synced_spent_count: usize = self.synced_spent.len();
-        let synced_spent_amount: Amount = self.synced_spent.iter().map(|x| x.1).sum();
-        let synced_spent: String = format!(
-            "synced, spent UTXOS: count: {}, amount: {:?}\n[{}]",
-            synced_spent_count,
-            synced_spent_amount,
-            self.synced_spent.iter().map(|x| x.to_string()).join(",")
-        );
-        let unsynced_spent_count: usize = self.unsynced_spent.len();
-        let unsynced_spent_amount: Amount = self.unsynced_spent.iter().map(|x| x.1).sum();
-        let unsynced_spent: String = format!(
-            "unsynced, spent UTXOS: count: {}, amount: {:?}\n[{}]",
-            unsynced_spent_count,
-            unsynced_spent_amount,
-            self.unsynced_spent.iter().map(|x| x.to_string()).join(",")
-        );
-        write!(
-            f,
-            "{}\n\n{}\n\n{}\n\n{}",
-            synced_unspent, unsynced_unspent, synced_spent, unsynced_spent
-        )
-    }
-}
 
 /// Generate a new secret
 pub fn generate_secret_key() -> Digest {
@@ -727,10 +625,13 @@ impl WalletState {
 
     pub async fn create_transaction(
         &self,
-        amount: Amount,
-        recipient_public_key: secp256k1::PublicKey,
+        output_utxo: Utxo,
+        // amount: Amount,
+        // recipient_public_key: secp256k1::PublicKey,
     ) -> Result<Transaction> {
-        let _spendable_utxos: Vec<(Utxo, Digest)> = self.allocate_sufficient_input_funds(amount)?;
+        let _spendable_utxos: Vec<(Utxo, Digest)> = self
+            .allocate_sufficient_input_funds(output_utxo.amount)
+            .await?;
         let _membership_proofs: Vec<MsMembershipProof<Hash>> = vec![];
 
         // TODO: Fetch `MembershipProof`s, generate `RemovalRecord`s, and sign.
@@ -738,10 +639,6 @@ impl WalletState {
         // See `allow_consumption_of_genesis_output_test` in archival_state.
         let inputs: Vec<DevNetInput> = vec![];
 
-        let output_utxo = Utxo {
-            amount,
-            public_key: recipient_public_key,
-        };
         let output_randomness = self.next_output_randomness().await;
 
         let outputs = vec![(output_utxo, output_randomness)];
@@ -761,8 +658,18 @@ impl WalletState {
     // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
     //
     // TODO: Assert that balance is sufficient! (There is similar logic in block-validation elsewhere.)
-    fn allocate_sufficient_input_funds(&self, _amount: Amount) -> Result<Vec<(Utxo, Digest)>> {
-        let _allocated_amount = Amount::zero();
+    async fn allocate_sufficient_input_funds(
+        &self,
+        _amount: Amount,
+    ) -> Result<Vec<(Utxo, Digest)>> {
+        let allocated_amount = Amount::zero();
+
+        // We only attempt to generate a transaction using those UTXOs that have up-to-date
+        // membership proofs.
+        let wallet_status: WalletStatus = self.get_wallet_status().await;
+
+        // if wallet_status.synced_unspent.
+
         // while allocated_amount < amount {
         // TODO: Allocate enough.
         //

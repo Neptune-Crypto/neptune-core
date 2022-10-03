@@ -8,7 +8,7 @@ use super::{
         block::{block_header::BlockHeader, block_height::BlockHeight},
         digest::Digest,
         transaction::utxo::Utxo,
-        wallet::WalletBlockUtxos,
+        wallet::wallet_block_utxos::WalletBlockUtxos,
     },
     peer::PeerStanding,
 };

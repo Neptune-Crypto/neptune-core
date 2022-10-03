@@ -3,7 +3,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction};
-use crate::models::blockchain::wallet::WalletStatus;
+use crate::models::blockchain::wallet::wallet_status::WalletStatus;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::GlobalState;
@@ -162,7 +162,7 @@ impl RPC for NeptuneRPCServer {
         for utxo in recipient_utxos {
             // 1. Build transaction objects.
             let transaction: Transaction =
-                executor::block_on(wallet_state.create_transaction(utxo.amount, utxo.public_key))
+                executor::block_on(wallet_state.create_transaction(utxo))
                     .expect("Could not create transaction object");
 
             // 2. Send transaction message to main
