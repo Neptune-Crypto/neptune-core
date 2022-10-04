@@ -670,11 +670,11 @@ impl WalletState {
         &self,
         _amount: Amount,
     ) -> Result<Vec<(Utxo, Digest)>> {
-        let allocated_amount = Amount::zero();
+        let _allocated_amount = Amount::zero();
 
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let wallet_status: WalletStatus = self.get_wallet_status().await;
+        let _wallet_status: WalletStatus = self.get_wallet_status().await;
 
         // if wallet_status.synced_unspent.
 

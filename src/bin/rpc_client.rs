@@ -22,6 +22,7 @@ enum Command {
     Shutdown,
     Balance,
     WalletStatus,
+    GetPublicKey,
 }
 
 #[derive(Debug, Parser)]
@@ -105,6 +106,11 @@ async fn main() -> Result<()> {
         Command::WalletStatus => {
             let wallet_status: WalletStatus = client.get_wallet_status(context::current()).await?;
             println!("{}", wallet_status)
+        }
+
+        Command::GetPublicKey => {
+            let pub_key: secp256k1::PublicKey = client.get_public_key(context::current()).await?;
+            println!("{}", pub_key)
         }
     }
 
