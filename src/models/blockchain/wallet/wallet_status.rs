@@ -1,12 +1,14 @@
 use std::fmt::Display;
 
 use itertools::Itertools;
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 
-use crate::models::blockchain::transaction::Amount;
+use crate::models::blockchain::transaction::{utxo::Utxo, Amount};
+use crate::Hash;
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct WalletStatusElement(pub u128, pub Amount);
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct WalletStatusElement(pub u128, pub Utxo);
 
 impl Display for WalletStatusElement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -15,16 +17,16 @@ impl Display for WalletStatusElement {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WalletStatus {
     pub synced_unspent_amount: Amount,
-    pub synced_unspent: Vec<WalletStatusElement>, // (leaf index, amount)
+    pub synced_unspent: Vec<(WalletStatusElement, MsMembershipProof<Hash>)>,
     pub unsynced_unspent_amount: Amount,
-    pub unsynced_unspent: Vec<WalletStatusElement>, // (leaf index, amount)
+    pub unsynced_unspent: Vec<WalletStatusElement>,
     pub synced_spent_amount: Amount,
-    pub synced_spent: Vec<WalletStatusElement>, // (leaf index, amount)
+    pub synced_spent: Vec<WalletStatusElement>,
     pub unsynced_spent_amount: Amount,
-    pub unsynced_spent: Vec<WalletStatusElement>, // (leaf index, amount)
+    pub unsynced_spent: Vec<WalletStatusElement>,
 }
 
 impl Display for WalletStatus {
@@ -34,7 +36,10 @@ impl Display for WalletStatus {
             "synced, unspent UTXOS: count: {}, amount: {:?}\n[{}]",
             synced_unspent_count,
             self.synced_unspent_amount,
-            self.synced_unspent.iter().map(|x| x.to_string()).join(",")
+            self.synced_unspent
+                .iter()
+                .map(|x| x.0.to_string())
+                .join(",")
         );
         let unsynced_unspent_count: usize = self.unsynced_unspent.len();
         let unsynced_unspent: String = format!(

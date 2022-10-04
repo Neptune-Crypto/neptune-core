@@ -541,13 +541,14 @@ impl WalletState {
 
     pub async fn get_wallet_status(&self) -> WalletStatus {
         let m_utxos = self.get_monitored_utxos().await;
-        let synced_unspent: Vec<WalletStatusElement> = m_utxos
+        let synced_unspent: Vec<(WalletStatusElement, MsMembershipProof<Hash>)> = m_utxos
             .iter()
             .filter(|x| x.spent_in_block.is_none() && x.has_synced_membership_proof)
             .map(|x| {
-                WalletStatusElement(
-                    x.get_latest_membership_proof().auth_path_aocl.data_index,
-                    x.utxo.amount,
+                let ms_mp = x.get_latest_membership_proof();
+                (
+                    WalletStatusElement(ms_mp.auth_path_aocl.data_index, x.utxo),
+                    ms_mp,
                 )
             })
             .collect();
@@ -557,7 +558,7 @@ impl WalletState {
             .map(|x| {
                 WalletStatusElement(
                     x.get_latest_membership_proof().auth_path_aocl.data_index,
-                    x.utxo.amount,
+                    x.utxo,
                 )
             })
             .collect();
@@ -567,7 +568,7 @@ impl WalletState {
             .map(|x| {
                 WalletStatusElement(
                     x.get_latest_membership_proof().auth_path_aocl.data_index,
-                    x.utxo.amount,
+                    x.utxo,
                 )
             })
             .collect();
@@ -577,18 +578,18 @@ impl WalletState {
             .map(|x| {
                 WalletStatusElement(
                     x.get_latest_membership_proof().auth_path_aocl.data_index,
-                    x.utxo.amount,
+                    x.utxo,
                 )
             })
             .collect();
         WalletStatus {
-            synced_unspent_amount: synced_unspent.iter().map(|x| x.1).sum(),
+            synced_unspent_amount: synced_unspent.iter().map(|x| x.0 .1.amount).sum(),
             synced_unspent,
-            unsynced_unspent_amount: unsynced_unspent.iter().map(|x| x.1).sum(),
+            unsynced_unspent_amount: unsynced_unspent.iter().map(|x| x.1.amount).sum(),
             unsynced_unspent,
-            synced_spent_amount: synced_spent.iter().map(|x| x.1).sum(),
+            synced_spent_amount: synced_spent.iter().map(|x| x.1.amount).sum(),
             synced_spent,
-            unsynced_spent_amount: unsynced_spent.iter().map(|x| x.1).sum(),
+            unsynced_spent_amount: unsynced_spent.iter().map(|x| x.1.amount).sum(),
             unsynced_spent,
         }
     }
