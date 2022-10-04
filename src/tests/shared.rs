@@ -451,7 +451,7 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
         membership_proof: membership_proof.into(),
         removal_record: removal_record.clone(),
         // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
-        signature: ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap(),
+        signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
     };
     tx.inputs.push(new_devnet_input);
     block.body.transaction = tx;
@@ -576,7 +576,7 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
         membership_proof: mock_ms_membership_proof.into(),
         removal_record: mock_removal_record,
         // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
-        signature: ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap(),
+        signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
     }
 }
 

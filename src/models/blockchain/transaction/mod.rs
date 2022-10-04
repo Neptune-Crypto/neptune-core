@@ -163,7 +163,7 @@ impl Transaction {
         let kernel_digest: Digest = kernel.neptune_hash();
         let signature = wallet.sign_digest(kernel_digest);
         for input in self.inputs.iter_mut() {
-            input.signature = signature;
+            input.signature = Some(signature);
         }
     }
 
@@ -225,10 +225,12 @@ impl Transaction {
         }
 
         for input in self.inputs.iter() {
-            if input
-                .signature
-                .verify(&msg, &input.utxo.public_key)
-                .is_err()
+            if input.signature.is_some()
+                && input
+                    .signature
+                    .unwrap()
+                    .verify(&msg, &input.utxo.public_key)
+                    .is_err()
             {
                 warn!("Invalid input-signature for transaction");
                 return false;
