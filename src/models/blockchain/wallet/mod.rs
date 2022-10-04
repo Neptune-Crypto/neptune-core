@@ -640,61 +640,31 @@ impl WalletState {
             .into()
     }
 
-    pub async fn create_transaction(
+    // Allocate sufficient UTXOs to generate a transaction. `amount` must include fees that are
+    // paid in the transaction.
+    pub async fn allocate_sufficient_input_funds(
         &self,
-        output_utxo: Utxo,
-        // amount: Amount,
-        // recipient_public_key: secp256k1::PublicKey,
-    ) -> Result<Transaction> {
-        let _spendable_utxos: Vec<(Utxo, Digest)> = self
-            .allocate_sufficient_input_funds(output_utxo.amount)
-            .await?;
-        let _membership_proofs: Vec<MsMembershipProof<Hash>> = vec![];
-
-        // TODO: Fetch `MembershipProof`s, generate `RemovalRecord`s, and sign.
-        //
-        // See `allow_consumption_of_genesis_output_test` in archival_state.
-        let inputs: Vec<DevNetInput> = vec![];
-
-        let output_randomness = self.next_output_randomness().await;
-
-        let outputs = vec![(output_utxo, output_randomness)];
-
-        let transaction = Transaction {
-            inputs,
-            outputs,
-            public_scripts: vec![],
-            fee: Amount::zero(),
-            timestamp: BFieldElement::new(1655916990),
-            authority_proof: None,
-        };
-
-        Ok(transaction)
-    }
-
-    // We apply the strategy of using all UTXOs for the wallet as input and transfer any surplus back to our wallet.
-    //
-    // TODO: Assert that balance is sufficient! (There is similar logic in block-validation elsewhere.)
-    async fn allocate_sufficient_input_funds(
-        &self,
-        _amount: Amount,
-    ) -> Result<Vec<(Utxo, Digest)>> {
-        let _allocated_amount = Amount::zero();
-
+        requested_amount: Amount,
+    ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let _wallet_status: WalletStatus = self.get_wallet_status().await;
+        let wallet_status: WalletStatus = self.get_wallet_status().await;
 
-        // if wallet_status.synced_unspent.
+        // First check that we have enough. Otherwise return an error.
+        if wallet_status.synced_unspent_amount < requested_amount {
+            // TODO: Change this to `Display` print once available.
+            bail!("Insufficient synced amount to create transaction. Requested: {:?}, synced available amount: {:?}", requested_amount, wallet_status.synced_unspent_amount);
+        }
 
-        // while allocated_amount < amount {
-        // TODO: Allocate enough.
-        //
-        // TODO: Depends on wallet database of owned UTXOs being available.
-        //
-        // TODO: Eventually sort by optimal granularity.
-        // }
-        Ok(vec![])
+        let mut ret: Vec<(Utxo, MsMembershipProof<Hash>)> = vec![];
+        let mut allocated_amount = Amount::zero();
+        while allocated_amount < requested_amount {
+            let next_elem = wallet_status.synced_unspent[ret.len()].clone();
+            allocated_amount = allocated_amount + next_elem.0 .1.amount;
+            ret.push((next_elem.0 .1, next_elem.1));
+        }
+
+        Ok(ret)
     }
 }
 
@@ -885,6 +855,105 @@ mod wallet_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn allocate_sufficient_input_funds_test() -> Result<()> {
+        let own_wallet = Wallet::new(generate_secret_key());
+        let own_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
+        let genesis_block = Block::genesis_block();
+        let block_1 = make_mock_block(
+            &genesis_block,
+            None,
+            own_wallet_state.wallet.get_public_key(),
+        );
+
+        // Add block to wallet state
+        own_wallet_state.update_wallet_state_with_new_block(
+            &block_1,
+            &mut own_wallet_state.wallet_db.lock().await,
+        )?;
+
+        // Verify that the allocater returns a sane amount
+        assert_eq!(
+            1,
+            own_wallet_state
+                .allocate_sufficient_input_funds(1.into())
+                .await
+                .unwrap()
+                .len()
+        );
+        assert_eq!(
+            1,
+            own_wallet_state
+                .allocate_sufficient_input_funds(99.into())
+                .await
+                .unwrap()
+                .len()
+        );
+        assert_eq!(
+            1,
+            own_wallet_state
+                .allocate_sufficient_input_funds(100.into())
+                .await
+                .unwrap()
+                .len()
+        );
+
+        // Cannot allocate more than we have: 100
+        assert!(own_wallet_state
+            .allocate_sufficient_input_funds(101.into())
+            .await
+            .is_err());
+
+        // Mine 21 more blocks and verify that 2200 worth of UTXOs can be allocated
+        let mut next_block = block_1.clone();
+        for _ in 0..21 {
+            let previous_block = next_block;
+            next_block = make_mock_block(
+                &previous_block,
+                None,
+                own_wallet_state.wallet.get_public_key(),
+            );
+            own_wallet_state.update_wallet_state_with_new_block(
+                &next_block,
+                &mut own_wallet_state.wallet_db.lock().await,
+            )?;
+        }
+
+        assert_eq!(
+            5,
+            own_wallet_state
+                .allocate_sufficient_input_funds(500.into())
+                .await
+                .unwrap()
+                .len()
+        );
+        assert_eq!(
+            6,
+            own_wallet_state
+                .allocate_sufficient_input_funds(501.into())
+                .await
+                .unwrap()
+                .len()
+        );
+        assert_eq!(
+            22,
+            own_wallet_state
+                .allocate_sufficient_input_funds(2200.into())
+                .await
+                .unwrap()
+                .len()
+        );
+
+        // Cannot allocate more than we have: 2200
+        assert!(own_wallet_state
+            .allocate_sufficient_input_funds(2201.into())
+            .await
+            .is_err());
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
         // an archival state is needed for how we currently add inputs to a transaction.
         // So it's just used to generate test data, not in any of the functions that are
@@ -935,7 +1004,8 @@ mod wallet_tests {
         );
         add_output_to_block(&mut block_1, output_utxo_3);
 
-        // Sign the transaction and verify validity
+        // Sign the transaction with the premine-wallet (since it owns the single input into
+        // the block), and verify its validity.
         block_1.body.transaction.sign(&premine_wallet);
         assert!(block_1.devnet_is_valid(&genesis_block));
 
@@ -1012,6 +1082,26 @@ mod wallet_tests {
             Into::<BlockHeight>::into(18u64),
             block_18.header.height,
             "Block height must be 18 after genesis and 18 blocks being mined"
+        );
+
+        // Check that `WalletStatus` is returned correctly
+        let wallet_status = own_wallet_state.get_wallet_status().await;
+        assert_eq!(
+            21,
+            wallet_status.synced_unspent.len(),
+            "Wallet must have 20 synced, unspent UTXOs"
+        );
+        assert!(
+            wallet_status.synced_spent.is_empty(),
+            "Wallet must have 0 synced, spent UTXOs"
+        );
+        assert!(
+            wallet_status.unsynced_spent.is_empty(),
+            "Wallet must have 0 unsynced spent UTXOs"
+        );
+        assert!(
+            wallet_status.unsynced_unspent.is_empty(),
+            "Wallet must have 0 unsynced unspent UTXOs"
         );
 
         // verify that membership proofs are valid after forks
@@ -1218,12 +1308,6 @@ mod wallet_tests {
             forked_utxo_info.blockhash_to_membership_proof.len(),
             "Two membership proofs must be stored for forked UTXO"
         );
-
-        // Then fork to B-chain with `block_4b` and verify that last output for `own_wallet` still works
-        // Then fork back to A-chain and verify that last output for `own_wallet` still works.
-        // With these forks we verify that membership proofs are stored across forks.
-
-        // We could also test that MPs are correctly marked as spent
 
         Ok(())
     }
