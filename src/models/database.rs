@@ -202,7 +202,7 @@ pub enum WalletDbKey {
     // digest represents a block hash
     WalletBlockUtxos(Digest),
 
-    UnspentUtxos,
+    MonitoredUtxos,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,10 +276,10 @@ pub enum WalletDbValue {
     // *incoming* transactions (i.e. spent UTXOs).
     WalletBlockUtxos(WalletBlockUtxos),
 
-    // Stores all confirmed and unspent UTXOs controlled by this wallet, and the associated membership proofs
+    // Stores all confirmed UTXOs controlled by this wallet, and the associated membership proofs
     // This is stored as a vector an not as a (aocl_leaf_index => MonitoredUtxo) map since in case of forks
     // UTXOs can have their `aocl_leaf_index` changed, and managing that in the wallet would be messy.
-    UnspentUtxos(Vec<MonitoredUtxo>),
+    MonitoredUtxos(Vec<MonitoredUtxo>),
 }
 
 impl WalletDbValue {
@@ -303,10 +303,10 @@ impl WalletDbValue {
         }
     }
 
-    pub fn as_unspent_utxos(&self) -> Vec<MonitoredUtxo> {
+    pub fn as_monitored_utxos(&self) -> Vec<MonitoredUtxo> {
         match self {
-            WalletDbValue::UnspentUtxos(vals) => vals.to_vec(),
-            _val => panic!("Requested unspent UTXOs, found {:?}", self),
+            WalletDbValue::MonitoredUtxos(vals) => vals.to_vec(),
+            _val => panic!("Requested monitored UTXOs, found {:?}", self),
         }
     }
 }

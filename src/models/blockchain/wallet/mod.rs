@@ -293,8 +293,8 @@ impl WalletState {
         // Derive the membership proofs for new input UTXOs, *and* in the process update existing membership
         // proofs with updates from this block
         let mut monitored_utxos: Vec<MonitoredUtxo> = wallet_db_lock
-            .get(WalletDbKey::UnspentUtxos)
-            .map(|x| x.as_unspent_utxos())
+            .get(WalletDbKey::MonitoredUtxos)
+            .map(|x| x.as_monitored_utxos())
             .unwrap_or_default();
 
         // Let's not store the UTXOs of blocks that don't affect our balance
@@ -508,8 +508,8 @@ impl WalletState {
         }
 
         new_wallet_db_values.push((
-            WalletDbKey::UnspentUtxos,
-            WalletDbValue::UnspentUtxos(monitored_utxos),
+            WalletDbKey::MonitoredUtxos,
+            WalletDbValue::MonitoredUtxos(monitored_utxos),
         ));
 
         // Push block hash for which wallet has been updated
@@ -528,8 +528,8 @@ impl WalletState {
         self.wallet_db
             .lock()
             .await
-            .get(WalletDbKey::UnspentUtxos)
-            .map(|x| x.as_unspent_utxos())
+            .get(WalletDbKey::MonitoredUtxos)
+            .map(|x| x.as_monitored_utxos())
             .unwrap_or_default()
     }
 
