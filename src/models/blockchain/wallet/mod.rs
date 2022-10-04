@@ -6,7 +6,6 @@ use super::digest::{
     Digest, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
     RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
 };
-use super::transaction::devnet_input::DevNetInput;
 use super::transaction::utxo::Utxo;
 use super::transaction::{Amount, Transaction};
 use crate::config_models::data_directory::get_data_directory;
@@ -430,6 +429,11 @@ impl WalletState {
         );
 
         // Loop over all output UTXOs, applying all removal records
+        debug!("Block has {} removal records", removal_records.len());
+        debug!(
+            "Transaction has {} inputs",
+            block.body.transaction.inputs.len()
+        );
         let mut i = 0;
         while let Some(removal_record) = removal_records.pop() {
             let res = MsMembershipProof::batch_update_from_remove(
@@ -451,6 +455,10 @@ impl WalletState {
             // membership proofs of spent UTXOs once they have been spent for M blocks.
             let input_utxo = block.body.transaction.inputs[i].utxo;
             if input_utxo.matches_pubkey(my_pub_key) {
+                debug!(
+                    "Discovered own input at input {}, marking UTXO as spent.",
+                    i
+                );
                 match monitored_utxos
                     .iter_mut()
                     .find(|x| x.utxo.neptune_hash() == input_utxo.neptune_hash())
