@@ -105,6 +105,10 @@ async fn mine_devnet_block(
     sender: oneshot::Sender<Block>,
     state: GlobalState,
 ) {
+    info!(
+        "Mining on block with {} outputs",
+        block_body.transaction.outputs.len()
+    );
     // Mining takes place here
     while Into::<OrderedDigest>::into(block_header.neptune_hash())
         >= OrderedDigest::to_digest_threshold(block_header.target_difficulty)
@@ -198,6 +202,7 @@ pub async fn mock_regtest_mine(
                 make_coinbase_transaction(own_public_key, &latest_block.header);
 
             let block_capacity_for_transactions = SIZE_1MB_IN_BYTES;
+
             let transactions = state
                 .mempool
                 .get_densest_transactions(block_capacity_for_transactions);
@@ -241,6 +246,9 @@ pub async fn mock_regtest_mine(
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
+                    MainToMiner::ReadyToMineNextBlock => {
+                        debug!("Got {:?} from `main_loop`", MainToMiner::ReadyToMineNextBlock);
+                    }
                 }
             }
             new_fake_block_res = receiver => {
@@ -252,9 +260,24 @@ pub async fn mock_regtest_mine(
                     }
                 };
 
+                // Sanity check, remove for more efficient mining.
+                assert!(new_fake_block.archival_is_valid(&latest_block), "Own mined block must be valid");
+
                 info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.header.height, new_fake_block.hash);
+
                 latest_block = new_fake_block.clone();
                 to_main.send(MinerToMain::NewBlock(Box::new(new_fake_block))).await?;
+
+                // Wait until `main_loop` has updated `global_state` before proceding. Otherwise, we would use
+                // a deprecated version of the mempool to build the next block. We don't mark the from-main loop
+                // received value as read yet as this would open up for race conditions if `main_loop` received
+                // a block from a peer at the same time as this block was found.
+                let _wait = from_main.changed().await;
+                let msg = from_main.borrow().clone();
+                debug!("Got {:?} msg from main after finding block", msg);
+                if !matches!(msg, MainToMiner::ReadyToMineNextBlock) {
+                    error!("Got bad message from `main_loop`: {:?}", msg);
+                }
             }
         }
     }

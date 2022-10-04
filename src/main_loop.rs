@@ -388,6 +388,9 @@ impl MainLoopHandler {
                     .remove_transactions_with(&new_block.body.transaction, &mut mempool_write_lock);
 
                 *light_state_locked = new_block.header.clone();
+
+                self.main_to_miner_tx
+                    .send(MainToMiner::ReadyToMineNextBlock)?;
             }
         }
 
@@ -478,13 +481,6 @@ impl MainLoopHandler {
                         }
                     }
 
-                    // When receiving a block from a peer thread, we assume it is verified.
-                    // It is the peer thread's responsibility to verify the block.
-                    if self.global_state.cli.mine {
-                        self.main_to_miner_tx
-                            .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
-                    }
-
                     for new_block in blocks {
                         debug!("Storing block {:?} in database", new_block.hash);
                         self.global_state
@@ -522,6 +518,15 @@ impl MainLoopHandler {
                             &new_block.body.transaction,
                             &mut mempool_write_lock,
                         );
+                    }
+
+                    // When receiving a block from a peer thread, we assume it is verified.
+                    // It is the peer thread's responsibility to verify the block.
+                    // We shouldn't start mining on the new block before we have removed the relevant
+                    // transactions from the mempool though.
+                    if self.global_state.cli.mine {
+                        self.main_to_miner_tx
+                            .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                     }
 
                     // Update information about latest header

@@ -16,6 +16,11 @@ pub enum MainToMiner {
     Empty,
     NewBlock(Box<Block>),
     Shutdown,
+
+    // `ReadyToMineNextBlock` is used to communicate that a block received from the miner has
+    // been processed by `main_loop` and that the mempool thus is in an updated state, ready to
+    // mine the next block.
+    ReadyToMineNextBlock,
     // StopMining,
     // StartMining,
     // SetCoinbasePubkey,
