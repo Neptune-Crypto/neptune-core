@@ -140,7 +140,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         wallet_state,
         mempool,
     };
-    let own_handshake_data: HandshakeData = state.get_handshakedata();
+    let own_handshake_data: HandshakeData = state.get_handshakedata().await;
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     for peer in state.cli.peers.clone() {

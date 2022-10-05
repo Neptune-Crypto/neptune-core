@@ -74,17 +74,19 @@ impl RPC for NeptuneRPCServer {
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
         // let lookup_res = databases.latest_block_header.get(());
-        let latest_block_header = self.state.chain.light_state.get_latest_block_header();
+        let latest_block_header =
+            executor::block_on(self.state.chain.light_state.get_latest_block_header());
         future::ready(latest_block_header.height)
     }
 
     fn head(self, _: context::Context) -> Self::HeadFut {
-        let latest_block = self.state.chain.light_state.get_latest_block();
+        let latest_block = executor::block_on(self.state.chain.light_state.get_latest_block());
         future::ready(latest_block.hash)
     }
 
     fn heads(self, _context: tarpc::context::Context, n: usize) -> Self::HeadsFut {
-        let latest_block_digest = self.state.chain.light_state.get_latest_block().hash;
+        let latest_block_digest =
+            executor::block_on(self.state.chain.light_state.get_latest_block()).hash;
 
         let head_hashes = executor::block_on(
             self.state

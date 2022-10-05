@@ -292,8 +292,8 @@ pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
         .block_databases
         .lock()
         .await;
-    let mut light_state_locked: std::sync::MutexGuard<Block> =
-        state.chain.light_state.latest_block.lock().unwrap();
+    let mut light_state_locked: tokio::sync::MutexGuard<Block> =
+        state.chain.light_state.latest_block.lock().await;
 
     let previous_pow_family = light_state_locked.header.proof_of_work_family;
     state.chain.archival_state.as_ref().unwrap().write_block(

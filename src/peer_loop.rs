@@ -345,6 +345,7 @@ impl PeerLoopHandler {
                     .chain
                     .light_state
                     .get_latest_block_header()
+                    .await
                     .proof_of_work_family
                     < block.header.proof_of_work_family
                     || !peer_state_info.fork_reconciliation_blocks.is_empty();
@@ -363,7 +364,7 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestBatch(most_canonical_digests, requested_batch_size) => {
                 // Find the block that the peer is requesting to start from
                 let mut peers_most_canonical_block: Option<Block> = None;
-                let tip_header = self.state.chain.light_state.get_latest_block_header();
+                let tip_header = self.state.chain.light_state.get_latest_block_header().await;
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
@@ -537,6 +538,7 @@ impl PeerLoopHandler {
                         .chain
                         .light_state
                         .get_latest_block_header()
+                        .await
                         .proof_of_work_family
                         < block_notification.proof_of_work_family;
 
@@ -606,7 +608,7 @@ impl PeerLoopHandler {
                 // If more than one block is found, we need to find the one that's canonical
                 let mut canonical_chain_block_header = block_headers[0].clone();
                 if block_headers.len() > 1 {
-                    let tip_header = self.state.chain.light_state.get_latest_block_header();
+                    let tip_header = self.state.chain.light_state.get_latest_block_header().await;
                     for block_header in block_headers {
                         if self
                             .state

@@ -343,7 +343,7 @@ impl MainLoopHandler {
                     .light_state
                     .latest_block
                     .lock()
-                    .unwrap();
+                    .await;
                 let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
                     .global_state
                     .mempool
@@ -443,13 +443,13 @@ impl MainLoopHandler {
                         .ms_block_sync_db
                         .lock()
                         .await;
-                    let mut light_state_locked: std::sync::MutexGuard<Block> = self
+                    let mut light_state_locked: tokio::sync::MutexGuard<Block> = self
                         .global_state
                         .chain
                         .light_state
                         .latest_block
                         .lock()
-                        .unwrap();
+                        .await;
                     let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
                         .global_state
                         .mempool
@@ -560,7 +560,8 @@ impl MainLoopHandler {
                     .global_state
                     .chain
                     .light_state
-                    .get_latest_block_header();
+                    .get_latest_block_header()
+                    .await;
                 if enter_sync_mode(
                     our_block_tip_header,
                     claimed_state,
@@ -590,7 +591,8 @@ impl MainLoopHandler {
                     .global_state
                     .chain
                     .light_state
-                    .get_latest_block_header();
+                    .get_latest_block_header()
+                    .await;
 
                 if self.global_state.net.syncing.read().unwrap().to_owned() {
                     let stay_in_sync_mode = stay_in_sync_mode(
@@ -718,7 +720,7 @@ impl MainLoopHandler {
             "Connecting to peer {} with distance {}",
             peer_candidate, candidate_distance
         );
-        let own_handshake_data: HandshakeData = self.global_state.get_handshakedata();
+        let own_handshake_data: HandshakeData = self.global_state.get_handshakedata().await;
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
         let state_clone = self.global_state.to_owned();
         let peer_thread_to_main_tx_clone = self.peer_thread_to_main_tx.to_owned();
@@ -862,7 +864,7 @@ impl MainLoopHandler {
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
                     let peer_address = stream.peer_addr().unwrap();
-                    let own_handshake_data: HandshakeData = state.get_handshakedata();
+                    let own_handshake_data: HandshakeData = state.get_handshakedata().await;
                     tokio::spawn(async move {
                         match answer_peer(
                             stream,
