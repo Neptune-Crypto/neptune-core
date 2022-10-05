@@ -19,11 +19,12 @@ use twenty_first::{
     util_types::simple_hasher::Hasher,
 };
 
+use crate::models::state::wallet::Wallet;
+
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
 use super::{
     digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
-    wallet::Wallet,
 };
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
@@ -58,7 +59,7 @@ impl GetSize for Transaction {
 }
 
 impl Hashable for Transaction {
-    fn hash(&self) -> Digest {
+    fn neptune_hash(&self) -> Digest {
         // TODO: Consider using a Merkle tree construction here instead
         let hasher = Hash::new();
 
@@ -66,14 +67,14 @@ impl Hashable for Transaction {
         let outputs_preimage: Vec<Vec<BFieldElement>> = self
             .outputs
             .iter()
-            .map(|(output_utxo, _)| <Utxo as Hashable>::hash(output_utxo).into())
+            .map(|(output_utxo, _)| <Utxo as Hashable>::neptune_hash(output_utxo).into())
             .collect();
         let outputs_digest = hasher.hash_many(&outputs_preimage);
 
         // Hash inputs
         let mut inputs_preimage: Vec<Vec<BFieldElement>> = vec![];
         for input in self.inputs.iter() {
-            inputs_preimage.push(<Utxo as Hashable>::hash(&input.utxo).into());
+            inputs_preimage.push(<Utxo as Hashable>::neptune_hash(&input.utxo).into());
             // We don't hash the membership proofs as they aren't part of the main net blocks
             inputs_preimage.push(input.removal_record.hash());
         }
@@ -116,7 +117,7 @@ impl Hashable for Transaction {
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Transaction {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = <Transaction as Hashable>::hash(self);
+        let our_hash = <Transaction as Hashable>::neptune_hash(self);
         <Digest as StdHash>::hash(&our_hash, state);
     }
 }
@@ -126,7 +127,7 @@ impl Transaction {
         self.inputs.iter().map(|dni| dni.utxo).collect()
     }
 
-    pub fn get_input_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<Utxo> {
+    pub fn get_own_input_utxos(&self, pub_key: PublicKey) -> Vec<Utxo> {
         self.inputs
             .iter()
             .map(|dni| dni.utxo)
@@ -134,7 +135,7 @@ impl Transaction {
             .collect()
     }
 
-    pub fn get_output_utxos_with_pub_key(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
+    pub fn get_own_output_utxos_and_comrands(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
         self.outputs
             .iter()
             .filter(|(utxo, _randomness)| utxo.public_key == pub_key)
@@ -160,10 +161,10 @@ impl Transaction {
     /// Sign all transaction inputs with the same signature
     pub fn sign(&mut self, wallet: &Wallet) {
         let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = kernel.hash();
+        let kernel_digest: Digest = kernel.neptune_hash();
         let signature = wallet.sign_digest(kernel_digest);
         for input in self.inputs.iter_mut() {
-            input.signature = signature;
+            input.signature = Some(signature);
         }
     }
 
@@ -174,7 +175,7 @@ impl Transaction {
     /// current signature scheme.
     pub fn devnet_authority_sign(&mut self) {
         let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = kernel.hash();
+        let kernel_digest: Digest = kernel.neptune_hash();
         let authority_wallet = Wallet::devnet_authority_wallet();
         let signature = authority_wallet.sign_digest(kernel_digest);
 
@@ -210,7 +211,7 @@ impl Transaction {
         //  - for all inputs
         //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
         let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = kernel.hash();
+        let kernel_digest: Digest = kernel.neptune_hash();
         let kernel_digest_as_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = kernel_digest.into();
         let msg: Message = Message::from_slice(&kernel_digest_as_bytes).unwrap();
 
@@ -225,10 +226,12 @@ impl Transaction {
         }
 
         for input in self.inputs.iter() {
-            if input
-                .signature
-                .verify(&msg, &input.utxo.public_key)
-                .is_err()
+            if input.signature.is_some()
+                && input
+                    .signature
+                    .unwrap()
+                    .verify(&msg, &input.utxo.public_key)
+                    .is_err()
             {
                 warn!("Invalid input-signature for transaction");
                 return false;
@@ -328,7 +331,7 @@ mod transaction_tests {
 
         // Make an authority sign with a wrong secret key and verify failure
         let kernel: TransactionKernel = merged_transaction.get_kernel();
-        let kernel_digest: Digest = kernel.hash();
+        let kernel_digest: Digest = kernel.neptune_hash();
         let bad_authority_signature = wallet_1.sign_digest(kernel_digest);
         merged_transaction.authority_proof = Some(bad_authority_signature);
         assert!(

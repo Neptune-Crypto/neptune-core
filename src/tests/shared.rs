@@ -42,16 +42,17 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
-use crate::models::blockchain::wallet;
-use crate::models::blockchain::wallet::Wallet;
-use crate::models::blockchain::wallet::WalletBlockUtxos;
-use crate::models::blockchain::wallet::WalletState;
 use crate::models::database::BlockIndexKey;
+use crate::models::database::WalletDbKey;
+use crate::models::database::WalletDbValue;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::wallet;
+use crate::models::state::wallet::Wallet;
+use crate::models::state::wallet::WalletState;
 use crate::models::state::GlobalState;
 use crate::Hash;
 use crate::{
@@ -234,7 +235,7 @@ pub async fn get_test_genesis_setup(
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
-        wallet_state: get_mock_wallet_state(),
+        wallet_state: get_mock_wallet_state(None).await,
         mempool,
     };
     Ok((
@@ -408,7 +409,7 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     let addition_record: AdditionRecord<Hash> = block
         .body
         .previous_mutator_set_accumulator
-        .commit(&utxo.hash().into(), &output_randomness);
+        .commit(&utxo.neptune_hash().into(), &output_randomness);
     tx.outputs.push((utxo, output_randomness.into()));
 
     // Add addition record for this output
@@ -431,7 +432,7 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
         .next_mutator_set_accumulator
         .get_commitment()
         .into();
-    block.header.block_body_merkle_root = block.body.hash();
+    block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
 /// Add an unsigned (incorrectly signed) devnet input to a transaction
@@ -449,7 +450,7 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
         membership_proof: membership_proof.into(),
         removal_record: removal_record.clone(),
         // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
-        signature: ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap(),
+        signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
     };
     tx.inputs.push(new_devnet_input);
     block.body.transaction = tx;
@@ -476,18 +477,36 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
         .next_mutator_set_accumulator
         .get_commitment()
         .into();
-    block.header.block_body_merkle_root = block.body.hash();
+    block.header.block_body_merkle_root = block.body.neptune_hash();
+}
+
+pub fn add_unsigned_input_to_block(
+    block: &mut Block,
+    consumed_utxo: Utxo,
+    membership_proof: MsMembershipProof<Hash>,
+) {
+    let item = consumed_utxo.neptune_hash();
+    let input_removal_record = block
+        .body
+        .previous_mutator_set_accumulator
+        .drop(&item.into(), &membership_proof);
+    add_unsigned_dev_net_input_to_block_transaction(
+        block,
+        consumed_utxo,
+        membership_proof,
+        input_removal_record,
+    );
 }
 
 /// Helper function to add an unsigned input to a block's transaction
-pub async fn add_unsigned_input_to_block(
+pub async fn add_unsigned_input_to_block_ams(
     block: &mut Block,
     consumed_utxo: Utxo,
     randomness: Digest,
     ams: &Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>>,
     aocl_leaf_index: u128,
 ) {
-    let item = consumed_utxo.hash();
+    let item = consumed_utxo.neptune_hash();
     let input_membership_proof = ams
         .lock()
         .await
@@ -556,7 +575,7 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
         membership_proof: mock_ms_membership_proof.into(),
         removal_record: mock_removal_record,
         // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
-        signature: ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap(),
+        signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
     }
 }
 
@@ -619,7 +638,7 @@ pub fn make_mock_transaction_with_wallet(
     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
     let output_utxos_with_digest = outputs
         .into_iter()
-        .map(|out_utxo| (out_utxo, <Utxo as Hashable>::hash(&out_utxo)))
+        .map(|out_utxo| (out_utxo, <Utxo as Hashable>::neptune_hash(&out_utxo)))
         .collect::<Vec<_>>();
 
     let timestamp = timestamp.unwrap_or_else(|| {
@@ -661,7 +680,7 @@ pub fn make_mock_block(
     );
     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
-    let coinbase_digest: Digest = coinbase_utxo.hash();
+    let coinbase_digest: Digest = coinbase_utxo.neptune_hash();
 
     let mut coinbase_addition_record: AdditionRecord<Hash> =
         new_ms.commit(&coinbase_digest.into(), &output_randomness);
@@ -698,7 +717,7 @@ pub fn make_mock_block(
             Some(td) => td,
             None => U32s::one(),
         },
-        block_body_merkle_root: block_body.hash(),
+        block_body_merkle_root: block_body.neptune_hash(),
         uncles: vec![],
     };
 
@@ -706,22 +725,17 @@ pub fn make_mock_block(
 }
 
 /// Return a dummy-wallet used for testing
-pub fn get_mock_wallet_state() -> WalletState {
-    let dummy_secret_for_genesis_wallet = Digest::new([
-        BFieldElement::new(14683724377595469133),
-        BFieldElement::new(4905634007273628284),
-        BFieldElement::new(2544353828551980854),
-        BFieldElement::new(9457203229242732950),
-        BFieldElement::new(5097796649750941488),
-        BFieldElement::new(12701344140082211424),
-    ]);
-    let wallet = Wallet::new(dummy_secret_for_genesis_wallet);
+pub async fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
+    let wallet = match wallet {
+        Some(wallet) => wallet,
+        None => Wallet::devnet_authority_wallet(),
+    };
 
     let test_path = get_data_director_for_unit_tests().unwrap();
     let wallet_block_db_name = "mock_wallet_block_db";
 
-    let wallet_block_db = Arc::new(TokioMutex::new(
-        RustyLevelDB::<Digest, WalletBlockUtxos>::new(
+    let wallet_db = Arc::new(TokioMutex::new(
+        RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
             &test_path,
             wallet_block_db_name,
             rusty_leveldb::in_memory(),
@@ -738,11 +752,19 @@ pub fn get_mock_wallet_state() -> WalletState {
         .unwrap(),
     ));
 
-    WalletState {
+    let ret = WalletState {
         outgoing_utxo_counter_db,
-        wallet_block_db,
+        wallet_db: wallet_db.clone(),
         wallet,
-    }
+    };
+
+    // Wallet state has to be initialized with the genesis block, otherwise the outputs
+    // from it would be unspendable.
+    let mut wallet_db_lock = wallet_db.lock().await;
+    ret.update_wallet_state_with_new_block(&Block::genesis_block(), &mut wallet_db_lock)
+        .expect("Applying genesis block in unit test setup must succeed");
+
+    ret
 }
 
 pub async fn make_unit_test_archival_state() -> ArchivalState {

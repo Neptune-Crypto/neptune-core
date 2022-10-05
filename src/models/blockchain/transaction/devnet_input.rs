@@ -11,7 +11,7 @@ pub struct DevNetInput {
     pub utxo: Utxo,
     pub membership_proof: TransferMsMembershipProof<Hash>,
     pub removal_record: RemovalRecord<Hash>,
-    pub signature: ecdsa::Signature,
+    pub signature: Option<ecdsa::Signature>,
 }
 
 impl Eq for DevNetInput {}

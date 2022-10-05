@@ -5,6 +5,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
+use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use futures::executor;
 use futures::future::{self, Ready};
@@ -43,6 +44,10 @@ pub trait RPC {
 
     // Get sum of unspent UTXOs.
     async fn get_balance() -> Amount;
+
+    async fn get_wallet_status() -> WalletStatus;
+
+    async fn get_public_key() -> secp256k1::PublicKey;
 }
 
 #[derive(Clone)]
@@ -62,7 +67,9 @@ impl RPC for NeptuneRPCServer {
     type SendFut = Ready<bool>;
     type ShutdownFut = Ready<bool>;
     type GetBalanceFut = Ready<Amount>;
+    type GetWalletStatusFut = Ready<WalletStatus>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
+    type GetPublicKeyFut = Ready<secp256k1::PublicKey>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
@@ -73,7 +80,7 @@ impl RPC for NeptuneRPCServer {
 
     fn head(self, _: context::Context) -> Self::HeadFut {
         let latest_block_header = self.state.chain.light_state.get_latest_block_header();
-        future::ready(latest_block_header.hash())
+        future::ready(latest_block_header.neptune_hash())
     }
 
     fn heads(self, _context: tarpc::context::Context, n: usize) -> Self::HeadsFut {
@@ -82,7 +89,7 @@ impl RPC for NeptuneRPCServer {
             .chain
             .light_state
             .get_latest_block_header()
-            .hash();
+            .neptune_hash();
 
         let head_hashes = executor::block_on(
             self.state
@@ -143,23 +150,20 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn send(self, _ctx: context::Context, recipient_utxos: Vec<Utxo>) -> Self::SendFut {
-        let wallet_state = self.state.wallet_state;
-
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
         tracing::debug!(
             "Wallet public key: {}",
-            wallet_state.wallet.get_public_key()
+            self.state.wallet_state.wallet.get_public_key()
         );
 
         // Construct and send a transaction object for each of the elements in the user-submitted transactions
         let mut response: Result<(), SendError<RPCServerToMain>> = Ok(());
         for utxo in recipient_utxos {
             // 1. Build transaction objects.
-            let transaction: Transaction =
-                executor::block_on(wallet_state.create_transaction(utxo.amount, utxo.public_key))
-                    .expect("Could not create transaction object");
+            let transaction: Transaction = executor::block_on(self.state.create_transaction(utxo))
+                .expect("Could not create transaction object");
 
             // 2. Send transaction message to main
             response = executor::block_on(
@@ -190,6 +194,11 @@ impl RPC for NeptuneRPCServer {
         future::ready(res)
     }
 
+    fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {
+        let res = executor::block_on(self.state.wallet_state.get_wallet_status());
+        future::ready(res)
+    }
+
     fn get_header(
         self,
         _context: tarpc::context::Context,
@@ -204,6 +213,10 @@ impl RPC for NeptuneRPCServer {
                 .get_block_header(block_digest),
         );
         future::ready(res)
+    }
+
+    fn get_public_key(self, _context: tarpc::context::Context) -> Self::GetPublicKeyFut {
+        future::ready(self.state.wallet_state.wallet.get_public_key())
     }
 }
 

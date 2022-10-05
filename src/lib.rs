@@ -14,13 +14,14 @@ mod tests;
 use crate::config_models::data_directory::get_data_directory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::main_loop::MainLoopHandler;
-use crate::models::blockchain::wallet::Wallet;
 use crate::models::channel::RPCServerToMain;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::wallet::Wallet;
+use crate::models::state::wallet::WalletState;
 use crate::models::state::GlobalState;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
@@ -31,7 +32,6 @@ use futures::future;
 use futures::StreamExt;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
-use models::blockchain::wallet::WalletState;
 use models::database::MsBlockSyncKey;
 use models::database::MsBlockSyncValue;
 use models::database::{BlockDatabases, PeerDatabases};
@@ -79,7 +79,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     debug!("Data root path is {:?}", root_data_dir_path_buf);
     let wallet_file = Wallet::wallet_path(root_data_dir_path);
     let wallet: Wallet = Wallet::read_from_file_or_create(&wallet_file);
-    let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network);
+    let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network).await;
 
     // Connect to or create databases for block state, and for peer state
     let block_databases = ArchivalState::initialize_block_databases(root_data_dir_path)?;

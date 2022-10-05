@@ -30,6 +30,10 @@ impl Utxo {
         Self { amount, public_key }
     }
 
+    pub fn matches_pubkey(&self, public_key: secp256k1::PublicKey) -> bool {
+        self.public_key == public_key
+    }
+
     fn accumulate(&self) -> Vec<BFieldElement> {
         let amount_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.amount.into();
         let bytes: [u8; PUBLIC_KEY_LENGTH_IN_BYTES] = self.public_key.serialize();
@@ -40,7 +44,7 @@ impl Utxo {
 }
 
 impl Hashable for Utxo {
-    fn hash(&self) -> Digest {
+    fn neptune_hash(&self) -> Digest {
         let hasher = Hash::new();
         Digest::new(
             hasher
@@ -58,7 +62,7 @@ impl Hashable for Utxo {
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = <Utxo as Hashable>::hash(self);
+        let our_hash = <Utxo as Hashable>::neptune_hash(self);
         <Digest as StdHash>::hash(&our_hash, state);
     }
 }

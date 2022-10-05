@@ -22,9 +22,9 @@ pub struct BlockBody {
 
 impl Hashable for BlockBody {
     /// Return a Merkle root for all digests in the block body
-    fn hash(&self) -> Digest {
+    fn neptune_hash(&self) -> Digest {
         // Append the single Transaction's digest
-        let mut all_digests: Vec<Vec<BFieldElement>> = vec![self.transaction.hash().into()];
+        let mut all_digests: Vec<Vec<BFieldElement>> = vec![self.transaction.neptune_hash().into()];
 
         // Append mutator set's commitment
         //

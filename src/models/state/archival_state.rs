@@ -519,7 +519,7 @@ impl ArchivalState {
         // Filter out those that don't have the right parent
         blocks_from_childrens_generation
             .into_iter()
-            .filter(|x| x.prev_block_digest == block_header.hash())
+            .filter(|x| x.prev_block_digest == block_header.neptune_hash())
             .collect()
     }
 
@@ -541,7 +541,8 @@ impl ArchivalState {
         // If tip header height is less than this block, or the same but with a different hash,
         // then it cannot belong to the canonical chain
         if tip_header.height < block_height
-            || tip_header.height == block_height && tip_header.hash() != block_header.hash()
+            || tip_header.height == block_height
+                && tip_header.neptune_hash() != block_header.neptune_hash()
         {
             return false;
         }
@@ -563,14 +564,14 @@ impl ArchivalState {
 
         if previous_generation_blocks
             .iter()
-            .any(|x| x.hash() == tip_header.hash())
+            .any(|x| x.neptune_hash() == tip_header.neptune_hash())
         {
             return true;
         }
 
         if offspring_of_generation_x
             .iter()
-            .any(|x| x.hash() == tip_header.hash())
+            .any(|x| x.neptune_hash() == tip_header.neptune_hash())
         {
             return true;
         }
@@ -603,7 +604,7 @@ impl ArchivalState {
                         .unwrap();
                 }
 
-                return tip_ancestor.hash() == offspring_candidate.hash();
+                return tip_ancestor.neptune_hash() == offspring_candidate.neptune_hash();
             }
         }
 
@@ -628,7 +629,7 @@ impl ArchivalState {
         let mut parent_digest = input_block_header.prev_block_digest;
         let mut ret = vec![];
         while let Some(parent) = self.get_block_header(parent_digest).await {
-            ret.push(parent.hash());
+            ret.push(parent.neptune_hash());
             parent_digest = parent.prev_block_digest;
             count -= 1;
             if count == 0 {
@@ -793,7 +794,7 @@ mod archival_state_tests {
             state::{blockchain_state::BlockchainState, light_state::LightState},
         },
         tests::shared::{
-            add_block_to_archival_state, add_output_to_block, add_unsigned_input_to_block,
+            add_block_to_archival_state, add_output_to_block, add_unsigned_input_to_block_ams,
             get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
             unit_test_databases,
         },
@@ -867,7 +868,7 @@ mod archival_state_tests {
         println!("root_data_dir_path = {:?}", root_data_dir_path);
         let (ams, ms_block_sync) =
             ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None).await;
         let genesis_wallet = genesis_wallet_state.wallet;
         let ams = Arc::new(TokioMutex::new(ams));
         let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
@@ -931,7 +932,7 @@ mod archival_state_tests {
             make_mock_block(&mock_block_1, None, genesis_wallet.get_public_key());
         let consumed_utxo = mock_block_1.body.transaction.outputs[0].0;
         let output_randomness = mock_block_1.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut mock_block_2,
             consumed_utxo,
             output_randomness,
@@ -1036,7 +1037,7 @@ mod archival_state_tests {
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks.
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None).await;
         let genesis_wallet = genesis_wallet_state.wallet;
 
         // 1. Create new block 1 with two inputs and three outputs and store it to disk
@@ -1048,7 +1049,7 @@ mod archival_state_tests {
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut block_1a,
             consumed_utxo,
             premine_output_randomness,
@@ -1148,7 +1149,7 @@ mod archival_state_tests {
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None).await;
         let genesis_wallet = genesis_wallet_state.wallet;
 
         let genesis_block: Block = *archival_state.genesis_block.to_owned();
@@ -1161,7 +1162,7 @@ mod archival_state_tests {
             // Create next block with inputs and outputs
             let mut next_block =
                 make_mock_block(&previous_block, None, genesis_wallet.get_public_key());
-            add_unsigned_input_to_block(
+            add_unsigned_input_to_block_ams(
                 &mut next_block,
                 consumed_utxo,
                 output_randomness,
@@ -1282,7 +1283,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None).await;
         let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1_a = make_mock_block(
             &archival_state.genesis_block,
@@ -1297,7 +1298,7 @@ mod archival_state_tests {
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut block_1_a,
             consumed_utxo,
             premine_output_randomness,
@@ -1386,7 +1387,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let genesis_wallet_state = get_mock_wallet_state();
+        let genesis_wallet_state = get_mock_wallet_state(None).await;
         let genesis_wallet = genesis_wallet_state.wallet;
         let mut block_1 = make_mock_block(
             &archival_state.genesis_block,
@@ -1398,7 +1399,7 @@ mod archival_state_tests {
         let genesis_block = archival_state.genesis_block.clone();
         let consumed_utxo = archival_state.genesis_block.body.transaction.outputs[0].0;
         let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block(
+        add_unsigned_input_to_block_ams(
             &mut block_1,
             consumed_utxo,
             premine_output_randomness,
@@ -2208,8 +2209,8 @@ mod archival_state_tests {
             .get_ancestor_block_digests(mock_block_2.hash, 10)
             .await;
         assert_eq!(2, ancestor_digests.len());
-        assert_eq!(mock_block_1.header.hash(), ancestor_digests[0]);
-        assert_eq!(genesis.header.hash(), ancestor_digests[1]);
+        assert_eq!(mock_block_1.header.neptune_hash(), ancestor_digests[0]);
+        assert_eq!(genesis.header.neptune_hash(), ancestor_digests[1]);
 
         Ok(())
     }

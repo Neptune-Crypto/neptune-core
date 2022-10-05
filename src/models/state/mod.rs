@@ -1,8 +1,11 @@
+use anyhow::Result;
 use std::net::{IpAddr, SocketAddr};
 
 use self::{
     blockchain_state::BlockchainState, mempool::Mempool, networking_state::NetworkingState,
+    wallet::WalletState,
 };
+use super::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::{
     config_models::cli_args,
     database::{leveldb::LevelDB, rusty::RustyLevelDBIterator},
@@ -16,8 +19,7 @@ pub mod light_state;
 pub mod mempool;
 pub mod networking_state;
 pub mod shared;
-
-use super::blockchain::wallet::WalletState;
+pub mod wallet;
 
 /// `GlobalState` handles all state of a Neptune node that is shared across its threads.
 ///
@@ -41,6 +43,10 @@ pub struct GlobalState {
 }
 
 impl GlobalState {
+    pub async fn create_transaction(&self, _output_utxo: Utxo) -> Result<Transaction> {
+        todo!()
+    }
+
     // Storing IP addresses is, according to this answer, not a violation of GDPR:
     // https://law.stackexchange.com/a/28609/45846
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609

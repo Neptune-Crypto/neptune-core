@@ -2,9 +2,10 @@ use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::digest::{Digest, Hashable};
-use crate::models::blockchain::wallet::WalletBlockUtxos;
-use crate::models::database::{BlockDatabases, MsBlockSyncKey, MsBlockSyncValue};
+use crate::models::blockchain::digest::Hashable;
+use crate::models::database::{
+    BlockDatabases, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
+};
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
@@ -305,8 +306,8 @@ impl MainLoopHandler {
                 // Store block in database
                 // Acquire both locks before updating
                 let mut wallet_state_db: tokio::sync::MutexGuard<
-                    RustyLevelDB<Digest, WalletBlockUtxos>,
-                > = self.global_state.wallet_state.wallet_block_db.lock().await;
+                    RustyLevelDB<WalletDbKey, WalletDbValue>,
+                > = self.global_state.wallet_state.wallet_db.lock().await;
                 let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                     .global_state
                     .chain
@@ -380,11 +381,16 @@ impl MainLoopHandler {
                     .wallet_state
                     .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
 
+                // Update mempool with UTXOs from this block. This is done by removing all transaction
+                // that became invalid/was mined by this block.
                 self.global_state
                     .mempool
                     .remove_transactions_with(&new_block.body.transaction, &mut mempool_write_lock);
 
                 *light_state_locked = new_block.header.clone();
+
+                self.main_to_miner_tx
+                    .send(MainToMiner::ReadyToMineNextBlock)?;
             }
         }
 
@@ -404,8 +410,8 @@ impl MainLoopHandler {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
                     let mut wallet_state_db: tokio::sync::MutexGuard<
-                        RustyLevelDB<Digest, WalletBlockUtxos>,
-                    > = self.global_state.wallet_state.wallet_block_db.lock().await;
+                        RustyLevelDB<WalletDbKey, WalletDbValue>,
+                    > = self.global_state.wallet_state.wallet_db.lock().await;
                     let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
                         .global_state
                         .chain
@@ -475,13 +481,6 @@ impl MainLoopHandler {
                         }
                     }
 
-                    // When receiving a block from a peer thread, we assume it is verified.
-                    // It is the peer thread's responsibility to verify the block.
-                    if self.global_state.cli.mine {
-                        self.main_to_miner_tx
-                            .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
-                    }
-
                     for new_block in blocks {
                         debug!("Storing block {:?} in database", new_block.hash);
                         self.global_state
@@ -519,6 +518,15 @@ impl MainLoopHandler {
                             &new_block.body.transaction,
                             &mut mempool_write_lock,
                         );
+                    }
+
+                    // When receiving a block from a peer thread, we assume it is verified.
+                    // It is the peer thread's responsibility to verify the block.
+                    // We shouldn't start mining on the new block before we have removed the relevant
+                    // transactions from the mempool though.
+                    if self.global_state.cli.mine {
+                        self.main_to_miner_tx
+                            .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                     }
 
                     // Update information about latest header
@@ -788,7 +796,7 @@ impl MainLoopHandler {
         );
 
         // Find the blocks to request
-        let tip_digest = current_block_header.hash();
+        let tip_digest = current_block_header.neptune_hash();
         let most_canonical_digests = self
             .global_state
             .chain
@@ -796,7 +804,7 @@ impl MainLoopHandler {
             .as_ref()
             .unwrap()
             .get_ancestor_block_digests(
-                current_block_header.hash(),
+                current_block_header.neptune_hash(),
                 STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE,
             )
             .await;

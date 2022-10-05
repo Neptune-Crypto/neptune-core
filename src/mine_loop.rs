@@ -40,8 +40,8 @@ fn make_devnet_block_template(
         previous_block.body.next_mutator_set_accumulator.clone();
 
     for (output_utxo, randomness) in transaction.outputs.iter() {
-        let addition_record =
-            next_mutator_set_accumulator.commit(&output_utxo.hash().into(), &(*randomness).into());
+        let addition_record = next_mutator_set_accumulator
+            .commit(&output_utxo.neptune_hash().into(), &(*randomness).into());
         additions.push(addition_record);
     }
 
@@ -83,14 +83,14 @@ fn make_devnet_block_template(
         version: zero,
         height: next_block_height,
         mutator_set_commitment,
-        prev_block_digest: previous_block.header.hash(),
+        prev_block_digest: previous_block.header.neptune_hash(),
         timestamp: block_timestamp,
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
         proof_of_work_line: new_pow_line,
         proof_of_work_family: new_pow_line,
         target_difficulty: difficulty,
-        block_body_merkle_root: block_body.hash(),
+        block_body_merkle_root: block_body.neptune_hash(),
         uncles: vec![],
     };
 
@@ -105,8 +105,12 @@ async fn mine_devnet_block(
     sender: oneshot::Sender<Block>,
     state: GlobalState,
 ) {
+    info!(
+        "Mining on block with {} outputs",
+        block_body.transaction.outputs.len()
+    );
     // Mining takes place here
-    while Into::<OrderedDigest>::into(block_header.hash())
+    while Into::<OrderedDigest>::into(block_header.neptune_hash())
         >= OrderedDigest::to_digest_threshold(block_header.target_difficulty)
     {
         // If the sender is cancelled, the parent to this thread most
@@ -198,6 +202,7 @@ pub async fn mock_regtest_mine(
                 make_coinbase_transaction(own_public_key, &latest_block.header);
 
             let block_capacity_for_transactions = SIZE_1MB_IN_BYTES;
+
             let transactions = state
                 .mempool
                 .get_densest_transactions(block_capacity_for_transactions);
@@ -241,6 +246,9 @@ pub async fn mock_regtest_mine(
                         info!("Miner thread received regtest block height {}", latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
+                    MainToMiner::ReadyToMineNextBlock => {
+                        debug!("Got {:?} from `main_loop`", MainToMiner::ReadyToMineNextBlock);
+                    }
                 }
             }
             new_fake_block_res = receiver => {
@@ -252,9 +260,24 @@ pub async fn mock_regtest_mine(
                     }
                 };
 
+                // Sanity check, remove for more efficient mining.
+                assert!(new_fake_block.archival_is_valid(&latest_block), "Own mined block must be valid");
+
                 info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.header.height, new_fake_block.hash);
+
                 latest_block = new_fake_block.clone();
                 to_main.send(MinerToMain::NewBlock(Box::new(new_fake_block))).await?;
+
+                // Wait until `main_loop` has updated `global_state` before proceding. Otherwise, we would use
+                // a deprecated version of the mempool to build the next block. We don't mark the from-main loop
+                // received value as read yet as this would open up for race conditions if `main_loop` received
+                // a block from a peer at the same time as this block was found.
+                let _wait = from_main.changed().await;
+                let msg = from_main.borrow().clone();
+                debug!("Got {:?} msg from main after finding block", msg);
+                if !matches!(msg, MainToMiner::ReadyToMineNextBlock) {
+                    error!("Got bad message from `main_loop`: {:?}", msg);
+                }
             }
         }
     }
@@ -268,10 +291,10 @@ mod mine_loop_tests {
 
     use super::*;
 
-    #[test]
-    fn make_devnet_block_template_is_valid_test() {
+    #[tokio::test]
+    async fn make_devnet_block_template_is_valid_test() {
         let previous_block = Block::genesis_block();
-        let wallet_state = get_mock_wallet_state();
+        let wallet_state = get_mock_wallet_state(None).await;
         let coinbase_tx =
             make_coinbase_transaction(wallet_state.wallet.get_public_key(), &previous_block.header);
         let (block_header, block_body) = make_devnet_block_template(&previous_block, coinbase_tx);

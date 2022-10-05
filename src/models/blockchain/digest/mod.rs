@@ -32,7 +32,7 @@ impl GetSize for Digest {
 }
 
 pub trait Hashable {
-    fn hash(&self) -> Digest;
+    fn neptune_hash(&self) -> Digest;
 }
 
 impl Digest {

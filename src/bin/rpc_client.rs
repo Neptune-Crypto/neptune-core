@@ -2,12 +2,12 @@ use anyhow::Result;
 use clap::Parser;
 use neptune_core::models::blockchain::digest::Digest;
 use neptune_core::models::blockchain::transaction::utxo::Utxo;
+use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::rpc_server::RPCClient;
 use num_bigint::BigUint;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[derive(Debug, Parser)]
 enum Command {
@@ -21,6 +21,8 @@ enum Command {
     Send { unparsed_send_argument: String },
     Shutdown,
     Balance,
+    WalletStatus,
+    GetPublicKey,
 }
 
 #[derive(Debug, Parser)]
@@ -36,19 +38,7 @@ struct Config {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Config = Config::from_args();
-    let subscriber = FmtSubscriber::builder()
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .with_thread_ids(true)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .map_err(|_err| eprintln!("Unable to set global default subscriber"))
-        .expect("Failed to set log subscriber");
-
     let transport = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default);
-
     let client = RPCClient::new(client::Config::default(), transport.await?).spawn();
 
     match args.command {
@@ -109,10 +99,18 @@ async fn main() -> Result<()> {
         }
 
         Command::Balance => {
-            println!("Sending balance-command.");
             let balance: BigUint = client.get_balance(context::current()).await?.into();
-            println!("Balance received:");
             println!("{}", balance);
+        }
+
+        Command::WalletStatus => {
+            let wallet_status: WalletStatus = client.get_wallet_status(context::current()).await?;
+            println!("{}", wallet_status)
+        }
+
+        Command::GetPublicKey => {
+            let pub_key: secp256k1::PublicKey = client.get_public_key(context::current()).await?;
+            println!("{}", pub_key)
         }
     }
 
