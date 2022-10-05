@@ -1,20 +1,19 @@
 use self::wallet_block_utxos::WalletBlockIOSums;
 use self::wallet_status::{WalletStatus, WalletStatusElement};
 
-use super::block::Block;
-use super::digest::{
-    Digest, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
-    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
-};
-use super::transaction::utxo::Utxo;
-use super::transaction::{Amount, Transaction};
 use crate::config_models::data_directory::get_data_directory;
 use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
-use crate::models::blockchain::digest::Hashable;
-use crate::models::blockchain::wallet::wallet_block_utxos::WalletBlockUtxos;
+use crate::models::blockchain::block::Block;
+use crate::models::blockchain::digest::{
+    Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
+    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
+};
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
+use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::Hash;
 use anyhow::{bail, Result};
 use itertools::Itertools;
@@ -657,7 +656,7 @@ impl WalletState {
     }
 
     /// Get the randomness for the next output UTXO and increment the output counter by one
-    async fn next_output_randomness(&self) -> Digest {
+    pub async fn next_output_randomness(&self) -> Digest {
         let counter = self.next_output_counter().await;
 
         // TODO: Ugly hack used to generate a `Digest` from a `u128` here.

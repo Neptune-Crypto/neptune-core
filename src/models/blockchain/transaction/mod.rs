@@ -19,11 +19,12 @@ use twenty_first::{
     util_types::simple_hasher::Hasher,
 };
 
+use crate::models::state::wallet::Wallet;
+
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
 use super::{
     digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
     shared::Hash,
-    wallet::Wallet,
 };
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;

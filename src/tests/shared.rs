@@ -42,10 +42,6 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
-use crate::models::blockchain::wallet;
-use crate::models::blockchain::wallet::Wallet;
-
-use crate::models::blockchain::wallet::WalletState;
 use crate::models::database::BlockIndexKey;
 use crate::models::database::WalletDbKey;
 use crate::models::database::WalletDbValue;
@@ -54,6 +50,9 @@ use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
+use crate::models::state::wallet;
+use crate::models::state::wallet::Wallet;
+use crate::models::state::wallet::WalletState;
 use crate::models::state::GlobalState;
 use crate::Hash;
 use crate::{

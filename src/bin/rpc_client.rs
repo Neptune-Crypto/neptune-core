@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use neptune_core::models::blockchain::digest::Digest;
 use neptune_core::models::blockchain::transaction::utxo::Utxo;
-use neptune_core::models::blockchain::wallet::wallet_status::WalletStatus;
+use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::rpc_server::RPCClient;
 use num_bigint::BigUint;
 use std::net::IpAddr;
