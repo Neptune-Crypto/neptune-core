@@ -2,7 +2,7 @@ use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::block::Block;
 use crate::models::database::{
     BlockDatabases, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
 };
@@ -341,7 +341,7 @@ impl MainLoopHandler {
                     .global_state
                     .chain
                     .light_state
-                    .latest_block_header
+                    .latest_block
                     .lock()
                     .unwrap();
                 let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
@@ -360,7 +360,7 @@ impl MainLoopHandler {
                     .write_block(
                         new_block.clone(),
                         &mut db_lock,
-                        Some(light_state_locked.proof_of_work_family),
+                        Some(light_state_locked.header.proof_of_work_family),
                     )?;
 
                 // update the mutator set with the UTXOs from this block
@@ -387,8 +387,10 @@ impl MainLoopHandler {
                     .mempool
                     .remove_transactions_with(&new_block.body.transaction, &mut mempool_write_lock);
 
-                *light_state_locked = new_block.header.clone();
+                *light_state_locked = *new_block;
 
+                // Inform miner that mempool has been updated and that it is safe
+                // to mine the next block
                 self.main_to_miner_tx
                     .send(MainToMiner::ReadyToMineNextBlock)?;
             }
@@ -441,11 +443,11 @@ impl MainLoopHandler {
                         .ms_block_sync_db
                         .lock()
                         .await;
-                    let mut light_state_locked: std::sync::MutexGuard<BlockHeader> = self
+                    let mut light_state_locked: std::sync::MutexGuard<Block> = self
                         .global_state
                         .chain
                         .light_state
-                        .latest_block_header
+                        .latest_block
                         .lock()
                         .unwrap();
                     let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
@@ -462,7 +464,7 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
-                    let block_is_new = light_state_locked.proof_of_work_family
+                    let block_is_new = light_state_locked.header.proof_of_work_family
                         < last_block.header.proof_of_work_family;
                     if !block_is_new {
                         return Ok(());
@@ -491,7 +493,7 @@ impl MainLoopHandler {
                             .write_block(
                                 Box::new(new_block.clone()),
                                 &mut block_db_lock,
-                                Some(light_state_locked.proof_of_work_family),
+                                Some(light_state_locked.header.proof_of_work_family),
                             )?;
 
                         // update the mutator set with the UTXOs from this block
@@ -529,8 +531,8 @@ impl MainLoopHandler {
                             .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                     }
 
-                    // Update information about latest header
-                    *light_state_locked = last_block.header.clone();
+                    // Update information about latest block
+                    *light_state_locked = last_block.clone();
                 }
 
                 // Inform all peers about new block
@@ -581,15 +583,14 @@ impl MainLoopHandler {
                     .peer_sync_states
                     .remove(&socket_addr);
 
-                // Get out of sync mode if needed
+                // Get out of sync mode if needed. Note that we do not need to hold
+                // a lock on any state, as it's only this thread (main thread) that
+                // is allowed to update the `BlockchainState` or the `syncing` state.
                 let tip_header: BlockHeader = self
                     .global_state
                     .chain
                     .light_state
-                    .latest_block_header
-                    .lock()
-                    .expect("Lock on block header must succeed")
-                    .to_owned();
+                    .get_latest_block_header();
 
                 if self.global_state.net.syncing.read().unwrap().to_owned() {
                     let stay_in_sync_mode = stay_in_sync_mode(
@@ -754,13 +755,7 @@ impl MainLoopHandler {
         info!("Running sync");
 
         // Check when latest batch of blocks was requested
-        let current_block_header = match self
-            .global_state
-            .chain
-            .light_state
-            .latest_block_header
-            .try_lock()
-        {
+        let current_block = match self.global_state.chain.light_state.latest_block.try_lock() {
             Ok(lock) => lock.to_owned(),
 
             // If we can't acquire lock on latest block header, don't block. Just exit and try again next
@@ -770,7 +765,7 @@ impl MainLoopHandler {
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
-            .get_status_of_last_request(current_block_header.height);
+            .get_status_of_last_request(current_block.header.height);
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
@@ -787,7 +782,7 @@ impl MainLoopHandler {
         // Pick a random peer that has reported to have relevant blocks
         let candidate_peers = main_loop_state
             .sync_state
-            .get_potential_peers_for_sync_request(current_block_header.proof_of_work_family);
+            .get_potential_peers_for_sync_request(current_block.header.proof_of_work_family);
         let mut rng = thread_rng();
         let chosen_peer = candidate_peers.choose(&mut rng);
         assert!(
@@ -796,17 +791,14 @@ impl MainLoopHandler {
         );
 
         // Find the blocks to request
-        let tip_digest = current_block_header.neptune_hash();
+        let tip_digest = current_block.hash;
         let most_canonical_digests = self
             .global_state
             .chain
             .archival_state
             .as_ref()
             .unwrap()
-            .get_ancestor_block_digests(
-                current_block_header.neptune_hash(),
-                STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE,
-            )
+            .get_ancestor_block_digests(tip_digest, STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE)
             .await;
         let most_canonical_digests = vec![vec![tip_digest], most_canonical_digests].concat();
 
@@ -820,7 +812,7 @@ impl MainLoopHandler {
             .expect("Sending message to peers must succeed");
 
         // Record that this request was sent to the peer
-        let requested_block_height = current_block_header.height.next();
+        let requested_block_height = current_block.header.height.next();
         main_loop_state
             .sync_state
             .record_request(requested_block_height, *chosen_peer);

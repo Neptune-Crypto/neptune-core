@@ -127,7 +127,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
 
-    let light_state: LightState = LightState::new(latest_block.header.clone());
+    let light_state: LightState = LightState::new(latest_block.clone());
     let blockchain_state = BlockchainState {
         light_state,
         archival_state: Some(archival_state),

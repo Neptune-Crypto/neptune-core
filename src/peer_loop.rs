@@ -536,9 +536,7 @@ impl PeerLoopHandler {
                         .state
                         .chain
                         .light_state
-                        .latest_block_header
-                        .lock()
-                        .unwrap()
+                        .get_latest_block_header()
                         .proof_of_work_family
                         < block_notification.proof_of_work_family;
 
@@ -608,14 +606,7 @@ impl PeerLoopHandler {
                 // If more than one block is found, we need to find the one that's canonical
                 let mut canonical_chain_block_header = block_headers[0].clone();
                 if block_headers.len() > 1 {
-                    let tip_header = self
-                        .state
-                        .chain
-                        .light_state
-                        .latest_block_header
-                        .lock()
-                        .unwrap()
-                        .to_owned();
+                    let tip_header = self.state.chain.light_state.get_latest_block_header();
                     for block_header in block_headers {
                         if self
                             .state

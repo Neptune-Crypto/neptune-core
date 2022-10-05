@@ -225,7 +225,7 @@ pub async fn get_test_genesis_setup(
     let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
-    let light_state: LightState = LightState::new(block.header);
+    let light_state: LightState = LightState::new(block);
     let blockchain_state = BlockchainState {
         light_state,
         archival_state: Some(archival_state),
@@ -292,17 +292,17 @@ pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
         .block_databases
         .lock()
         .await;
-    let mut light_state_locked: std::sync::MutexGuard<BlockHeader> =
-        state.chain.light_state.latest_block_header.lock().unwrap();
+    let mut light_state_locked: std::sync::MutexGuard<Block> =
+        state.chain.light_state.latest_block.lock().unwrap();
 
-    let previous_pow_family = light_state_locked.proof_of_work_family;
+    let previous_pow_family = light_state_locked.header.proof_of_work_family;
     state.chain.archival_state.as_ref().unwrap().write_block(
         Box::new(new_block.clone()),
         &mut db_lock,
         Some(previous_pow_family),
     )?;
     if previous_pow_family < new_block.header.proof_of_work_family {
-        *light_state_locked = new_block.header;
+        *light_state_locked = new_block;
     }
 
     Ok(())

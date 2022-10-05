@@ -818,7 +818,7 @@ mod archival_state_tests {
                 ArchivalState::initialize_mutator_set(&data_dir_1).unwrap();
             let ams1 = Arc::new(TokioMutex::new(ams1));
             let ms_block_sync_1 = Arc::new(TokioMutex::new(ms_block_sync_1));
-            let _archival_state1 =
+            let archival_state1 =
                 ArchivalState::new(block_databases_1, ams1, data_dir_1, ms_block_sync_1).await;
 
             let (block_databases_2, _, data_dir_2) = unit_test_databases(Network::Main).unwrap();
@@ -832,7 +832,7 @@ mod archival_state_tests {
             let b = Block::genesis_block();
             let blockchain_state = BlockchainState {
                 archival_state: Some(archival_state2),
-                light_state: LightState::new(_archival_state1.genesis_block.header),
+                light_state: LightState::new(*archival_state1.genesis_block),
             };
             let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
                 Secp256k1::new().generate_keypair(&mut thread_rng());
