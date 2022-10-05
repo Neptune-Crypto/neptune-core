@@ -559,14 +559,19 @@ impl WalletState {
         Ok(())
     }
 
-    // Blocking call to get the monitored UTXOs.
-    pub async fn get_monitored_utxos(&self) -> Vec<MonitoredUtxo> {
-        self.wallet_db
-            .lock()
-            .await
-            .get(WalletDbKey::MonitoredUtxos)
+    fn get_monitored_utxos_with_lock(
+        &self,
+        lock: &mut RustyLevelDB<WalletDbKey, WalletDbValue>,
+    ) -> Vec<MonitoredUtxo> {
+        lock.get(WalletDbKey::MonitoredUtxos)
             .map(|x| x.as_monitored_utxos())
             .unwrap_or_default()
+    }
+
+    // Blocking call to get the monitored UTXOs.
+    pub async fn get_monitored_utxos(&self) -> Vec<MonitoredUtxo> {
+        let mut lock = self.wallet_db.lock().await;
+        self.get_monitored_utxos_with_lock(&mut lock)
     }
 
     pub async fn get_balance(&self) -> Amount {
@@ -583,8 +588,11 @@ impl WalletState {
         sums.output_sum - sums.input_sum
     }
 
-    pub async fn get_wallet_status(&self) -> WalletStatus {
-        let m_utxos = self.get_monitored_utxos().await;
+    fn get_wallet_status_with_lock(
+        &self,
+        lock: &mut RustyLevelDB<WalletDbKey, WalletDbValue>,
+    ) -> WalletStatus {
+        let m_utxos = self.get_monitored_utxos_with_lock(lock);
         let synced_unspent: Vec<(WalletStatusElement, MsMembershipProof<Hash>)> = m_utxos
             .iter()
             .filter(|x| x.spent_in_block.is_none() && x.has_synced_membership_proof)
@@ -638,6 +646,11 @@ impl WalletState {
         }
     }
 
+    pub async fn get_wallet_status(&self) -> WalletStatus {
+        let mut lock = self.wallet_db.lock().await;
+        self.get_wallet_status_with_lock(&mut lock)
+    }
+
     #[allow(dead_code)]
     async fn forget_block(&self, block_hash: Digest) {
         self.wallet_db
@@ -676,15 +689,14 @@ impl WalletState {
             .into()
     }
 
-    // Allocate sufficient UTXOs to generate a transaction. `amount` must include fees that are
-    // paid in the transaction.
-    pub async fn allocate_sufficient_input_funds(
+    pub fn allocate_sufficient_input_funds_with_lock(
         &self,
+        lock: &mut RustyLevelDB<WalletDbKey, WalletDbValue>,
         requested_amount: Amount,
     ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let wallet_status: WalletStatus = self.get_wallet_status().await;
+        let wallet_status: WalletStatus = self.get_wallet_status_with_lock(lock);
 
         // First check that we have enough. Otherwise return an error.
         if wallet_status.synced_unspent_amount < requested_amount {
@@ -701,6 +713,16 @@ impl WalletState {
         }
 
         Ok(ret)
+    }
+
+    // Allocate sufficient UTXOs to generate a transaction. `amount` must include fees that are
+    // paid in the transaction.
+    pub async fn allocate_sufficient_input_funds(
+        &self,
+        requested_amount: Amount,
+    ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
+        let mut lock = self.wallet_db.lock().await;
+        self.allocate_sufficient_input_funds_with_lock(&mut lock, requested_amount)
     }
 }
 
