@@ -459,16 +459,40 @@ impl WalletState {
                     "Discovered own input at input {}, marking UTXO as spent.",
                     i
                 );
-                match monitored_utxos
+
+                let mut matching_utxos: Vec<&mut MonitoredUtxo> = monitored_utxos
                     .iter_mut()
-                    .find(|x| x.utxo.neptune_hash() == input_utxo.neptune_hash())
-                {
-                    Some(mut monitored_utxo_spent) => {
-                        monitored_utxo_spent.spent_in_block =
+                    .filter(|x| x.utxo.neptune_hash() == input_utxo.neptune_hash())
+                    .collect();
+                match matching_utxos.len() {
+                    0 => panic!(
+                        "Discovered own input UTXO in block that did not match a monitored UTXO"
+                    ),
+                    1 => {
+                        matching_utxos[0].spent_in_block =
                             Some((block.hash, block.header.height, block.header.timestamp));
                     }
-                    None => {
-                        panic!("Discovered own input UTXO in block that did not match a monitored UTXO");
+                    _n => {
+                        // If we are monitoring multiple UTXOs with the same hash, we need another
+                        // method to mark the correct UTXO as spent. In DevNet we use the membership
+                        // proof from the block for this. In MainNet, where the input membership
+                        // proofs are not included in the blocks, we can probably just check which
+                        // of our own membership proofs that have become invalid with this block.
+                        let matching_match = matching_utxos
+                            .iter_mut()
+                            .find(|x| {
+                                x.get_membership_proof_for_block(&block.header.prev_block_digest)
+                                    .unwrap()
+                                    .auth_path_aocl
+                                    .data_index
+                                    == block.body.transaction.inputs[i]
+                                        .membership_proof
+                                        .auth_path_aocl
+                                        .data_index
+                            })
+                            .unwrap();
+                        matching_match.spent_in_block =
+                            Some((block.hash, block.header.height, block.header.timestamp));
                     }
                 }
             }
@@ -488,7 +512,16 @@ impl WalletState {
             "Mutator set in wallet-handler must agree with that from applied block"
         );
 
+        changed_mps.sort();
+        changed_mps.dedup();
         debug!("Number of mutated membership proofs: {}", changed_mps.len());
+        debug!(
+            "Number of unspent membership proofs: {}",
+            monitored_utxos
+                .iter()
+                .filter(|x| x.spent_in_block.is_none())
+                .count()
+        );
 
         for (monitored_utxo, updated_mp) in monitored_utxos
             .iter_mut()
@@ -500,7 +533,11 @@ impl WalletState {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
                     || msa_state.verify(&monitored_utxo.utxo.neptune_hash().into(), &updated_mp),
-                "Updated membership proof for unspent UTXO must be valid"
+                "{}",
+                format!(
+                    "Updated membership proof for unspent UTXO must be valid. Invalid: {:?}",
+                    monitored_utxo
+                )
             );
 
             // Add the new membership proof to the list of membership proofs for this UTXO
@@ -946,6 +983,77 @@ mod wallet_tests {
         // Cannot allocate more than we have: 2200
         assert!(own_wallet_state
             .allocate_sufficient_input_funds(2201.into())
+            .await
+            .is_err());
+
+        // Make a block that spends an input, then verify that this is reflected by
+        // the allocator.
+        let two_utxos = own_wallet_state
+            .allocate_sufficient_input_funds(200.into())
+            .await
+            .unwrap();
+        assert_eq!(
+            2,
+            two_utxos.len(),
+            "Must use two UTXOs each worth 100 to send 200"
+        );
+
+        // This block spends two UTXOs and gives us none, so the new balance
+        // becomes 2000
+        let other_wallet = Wallet::new(generate_secret_key());
+        assert_eq!(Into::<BlockHeight>::into(22u64), next_block.header.height);
+        next_block = make_mock_block(&next_block.clone(), None, other_wallet.get_public_key());
+        assert_eq!(Into::<BlockHeight>::into(23u64), next_block.header.height);
+        for (utxo, ms_mp) in two_utxos {
+            add_unsigned_input_to_block(&mut next_block, utxo, ms_mp);
+        }
+
+        own_wallet_state.update_wallet_state_with_new_block(
+            &next_block,
+            &mut own_wallet_state.wallet_db.lock().await,
+        )?;
+        assert_eq!(
+            20,
+            own_wallet_state
+                .allocate_sufficient_input_funds(2000.into())
+                .await
+                .unwrap()
+                .len()
+        );
+
+        // Cannot allocate more than we have: 2000
+        assert!(own_wallet_state
+            .allocate_sufficient_input_funds(2001.into())
+            .await
+            .is_err());
+
+        // Add another block that spends *one* UTXO and gives us none, so the new balance
+        // becomes 1900
+        next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+        let one_utxo = own_wallet_state
+            .allocate_sufficient_input_funds(98.into())
+            .await
+            .unwrap();
+        assert_eq!(1, one_utxo.len());
+        add_unsigned_input_to_block(&mut next_block, one_utxo[0].0, one_utxo[0].1.clone());
+
+        own_wallet_state.update_wallet_state_with_new_block(
+            &next_block,
+            &mut own_wallet_state.wallet_db.lock().await,
+        )?;
+
+        assert_eq!(
+            19,
+            own_wallet_state
+                .allocate_sufficient_input_funds(1900.into())
+                .await
+                .unwrap()
+                .len()
+        );
+
+        // Cannot allocate more than we have: 1900
+        assert!(own_wallet_state
+            .allocate_sufficient_input_funds(1901.into())
             .await
             .is_err());
 
