@@ -184,6 +184,42 @@ pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeDat
     (handshake, socket_address)
 }
 
+pub async fn get_mock_global_state(network: Network, peer_count: u8) -> GlobalState {
+    let (block_databases, peer_databases, root_data_dir_path) =
+        unit_test_databases(network).unwrap();
+    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+    let ams = Arc::new(tokio::sync::Mutex::new(ams));
+    let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
+    let archival_state =
+        ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync).await;
+    let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
+    let syncing = Arc::new(std::sync::RwLock::new(false));
+    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
+    for i in 0..peer_count {
+        let peer_address =
+            std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
+        peer_map
+            .lock()
+            .unwrap()
+            .insert(peer_address, get_dummy_peer(peer_address));
+    }
+    let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
+    let (block, _, _) = get_dummy_latest_block(None);
+    let light_state: LightState = LightState::new(block);
+    let blockchain_state = BlockchainState {
+        light_state,
+        archival_state: Some(archival_state),
+    };
+    let mempool = Mempool::default();
+    GlobalState {
+        chain: blockchain_state,
+        cli: cli_default_args,
+        net: networking_state,
+        wallet_state: get_mock_wallet_state(None).await,
+        mempool,
+    }
+}
+
 /// Return a setup with empty databases, and with the genesis block in the
 /// block header field of the state.
 /// Returns:
@@ -205,39 +241,7 @@ pub async fn get_test_genesis_setup(
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
-    for i in 0..peer_count {
-        let peer_address =
-            std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
-        peer_map
-            .lock()
-            .unwrap()
-            .insert(peer_address, get_dummy_peer(peer_address));
-    }
-
-    let (block, _, _) = get_dummy_latest_block(None);
-    let (block_databases, peer_databases, root_data_dir_path) = unit_test_databases(network)?;
-    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
-    let ams = Arc::new(tokio::sync::Mutex::new(ams));
-    let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
-    let archival_state =
-        ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync).await;
-    let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
-    let syncing = Arc::new(std::sync::RwLock::new(false));
-    let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
-    let light_state: LightState = LightState::new(block);
-    let blockchain_state = BlockchainState {
-        light_state,
-        archival_state: Some(archival_state),
-    };
-    let mempool = Mempool::default();
-    let state = GlobalState {
-        chain: blockchain_state,
-        cli: cli_default_args,
-        net: networking_state,
-        wallet_state: get_mock_wallet_state(None).await,
-        mempool,
-    };
+    let state = get_mock_global_state(network, peer_count).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx_clone,

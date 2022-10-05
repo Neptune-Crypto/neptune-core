@@ -1,16 +1,22 @@
 use anyhow::Result;
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use num_traits::{One, Zero};
 use std::net::{IpAddr, SocketAddr};
+use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use self::{
     blockchain_state::BlockchainState, mempool::Mempool, networking_state::NetworkingState,
     wallet::WalletState,
 };
-use super::blockchain::transaction::{utxo::Utxo, Transaction};
+use super::blockchain::{
+    digest::Hashable,
+    transaction::{devnet_input::DevNetInput, utxo::Utxo, Amount, Transaction},
+};
 use crate::{
     config_models::cli_args,
     database::{leveldb::LevelDB, rusty::RustyLevelDBIterator},
     models::peer::{HandshakeData, PeerStanding},
-    VERSION,
+    Hash, VERSION,
 };
 
 pub mod archival_state;
@@ -43,8 +49,61 @@ pub struct GlobalState {
 }
 
 impl GlobalState {
-    pub async fn create_transaction(&self, _output_utxo: Utxo) -> Result<Transaction> {
-        todo!()
+    pub async fn create_transaction(&self, output_utxo: Utxo) -> Result<Transaction> {
+        // acquire a lock on `WalletState` to prevent it from being updated
+        let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
+
+        // Acquire a lock on `LightState` to prevent it from being updated
+        let light_state_lock = self.chain.light_state.latest_block.lock().await;
+
+        // Get the UTXOs required for this transaction
+        let fee = Amount::one(); // TODO: Set this to something more sane
+        let total_spend = output_utxo.amount + fee;
+        let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
+            .wallet_state
+            .allocate_sufficient_input_funds_with_lock(&mut wallet_db_lock, total_spend)?;
+
+        // Create all removal records. These must be relative to the block tip.
+        let mut msa_tip = light_state_lock.body.next_mutator_set_accumulator.clone();
+        let mut inputs: Vec<DevNetInput> = vec![];
+        let mut input_amount: Amount = Amount::zero();
+        for (spendable_utxo, mp) in spendable_utxos_and_mps {
+            let removal_record = msa_tip.drop(&spendable_utxo.neptune_hash().into(), &mp);
+            input_amount = input_amount + spendable_utxo.amount;
+            inputs.push(DevNetInput {
+                utxo: spendable_utxo,
+                membership_proof: mp.into(),
+                removal_record,
+                signature: None,
+            });
+        }
+
+        let output_randomness = self.wallet_state.next_output_randomness().await;
+        let mut outputs = vec![(output_utxo, output_randomness)];
+
+        // Send remaining amount back to self
+        if input_amount > total_spend {
+            let change_utxo = Utxo {
+                amount: input_amount - total_spend,
+                public_key: self.wallet_state.wallet.get_public_key(),
+            };
+            outputs.push((
+                change_utxo,
+                self.wallet_state.next_output_randomness().await,
+            ));
+        }
+
+        let mut transaction = Transaction {
+            inputs,
+            outputs,
+            public_scripts: vec![],
+            fee: Amount::zero(),
+            timestamp: BFieldElement::new(1655916990),
+            authority_proof: None,
+        };
+        transaction.sign(&self.wallet_state.wallet);
+
+        Ok(transaction)
     }
 
     // Storing IP addresses is, according to this answer, not a violation of GDPR:
@@ -104,5 +163,39 @@ impl GlobalState {
                     .put(ip, PeerStanding::default())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod global_state_tests {
+    use crate::{config_models::network::Network, tests::shared::get_mock_global_state};
+    use tracing_test::traced_test;
+
+    use super::{wallet::Wallet, *};
+
+    #[traced_test]
+    #[tokio::test]
+    async fn premine_recipient_can_spend_genesis_block_output() {
+        let other_wallet = Wallet::new(wallet::generate_secret_key());
+        let global_state = get_mock_global_state(Network::Main, 2).await;
+        let output_utxo = Utxo {
+            amount: 20.into(),
+            public_key: other_wallet.get_public_key(),
+        };
+        let tx: Transaction = global_state.create_transaction(output_utxo).await.unwrap();
+
+        assert!(tx.devnet_is_valid(None));
+        assert_eq!(
+            2,
+            tx.outputs.len(),
+            "tx must have a send output and a change output"
+        );
+        assert_eq!(
+            1,
+            tx.inputs.len(),
+            "tx must have exactly one input, a genesis UTXO"
+        );
+
+        // TODO: Build better tools to integrate a transaction into a block.
     }
 }

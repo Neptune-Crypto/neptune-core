@@ -1,3 +1,11 @@
+use anyhow::Result;
+use futures::executor;
+use futures::future::{self, Ready};
+use std::net::IpAddr;
+use std::net::SocketAddr;
+use tarpc::context;
+use tokio::sync::mpsc::error::SendError;
+
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::digest::Digest;
@@ -7,12 +15,6 @@ use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
-use futures::executor;
-use futures::future::{self, Ready};
-use std::net::IpAddr;
-use std::net::SocketAddr;
-use tarpc::context;
-use tokio::sync::mpsc::error::SendError;
 
 #[tarpc::service]
 pub trait RPC {
@@ -159,8 +161,12 @@ impl RPC for NeptuneRPCServer {
         let mut response: Result<(), SendError<RPCServerToMain>> = Ok(());
         for utxo in recipient_utxos {
             // 1. Build transaction objects.
-            let transaction: Transaction = executor::block_on(self.state.create_transaction(utxo))
-                .expect("Could not create transaction object");
+            let transaction_res: Result<Transaction> =
+                executor::block_on(self.state.create_transaction(utxo));
+            let transaction = match transaction_res {
+                Ok(tx) => tx,
+                Err(err) => panic!("Could not create transaction: {}", err),
+            };
 
             // 2. Send transaction message to main
             response = executor::block_on(
