@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use mutator_set_tf::util_types::mutator_set::{
     mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
 };
@@ -146,6 +148,67 @@ impl Block {
             header,
             hash: digest,
         }
+    }
+
+    /// Merge a transaction into this block's transaction using the authority signature on the transaction
+    pub fn authority_merge_transaction(&mut self, transaction: Transaction) {
+        let new_transaction = self.body.transaction.clone().merge_with(transaction);
+
+        let mut additions = Vec::with_capacity(new_transaction.outputs.len());
+        let mut removals = Vec::with_capacity(new_transaction.inputs.len());
+        let mut next_mutator_set_accumulator = self.body.previous_mutator_set_accumulator.clone();
+
+        for (output_utxo, randomness) in new_transaction.outputs.iter() {
+            let addition_record = next_mutator_set_accumulator
+                .commit(&output_utxo.neptune_hash().into(), &(*randomness).into());
+            additions.push(addition_record);
+        }
+
+        for devnet_input in new_transaction.inputs.iter() {
+            next_mutator_set_accumulator.remove(&devnet_input.removal_record);
+            removals.push(devnet_input.removal_record.clone());
+        }
+
+        let mutator_set_update = MutatorSetUpdate::new(removals, additions);
+
+        // Apply the mutator set update to get the `next_mutator_set_accumulator`
+        mutator_set_update
+            .apply(&mut next_mutator_set_accumulator)
+            .expect("Mutator set mutation must work");
+
+        let block_body: BlockBody = BlockBody {
+            transaction: new_transaction,
+            next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
+            previous_mutator_set_accumulator: self.body.previous_mutator_set_accumulator.clone(),
+            mutator_set_update,
+            stark_proof: vec![],
+        };
+
+        let block_timestamp = BFieldElement::new(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Got bad time timestamp in mining process")
+                .as_secs(),
+        );
+
+        let block_header = BlockHeader {
+            version: self.header.version,
+            height: self.header.height,
+            mutator_set_commitment: next_mutator_set_accumulator.get_commitment().into(),
+            prev_block_digest: self.header.prev_block_digest,
+            timestamp: block_timestamp,
+            nonce: self.header.nonce,
+            max_block_size: self.header.max_block_size,
+            proof_of_work_line: self.header.proof_of_work_line,
+            proof_of_work_family: self.header.proof_of_work_family,
+            target_difficulty: self.header.target_difficulty,
+            block_body_merkle_root: block_body.neptune_hash(),
+            uncles: vec![],
+        };
+
+        self.body = block_body;
+        self.hash = block_header.neptune_hash();
+        self.header = block_header;
     }
 
     fn count_outputs(&self) -> usize {
@@ -348,5 +411,64 @@ impl Block {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod block_tests {
+    use crate::{
+        config_models::network::Network,
+        models::state::wallet,
+        tests::shared::{get_mock_global_state, make_mock_block},
+    };
+
+    use super::*;
+
+    use anyhow::Result;
+    use tracing_test::traced_test;
+
+    #[traced_test]
+    #[tokio::test]
+    async fn merge_transaction_test() -> Result<()> {
+        // We need the global state to construct a transaction. This global state
+        // has a wallet which receives a premine-UTXO.
+        let global_state = get_mock_global_state(Network::Main, 2).await;
+        let genesis_block = Block::genesis_block();
+        let mut block_1 = make_mock_block(
+            &genesis_block,
+            None,
+            global_state.wallet_state.wallet.get_public_key(),
+        );
+        assert!(
+            block_1.devnet_is_valid(&genesis_block),
+            "Block 1 must be valid with only coinbase output"
+        );
+
+        // create a new transaction, merge it into block 1 and check that block 1 is still valid
+        let other_wallet = wallet::Wallet::new(wallet::generate_secret_key());
+        let new_utxo = Utxo {
+            amount: 5.into(),
+            public_key: other_wallet.get_public_key(),
+        };
+        let new_tx = global_state.create_transaction(new_utxo).await.unwrap();
+        block_1.authority_merge_transaction(new_tx);
+        assert!(
+            block_1.devnet_is_valid(&genesis_block),
+            "Block 1 must be valid after adding a transaction"
+        );
+
+        // Sanity checks
+        assert_eq!(
+            3,
+            block_1.body.transaction.outputs.len(),
+            "New block must have three outputs: coinbase, transaction, and change"
+        );
+        assert_eq!(
+            1,
+            block_1.body.transaction.inputs.len(),
+            "New block must have one input: spending of genesis UTXO"
+        );
+
+        Ok(())
     }
 }
