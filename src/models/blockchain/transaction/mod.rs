@@ -461,7 +461,10 @@ mod transaction_tests {
             amount: 5.into(),
             public_key: other_wallet.get_public_key(),
         };
-        let mut updated_tx = global_state.create_transaction(new_utxo).await.unwrap();
+        let mut updated_tx = global_state
+            .create_transaction(vec![new_utxo])
+            .await
+            .unwrap();
 
         let genesis_block = Block::genesis_block();
         let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());

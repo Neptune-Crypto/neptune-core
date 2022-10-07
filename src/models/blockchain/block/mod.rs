@@ -450,7 +450,10 @@ mod block_tests {
             amount: 5.into(),
             public_key: other_wallet.get_public_key(),
         };
-        let new_tx = global_state.create_transaction(new_utxo).await.unwrap();
+        let new_tx = global_state
+            .create_transaction(vec![new_utxo])
+            .await
+            .unwrap();
         block_1.authority_merge_transaction(new_tx);
         assert!(
             block_1.devnet_is_valid(&genesis_block),

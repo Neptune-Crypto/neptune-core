@@ -157,27 +157,19 @@ impl RPC for NeptuneRPCServer {
             self.state.wallet_state.wallet.get_public_key()
         );
 
-        // Construct and send a transaction object for each of the elements in the user-submitted transactions
-        let mut response: Result<(), SendError<RPCServerToMain>> = Ok(());
-        for utxo in recipient_utxos {
-            // 1. Build transaction objects.
-            let transaction_res: Result<Transaction> =
-                executor::block_on(self.state.create_transaction(utxo));
-            let transaction = match transaction_res {
-                Ok(tx) => tx,
-                Err(err) => panic!("Could not create transaction: {}", err),
-            };
+        // 1. Build transaction object
+        let transaction_res: Result<Transaction> =
+            executor::block_on(self.state.create_transaction(recipient_utxos));
+        let transaction = match transaction_res {
+            Ok(tx) => tx,
+            Err(err) => panic!("Could not create transaction: {}", err),
+        };
 
-            // 2. Send transaction message to main
-            response = executor::block_on(
-                self.rpc_server_to_main_tx
-                    .send(RPCServerToMain::Send(transaction)),
-            );
-
-            if response.is_err() {
-                break;
-            }
-        }
+        // 2. Send transaction message to main
+        let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
+            self.rpc_server_to_main_tx
+                .send(RPCServerToMain::Send(transaction)),
+        );
 
         // 3. Send acknowledgement to client.
         future::ready(response.is_ok())

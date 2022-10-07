@@ -9,7 +9,7 @@ use self::{
     wallet::WalletState,
 };
 use super::blockchain::{
-    digest::Hashable2,
+    digest::{Digest, Hashable2},
     transaction::{devnet_input::DevNetInput, utxo::Utxo, Amount, Transaction},
 };
 use crate::{
@@ -49,7 +49,9 @@ pub struct GlobalState {
 }
 
 impl GlobalState {
-    pub async fn create_transaction(&self, output_utxo: Utxo) -> Result<Transaction> {
+    /// Create a transaction from own UTXOs. A change UTXO will be added if needed, the caller
+    /// does not need to supply this.
+    pub async fn create_transaction(&self, output_utxos: Vec<Utxo>) -> Result<Transaction> {
         // acquire a lock on `WalletState` to prevent it from being updated
         let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
 
@@ -58,7 +60,7 @@ impl GlobalState {
 
         // Get the UTXOs required for this transaction
         let fee = Amount::one(); // TODO: Set this to something more sane
-        let total_spend = output_utxo.amount + fee;
+        let total_spend: Amount = output_utxos.iter().map(|x| x.amount).sum::<Amount>() + fee;
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
             .wallet_state
             .allocate_sufficient_input_funds_with_lock(&mut wallet_db_lock, total_spend)?;
@@ -80,8 +82,11 @@ impl GlobalState {
             });
         }
 
-        let output_randomness = self.wallet_state.next_output_randomness().await;
-        let mut outputs = vec![(output_utxo, output_randomness)];
+        let mut outputs: Vec<(Utxo, Digest)> = vec![];
+        for output_utxo in output_utxos {
+            let output_randomness = self.wallet_state.next_output_randomness().await;
+            outputs.push((output_utxo, output_randomness));
+        }
 
         // Send remaining amount back to self
         if input_amount > total_spend {
@@ -99,7 +104,7 @@ impl GlobalState {
             inputs,
             outputs,
             public_scripts: vec![],
-            fee: Amount::zero(),
+            fee,
             timestamp: BFieldElement::new(1655916990),
             authority_proof: None,
         };
@@ -184,7 +189,10 @@ mod global_state_tests {
             amount: 20.into(),
             public_key: other_wallet.get_public_key(),
         };
-        let tx: Transaction = global_state.create_transaction(output_utxo).await.unwrap();
+        let tx: Transaction = global_state
+            .create_transaction(vec![output_utxo])
+            .await
+            .unwrap();
 
         assert!(tx.devnet_is_valid(None));
         assert_eq!(
@@ -198,6 +206,27 @@ mod global_state_tests {
             "tx must have exactly one input, a genesis UTXO"
         );
 
-        // TODO: Build better tools to integrate a transaction into a block.
+        // Test with a transaction with three outputs and one (premine) input
+        let mut output_utxos: Vec<Utxo> = vec![];
+        for i in 2..5 {
+            let utxo = Utxo {
+                amount: i.into(),
+                public_key: other_wallet.get_public_key(),
+            };
+            output_utxos.push(utxo);
+        }
+
+        let new_tx: Transaction = global_state.create_transaction(output_utxos).await.unwrap();
+        assert!(new_tx.devnet_is_valid(None));
+        assert_eq!(
+            4,
+            new_tx.outputs.len(),
+            "tx must have three send outputs and a change output"
+        );
+        assert_eq!(
+            1,
+            new_tx.inputs.len(),
+            "tx must have exactly one input, a genesis UTXO"
+        );
     }
 }
