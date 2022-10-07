@@ -184,7 +184,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn premine_recipient_can_spend_genesis_block_output() {
         let other_wallet = Wallet::new(wallet::generate_secret_key());
-        let global_state = get_mock_global_state(Network::Main, 2).await;
+        let global_state = get_mock_global_state(Network::Main, 2, None).await;
         let output_utxo = Utxo {
             amount: 20.into(),
             public_key: other_wallet.get_public_key(),

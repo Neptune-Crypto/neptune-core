@@ -340,6 +340,8 @@ impl Transaction {
         true
     }
 
+    /// Merge two transactions. Both input transactions must have valid mutator set data
+    /// for this to produce a valid transaction.
     pub fn merge_with(self, other: Transaction) -> Transaction {
         let timestamp = BFieldElement::new(
             SystemTime::now()
@@ -379,7 +381,7 @@ mod transaction_tests {
     use super::*;
     use crate::{
         config_models::network::Network,
-        models::state::wallet,
+        models::state::wallet::{self, generate_secret_key},
         tests::shared::{
             get_mock_global_state, make_mock_block, make_mock_transaction,
             make_mock_unsigned_devnet_input, new_random_wallet,
@@ -450,10 +452,10 @@ mod transaction_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn transaction_is_valid_after_update_test() -> Result<()> {
+    async fn transaction_is_valid_after_block_update_simple_test() -> Result<()> {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let global_state = get_mock_global_state(Network::Main, 2).await;
+        let global_state = get_mock_global_state(Network::Main, 2, None).await;
         let other_wallet = wallet::Wallet::new(wallet::generate_secret_key());
 
         // Create a transaction that's valid after the Genesis block
@@ -494,6 +496,145 @@ mod transaction_tests {
         next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
         next_block.authority_merge_transaction(updated_tx.clone());
         assert!(next_block.devnet_is_valid(&_previous_block));
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn transaction_is_valid_after_block_update_multiple_ios_test() -> Result<()> {
+        // We need the global state to construct a transaction. This global state
+        // has a wallet which receives a premine-UTXO.
+        let own_global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let own_wallet = &own_global_state.wallet_state.wallet;
+
+        // Create a transaction that's valid after the Genesis block
+        let mut output_utxos: Vec<Utxo> = vec![];
+        for i in 0..7 {
+            let new_utxo = Utxo {
+                amount: i.into(),
+                public_key: own_wallet.get_public_key(),
+            };
+            output_utxos.push(new_utxo);
+        }
+
+        // Create a transaction that's valid after genesis block
+        let mut tx = own_global_state.create_transaction(output_utxos).await?;
+        let original_tx = tx.clone();
+
+        // Create next block and verify that transaction is not valid with this block as tip
+        let genesis_block = Block::genesis_block();
+        let other_wallet = Wallet::new(generate_secret_key());
+        let block_1 = make_mock_block(&genesis_block, None, own_wallet.get_public_key());
+        let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+        assert!(
+            block_1.devnet_is_valid(&genesis_block),
+            "Block 1 must be valid with only coinbase output"
+        );
+        assert!(
+            block_2.devnet_is_valid(&block_1),
+            "Block 2 must be valid with only coinbase output"
+        );
+
+        let mut block_2_with_deprecated_tx = block_2.clone();
+        block_2_with_deprecated_tx.authority_merge_transaction(tx.clone());
+        assert!(
+            !block_2_with_deprecated_tx.devnet_is_valid(&block_1),
+            "Block with transaction with deprecated mutator set data must be invalid"
+        );
+
+        // Update the transaction with mutator set data from block 1. Verify that this
+        // gives rise to a valid block.
+        tx.update_ms_data(&block_1)?;
+        let mut block_2_with_updated_tx = block_2.clone();
+        block_2_with_updated_tx.authority_merge_transaction(tx.clone());
+        assert!(
+            block_2_with_updated_tx.devnet_is_valid(&block_1),
+            "Block with transaction with updated mutator set data must be valid"
+        );
+
+        // We would like to use more advanced blocks, that have multiple inputs and outputs.
+        // Problem: If we start making with my own wallet, we consume the same inputs that are
+        // consumed in `updated_tx`. Solution: Create another global state object, containing
+        // another wallet, and use this to generate the transactions that go into these
+        // blocks. This should keep the `updated_tx` valid as its inputs are not being spent.
+        let other_global_state =
+            get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
+        other_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_1,
+                &mut other_global_state.wallet_state.wallet_db.lock().await,
+            )?;
+        other_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_2,
+                &mut other_global_state.wallet_state.wallet_db.lock().await,
+            )?;
+        let mut updated_tx = original_tx;
+        updated_tx.update_ms_data(&block_1)?;
+        updated_tx.update_ms_data(&block_2)?;
+
+        // Mine 12 blocks with non-trivial transactions, keep the transaction updated,
+        // and verify that it is valid after all blocks.
+        let mut next_block = block_2.clone();
+        let mut _previous_block = next_block.clone();
+        for i in 0..12 {
+            _previous_block = next_block.clone();
+            let utxo_a = Utxo {
+                amount: (3 * i).into(),
+                public_key: other_wallet.get_public_key(),
+            };
+            let utxo_b = Utxo {
+                amount: (3 * i + 1).into(),
+                public_key: other_wallet.get_public_key(),
+            };
+            let utxo_c = Utxo {
+                amount: (3 * i + 2).into(),
+                public_key: other_wallet.get_public_key(),
+            };
+            let other_transaction = other_global_state
+                .create_transaction(vec![utxo_a, utxo_b, utxo_c])
+                .await?;
+            next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
+
+            next_block.authority_merge_transaction(other_transaction);
+            assert!(
+                next_block.devnet_is_valid(&_previous_block),
+                "Produced block must be valid after merging new transaction"
+            );
+
+            // Update other's global state with this transaction, such that a new transaction
+            // can be made in the next iteration of the loop.
+            {
+                let mut light_state = other_global_state
+                    .chain
+                    .light_state
+                    .latest_block
+                    .lock()
+                    .await;
+                *light_state = next_block.clone();
+                other_global_state
+                    .wallet_state
+                    .update_wallet_state_with_new_block(
+                        &next_block,
+                        &mut other_global_state.wallet_state.wallet_db.lock().await,
+                    )?;
+            }
+
+            // After each new block, "our" transaction is updated with the information
+            // from that block such that its mutator set data is kept up-to-date.
+            updated_tx.update_ms_data(&next_block)?;
+        }
+
+        _previous_block = next_block.clone();
+        next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+        next_block.authority_merge_transaction(updated_tx.clone());
+        assert!(
+            next_block.devnet_is_valid(&_previous_block),
+            "Block is valid when merged transaction is updated"
+        );
 
         Ok(())
     }
