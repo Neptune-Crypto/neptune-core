@@ -11,8 +11,8 @@
 //! The `Mempool` type is a thread-safe wrapper around `MempoolInternal`, and
 //! all interaction should go through the wrapper.
 
+use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::Hashable2;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction, TransactionDigest};
 use crate::models::shared::SIZE_1GB_IN_BYTES;
 
@@ -138,12 +138,12 @@ impl Mempool {
 
     /// Remove any transaction from the mempool that are invalid due to the latest block
     /// containing a new transaction.
-    pub fn remove_transactions_with(
+    pub fn update_with_block(
         &self,
-        transaction: &Transaction,
+        block: &Block,
         lock: &mut std::sync::RwLockWriteGuard<MempoolInternal>,
     ) {
-        lock.remove_transactions_with(transaction)
+        lock.update_with_block(block)
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
@@ -371,22 +371,43 @@ impl MempoolInternal {
         self.retain(keep);
     }
 
-    // TODO: This function remove from the mempool all those transactions that become invalid because
-    // of this newly mined block.
-    fn remove_transactions_with(&mut self, transaction: &Transaction) {
+    /// This function remove from the mempool all those transactions that become invalid because
+    /// of this newly mined block. It also updates all mutator set data for the monitored
+    /// transactions that were not removed due to being included in the block.
+    fn update_with_block(&mut self, block: &Block) {
         //! Checks if the `input_utxos` in `canonical_transaction`
         //! and any `transaction` in the mempool is disjoint.
         //! Removes the `transaction` from mempool otherwise.
+        let flipped_bloom_filter_indices: HashSet<_> = block
+            .body
+            .transaction
+            .inputs
+            .iter()
+            .map(|x| x.removal_record.bit_indices)
+            .collect();
 
-        let mined_utxos: HashSet<Utxo> = transaction.get_input_utxos().into_iter().collect();
-
+        // The indices that the input UTXOs would flip are used to determine
+        // which transactions contain UTXOs that were spent in this block. Any
+        // transaction that contains just *one* input-UTXO that was spent in
+        // this block is invalid
         let keep = |(_transaction_id, tx): LookupItem| -> bool {
-            let transaction_set: HashSet<Utxo> = tx.get_input_utxos().into_iter().collect();
+            let bloom_filter_indices: HashSet<_> = tx
+                .inputs
+                .iter()
+                .map(|x| x.removal_record.bit_indices)
+                .collect();
 
-            transaction_set.is_disjoint(&mined_utxos)
+            bloom_filter_indices.is_disjoint(&flipped_bloom_filter_indices)
         };
 
+        // Remove the transactions that become invalid with this block
         self.retain(keep);
+
+        // Update the remaining transactions so their mutator set data is still valid
+        for tx in self.table.values_mut() {
+            tx.update_ms_data(block)
+                .expect("Updating mempool transaction must succeed");
+        }
     }
 
     fn shrink_to_max_size(&mut self) {
@@ -413,12 +434,21 @@ impl MempoolInternal {
 mod tests {
     use super::*;
     use crate::{
+        config_models::network::Network,
         models::{
-            blockchain::transaction::{Amount, Transaction},
+            blockchain::{
+                block::block_height::BlockHeight,
+                transaction::{utxo::Utxo, Amount, Transaction},
+            },
             shared::SIZE_1MB_IN_BYTES,
+            state::wallet::{generate_secret_key, Wallet},
         },
-        tests::shared::{get_mock_wallet_state, make_mock_transaction_with_wallet},
+        tests::shared::{
+            get_mock_global_state, get_mock_wallet_state, make_mock_block,
+            make_mock_transaction_with_wallet,
+        },
     };
+    use anyhow::Result;
     use num_bigint::BigInt;
     use num_traits::Zero;
     use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -520,76 +550,122 @@ mod tests {
     }
 
     #[tokio::test]
-    pub async fn remove_transactions_with_test() {
-        let wallet_state = get_mock_wallet_state(None).await;
-        let wallet_state_unrelated = get_mock_wallet_state(None).await;
+    pub async fn remove_transactions_with_block_test() -> Result<()> {
+        // We need the global state to construct a transaction. This global state
+        // has a wallet which receives a premine-UTXO.
+        let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let premine_wallet = &premine_receiver_global_state.wallet_state.wallet;
+        let other_wallet = Wallet::new(generate_secret_key());
+        let other_global_state =
+            get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
 
-        let related_utxo = Utxo {
-            amount: Amount::from(13u32),
-            public_key: wallet_state.wallet.get_public_key(),
-        };
+        // Ensure that both wallets have a non-zero balance
+        let genesis_block = Block::genesis_block();
+        let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());
 
-        let unrelated_utxo = Utxo {
-            amount: Amount::from(42u32),
-            public_key: wallet_state_unrelated.wallet.get_public_key(),
-        };
+        // Update both states with block 1
+        premine_receiver_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_1,
+                &mut other_global_state.wallet_state.wallet_db.lock().await,
+            )?;
+        *premine_receiver_global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock()
+            .await = block_1.clone();
+        other_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_1,
+                &mut other_global_state.wallet_state.wallet_db.lock().await,
+            )?;
+        *other_global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock()
+            .await = block_1.clone();
 
-        let mempool = {
-            let m = Mempool::default();
+        // Create a transaction that's valid to be included in block 2
+        let mut output_utxos_generated_by_me: Vec<Utxo> = vec![];
+        for i in 0..7 {
+            let new_utxo = Utxo {
+                amount: i.into(),
+                public_key: premine_wallet.get_public_key(),
+            };
+            output_utxos_generated_by_me.push(new_utxo);
+        }
 
-            // Insert partially related transactions.
-            for i in 0u32..2 {
-                let t = make_mock_transaction_with_wallet(
-                    vec![unrelated_utxo, related_utxo],
-                    vec![],
-                    Amount::from(i),
-                    &wallet_state,
-                    None,
-                );
-                m.insert(&t);
-            }
+        let tx_by_preminer = premine_receiver_global_state
+            .create_transaction(output_utxos_generated_by_me)
+            .await?;
 
-            for i in 0u32..3 {
-                let t = make_mock_transaction_with_wallet(
-                    vec![unrelated_utxo],
-                    vec![related_utxo],
-                    Amount::from(i),
-                    &wallet_state,
-                    None,
-                );
-                m.insert(&t);
-            }
+        // Add this transaction to the mempool
+        let m = Mempool::default();
+        m.insert(&tx_by_preminer);
 
-            // Insert unrelated transtions.
-            for i in 0u32..5 {
-                let t = make_mock_transaction_with_wallet(
-                    vec![unrelated_utxo, unrelated_utxo],
-                    vec![],
-                    Amount::from(i),
-                    &wallet_state_unrelated,
-                    None,
-                );
-                m.insert(&t);
-            }
-            println!("Mempool size: {}", m.len());
-            m
-        };
+        // Create another transaction that's valid to be included in block 2, but isn't actually
+        // included by the miner. This transaction is inserted into the mempool, but since it's
+        // not included in block 2 it must still be in the mempool after the mempool has been
+        // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
+        // manager must keep mutator set data updated.
+        let output_utxos_by_other = vec![Utxo {
+            amount: 68.into(),
+            public_key: other_wallet.get_public_key(),
+        }];
+        let tx_by_other_original = other_global_state
+            .create_transaction(output_utxos_by_other)
+            .await
+            .unwrap();
+        m.insert(&tx_by_other_original);
 
-        let canonicalized_transaction = make_mock_transaction_with_wallet(
-            vec![related_utxo],
-            vec![],
-            Amount::from(454542u32),
-            &wallet_state,
-            None,
+        // Create next block which includes this transaction
+        let mut block_2 = make_mock_block(&block_1, None, premine_wallet.get_public_key());
+        block_2.authority_merge_transaction(tx_by_preminer.clone());
+
+        // Update the mempool with block 2 and verify that the mempool is now empty
+        assert_eq!(2, m.len());
+        m.update_with_block(&block_2, &mut m.internal.write().unwrap());
+        assert_eq!(1, m.len());
+
+        // Create a new block to verify that the non-mined transaction still contains
+        // valid mutator set data
+        let mut tx_by_other_updated: Transaction =
+            m.get_densest_transactions(usize::MAX)[0].clone();
+
+        let block_3_with_no_input =
+            make_mock_block(&block_2, None, premine_wallet.get_public_key());
+        let mut block_3_with_updated_tx = block_3_with_no_input.clone();
+
+        block_3_with_updated_tx.authority_merge_transaction(tx_by_other_updated.clone());
+        assert!(
+            block_3_with_updated_tx.devnet_is_valid(&block_2),
+            "Block with tx with updated mutator set data must be valid"
         );
 
-        assert_eq!(mempool.len(), 10);
-        {
-            let mut m_lock: std::sync::RwLockWriteGuard<MempoolInternal> =
-                mempool.internal.write().unwrap();
-            mempool.remove_transactions_with(&canonicalized_transaction, &mut m_lock);
+        // Mine 10 more blocks without including the transaction but while still keeping the
+        // mempool updated. After these 10 blocks are mined, the transaction must still be
+        // valid.
+        let mut previous_block = block_3_with_no_input;
+        for _ in 0..10 {
+            let next_block = make_mock_block(&previous_block, None, other_wallet.get_public_key());
+            m.update_with_block(&next_block, &mut m.internal.write().unwrap());
+            previous_block = next_block;
         }
-        assert_eq!(mempool.len(), 8)
+
+        let mut block_14 = make_mock_block(&previous_block, None, other_wallet.get_public_key());
+        assert_eq!(Into::<BlockHeight>::into(14), block_14.header.height);
+        tx_by_other_updated = m.get_densest_transactions(usize::MAX)[0].clone();
+        block_14.authority_merge_transaction(tx_by_other_updated);
+        assert!(
+            block_14.devnet_is_valid(&previous_block),
+            "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
+        );
+
+        Ok(())
     }
 
     #[tokio::test]
