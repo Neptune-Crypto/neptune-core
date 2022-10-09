@@ -1,26 +1,8 @@
-use self::wallet_block_utxos::WalletBlockIOSums;
-use self::wallet_status::{WalletStatus, WalletStatusElement};
+pub mod wallet_block_utxos;
+pub mod wallet_status;
 
-use crate::config_models::data_directory::get_data_directory;
-use crate::config_models::network::Network;
-use crate::database::leveldb::LevelDB;
-use crate::database::rusty::RustyLevelDB;
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::digest::{
-    Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
-    DIGEST_LENGTH,
-};
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::{Amount, Transaction};
-use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
-use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
-use crate::Hash;
 use anyhow::{bail, Result};
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::{One, Zero};
 use rand::thread_rng;
 use secp256k1::{ecdsa, Secp256k1};
@@ -30,11 +12,32 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, info, warn};
+
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
+
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 use twenty_first::util_types::simple_hasher::Hasher;
 
-pub mod wallet_block_utxos;
-pub mod wallet_status;
+use crate::config_models::data_directory::get_data_directory;
+use crate::config_models::network::Network;
+use crate::database::leveldb::LevelDB;
+use crate::database::rusty::RustyLevelDB;
+use crate::models::blockchain::block::Block;
+use crate::models::blockchain::digest::{
+    Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
+};
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::{Amount, Transaction};
+use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
+use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
+use crate::Hash;
+
+use self::wallet_block_utxos::WalletBlockIOSums;
+use self::wallet_status::{WalletStatus, WalletStatusElement};
 
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
@@ -80,7 +83,7 @@ impl Wallet {
             BFieldElement::new(2544353828551980854),
             BFieldElement::new(9457203229242732950),
             BFieldElement::new(5097796649750941488),
-            BFieldElement::new(12701344140082211424),
+            // BFieldElement::new(12701344140082211424), // FIXME: This test will break. Redo manual test.
         ]);
 
         Wallet::new(secret_seed)

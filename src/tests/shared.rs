@@ -31,20 +31,30 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::shared_math::traits::GetRandomElements;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
+use crate::config_models::{cli_args, network::Network};
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::block::{block_height::BlockHeight, Block};
+use crate::models::blockchain::digest::Digest;
 use crate::models::blockchain::digest::Hashable;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
+use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
+use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
 use crate::models::database::WalletDbKey;
 use crate::models::database::WalletDbValue;
+use crate::models::database::{BlockDatabases, PeerDatabases};
+use crate::models::peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding};
+use crate::models::shared::LatestBlockInfo;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
@@ -55,25 +65,7 @@ use crate::models::state::wallet::Wallet;
 use crate::models::state::wallet::WalletState;
 use crate::models::state::GlobalState;
 use crate::Hash;
-use crate::{
-    config_models::{cli_args, network::Network},
-    models::{
-        blockchain::{
-            block::{
-                block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE},
-                block_height::BlockHeight,
-                Block,
-            },
-            digest::{Digest, DIGEST_LENGTH},
-            transaction::{utxo::Utxo, Transaction},
-        },
-        channel::{MainToPeerThread, PeerThreadToMain},
-        database::{BlockDatabases, PeerDatabases},
-        peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding},
-        shared::LatestBlockInfo,
-    },
-    PEER_CHANNEL_CAPACITY,
-};
+use crate::PEER_CHANNEL_CAPACITY;
 
 /// Return an empty peer map
 pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {

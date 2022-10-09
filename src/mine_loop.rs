@@ -24,6 +24,7 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::shared_math::traits::GetRandomElements;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;

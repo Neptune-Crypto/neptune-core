@@ -1,12 +1,10 @@
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{merkle_tree::MerkleTree, simple_hasher::Hasher},
-};
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
+use twenty_first::util_types::merkle_tree::MerkleTree;
+use twenty_first::util_types::simple_hasher::Hasher;
 
-use crate::models::blockchain::{
-    digest::{Digest, Hashable, DIGEST_LENGTH},
-    shared::Hash,
-};
+use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::shared::Hash;
 
 use super::{utxo::Utxo, Amount, AMOUNT_SIZE_FOR_U32};
 

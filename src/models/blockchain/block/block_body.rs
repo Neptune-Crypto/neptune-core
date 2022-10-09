@@ -2,10 +2,11 @@ use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSet
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::util_types::merkle_tree::MerkleTree;
 use twenty_first::util_types::simple_hasher::Hasher;
 
-use crate::models::blockchain::digest::{Digest, Hashable, DIGEST_LENGTH};
+use crate::models::blockchain::digest::{Digest, Hashable};
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 

@@ -1,8 +1,6 @@
 use super::{Amount, AMOUNT_SIZE_FOR_U32};
-use crate::models::blockchain::{
-    digest::{Digest, Hashable, DIGEST_LENGTH},
-    shared::Hash,
-};
+use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::shared::Hash;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::str::FromStr;

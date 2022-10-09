@@ -14,18 +14,17 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::warn;
-use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
-    util_types::simple_hasher::Hasher,
-};
+
+use twenty_first::amount::u32s::U32s;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
+use twenty_first::util_types::simple_hasher::Hasher;
 
 use crate::models::state::wallet::Wallet;
 
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
-use super::{
-    digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DIGEST_LENGTH},
-    shared::Hash,
-};
+use super::digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES};
+use super::shared::Hash;
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;

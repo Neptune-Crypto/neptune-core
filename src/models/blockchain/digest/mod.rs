@@ -5,10 +5,11 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
+use twenty_first::shared_math::traits::FromVecu8;
 
 pub const BYTES_PER_BFE: usize = 8;
-pub const DIGEST_LENGTH: usize = 6;
 pub const DEVNET_MSG_DIGEST_SIZE_IN_BYTES: usize = 32;
 pub const DEVNET_SECRET_KEY_SIZE_IN_BYTES: usize = 32;
 pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize = DIGEST_LENGTH * BYTES_PER_BFE;
