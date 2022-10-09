@@ -5,7 +5,7 @@ use super::blockchain::{
         transfer_block::TransferBlock,
         Block,
     },
-    digest::{Digest, Hashable},
+    digest::{Digest, Hashable2},
     transaction::{Transaction, TransactionDigest},
 };
 use crate::config_models::network::Network;

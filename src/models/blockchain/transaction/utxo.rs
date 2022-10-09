@@ -1,5 +1,5 @@
 use super::{Amount, AMOUNT_SIZE_FOR_U32};
-use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
@@ -41,7 +41,7 @@ impl Utxo {
     }
 }
 
-impl Hashable for Utxo {
+impl Hashable2 for Utxo {
     fn neptune_hash(&self) -> Digest {
         let hasher = Hash::new();
         Digest::new(
@@ -60,7 +60,7 @@ impl Hashable for Utxo {
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = <Utxo as Hashable>::neptune_hash(self);
+        let our_hash = Utxo::neptune_hash(self);
         <Digest as StdHash>::hash(&our_hash, state);
     }
 }

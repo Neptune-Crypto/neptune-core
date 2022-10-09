@@ -32,7 +32,7 @@ impl GetSize for Digest {
     }
 }
 
-pub trait Hashable {
+pub trait Hashable2 {
     fn neptune_hash(&self) -> Digest;
 }
 

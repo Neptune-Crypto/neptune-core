@@ -7,7 +7,7 @@ use mutator_set_tf::util_types::mutator_set::{
 use serde::{Deserialize, Serialize};
 use twenty_first::util_types::{merkle_tree::MerkleTree, simple_hasher::Hasher};
 
-use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -18,7 +18,7 @@ pub struct MutatorSetUpdate {
     pub additions: Vec<AdditionRecord<Hash>>,
 }
 
-impl Hashable for MutatorSetUpdate {
+impl Hashable2 for MutatorSetUpdate {
     fn neptune_hash(&self) -> Digest {
         let additions = self.additions.to_owned();
         let addition_digests: Vec<_> = additions.into_iter().map(|a| a.hash()).collect();

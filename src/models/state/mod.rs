@@ -9,7 +9,7 @@ use self::{
     wallet::WalletState,
 };
 use super::blockchain::{
-    digest::Hashable,
+    digest::Hashable2,
     transaction::{devnet_input::DevNetInput, utxo::Utxo, Amount, Transaction},
 };
 use crate::{

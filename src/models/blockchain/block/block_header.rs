@@ -6,7 +6,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::util_types::simple_hasher::Hasher;
 
-use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 
 use super::block_height::BlockHeight;
@@ -59,7 +59,7 @@ impl Display for BlockHeader {
     }
 }
 
-impl Hashable for BlockHeader {
+impl Hashable2 for BlockHeader {
     fn neptune_hash(&self) -> Digest {
         let hasher = Hash::new();
         Digest::new(

@@ -23,7 +23,7 @@ use twenty_first::util_types::simple_hasher::Hasher;
 use crate::models::state::wallet::Wallet;
 
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
-use super::digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES};
+use super::digest::{Digest, Hashable2, DEVNET_MSG_DIGEST_SIZE_IN_BYTES};
 use super::shared::Hash;
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
@@ -57,7 +57,7 @@ impl GetSize for Transaction {
     }
 }
 
-impl Hashable for Transaction {
+impl Hashable2 for Transaction {
     fn neptune_hash(&self) -> Digest {
         // TODO: Consider using a Merkle tree construction here instead
         let hasher = Hash::new();
@@ -66,14 +66,14 @@ impl Hashable for Transaction {
         let outputs_preimage: Vec<Vec<BFieldElement>> = self
             .outputs
             .iter()
-            .map(|(output_utxo, _)| <Utxo as Hashable>::neptune_hash(output_utxo).into())
+            .map(|(output_utxo, _)| Utxo::neptune_hash(output_utxo).into())
             .collect();
         let outputs_digest = hasher.hash_many(&outputs_preimage);
 
         // Hash inputs
         let mut inputs_preimage: Vec<Vec<BFieldElement>> = vec![];
         for input in self.inputs.iter() {
-            inputs_preimage.push(<Utxo as Hashable>::neptune_hash(&input.utxo).into());
+            inputs_preimage.push(Utxo::neptune_hash(&input.utxo).into());
             // We don't hash the membership proofs as they aren't part of the main net blocks
             inputs_preimage.push(input.removal_record.hash());
         }
@@ -110,7 +110,7 @@ impl Hashable for Transaction {
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Transaction {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = <Transaction as Hashable>::neptune_hash(self);
+        let our_hash = Transaction::neptune_hash(self);
         <Digest as StdHash>::hash(&our_hash, state);
     }
 }

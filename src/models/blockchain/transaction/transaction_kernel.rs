@@ -3,7 +3,7 @@ use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::util_types::merkle_tree::MerkleTree;
 use twenty_first::util_types::simple_hasher::Hasher;
 
-use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 
 use super::{utxo::Utxo, Amount, AMOUNT_SIZE_FOR_U32};
@@ -16,7 +16,7 @@ pub struct TransactionKernel {
     pub timestamp: BFieldElement,
 }
 
-impl Hashable for TransactionKernel {
+impl Hashable2 for TransactionKernel {
     fn neptune_hash(&self) -> Digest {
         let mut leafs: Vec<Vec<BFieldElement>> = vec![];
 

@@ -45,7 +45,7 @@ use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICU
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::digest::Digest;
-use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::digest::Hashable2;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
@@ -633,7 +633,7 @@ pub fn make_mock_transaction_with_wallet(
     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
     let output_utxos_with_digest = outputs
         .into_iter()
-        .map(|out_utxo| (out_utxo, <Utxo as Hashable>::neptune_hash(&out_utxo)))
+        .map(|out_utxo| (out_utxo, Utxo::neptune_hash(&out_utxo)))
         .collect::<Vec<_>>();
 
     let timestamp = timestamp.unwrap_or_else(|| {

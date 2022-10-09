@@ -6,7 +6,7 @@ use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::util_types::merkle_tree::MerkleTree;
 use twenty_first::util_types::simple_hasher::Hasher;
 
-use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 
@@ -21,7 +21,7 @@ pub struct BlockBody {
     pub stark_proof: Vec<BFieldElement>,
 }
 
-impl Hashable for BlockBody {
+impl Hashable2 for BlockBody {
     /// Return a Merkle root for all digests in the block body
     fn neptune_hash(&self) -> Digest {
         // Append the single Transaction's digest
