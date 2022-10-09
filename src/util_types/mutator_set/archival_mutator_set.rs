@@ -363,8 +363,10 @@ where
 mod archival_mutator_set_tests {
     use super::*;
     use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness_for_rp};
+    use rand::distributions::Standard;
+    use rand::prelude::Distribution;
+    use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::shared_math::traits::GetRandomElements;
     use twenty_first::util_types::simple_hasher::Hasher;
 
     #[test]
@@ -580,14 +582,11 @@ mod archival_mutator_set_tests {
     ) -> (H::Digest, AdditionRecord<H>, MsMembershipProof<H>)
     where
         u128: Hashable<<H as Hasher>::T>,
-        <H as Hasher>::T: GetRandomElements,
+        Standard: Distribution<<H as Hasher>::T>,
     {
-        let mut rng = rand::thread_rng();
-        let hasher = H::new();
-
-        let random_elements = <H as Hasher>::T::random_elements(6, &mut rng);
-        let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+        let random_elements = random_elements(6);
+        let item: <H as Hasher>::Digest = H::new().hash_sequence(&random_elements[0..3]);
+        let randomness: <H as Hasher>::Digest = H::new().hash_sequence(&random_elements[3..6]);
 
         let addition_record = archival_mutator_set
             .set_commitment

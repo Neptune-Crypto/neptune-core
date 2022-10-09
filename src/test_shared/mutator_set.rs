@@ -1,16 +1,18 @@
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
+use rand::RngCore;
+use rusty_leveldb::DB;
+
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::other::random_elements;
+use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+use twenty_first::util_types::blake3_wrapper::Blake3Hash;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::simple_hasher::{Hashable, Hasher};
+
 use crate::util_types::mutator_set::{
     archival_mutator_set::ArchivalMutatorSet, ms_membership_proof::MsMembershipProof,
     removal_record::RemovalRecord, set_commitment::SetCommitment,
-};
-use rand::{thread_rng, RngCore};
-use rusty_leveldb::DB;
-use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-use twenty_first::shared_math::traits::GetRandomElements;
-use twenty_first::util_types::blake3_wrapper::Blake3Hash;
-use twenty_first::util_types::simple_hasher::Hasher;
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::{mmr::mmr_trait::Mmr, simple_hasher::Hashable},
 };
 
 pub fn make_item_and_randomness_for_blake3() -> (Blake3Hash, Blake3Hash) {
@@ -26,12 +28,10 @@ pub fn make_item_and_randomness_for_blake3() -> (Blake3Hash, Blake3Hash) {
 
 pub fn make_item_and_randomness_for_rp() -> ([BFieldElement; 5], [BFieldElement; 5]) {
     type H = RescuePrimeRegular;
-    let mut rng = rand::thread_rng();
-    let hasher = H::new();
 
-    let random_elements = <H as Hasher>::T::random_elements(6, &mut rng);
-    let item: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[0..3]);
-    let randomness: <H as Hasher>::Digest = hasher.hash_sequence(&random_elements[3..6]);
+    let random_elements = random_elements(6);
+    let item: <H as Hasher>::Digest = H::new().hash_sequence(&random_elements[0..3]);
+    let randomness: <H as Hasher>::Digest = H::new().hash_sequence(&random_elements[3..6]);
 
     (item, randomness)
 }
@@ -53,14 +53,11 @@ where
     H: Hasher,
     M: Mmr<H>,
     u128: Hashable<<H as Hasher>::T>,
-    <H as Hasher>::T: GetRandomElements,
+    Standard: Distribution<<H as Hasher>::T>,
 {
-    let mut prng = thread_rng();
-    let hasher = H::new();
-
-    let random_elements = H::T::random_elements(6, &mut prng);
-    let new_item: H::Digest = hasher.hash_sequence(&random_elements[0..3]);
-    let randomness: H::Digest = hasher.hash_sequence(&random_elements[3..6]);
+    let random_elements = random_elements(6);
+    let new_item: H::Digest = H::new().hash_sequence(&random_elements[0..3]);
+    let randomness: H::Digest = H::new().hash_sequence(&random_elements[3..6]);
 
     let mut addition_record = mutator_set.commit(&new_item, &randomness);
     let membership_proof = mutator_set.prove(&new_item, &randomness, true);
