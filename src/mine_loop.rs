@@ -67,7 +67,7 @@ fn make_devnet_block_template(
         stark_proof: vec![],
     };
 
-    let zero = BFieldElement::ring_zero();
+    let zero = BFieldElement::zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
     let new_pow_line: U32s<5> = previous_block.header.proof_of_work_family + difficulty;
     let mutator_set_commitment: Digest = next_mutator_set_accumulator.get_commitment().into();
@@ -132,9 +132,9 @@ async fn mine_devnet_block(
         }
 
         if block_header.nonce[2].value() == BFieldElement::MAX {
-            block_header.nonce[2] = BFieldElement::ring_zero();
+            block_header.nonce[2] = BFieldElement::zero();
             if block_header.nonce[1].value() == BFieldElement::MAX {
-                block_header.nonce[1] = BFieldElement::ring_zero();
+                block_header.nonce[1] = BFieldElement::zero();
                 block_header.nonce[0].increment();
                 continue;
             }

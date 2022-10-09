@@ -110,15 +110,15 @@ impl Block {
         };
 
         let header: BlockHeader = BlockHeader {
-            version: BFieldElement::ring_zero(),
-            height: BFieldElement::ring_zero().into(),
+            version: BFieldElement::zero(),
+            height: BFieldElement::zero().into(),
             mutator_set_commitment: genesis_mutator_set.get_commitment().into(),
             prev_block_digest: Digest::default(),
             timestamp,
             nonce: [
-                BFieldElement::ring_zero(),
-                BFieldElement::ring_zero(),
-                BFieldElement::ring_zero(),
+                BFieldElement::zero(),
+                BFieldElement::zero(),
+                BFieldElement::zero(),
             ],
             max_block_size: 10_000,
             proof_of_work_line: U32s::zero(),

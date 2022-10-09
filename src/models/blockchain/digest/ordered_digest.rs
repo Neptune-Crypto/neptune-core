@@ -32,7 +32,7 @@ impl OrderedDigest {
     }
 
     pub const fn default() -> Self {
-        Self([BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+        Self([BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
     }
 
     pub const fn new(digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
@@ -130,51 +130,51 @@ mod ordered_digest_tests {
         let fourteen: BigUint = 14u128.into();
         let fourteen_converted_expected: OrderedDigest = OrderedDigest([
             BFieldElement::new(14),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
         ]);
 
         let bfe_max: BigUint = BFieldElement::MAX.into();
         let bfe_max_converted_expected = OrderedDigest([
             BFieldElement::new(BFieldElement::MAX),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
         ]);
 
         let bfe_max_plus_one: BigUint = BFieldElement::QUOTIENT.into();
         let bfe_max_plus_one_converted_expected = OrderedDigest([
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_one(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
+            BFieldElement::zero(),
+            BFieldElement::one(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
         ]);
 
         let two_pow_64: BigUint = (1u128 << 64).into();
         let two_pow_64_converted_expected = OrderedDigest([
             BFieldElement::new((1u64 << 32) - 1),
-            BFieldElement::ring_one(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
+            BFieldElement::one(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
         ]);
 
         let two_pow_123: BigUint = (1u128 << 123).into();
         let two_pow_123_converted_expected = OrderedDigest([
             BFieldElement::new(18446744069280366593),
             BFieldElement::new(576460752437641215),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
-            BFieldElement::ring_zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
         ]);
 
         let mut two_pow_351: BigUint = (1u128 << 70).into();

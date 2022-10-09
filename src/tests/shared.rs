@@ -706,7 +706,7 @@ pub fn make_mock_block(
     let block_target_difficulty = previous_block.header.target_difficulty;
     let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
     let pow_family = pow_line;
-    let zero = BFieldElement::ring_zero();
+    let zero = BFieldElement::zero();
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,

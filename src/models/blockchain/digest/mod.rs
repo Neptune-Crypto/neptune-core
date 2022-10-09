@@ -1,6 +1,7 @@
 pub mod ordered_digest;
 
 use get_size::GetSize;
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -45,7 +46,7 @@ impl Digest {
     }
 
     pub const fn default() -> Self {
-        Self([BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+        Self([BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
     }
 }
 
@@ -114,11 +115,11 @@ impl From<Digest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
 impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for Digest {
     fn from(item: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]) -> Self {
         let mut bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
-            [BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+            [BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
         for (i, bfe) in bfes.iter_mut().enumerate() {
             let start_index = i * BYTES_PER_BFE;
             let end_index = (i + 1) * BYTES_PER_BFE;
-            *bfe = BFieldElement::ring_zero().from_vecu8(item[start_index..end_index].to_vec())
+            *bfe = BFieldElement::zero().from_vecu8(item[start_index..end_index].to_vec())
         }
 
         Self(bfes)

@@ -21,7 +21,7 @@ use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipPr
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
-use num_traits::Zero;
+use num_traits::{One, Zero};
 use rand::thread_rng;
 use secp256k1::{ecdsa, Secp256k1};
 use serde::{Deserialize, Serialize};
@@ -207,8 +207,8 @@ impl Wallet {
     fn get_commitment_randomness_seed(&self) -> Digest {
         let secret_seed = self.secret_seed;
         let mut commitment_pr_marker: Vec<BFieldElement> =
-            vec![BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
-        commitment_pr_marker[0] = BFieldElement::ring_one();
+            vec![BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+        commitment_pr_marker[0] = BFieldElement::one();
         let hasher = Hash::new();
         hasher
             .hash_pair(&secret_seed.into(), &commitment_pr_marker)
@@ -675,7 +675,7 @@ impl WalletState {
         // TODO: Ugly hack used to generate a `Digest` from a `u128` here.
         // Once we've updated to twenty-first 0.2.0 or later use its `to_sequence` instead.
         let mut counter_as_digest: Vec<BFieldElement> =
-            vec![BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+            vec![BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
         counter_as_digest[0] = BFieldElement::new(counter as u64);
         let counter_as_digest: Digest = counter_as_digest.into();
         let commitment_pseudo_randomness_seed = self.wallet.get_commitment_randomness_seed();
