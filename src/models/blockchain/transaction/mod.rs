@@ -276,7 +276,7 @@ mod transaction_tests {
     };
     use rand::thread_rng;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::traits::GetRandomElements;
+    use twenty_first::shared_math::other::random_elements_array;
 
     #[traced_test]
     #[test]
@@ -288,7 +288,7 @@ mod transaction_tests {
             amount: output_amount_1,
             public_key: wallet_1.get_public_key(),
         };
-        let randomness: Digest = BFieldElement::random_elements(DIGEST_LENGTH, &mut rng).into();
+        let randomness: Digest = Digest::new(random_elements_array());
 
         let coinbase_transaction = make_mock_transaction(vec![], vec![(output_1, randomness)]);
         let coinbase_amount = Some(output_amount_1);

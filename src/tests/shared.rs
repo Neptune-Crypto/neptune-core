@@ -31,6 +31,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
+use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::shared_math::traits::GetRandomElements;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -400,8 +401,7 @@ impl<Item> stream::Stream for Mock<Item> {
 
 pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     let tx = &mut block.body.transaction;
-    let output_randomness: Vec<BFieldElement> =
-        BFieldElement::random_elements(DIGEST_LENGTH, &mut thread_rng());
+    let output_randomness: Digest = Digest::new(random_elements_array());
     let addition_record: AdditionRecord<Hash> = block
         .body
         .previous_mutator_set_accumulator
@@ -584,7 +584,7 @@ pub fn make_mock_signed_valid_tx() -> Transaction {
         amount: output_amount_1,
         public_key: wallet_1.get_public_key(),
     };
-    let randomness: Digest = BFieldElement::random_elements(DIGEST_LENGTH, &mut rng).into();
+    let randomness: Digest = Digest::new(random_elements_array());
 
     let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
     let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
@@ -667,7 +667,7 @@ pub fn make_mock_block(
         amount: Block::get_mining_reward(new_block_height),
         public_key: coinbase_beneficiary,
     };
-    let output_randomness = BFieldElement::random_elements(DIGEST_LENGTH, &mut thread_rng());
+    let output_randomness: Digest = Digest::new(random_elements_array());
     let transaction = make_mock_transaction(
         vec![],
         vec![(coinbase_utxo, output_randomness.clone().into())],

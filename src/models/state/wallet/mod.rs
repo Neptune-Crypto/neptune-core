@@ -12,14 +12,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, info, warn};
+use twenty_first::shared_math::other::random_elements_array;
 
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 
+use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
-use twenty_first::shared_math::{b_field_element::BFieldElement, traits::GetRandomElements};
 use twenty_first::util_types::simple_hasher::Hasher;
 
 use crate::config_models::data_directory::get_data_directory;
@@ -47,8 +48,7 @@ const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
 /// Generate a new secret
 pub fn generate_secret_key() -> Digest {
-    let mut rng = thread_rng();
-    BFieldElement::random_elements(DIGEST_LENGTH, &mut rng).into()
+    Digest::new(random_elements_array())
 }
 
 /// Wallet contains the wallet-related data we want to store in a JSON file,

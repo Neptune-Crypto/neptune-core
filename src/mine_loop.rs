@@ -24,8 +24,8 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
-use twenty_first::shared_math::traits::GetRandomElements;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
@@ -171,12 +171,11 @@ fn make_coinbase_transaction(
             .as_secs(),
     );
 
-    let output_randomness: Vec<BFieldElement> =
-        BFieldElement::random_elements(DIGEST_LENGTH, &mut thread_rng());
+    let output_randomness: Digest = Digest::new(random_elements_array());
 
     Transaction {
         inputs: vec![],
-        outputs: vec![(coinbase_utxo, output_randomness.into())],
+        outputs: vec![(coinbase_utxo, output_randomness)],
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,
