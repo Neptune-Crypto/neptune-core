@@ -4,7 +4,7 @@ use twenty_first::{
 };
 
 use crate::models::blockchain::{
-    digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{Digest, Hashable, DIGEST_LENGTH},
     shared::Hash,
 };
 
@@ -47,7 +47,7 @@ impl Hashable for TransactionKernel {
         let public_script_digests: Vec<Vec<BFieldElement>> = self
             .public_scripts
             .iter()
-            .map(|ps| hasher.hash(ps, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES))
+            .map(|ps| hasher.hash(ps, DIGEST_LENGTH))
             .collect();
         leafs.push(MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(
             &public_script_digests,
@@ -55,11 +55,11 @@ impl Hashable for TransactionKernel {
 
         // Hash fee
         let fee_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.fee.into();
-        let fee_digest = hasher.hash(&fee_bfes, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let fee_digest = hasher.hash(&fee_bfes, DIGEST_LENGTH);
         leafs.push(fee_digest);
 
         // Hash timestamp
-        let timestamp_digest = hasher.hash(&[self.timestamp], RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let timestamp_digest = hasher.hash(&[self.timestamp], DIGEST_LENGTH);
         leafs.push(timestamp_digest);
 
         MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(&leafs).into()

@@ -23,7 +23,7 @@ use crate::models::state::wallet::Wallet;
 
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
 use super::{
-    digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DIGEST_LENGTH},
     shared::Hash,
 };
 
@@ -82,18 +82,17 @@ impl Hashable for Transaction {
 
         // Hash fee
         let fee_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.fee.into();
-        let fee_digest = hasher.hash(&fee_bfes, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let fee_digest = hasher.hash(&fee_bfes, DIGEST_LENGTH);
 
         // Hash timestamp
-        let timestamp_digest = hasher.hash(&[self.timestamp], RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let timestamp_digest = hasher.hash(&[self.timestamp], DIGEST_LENGTH);
 
         // Hash public_scripts
         // If public scripts are not padded or end with a specific instruction, then it might
         // be possible to find a collission for this digest. If that's the case, each public script
         // can be padded with a B field element that's not a valid VM instruction.
         let flatted_public_scripts: Vec<BFieldElement> = self.public_scripts.concat();
-        let public_scripts_digest =
-            hasher.hash(&flatted_public_scripts, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let public_scripts_digest = hasher.hash(&flatted_public_scripts, DIGEST_LENGTH);
 
         let all_digests = vec![
             inputs_digest,
@@ -104,12 +103,7 @@ impl Hashable for Transaction {
         ]
         .concat();
 
-        Digest::new(
-            hasher
-                .hash(&all_digests, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
-                .try_into()
-                .unwrap(),
-        )
+        Digest::new(hasher.hash(&all_digests, DIGEST_LENGTH).try_into().unwrap())
     }
 }
 
@@ -295,8 +289,7 @@ mod transaction_tests {
             amount: output_amount_1,
             public_key: wallet_1.get_public_key(),
         };
-        let randomness: Digest =
-            BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into();
+        let randomness: Digest = BFieldElement::random_elements(DIGEST_LENGTH, &mut rng).into();
 
         let coinbase_transaction = make_mock_transaction(vec![], vec![(output_1, randomness)]);
         let coinbase_amount = Some(output_amount_1);

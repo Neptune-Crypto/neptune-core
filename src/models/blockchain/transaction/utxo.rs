@@ -1,6 +1,6 @@
 use super::{Amount, AMOUNT_SIZE_FOR_U32};
 use crate::models::blockchain::{
-    digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{Digest, Hashable, DIGEST_LENGTH},
     shared::Hash,
 };
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ impl Hashable for Utxo {
         let hasher = Hash::new();
         Digest::new(
             hasher
-                .hash(&self.accumulate(), RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
+                .hash(&self.accumulate(), DIGEST_LENGTH)
                 .try_into()
                 .unwrap(),
         )

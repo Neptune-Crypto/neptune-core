@@ -171,7 +171,7 @@ fn make_coinbase_transaction(
     );
 
     let output_randomness: Vec<BFieldElement> =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+        BFieldElement::random_elements(DIGEST_LENGTH, &mut thread_rng());
 
     Transaction {
         inputs: vec![],

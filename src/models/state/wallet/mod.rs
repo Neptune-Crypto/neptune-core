@@ -8,7 +8,7 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{
     Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
-    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES,
+    DIGEST_LENGTH,
 };
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction};
@@ -45,7 +45,7 @@ const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 /// Generate a new secret
 pub fn generate_secret_key() -> Digest {
     let mut rng = thread_rng();
-    BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into()
+    BFieldElement::random_elements(DIGEST_LENGTH, &mut rng).into()
 }
 
 /// Wallet contains the wallet-related data we want to store in a JSON file,
@@ -207,7 +207,7 @@ impl Wallet {
     fn get_commitment_randomness_seed(&self) -> Digest {
         let secret_seed = self.secret_seed;
         let mut commitment_pr_marker: Vec<BFieldElement> =
-            vec![BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+            vec![BFieldElement::zero(); DIGEST_LENGTH];
         commitment_pr_marker[0] = BFieldElement::one();
         let hasher = Hash::new();
         hasher
@@ -674,8 +674,7 @@ impl WalletState {
 
         // TODO: Ugly hack used to generate a `Digest` from a `u128` here.
         // Once we've updated to twenty-first 0.2.0 or later use its `to_sequence` instead.
-        let mut counter_as_digest: Vec<BFieldElement> =
-            vec![BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+        let mut counter_as_digest: Vec<BFieldElement> = vec![BFieldElement::zero(); DIGEST_LENGTH];
         counter_as_digest[0] = BFieldElement::new(counter as u64);
         let counter_as_digest: Digest = counter_as_digest.into();
         let commitment_pseudo_randomness_seed = self.wallet.get_commitment_randomness_seed();

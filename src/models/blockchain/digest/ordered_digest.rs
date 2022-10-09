@@ -3,20 +3,20 @@ use num_traits::Zero;
 use serde::Serialize;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
-use super::{Digest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
+use super::{Digest, DIGEST_LENGTH};
 
 // The data structure `RescuePrimeDigest` is primarily needed, so we can make
 // database keys out of rescue prime digests.
 /// Type for ordered digests. The digest is considered a big-endian unsigned integer
 /// written in base BFieldElement::QUOTIENT.
 #[derive(Clone, Copy, Debug, Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct OrderedDigest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+pub struct OrderedDigest([BFieldElement; DIGEST_LENGTH]);
 
 // Digest needs a partial ordering for the mining/PoW process, to check if
 // a digest is below the difficulty threshold.
 impl PartialOrd for OrderedDigest {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        for i in (0..RESCUE_PRIME_OUTPUT_SIZE_IN_BFES).rev() {
+        for i in (0..DIGEST_LENGTH).rev() {
             if self.0[i].value() != other.0[i].value() {
                 return self.0[i].value().partial_cmp(&other.0[i].value());
             }
@@ -28,14 +28,14 @@ impl PartialOrd for OrderedDigest {
 
 impl OrderedDigest {
     pub const fn max() -> Self {
-        Self([BFieldElement::new(BFieldElement::MAX); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+        Self([BFieldElement::new(BFieldElement::MAX); DIGEST_LENGTH])
     }
 
     pub const fn default() -> Self {
-        Self([BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+        Self([BFieldElement::zero(); DIGEST_LENGTH])
     }
 
-    pub const fn new(digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
+    pub const fn new(digest: [BFieldElement; DIGEST_LENGTH]) -> Self {
         Self(digest)
     }
 
@@ -58,7 +58,7 @@ impl From<BigUint> for OrderedDigest {
         let mut remaining = biguint;
         let mut ret = OrderedDigest::default();
         let modulus: BigUint = BFieldElement::QUOTIENT.into();
-        for i in 0..RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
+        for i in 0..DIGEST_LENGTH {
             let resulting_u64: u64 = (remaining.clone() % modulus.clone()).try_into().unwrap();
             ret.0[i] = BFieldElement::new(resulting_u64);
             remaining /= modulus.clone();
@@ -77,7 +77,7 @@ impl From<OrderedDigest> for BigUint {
     fn from(digest: OrderedDigest) -> Self {
         let mut ret = BigUint::zero();
         let modulus: BigUint = BFieldElement::QUOTIENT.into();
-        for i in (0..RESCUE_PRIME_OUTPUT_SIZE_IN_BFES).rev() {
+        for i in (0..DIGEST_LENGTH).rev() {
             ret *= modulus.clone();
             let digest_element: BigUint = digest.0[i].value().into();
             ret += digest_element;
@@ -231,7 +231,7 @@ mod ordered_digest_tests {
 
     #[test]
     fn digest_ordering() {
-        let val0 = OrderedDigest::new([BFieldElement::new(0); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let val0 = OrderedDigest::new([BFieldElement::new(0); DIGEST_LENGTH]);
         let val1 = OrderedDigest::new([
             BFieldElement::new(14),
             BFieldElement::new(0),
@@ -242,7 +242,7 @@ mod ordered_digest_tests {
         ]);
         assert!(val0 < val1);
 
-        let val2 = OrderedDigest::new([BFieldElement::new(14); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+        let val2 = OrderedDigest::new([BFieldElement::new(14); DIGEST_LENGTH]);
         assert!(val2 > val1);
         assert!(val2 > val0);
 

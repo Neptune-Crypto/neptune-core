@@ -8,14 +8,13 @@ use std::str::FromStr;
 use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
 
 pub const BYTES_PER_BFE: usize = 8;
-pub const RESCUE_PRIME_OUTPUT_SIZE_IN_BFES: usize = 6;
+pub const DIGEST_LENGTH: usize = 6;
 pub const DEVNET_MSG_DIGEST_SIZE_IN_BYTES: usize = 32;
 pub const DEVNET_SECRET_KEY_SIZE_IN_BYTES: usize = 32;
-pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
-    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES * BYTES_PER_BFE;
+pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize = DIGEST_LENGTH * BYTES_PER_BFE;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct Digest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+pub struct Digest([BFieldElement; DIGEST_LENGTH]);
 
 impl GetSize for Digest {
     fn get_stack_size() -> usize {
@@ -37,16 +36,16 @@ pub trait Hashable {
 }
 
 impl Digest {
-    pub fn values(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
+    pub fn values(&self) -> [BFieldElement; DIGEST_LENGTH] {
         self.0
     }
 
-    pub const fn new(digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
+    pub const fn new(digest: [BFieldElement; DIGEST_LENGTH]) -> Self {
         Self(digest)
     }
 
     pub const fn default() -> Self {
-        Self([BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+        Self([BFieldElement::zero(); DIGEST_LENGTH])
     }
 }
 
@@ -68,11 +67,10 @@ impl FromStr for Digest {
             .split(DIGEST_SEPARATOR)
             .map(|substring| substring.parse::<u64>())
             .collect();
-        if parsed_u64s.len() != RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
+        if parsed_u64s.len() != DIGEST_LENGTH {
             Err("Given invalid number of BFieldElements in string.".to_owned())
         } else {
-            let mut bf_elms: Vec<BFieldElement> =
-                Vec::with_capacity(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+            let mut bf_elms: Vec<BFieldElement> = Vec::with_capacity(DIGEST_LENGTH);
             for parse_result in parsed_u64s {
                 if let Ok(content) = parse_result {
                     bf_elms.push(BFieldElement::new(content));
@@ -114,8 +112,7 @@ impl From<Digest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
 
 impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for Digest {
     fn from(item: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]) -> Self {
-        let mut bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
-            [BFieldElement::zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+        let mut bfes: [BFieldElement; DIGEST_LENGTH] = [BFieldElement::zero(); DIGEST_LENGTH];
         for (i, bfe) in bfes.iter_mut().enumerate() {
             let start_index = i * BYTES_PER_BFE;
             let end_index = (i + 1) * BYTES_PER_BFE;

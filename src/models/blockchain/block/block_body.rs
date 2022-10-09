@@ -5,7 +5,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::merkle_tree::MerkleTree;
 use twenty_first::util_types::simple_hasher::Hasher;
 
-use crate::models::blockchain::digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES};
+use crate::models::blockchain::digest::{Digest, Hashable, DIGEST_LENGTH};
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 
@@ -40,8 +40,7 @@ impl Hashable for BlockBody {
 
         // Append digest of STARK proof
         let hasher = Hash::new();
-        let stark_proof_digest: Vec<BFieldElement> =
-            hasher.hash(&self.stark_proof, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let stark_proof_digest: Vec<BFieldElement> = hasher.hash(&self.stark_proof, DIGEST_LENGTH);
         all_digests.push(stark_proof_digest);
 
         let merkle_root: Vec<BFieldElement> =

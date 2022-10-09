@@ -7,7 +7,7 @@ use twenty_first::{
 };
 
 use crate::models::blockchain::{
-    digest::{Digest, Hashable, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
+    digest::{Digest, Hashable, DIGEST_LENGTH},
     shared::Hash,
 };
 
@@ -66,7 +66,7 @@ impl Hashable for BlockHeader {
         let hasher = Hash::new();
         Digest::new(
             hasher
-                .hash(&self.accumulate(), RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
+                .hash(&self.accumulate(), DIGEST_LENGTH)
                 .try_into()
                 .unwrap(),
         )
