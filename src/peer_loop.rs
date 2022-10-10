@@ -3,7 +3,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::digest::{Digest, Hashable};
+use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -1051,7 +1051,7 @@ mod peer_loop_tests {
     use crate::{
         config_models::{cli_args, network::Network},
         models::{
-            blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable},
+            blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable2},
             peer::TransactionNotification,
         },
         tests::shared::{

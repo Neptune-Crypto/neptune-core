@@ -8,24 +8,19 @@ use num_rational::BigRational;
 use num_traits::Zero;
 use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
-use std::{
-    convert::TryInto,
-    hash::{Hash as StdHash, Hasher as StdHasher},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
-use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
-    util_types::simple_hasher::Hasher,
-};
+
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::util_types::simple_hasher::Hasher;
+use twenty_first::{amount::u32s::U32s, util_types::simple_hasher::Hashable};
 
 use crate::models::state::wallet::Wallet;
 
 use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
-use super::{
-    digest::{Digest, Hashable, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
-    shared::Hash,
-};
+use super::digest::{Digest, Hashable2, DEVNET_MSG_DIGEST_SIZE_IN_BYTES};
+use super::shared::Hash;
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
@@ -58,58 +53,46 @@ impl GetSize for Transaction {
     }
 }
 
-impl Hashable for Transaction {
+impl Hashable2 for Transaction {
     fn neptune_hash(&self) -> Digest {
-        // TODO: Consider using a Merkle tree construction here instead
         let hasher = Hash::new();
 
         // Hash outputs
-        let outputs_preimage: Vec<Vec<BFieldElement>> = self
+        let outputs_preimage: Vec<BFieldElement> = self
             .outputs
             .iter()
-            .map(|(output_utxo, _)| <Utxo as Hashable>::neptune_hash(output_utxo).into())
+            .flat_map(|(output_utxo, _)| Utxo::neptune_hash(output_utxo).values())
             .collect();
-        let outputs_digest = hasher.hash_many(&outputs_preimage);
 
         // Hash inputs
-        let mut inputs_preimage: Vec<Vec<BFieldElement>> = vec![];
-        for input in self.inputs.iter() {
-            inputs_preimage.push(<Utxo as Hashable>::neptune_hash(&input.utxo).into());
-            // We don't hash the membership proofs as they aren't part of the main net blocks
-            inputs_preimage.push(input.removal_record.hash());
-        }
-        let inputs_digest = hasher.hash_many(&inputs_preimage);
+        let inputs_preimage: Vec<BFieldElement> = self
+            .inputs
+            .iter()
+            .flat_map(|input| input.utxo.neptune_hash().values())
+            .collect();
 
         // Hash fee
-        let fee_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.fee.into();
-        let fee_digest = hasher.hash(&fee_bfes, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let fee_preimage: Vec<BFieldElement> = self.fee.to_sequence();
 
         // Hash timestamp
-        let timestamp_digest = hasher.hash(&[self.timestamp], RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let timestamp_preimage = vec![self.timestamp];
 
         // Hash public_scripts
         // If public scripts are not padded or end with a specific instruction, then it might
         // be possible to find a collission for this digest. If that's the case, each public script
         // can be padded with a B field element that's not a valid VM instruction.
-        let flatted_public_scripts: Vec<BFieldElement> = self.public_scripts.concat();
-        let public_scripts_digest =
-            hasher.hash(&flatted_public_scripts, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+        let public_scripts_preimage: Vec<BFieldElement> = self.public_scripts.concat();
 
         let all_digests = vec![
-            inputs_digest,
-            outputs_digest,
-            fee_digest,
-            timestamp_digest,
-            public_scripts_digest,
+            inputs_preimage,
+            outputs_preimage,
+            fee_preimage,
+            timestamp_preimage,
+            public_scripts_preimage,
         ]
         .concat();
 
-        Digest::new(
-            hasher
-                .hash(&all_digests, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES)
-                .try_into()
-                .unwrap(),
-        )
+        Digest::new(hasher.hash_sequence(&all_digests))
     }
 }
 
@@ -117,7 +100,7 @@ impl Hashable for Transaction {
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Transaction {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = <Transaction as Hashable>::neptune_hash(self);
+        let our_hash = Transaction::neptune_hash(self);
         <Digest as StdHash>::hash(&our_hash, state);
     }
 }
@@ -281,22 +264,19 @@ mod transaction_tests {
     use crate::tests::shared::{
         make_mock_transaction, make_mock_unsigned_devnet_input, new_random_wallet,
     };
-    use rand::thread_rng;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::traits::GetRandomElements;
+    use twenty_first::shared_math::other::random_elements_array;
 
     #[traced_test]
     #[test]
     fn merged_transaction_is_devnet_valid_test() {
-        let mut rng = thread_rng();
         let wallet_1 = new_random_wallet();
         let output_amount_1: Amount = 42.into();
         let output_1 = Utxo {
             amount: output_amount_1,
             public_key: wallet_1.get_public_key(),
         };
-        let randomness: Digest =
-            BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into();
+        let randomness: Digest = Digest::new(random_elements_array());
 
         let coinbase_transaction = make_mock_transaction(vec![], vec![(output_1, randomness)]);
         let coinbase_amount = Some(output_amount_1);

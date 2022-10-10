@@ -30,7 +30,7 @@ use crate::{
                 block_height::BlockHeight,
                 Block,
             },
-            digest::{Digest, Hashable},
+            digest::{Digest, Hashable2},
             shared::Hash,
         },
         database::{

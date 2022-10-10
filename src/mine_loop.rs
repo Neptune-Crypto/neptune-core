@@ -16,7 +16,6 @@ use futures::channel::oneshot;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use num_traits::identities::Zero;
-use rand::thread_rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -24,7 +23,7 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::traits::GetRandomElements;
+use twenty_first::shared_math::other::random_elements_array;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
@@ -40,8 +39,10 @@ fn make_devnet_block_template(
         previous_block.body.next_mutator_set_accumulator.clone();
 
     for (output_utxo, randomness) in transaction.outputs.iter() {
-        let addition_record = next_mutator_set_accumulator
-            .commit(&output_utxo.neptune_hash().into(), &(*randomness).into());
+        let addition_record = next_mutator_set_accumulator.commit(
+            &output_utxo.neptune_hash().values(),
+            &(*randomness).values(),
+        );
         additions.push(addition_record);
     }
 
@@ -67,10 +68,10 @@ fn make_devnet_block_template(
         stark_proof: vec![],
     };
 
-    let zero = BFieldElement::ring_zero();
+    let zero = BFieldElement::zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
     let new_pow_line: U32s<5> = previous_block.header.proof_of_work_family + difficulty;
-    let mutator_set_commitment: Digest = next_mutator_set_accumulator.get_commitment().into();
+    let mutator_set_commitment: Digest = Digest::new(next_mutator_set_accumulator.get_commitment());
     let next_block_height = previous_block.header.height.next();
     let block_timestamp = BFieldElement::new(
         SystemTime::now()
@@ -132,9 +133,9 @@ async fn mine_devnet_block(
         }
 
         if block_header.nonce[2].value() == BFieldElement::MAX {
-            block_header.nonce[2] = BFieldElement::ring_zero();
+            block_header.nonce[2] = BFieldElement::zero();
             if block_header.nonce[1].value() == BFieldElement::MAX {
-                block_header.nonce[1] = BFieldElement::ring_zero();
+                block_header.nonce[1] = BFieldElement::zero();
                 block_header.nonce[0].increment();
                 continue;
             }
@@ -170,12 +171,11 @@ fn make_coinbase_transaction(
             .as_secs(),
     );
 
-    let output_randomness: Vec<BFieldElement> =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+    let output_randomness: Digest = Digest::new(random_elements_array());
 
     Transaction {
         inputs: vec![],
-        outputs: vec![(coinbase_utxo, output_randomness.into())],
+        outputs: vec![(coinbase_utxo, output_randomness)],
         public_scripts: vec![],
         fee: U32s::zero(),
         timestamp,

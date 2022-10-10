@@ -1,3 +1,4 @@
+use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -19,15 +20,15 @@ impl BlockHeight {
     }
 
     pub fn next(&self) -> Self {
-        Self(self.0 + BFieldElement::ring_one())
+        Self(self.0 + BFieldElement::one())
     }
 
     pub fn previous(&self) -> Self {
-        Self(self.0 - BFieldElement::ring_one())
+        Self(self.0 - BFieldElement::one())
     }
 
-    pub const fn genesis() -> Self {
-        Self(BFieldElement::ring_zero())
+    pub fn genesis() -> Self {
+        Self(BFieldElement::zero())
     }
 }
 

@@ -1,20 +1,21 @@
 pub mod ordered_digest;
 
 use get_size::GetSize;
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
-use twenty_first::shared_math::{b_field_element::BFieldElement, traits::FromVecu8};
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
+use twenty_first::shared_math::traits::FromVecu8;
 
 pub const BYTES_PER_BFE: usize = 8;
-pub const RESCUE_PRIME_OUTPUT_SIZE_IN_BFES: usize = 6;
 pub const DEVNET_MSG_DIGEST_SIZE_IN_BYTES: usize = 32;
 pub const DEVNET_SECRET_KEY_SIZE_IN_BYTES: usize = 32;
-pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize =
-    RESCUE_PRIME_OUTPUT_SIZE_IN_BFES * BYTES_PER_BFE;
+pub const RESCUE_PRIME_DIGEST_SIZE_IN_BYTES: usize = DIGEST_LENGTH * BYTES_PER_BFE;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct Digest([BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]);
+pub struct Digest([BFieldElement; DIGEST_LENGTH]);
 
 impl GetSize for Digest {
     fn get_stack_size() -> usize {
@@ -31,21 +32,21 @@ impl GetSize for Digest {
     }
 }
 
-pub trait Hashable {
+pub trait Hashable2 {
     fn neptune_hash(&self) -> Digest;
 }
 
 impl Digest {
-    pub fn values(&self) -> [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] {
+    pub fn values(&self) -> [BFieldElement; DIGEST_LENGTH] {
         self.0
     }
 
-    pub const fn new(digest: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES]) -> Self {
+    pub const fn new(digest: [BFieldElement; DIGEST_LENGTH]) -> Self {
         Self(digest)
     }
 
-    pub const fn default() -> Self {
-        Self([BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES])
+    pub fn default() -> Self {
+        Self([BFieldElement::zero(); DIGEST_LENGTH])
     }
 }
 
@@ -67,11 +68,10 @@ impl FromStr for Digest {
             .split(DIGEST_SEPARATOR)
             .map(|substring| substring.parse::<u64>())
             .collect();
-        if parsed_u64s.len() != RESCUE_PRIME_OUTPUT_SIZE_IN_BFES {
+        if parsed_u64s.len() != DIGEST_LENGTH {
             Err("Given invalid number of BFieldElements in string.".to_owned())
         } else {
-            let mut bf_elms: Vec<BFieldElement> =
-                Vec::with_capacity(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES);
+            let mut bf_elms: Vec<BFieldElement> = Vec::with_capacity(DIGEST_LENGTH);
             for parse_result in parsed_u64s {
                 if let Ok(content) = parse_result {
                     bf_elms.push(BFieldElement::new(content));
@@ -79,18 +79,22 @@ impl FromStr for Digest {
                     return Err("Given invalid BFieldElement in string.".to_owned());
                 }
             }
-            let digest = Digest::from(bf_elms);
-            Ok(digest)
+            Ok(bf_elms.try_into()?)
         }
     }
 }
 
-impl From<Vec<BFieldElement>> for Digest {
-    fn from(vals: Vec<BFieldElement>) -> Self {
-        Self(
-            vals.try_into()
-                .expect("Hash function returned bad number of B field elements."),
-        )
+impl TryFrom<Vec<BFieldElement>> for Digest {
+    type Error = String;
+
+    fn try_from(value: Vec<BFieldElement>) -> Result<Self, Self::Error> {
+        let len = value.len();
+        Ok(Digest::new(value.try_into().map_err(|_| {
+            format!(
+                "Expected {} BFieldElements for digest, but got {}",
+                DIGEST_LENGTH, len,
+            )
+        })?))
     }
 }
 
@@ -113,12 +117,11 @@ impl From<Digest> for [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES] {
 
 impl From<[u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]> for Digest {
     fn from(item: [u8; RESCUE_PRIME_DIGEST_SIZE_IN_BYTES]) -> Self {
-        let mut bfes: [BFieldElement; RESCUE_PRIME_OUTPUT_SIZE_IN_BFES] =
-            [BFieldElement::ring_zero(); RESCUE_PRIME_OUTPUT_SIZE_IN_BFES];
+        let mut bfes: [BFieldElement; DIGEST_LENGTH] = [BFieldElement::zero(); DIGEST_LENGTH];
         for (i, bfe) in bfes.iter_mut().enumerate() {
             let start_index = i * BYTES_PER_BFE;
             let end_index = (i + 1) * BYTES_PER_BFE;
-            *bfe = BFieldElement::ring_zero().from_vecu8(item[start_index..end_index].to_vec())
+            *bfe = BFieldElement::from_vecu8(item[start_index..end_index].to_vec())
         }
 
         Self(bfes)
@@ -148,16 +151,15 @@ mod digest_tests {
             BFieldElement::new(36),
             BFieldElement::new(48),
             BFieldElement::new(60),
-            BFieldElement::new(70),
         ];
-        let rescue_prime_digest_type_from_array: Digest = bfe_vec.into();
+        let rescue_prime_digest_type_from_array: Digest = bfe_vec.try_into().unwrap();
         let _shorter: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] =
             rescue_prime_digest_type_from_array.into();
     }
 
     #[test]
     pub fn get_size() {
-        let stack = crate::models::blockchain::digest::Digest::get_stack_size();
+        let stack = Digest::get_stack_size();
 
         let bfe_vec = vec![
             BFieldElement::new(12),
@@ -165,10 +167,8 @@ mod digest_tests {
             BFieldElement::new(36),
             BFieldElement::new(48),
             BFieldElement::new(60),
-            BFieldElement::new(70),
         ];
-        let rescue_prime_digest_type_from_array: crate::models::blockchain::digest::Digest =
-            bfe_vec.into();
+        let rescue_prime_digest_type_from_array: Digest = bfe_vec.try_into().unwrap();
 
         let heap = rescue_prime_digest_type_from_array.get_heap_size();
 
@@ -181,8 +181,8 @@ mod digest_tests {
 
     #[test]
     pub fn digest_from_str() {
-        // This tests a valid digest. It will fail when we change RESCUE_PRIME_OUTPUT_SIZE_IN_BFES.
-        let valid_digest_string = "00059361073062755064,05168490802189810700,02524349865623165603,04907779149954626615,01487912569022462807,00000104867047771348";
+        // This tests a valid digest. It will fail when we change DIGEST_LENGTH.
+        let valid_digest_string = "12063201067205522823,1529663126377206632,2090171368883726200,12975872837767296928,11492877804687889759";
         let valid_digest = Digest::from_str(valid_digest_string);
         assert!(valid_digest.is_ok());
 

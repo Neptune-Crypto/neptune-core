@@ -28,7 +28,7 @@ use super::{
 };
 use crate::models::blockchain::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Block {
     pub hash: Digest,
     pub header: BlockHeader,
@@ -91,7 +91,7 @@ impl Block {
 
             // Add pre-mine UTXO to MutatorSet
             let mut addition_record =
-                genesis_mutator_set.commit(&utxo_commitment.into(), &bad_randomness.into());
+                genesis_mutator_set.commit(&utxo_commitment.values(), &bad_randomness.values());
             ms_update.additions.push(addition_record.clone());
             genesis_mutator_set.add(&mut addition_record);
 
@@ -110,15 +110,15 @@ impl Block {
         };
 
         let header: BlockHeader = BlockHeader {
-            version: BFieldElement::ring_zero(),
-            height: BFieldElement::ring_zero().into(),
-            mutator_set_commitment: genesis_mutator_set.get_commitment().into(),
+            version: BFieldElement::zero(),
+            height: BFieldElement::zero().into(),
+            mutator_set_commitment: Digest::new(genesis_mutator_set.get_commitment()),
             prev_block_digest: Digest::default(),
             timestamp,
             nonce: [
-                BFieldElement::ring_zero(),
-                BFieldElement::ring_zero(),
-                BFieldElement::ring_zero(),
+                BFieldElement::zero(),
+                BFieldElement::zero(),
+                BFieldElement::zero(),
             ],
             max_block_size: 10_000,
             proof_of_work_line: U32s::zero(),
@@ -136,7 +136,7 @@ impl Block {
         // let devnet_authority_wallet = Wallet::devnet_authority_wallet();
         vec![Utxo::new_from_hex(
             20000.into(),
-            "03b1f961943bfc4875429a8000e94d765bb75b992d16594927677b12ef3927e5a9",
+            "02411147a47b398f5ee938241aaeb76a68af37645bdee5b0d29407c2c7a8496db4",
             // &devnet_authority_wallet.get_public_key().to_string(),
         )]
     }
@@ -160,7 +160,7 @@ impl Block {
 
         for (output_utxo, randomness) in new_transaction.outputs.iter() {
             let addition_record = next_mutator_set_accumulator
-                .commit(&output_utxo.neptune_hash().into(), &(*randomness).into());
+                .commit(&output_utxo.neptune_hash().values(), &randomness.values());
             additions.push(addition_record);
         }
 
@@ -194,7 +194,7 @@ impl Block {
         let block_header = BlockHeader {
             version: self.header.version,
             height: self.header.height,
-            mutator_set_commitment: next_mutator_set_accumulator.get_commitment().into(),
+            mutator_set_commitment: Digest::new(next_mutator_set_accumulator.get_commitment()),
             prev_block_digest: self.header.prev_block_digest,
             timestamp: block_timestamp,
             nonce: self.header.nonce,
@@ -266,7 +266,7 @@ impl Block {
         for (i, input) in block_copy.body.transaction.inputs.iter().enumerate() {
             // 1.a) Verify validity of membership proofs
             if !block_copy.body.previous_mutator_set_accumulator.verify(
-                &input.utxo.neptune_hash().into(),
+                &input.utxo.neptune_hash().values(),
                 &input.membership_proof.clone().into(),
             ) {
                 warn!("Invalid membership proof found in block for input {}", i);
@@ -301,8 +301,10 @@ impl Block {
         i = 0;
         let hasher = Hash::new();
         for (utxo, randomness) in block_copy.body.transaction.outputs.iter() {
-            let expected_commitment =
-                hasher.hash_pair(&utxo.neptune_hash().into(), &randomness.to_owned().into());
+            let expected_commitment = hasher.hash_pair(
+                &utxo.neptune_hash().values(),
+                &randomness.to_owned().values(),
+            );
             if block_copy.body.mutator_set_update.additions[i].canonical_commitment
                 != expected_commitment
             {
@@ -343,9 +345,7 @@ impl Block {
         }
 
         // Verify that the locally constructed mutator set matches that in the received block's header
-        if ms.get_commitment()
-            != Into::<Vec<BFieldElement>>::into(block_copy.header.mutator_set_commitment)
-        {
+        if Digest::new(ms.get_commitment()) != block_copy.header.mutator_set_commitment {
             warn!("Mutator set commitment does not match calculated object");
             return false;
         }
@@ -418,7 +418,7 @@ impl Block {
 mod block_tests {
     use crate::{
         config_models::network::Network,
-        models::state::wallet,
+        models::state::wallet::{self, Wallet},
         tests::shared::{get_mock_global_state, make_mock_block},
     };
 
@@ -445,7 +445,7 @@ mod block_tests {
         );
 
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
-        let other_wallet = wallet::Wallet::new(wallet::generate_secret_key());
+        let other_wallet = Wallet::new(wallet::generate_secret_key());
         let new_utxo = Utxo {
             amount: 5.into(),
             public_key: other_wallet.get_public_key(),

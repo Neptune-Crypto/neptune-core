@@ -11,7 +11,7 @@
 //! The `Mempool` type is a thread-safe wrapper around `MempoolInternal`, and
 //! all interaction should go through the wrapper.
 
-use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::digest::Hashable2;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction, TransactionDigest};
 use crate::models::shared::SIZE_1GB_IN_BYTES;
@@ -187,11 +187,12 @@ impl Mempool {
     }
 }
 
+#[allow(rustdoc::invalid_codeblock_attributes)]
 /// The fundamental data type in this module.
 ///
 /// # Example
 ///
-/// ```
+/// ```norun
 /// // Instantiate Mempool, insert and get a transaction.
 /// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
 /// use neptune_core::models::state::mempool::Mempool;
@@ -253,8 +254,7 @@ impl MempoolInternal {
             }
         }
 
-        let transaction_id: TransactionDigest =
-            <Transaction as Hashable>::neptune_hash(transaction);
+        let transaction_id: TransactionDigest = Transaction::neptune_hash(transaction);
 
         if let Entry::Vacant(slot) = self.table.entry(transaction_id) {
             self.queue.push(transaction_id, transaction.fee_density());
@@ -429,7 +429,7 @@ mod tests {
         let wallet_state = get_mock_wallet_state(None).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
-        let transaction_digest = &<Transaction as Hashable>::neptune_hash(&transaction);
+        let transaction_digest = &Transaction::neptune_hash(&transaction);
         assert!(!mempool.contains(transaction_digest));
         mempool.insert(&transaction);
         assert!(mempool.contains(transaction_digest));

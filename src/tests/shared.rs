@@ -14,7 +14,7 @@ use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{distributions::Alphanumeric, Rng};
 use rusty_leveldb;
 use secp256k1::ecdsa;
 use std::path::PathBuf;
@@ -31,20 +31,29 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
-use twenty_first::shared_math::traits::GetRandomElements;
+use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
+use crate::config_models::{cli_args, network::Network};
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
+use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
-use crate::models::blockchain::digest::Hashable;
+use crate::models::blockchain::block::{block_height::BlockHeight, Block};
+use crate::models::blockchain::digest::Digest;
+use crate::models::blockchain::digest::Hashable2;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
+use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
+use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
 use crate::models::database::WalletDbKey;
 use crate::models::database::WalletDbValue;
+use crate::models::database::{BlockDatabases, PeerDatabases};
+use crate::models::peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding};
+use crate::models::shared::LatestBlockInfo;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
@@ -55,25 +64,7 @@ use crate::models::state::wallet::Wallet;
 use crate::models::state::wallet::WalletState;
 use crate::models::state::GlobalState;
 use crate::Hash;
-use crate::{
-    config_models::{cli_args, network::Network},
-    models::{
-        blockchain::{
-            block::{
-                block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE},
-                block_height::BlockHeight,
-                Block,
-            },
-            digest::{Digest, RESCUE_PRIME_OUTPUT_SIZE_IN_BFES},
-            transaction::{utxo::Utxo, Transaction},
-        },
-        channel::{MainToPeerThread, PeerThreadToMain},
-        database::{BlockDatabases, PeerDatabases},
-        peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding},
-        shared::LatestBlockInfo,
-    },
-    PEER_CHANNEL_CAPACITY,
-};
+use crate::PEER_CHANNEL_CAPACITY;
 
 /// Return an empty peer map
 pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
@@ -408,12 +399,11 @@ impl<Item> stream::Stream for Mock<Item> {
 
 pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     let tx = &mut block.body.transaction;
-    let output_randomness: Vec<BFieldElement> =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+    let output_randomness: Digest = Digest::new(random_elements_array());
     let addition_record: AdditionRecord<Hash> = block
         .body
         .previous_mutator_set_accumulator
-        .commit(&utxo.neptune_hash().into(), &output_randomness);
+        .commit(&utxo.neptune_hash().values(), &output_randomness.values());
     tx.outputs.push((utxo, output_randomness.into()));
 
     // Add addition record for this output
@@ -431,11 +421,8 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment = block
-        .body
-        .next_mutator_set_accumulator
-        .get_commitment()
-        .into();
+    block.header.mutator_set_commitment =
+        Digest::new(block.body.next_mutator_set_accumulator.get_commitment());
     block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
@@ -476,11 +463,13 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment = block
-        .body
-        .next_mutator_set_accumulator
-        .get_commitment()
-        .into();
+    block.header.mutator_set_commitment = Digest::new(
+        block
+            .body
+            .next_mutator_set_accumulator
+            .get_commitment()
+            .into(),
+    );
     block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
@@ -493,7 +482,7 @@ pub fn add_unsigned_input_to_block(
     let input_removal_record = block
         .body
         .previous_mutator_set_accumulator
-        .drop(&item.into(), &membership_proof);
+        .drop(&item.values(), &membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(
         block,
         consumed_utxo,
@@ -514,14 +503,14 @@ pub async fn add_unsigned_input_to_block_ams(
     let input_membership_proof = ams
         .lock()
         .await
-        .restore_membership_proof(&item.into(), &randomness.into(), aocl_leaf_index)
+        .restore_membership_proof(&item.values(), &randomness.values(), aocl_leaf_index)
         .unwrap();
 
     // Sanity check that restored membership proof agrees with AMS
     assert!(
         ams.lock()
             .await
-            .verify(&item.into(), &input_membership_proof),
+            .verify(&item.values(), &input_membership_proof),
         "Restored MS membership proof must validate against own AMS"
     );
 
@@ -530,7 +519,7 @@ pub async fn add_unsigned_input_to_block_ams(
         block
             .body
             .previous_mutator_set_accumulator
-            .verify(&item.into(), &input_membership_proof),
+            .verify(&item.values(), &input_membership_proof),
         "Restored MS membership proof must validate against input block"
     );
 
@@ -538,7 +527,7 @@ pub async fn add_unsigned_input_to_block_ams(
         .lock()
         .await
         .set_commitment
-        .drop(&item.into(), &input_membership_proof);
+        .drop(&item.values(), &input_membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(
         block,
         consumed_utxo,
@@ -559,15 +548,15 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
         data_index: 0,
         authentication_path: vec![],
     };
+    let randomness = Digest::default().values();
     let mock_ms_membership_proof = MsMembershipProof {
-        randomness: Digest::default().into(),
+        randomness,
         auth_path_aocl: mock_mmr_membership_proof,
         target_chunks: ChunkDictionary::default(),
         cached_bits: None,
     };
     let mut mock_ms_acc = MutatorSetAccumulator::default();
-    let mock_removal_record =
-        mock_ms_acc.drop(&Digest::default().into(), &mock_ms_membership_proof);
+    let mock_removal_record = mock_ms_acc.drop(&randomness, &mock_ms_membership_proof);
 
     let utxo = Utxo {
         amount,
@@ -585,15 +574,13 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
 
 pub fn make_mock_signed_valid_tx() -> Transaction {
     // Build a transaction
-    let mut rng = thread_rng();
     let wallet_1 = new_random_wallet();
     let output_amount_1: Amount = 42.into();
     let output_1 = Utxo {
         amount: output_amount_1,
         public_key: wallet_1.get_public_key(),
     };
-    let randomness: Digest =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut rng).into();
+    let randomness: Digest = Digest::new(random_elements_array());
 
     let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
     let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
@@ -642,7 +629,7 @@ pub fn make_mock_transaction_with_wallet(
     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
     let output_utxos_with_digest = outputs
         .into_iter()
-        .map(|out_utxo| (out_utxo, <Utxo as Hashable>::neptune_hash(&out_utxo)))
+        .map(|out_utxo| (out_utxo, Utxo::neptune_hash(&out_utxo)))
         .collect::<Vec<_>>();
 
     let timestamp = timestamp.unwrap_or_else(|| {
@@ -676,8 +663,7 @@ pub fn make_mock_block(
         amount: Block::get_mining_reward(new_block_height),
         public_key: coinbase_beneficiary,
     };
-    let output_randomness =
-        BFieldElement::random_elements(RESCUE_PRIME_OUTPUT_SIZE_IN_BFES, &mut thread_rng());
+    let output_randomness: Digest = Digest::new(random_elements_array());
     let transaction = make_mock_transaction(
         vec![],
         vec![(coinbase_utxo, output_randomness.clone().into())],
@@ -687,7 +673,7 @@ pub fn make_mock_block(
     let coinbase_digest: Digest = coinbase_utxo.neptune_hash();
 
     let mut coinbase_addition_record: AdditionRecord<Hash> =
-        new_ms.commit(&coinbase_digest.into(), &output_randomness);
+        new_ms.commit(&coinbase_digest.values(), &output_randomness.values());
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
@@ -706,11 +692,11 @@ pub fn make_mock_block(
     let block_target_difficulty = previous_block.header.target_difficulty;
     let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
     let pow_family = pow_line;
-    let zero = BFieldElement::ring_zero();
+    let zero = BFieldElement::zero();
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
-        mutator_set_commitment: new_ms.get_commitment().into(),
+        mutator_set_commitment: Digest::new(new_ms.get_commitment()),
         prev_block_digest: previous_block.hash,
         timestamp: block_body.transaction.timestamp,
         nonce: [zero, zero, zero],

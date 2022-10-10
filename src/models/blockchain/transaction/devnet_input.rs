@@ -6,12 +6,10 @@ use mutator_set_tf::util_types::mutator_set::{
 use secp256k1::ecdsa;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DevNetInput {
     pub utxo: Utxo,
     pub membership_proof: TransferMsMembershipProof<Hash>,
     pub removal_record: RemovalRecord<Hash>,
     pub signature: Option<ecdsa::Signature>,
 }
-
-impl Eq for DevNetInput {}
