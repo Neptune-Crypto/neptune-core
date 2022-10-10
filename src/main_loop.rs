@@ -940,9 +940,7 @@ impl MainLoopHandler {
         info!("Shutdown completed.");
         Ok(())
     }
-}
 
-impl MainLoopHandler {
     async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::Send(transaction) => {
@@ -970,12 +968,8 @@ impl MainLoopHandler {
             }
         }
     }
-}
 
-impl MainLoopHandler {
-    async fn graceful_shutdown(self: &MainLoopHandler) -> Result<()> {
-        info!("Shutdown initiated.");
-
+    async fn flush_databases(&self) -> Result<()> {
         // flush wallet databases
         self.global_state
             .wallet_state
@@ -1044,17 +1038,29 @@ impl MainLoopHandler {
             .await
             .peer_standings
             .flush();
+        debug!("Flushed all databases");
+
+        Ok(())
+    }
+
+    async fn graceful_shutdown(&self) -> Result<()> {
+        info!("Shutdown initiated.");
+
+        // Stop mining
+        let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+
+        // Flush all databases
+        self.flush_databases().await?;
 
         // Send 'bye' message to alle peers.
         let _result = self
             .main_to_peer_broadcast_tx
             .send(MainToPeerThread::DisconnectAll());
-
-        let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+        debug!("sent bye");
 
         //TODO: wait for child processes to finish - using stored tokio JoinHandles.
 
-        sleep(Duration::new(0, 10 * 500000)); // ten miliseconds
+        sleep(Duration::new(0, 100 * 1_000_000)); // wait 0.1 seconds
 
         Ok(())
     }
