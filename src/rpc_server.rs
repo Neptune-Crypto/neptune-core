@@ -50,6 +50,11 @@ pub trait RPC {
     async fn get_wallet_status() -> WalletStatus;
 
     async fn get_public_key() -> secp256k1::PublicKey;
+
+    async fn get_mempool_tx_count() -> usize;
+
+    // TODO: Change to return current size and max size
+    async fn get_mempool_size() -> usize;
 }
 
 #[derive(Clone)]
@@ -72,6 +77,8 @@ impl RPC for NeptuneRPCServer {
     type GetWalletStatusFut = Ready<WalletStatus>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
     type GetPublicKeyFut = Ready<secp256k1::PublicKey>;
+    type GetMempoolTxCountFut = Ready<usize>;
+    type GetMempoolSizeFut = Ready<usize>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
