@@ -976,7 +976,8 @@ impl MainLoopHandler {
         // flush walletblock db
         self.global_state
             .wallet_state
-            .wallet_block_db
+            .wallet_db
+            .as_ref()
             .lock()
             .await
             .flush();
@@ -1012,7 +1013,7 @@ impl MainLoopHandler {
             .archival_mutator_set
             .lock()
             .await
-            .flush(); // TODO: implement flush in database vector in twenty-first?
+            .flush();
 
         // flush ms_block_sync_db
         self.global_state
