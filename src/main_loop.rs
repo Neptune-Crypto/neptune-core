@@ -9,6 +9,7 @@ use crate::models::database::{
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
+use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::mempool::MempoolInternal;
 use crate::models::state::GlobalState;
 use crate::Hash;
@@ -975,7 +976,13 @@ impl MainLoopHandler {
     async fn graceful_shutdown(self: &MainLoopHandler) -> Result<()> {
         info!("Shutdown initiated.");
 
-        // flush walletblock db
+        // flush wallet databases
+        self.global_state
+            .wallet_state
+            .outgoing_utxo_counter_db
+            .lock()
+            .await
+            .flush();
         self.global_state
             .wallet_state
             .wallet_db
@@ -984,17 +991,7 @@ impl MainLoopHandler {
             .await
             .flush();
 
-        // flush peer_standings
-        self.global_state
-            .net
-            .peer_databases
-            .as_ref()
-            .lock()
-            .await
-            .peer_standings
-            .flush();
-
-        // flush block_databases
+        // flush block_index database
         self.global_state
             .chain
             .archival_state
@@ -1016,6 +1013,16 @@ impl MainLoopHandler {
             .await
             .flush();
 
+        // Write back active part of Bloom filter to database
+        let _active_window_db = self
+            .global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .flush_active_window()
+            .await;
+
         // flush ms_block_sync_db
         self.global_state
             .chain
@@ -1026,6 +1033,16 @@ impl MainLoopHandler {
             .as_ref()
             .lock()
             .await
+            .flush();
+
+        // flush peer_standings
+        self.global_state
+            .net
+            .peer_databases
+            .as_ref()
+            .lock()
+            .await
+            .peer_standings
             .flush();
 
         // Send 'bye' message to alle peers.

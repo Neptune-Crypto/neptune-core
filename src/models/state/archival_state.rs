@@ -59,6 +59,12 @@ pub struct ArchivalState {
     // this object in a spawned worker thread.
     genesis_block: Box<Block>,
 
+    // The archival mutator set is three databases and one array that lives in memory that needs
+    // to be persisted in a database. So it involves four databases where the last one is opened
+    // and closed as needed and the other ones are kept open throughout the lifetime of the program.
+    // The fourth database is the active window that is small enough to that we can keep it in RAM
+    // but we need to persist it when the program is shut down and started again. The database of
+    // the active window is not exposed outside of this module.
     pub archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
 
     pub ms_block_sync_db: Arc<TokioMutex<RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>>>,
@@ -629,6 +635,19 @@ impl ArchivalState {
         }
 
         ret
+    }
+
+    pub async fn flush_active_window(&self) -> Result<()> {
+        let ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> =
+            self.archival_mutator_set.lock().await;
+        // Store active window onto disk for persistence
+        let active_window_db = Self::active_window_db(&self.root_data_dir)?;
+        let _active_window_db = ams_lock
+            .set_commitment
+            .swbf_active
+            .store_to_database(active_window_db);
+
+        Ok(())
     }
 
     /// Update the mutator set with a block after this block has been stored to the database.
