@@ -305,92 +305,97 @@ impl MainLoopHandler {
                 );
 
                 // Store block in database
-                // Acquire both locks before updating
-                let mut wallet_state_db: tokio::sync::MutexGuard<
-                    RustyLevelDB<WalletDbKey, WalletDbValue>,
-                > = self.global_state.wallet_state.wallet_db.lock().await;
-                let mut db_lock: tokio::sync::MutexGuard<
-                    RustyLevelDB<BlockIndexKey, BlockIndexValue>,
-                > = self
-                    .global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .block_index_db
-                    .lock()
-                    .await;
-                let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
-                    .global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .archival_mutator_set
-                    .lock()
-                    .await;
-                let mut ms_block_sync_lock: tokio::sync::MutexGuard<
-                    RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
-                > = self
-                    .global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .ms_block_sync_db
-                    .lock()
-                    .await;
-                let mut light_state_locked = self
-                    .global_state
-                    .chain
-                    .light_state
-                    .latest_block
-                    .lock()
-                    .await;
-                let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
-                    .global_state
-                    .mempool
-                    .internal
-                    .write()
-                    .expect("Locking mempool for write must succeed");
+                // Acquire all locks before updating
+                {
+                    let mut wallet_state_db: tokio::sync::MutexGuard<
+                        RustyLevelDB<WalletDbKey, WalletDbValue>,
+                    > = self.global_state.wallet_state.wallet_db.lock().await;
+                    let mut db_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
+                    > = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .block_index_db
+                        .lock()
+                        .await;
+                    let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .archival_mutator_set
+                        .lock()
+                        .await;
+                    let mut ms_block_sync_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+                    > = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .ms_block_sync_db
+                        .lock()
+                        .await;
+                    let mut light_state_locked = self
+                        .global_state
+                        .chain
+                        .light_state
+                        .latest_block
+                        .lock()
+                        .await;
+                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
+                        .global_state
+                        .mempool
+                        .internal
+                        .write()
+                        .expect("Locking mempool for write must succeed");
 
-                // Apply the updates
-                self.global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .write_block(
-                        new_block.clone(),
-                        &mut db_lock,
-                        Some(light_state_locked.header.proof_of_work_family),
-                    )?;
+                    // Apply the updates
+                    self.global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .write_block(
+                            new_block.clone(),
+                            &mut db_lock,
+                            Some(light_state_locked.header.proof_of_work_family),
+                        )?;
 
-                // update the mutator set with the UTXOs from this block
-                self.global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .update_mutator_set(
-                        &mut db_lock,
-                        &mut ams_lock,
-                        &mut ms_block_sync_lock,
-                        &new_block,
-                    )?;
+                    // update the mutator set with the UTXOs from this block
+                    self.global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .update_mutator_set(
+                            &mut db_lock,
+                            &mut ams_lock,
+                            &mut ms_block_sync_lock,
+                            &new_block,
+                        )?;
 
-                // update wallet state with relevant UTXOs from this block
-                self.global_state
-                    .wallet_state
-                    .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+                    // update wallet state with relevant UTXOs from this block
+                    self.global_state
+                        .wallet_state
+                        .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
 
-                // Update mempool with UTXOs from this block. This is done by removing all transaction
-                // that became invalid/was mined by this block.
-                self.global_state
-                    .mempool
-                    .update_with_block(&new_block, &mut mempool_write_lock);
+                    // Update mempool with UTXOs from this block. This is done by removing all transaction
+                    // that became invalid/was mined by this block.
+                    self.global_state
+                        .mempool
+                        .update_with_block(&new_block, &mut mempool_write_lock);
 
-                *light_state_locked = *new_block;
+                    *light_state_locked = *new_block;
+                }
+
+                // Flush databases
+                self.flush_databases().await?;
 
                 // Inform miner that mempool has been updated and that it is safe
                 // to mine the next block
@@ -538,6 +543,9 @@ impl MainLoopHandler {
                     // Update information about latest block
                     *light_state_locked = last_block.clone();
                 }
+
+                // Flush databases
+                self.flush_databases().await?;
 
                 // Inform all peers about new block
                 self.main_to_peer_broadcast_tx
