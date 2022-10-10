@@ -8,17 +8,13 @@ use num_rational::BigRational;
 use num_traits::Zero;
 use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
-use std::{
-    convert::TryInto,
-    hash::{Hash as StdHash, Hasher as StdHasher},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
-use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::util_types::simple_hasher::Hasher;
+use twenty_first::{amount::u32s::U32s, util_types::simple_hasher::Hashable};
 
 use crate::models::state::wallet::Wallet;
 
@@ -59,50 +55,44 @@ impl GetSize for Transaction {
 
 impl Hashable2 for Transaction {
     fn neptune_hash(&self) -> Digest {
-        // TODO: Consider using a Merkle tree construction here instead
         let hasher = Hash::new();
 
         // Hash outputs
-        let outputs_preimage: Vec<Vec<BFieldElement>> = self
+        let outputs_preimage: Vec<BFieldElement> = self
             .outputs
             .iter()
-            .map(|(output_utxo, _)| Utxo::neptune_hash(output_utxo).into())
+            .flat_map(|(output_utxo, _)| Utxo::neptune_hash(output_utxo).values())
             .collect();
-        let outputs_digest = hasher.hash_many(&outputs_preimage);
 
         // Hash inputs
-        let mut inputs_preimage: Vec<Vec<BFieldElement>> = vec![];
-        for input in self.inputs.iter() {
-            inputs_preimage.push(Utxo::neptune_hash(&input.utxo).into());
-            // We don't hash the membership proofs as they aren't part of the main net blocks
-            inputs_preimage.push(input.removal_record.hash());
-        }
-        let inputs_digest = hasher.hash_many(&inputs_preimage);
+        let inputs_preimage: Vec<BFieldElement> = self
+            .inputs
+            .iter()
+            .flat_map(|input| input.utxo.neptune_hash().values())
+            .collect();
 
         // Hash fee
-        let fee_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.fee.into();
-        let fee_digest = hasher.hash(&fee_bfes, DIGEST_LENGTH);
+        let fee_preimage: Vec<BFieldElement> = self.fee.to_sequence();
 
         // Hash timestamp
-        let timestamp_digest = hasher.hash(&[self.timestamp], DIGEST_LENGTH);
+        let timestamp_preimage = vec![self.timestamp];
 
         // Hash public_scripts
         // If public scripts are not padded or end with a specific instruction, then it might
         // be possible to find a collission for this digest. If that's the case, each public script
         // can be padded with a B field element that's not a valid VM instruction.
-        let flatted_public_scripts: Vec<BFieldElement> = self.public_scripts.concat();
-        let public_scripts_digest = hasher.hash(&flatted_public_scripts, DIGEST_LENGTH);
+        let public_scripts_preimage: Vec<BFieldElement> = self.public_scripts.concat();
 
         let all_digests = vec![
-            inputs_digest,
-            outputs_digest,
-            fee_digest,
-            timestamp_digest,
-            public_scripts_digest,
+            inputs_preimage,
+            outputs_preimage,
+            fee_preimage,
+            timestamp_preimage,
+            public_scripts_preimage,
         ]
         .concat();
 
-        Digest::new(hasher.hash(&all_digests, DIGEST_LENGTH).try_into().unwrap())
+        Digest::new(hasher.hash_sequence(&all_digests))
     }
 }
 
@@ -274,14 +264,12 @@ mod transaction_tests {
     use crate::tests::shared::{
         make_mock_transaction, make_mock_unsigned_devnet_input, new_random_wallet,
     };
-    use rand::thread_rng;
     use tracing_test::traced_test;
     use twenty_first::shared_math::other::random_elements_array;
 
     #[traced_test]
     #[test]
     fn merged_transaction_is_devnet_valid_test() {
-        let mut rng = thread_rng();
         let wallet_1 = new_random_wallet();
         let output_amount_1: Amount = 42.into();
         let output_1 = Utxo {

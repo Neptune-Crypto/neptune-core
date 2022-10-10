@@ -43,13 +43,7 @@ impl Utxo {
 
 impl Hashable2 for Utxo {
     fn neptune_hash(&self) -> Digest {
-        let hasher = Hash::new();
-        Digest::new(
-            hasher
-                .hash(&self.accumulate(), DIGEST_LENGTH)
-                .try_into()
-                .unwrap(),
-        )
+        Digest::new(Hash::new().hash_sequence(&self.accumulate()))
     }
 }
 

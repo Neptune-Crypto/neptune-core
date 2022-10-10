@@ -2,8 +2,6 @@ use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSet
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
-use twenty_first::util_types::merkle_tree::MerkleTree;
 use twenty_first::util_types::simple_hasher::Hasher;
 
 use crate::models::blockchain::digest::{Digest, Hashable2};
@@ -12,7 +10,7 @@ use crate::models::blockchain::transaction::Transaction;
 
 use super::mutator_set_update::MutatorSetUpdate;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockBody {
     pub transaction: Transaction,
     pub next_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
@@ -22,10 +20,8 @@ pub struct BlockBody {
 }
 
 impl Hashable2 for BlockBody {
-    /// Return a Merkle root for all digests in the block body
     fn neptune_hash(&self) -> Digest {
-        // Append the single Transaction's digest
-        let mut all_digests: Vec<Vec<BFieldElement>> = vec![self.transaction.neptune_hash().into()];
+        let transaction_digest = self.transaction.neptune_hash().values();
 
         // Append mutator set's commitment
         //
@@ -34,18 +30,17 @@ impl Hashable2 for BlockBody {
         // It's not necessary to hash `previous_mutator_set_accumulator` and `ms_update_digest` here,
         // as they are fully determined by `next_ms_acc_digest` assuming a good hash function.
         let mut block_body_copy: BlockBody = self.to_owned();
-        let next_ms_acc_digest: Vec<BFieldElement> = block_body_copy
+        let next_ms_acc_digest = block_body_copy
             .next_mutator_set_accumulator
             .get_commitment();
-        all_digests.push(next_ms_acc_digest);
 
         // Append digest of STARK proof
-        let hasher = Hash::new();
-        let stark_proof_digest: Vec<BFieldElement> = hasher.hash(&self.stark_proof, DIGEST_LENGTH);
-        all_digests.push(stark_proof_digest);
+        let stark_proof_digest = Hash::new().hash_sequence(&self.stark_proof);
 
-        let merkle_root: Vec<BFieldElement> =
-            MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(&all_digests);
-        merkle_root.into()
+        Digest::new(Hash::new().hash_many(&[
+            transaction_digest,
+            next_ms_acc_digest,
+            stark_proof_digest,
+        ]))
     }
 }

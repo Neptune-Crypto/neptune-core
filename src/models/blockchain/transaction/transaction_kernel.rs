@@ -1,12 +1,10 @@
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
-use twenty_first::util_types::merkle_tree::MerkleTree;
-use twenty_first::util_types::simple_hasher::Hasher;
+use twenty_first::util_types::simple_hasher::{Hashable, Hasher};
 
 use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 
-use super::{utxo::Utxo, Amount, AMOUNT_SIZE_FOR_U32};
+use super::{utxo::Utxo, Amount};
 
 pub struct TransactionKernel {
     pub input_utxos: Vec<Utxo>,
@@ -18,48 +16,38 @@ pub struct TransactionKernel {
 
 impl Hashable2 for TransactionKernel {
     fn neptune_hash(&self) -> Digest {
-        let mut leafs: Vec<Vec<BFieldElement>> = vec![];
-
         // Hash all inputs
-        let input_digests: Vec<Vec<BFieldElement>> = self
+        let inputs_preimage: Vec<BFieldElement> = self
             .input_utxos
             .iter()
-            .map(|inp| inp.neptune_hash().into())
+            .flat_map(|input_utxo| input_utxo.neptune_hash().values())
             .collect();
-        leafs.push(MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(
-            &input_digests,
-        ));
 
         // Hash all outputs
-        let output_digests: Vec<Vec<BFieldElement>> = self
+        let outputs_preimage: Vec<BFieldElement> = self
             .output_utxos
             .iter()
-            .map(|inp| inp.neptune_hash().into())
+            .flat_map(|output_utxo| output_utxo.neptune_hash().values())
             .collect();
-        leafs.push(MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(
-            &output_digests,
-        ));
 
         // Hash all public scripts
-        let hasher = Hash::new();
-        let public_script_digests: Vec<Vec<BFieldElement>> = self
-            .public_scripts
-            .iter()
-            .map(|ps| hasher.hash(ps, DIGEST_LENGTH))
-            .collect();
-        leafs.push(MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(
-            &public_script_digests,
-        ));
+        let public_scripts_preimage: Vec<BFieldElement> = self.public_scripts.concat();
 
         // Hash fee
-        let fee_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.fee.into();
-        let fee_digest = hasher.hash(&fee_bfes, DIGEST_LENGTH);
-        leafs.push(fee_digest);
+        let fee_preimage: Vec<BFieldElement> = self.fee.to_sequence();
 
         // Hash timestamp
-        let timestamp_digest = hasher.hash(&[self.timestamp], DIGEST_LENGTH);
-        leafs.push(timestamp_digest);
+        let timestamp_preimage = vec![self.timestamp];
 
-        MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(&leafs).into()
+        let all_digests = vec![
+            inputs_preimage,
+            outputs_preimage,
+            fee_preimage,
+            timestamp_preimage,
+            public_scripts_preimage,
+        ]
+        .concat();
+
+        Digest::new(Hash::new().hash_sequence(&all_digests))
     }
 }

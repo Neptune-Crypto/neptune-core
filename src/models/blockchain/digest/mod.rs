@@ -45,7 +45,7 @@ impl Digest {
         Self(digest)
     }
 
-    pub const fn default() -> Self {
+    pub fn default() -> Self {
         Self([BFieldElement::zero(); DIGEST_LENGTH])
     }
 }
@@ -79,18 +79,22 @@ impl FromStr for Digest {
                     return Err("Given invalid BFieldElement in string.".to_owned());
                 }
             }
-            let digest = Digest::from(bf_elms);
-            Ok(digest)
+            Ok(bf_elms.try_into()?)
         }
     }
 }
 
-impl From<Vec<BFieldElement>> for Digest {
-    fn from(vals: Vec<BFieldElement>) -> Self {
-        Self(
-            vals.try_into()
-                .expect("Hash function returned bad number of B field elements."),
-        )
+impl TryFrom<Vec<BFieldElement>> for Digest {
+    type Error = String;
+
+    fn try_from(value: Vec<BFieldElement>) -> Result<Self, Self::Error> {
+        let len = value.len();
+        Ok(Digest::new(value.try_into().map_err(|_| {
+            format!(
+                "Expected {} BFieldElements for digest, but got {}",
+                DIGEST_LENGTH, len,
+            )
+        })?))
     }
 }
 
@@ -147,16 +151,15 @@ mod digest_tests {
             BFieldElement::new(36),
             BFieldElement::new(48),
             BFieldElement::new(60),
-            BFieldElement::new(70),
         ];
-        let rescue_prime_digest_type_from_array: Digest = bfe_vec.into();
+        let rescue_prime_digest_type_from_array: Digest = bfe_vec.try_into().unwrap();
         let _shorter: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] =
             rescue_prime_digest_type_from_array.into();
     }
 
     #[test]
     pub fn get_size() {
-        let stack = crate::models::blockchain::digest::Digest::get_stack_size();
+        let stack = Digest::get_stack_size();
 
         let bfe_vec = vec![
             BFieldElement::new(12),
@@ -164,10 +167,8 @@ mod digest_tests {
             BFieldElement::new(36),
             BFieldElement::new(48),
             BFieldElement::new(60),
-            BFieldElement::new(70),
         ];
-        let rescue_prime_digest_type_from_array: crate::models::blockchain::digest::Digest =
-            bfe_vec.into();
+        let rescue_prime_digest_type_from_array: Digest = bfe_vec.try_into().unwrap();
 
         let heap = rescue_prime_digest_type_from_array.get_heap_size();
 
@@ -180,8 +181,8 @@ mod digest_tests {
 
     #[test]
     pub fn digest_from_str() {
-        // This tests a valid digest. It will fail when we change RESCUE_PRIME_OUTPUT_SIZE_IN_BFES.
-        let valid_digest_string = "00059361073062755064,05168490802189810700,02524349865623165603,04907779149954626615,01487912569022462807,00000104867047771348";
+        // This tests a valid digest. It will fail when we change DIGEST_LENGTH.
+        let valid_digest_string = "12063201067205522823,1529663126377206632,2090171368883726200,12975872837767296928,11492877804687889759";
         let valid_digest = Digest::from_str(valid_digest_string);
         assert!(valid_digest.is_ok());
 

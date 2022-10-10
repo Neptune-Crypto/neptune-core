@@ -10,7 +10,7 @@ use twenty_first::util_types::{merkle_tree::MerkleTree, simple_hasher::Hasher};
 use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MutatorSetUpdate {
     // The ordering of the removal/addition records must match that of
     // the block.
@@ -27,14 +27,8 @@ impl Hashable2 for MutatorSetUpdate {
             MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(&addition_digests);
         let removals_root =
             MerkleTree::<Hash>::root_from_arbitrary_number_of_digests(&removal_digests);
-        let hasher = Hash::new();
 
-        Digest::new(
-            hasher
-                .hash_pair(&additions_root, &removals_root)
-                .try_into()
-                .unwrap(),
-        )
+        Digest::new(Hash::new().hash_pair(&additions_root, &removals_root))
     }
 }
 
@@ -63,8 +57,10 @@ impl MutatorSetUpdate {
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
         while let Some(mut addition_record) = addition_records.pop() {
-            let update_res =
-                RemovalRecord::batch_update_from_addition(&mut removal_records, ms_accumulator);
+            let update_res = RemovalRecord::batch_update_from_addition(
+                &mut removal_records,
+                &mut ms_accumulator.set_commitment,
+            );
 
             if update_res.is_err() {
                 bail!("Failed to update removal records with addition record");

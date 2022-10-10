@@ -3,7 +3,6 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::util_types::simple_hasher::Hasher;
 
 use crate::models::blockchain::digest::{Digest, Hashable2};
@@ -61,13 +60,7 @@ impl Display for BlockHeader {
 
 impl Hashable2 for BlockHeader {
     fn neptune_hash(&self) -> Digest {
-        let hasher = Hash::new();
-        Digest::new(
-            hasher
-                .hash(&self.accumulate(), DIGEST_LENGTH)
-                .try_into()
-                .unwrap(),
-        )
+        Digest::new(Hash::new().hash_sequence(&self.accumulate()))
     }
 }
 

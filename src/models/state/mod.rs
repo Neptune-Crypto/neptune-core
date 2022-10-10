@@ -68,7 +68,9 @@ impl GlobalState {
         let mut inputs: Vec<DevNetInput> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, mp) in spendable_utxos_and_mps {
-            let removal_record = msa_tip.drop(&spendable_utxo.neptune_hash().into(), &mp);
+            let removal_record = msa_tip
+                .set_commitment
+                .drop(&spendable_utxo.neptune_hash().values(), &mp);
             input_amount = input_amount + spendable_utxo.amount;
             inputs.push(DevNetInput {
                 utxo: spendable_utxo,

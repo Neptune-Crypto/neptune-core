@@ -16,7 +16,6 @@ use futures::channel::oneshot;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use num_traits::identities::Zero;
-use rand::thread_rng;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -25,7 +24,6 @@ use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
@@ -41,8 +39,10 @@ fn make_devnet_block_template(
         previous_block.body.next_mutator_set_accumulator.clone();
 
     for (output_utxo, randomness) in transaction.outputs.iter() {
-        let addition_record = next_mutator_set_accumulator
-            .commit(&output_utxo.neptune_hash().into(), &(*randomness).into());
+        let addition_record = next_mutator_set_accumulator.commit(
+            &output_utxo.neptune_hash().values(),
+            &(*randomness).values(),
+        );
         additions.push(addition_record);
     }
 
@@ -71,7 +71,7 @@ fn make_devnet_block_template(
     let zero = BFieldElement::zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
     let new_pow_line: U32s<5> = previous_block.header.proof_of_work_family + difficulty;
-    let mutator_set_commitment: Digest = next_mutator_set_accumulator.get_commitment().into();
+    let mutator_set_commitment: Digest = Digest::new(next_mutator_set_accumulator.get_commitment());
     let next_block_height = previous_block.header.height.next();
     let block_timestamp = BFieldElement::new(
         SystemTime::now()

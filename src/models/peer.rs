@@ -217,7 +217,7 @@ impl From<Transaction> for TransactionNotification {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PeerMessage {
     Handshake(Box<(Vec<u8>, HandshakeData)>),
     Block(Box<TransferBlock>),

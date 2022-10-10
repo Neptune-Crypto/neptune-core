@@ -14,7 +14,7 @@ use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::One;
 use num_traits::Zero;
 use pin_project_lite::pin_project;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{distributions::Alphanumeric, Rng};
 use rusty_leveldb;
 use secp256k1::ecdsa;
 use std::path::PathBuf;
@@ -32,8 +32,6 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
-use twenty_first::shared_math::traits::GetRandomElements;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
@@ -405,7 +403,7 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     let addition_record: AdditionRecord<Hash> = block
         .body
         .previous_mutator_set_accumulator
-        .commit(&utxo.neptune_hash().into(), &output_randomness);
+        .commit(&utxo.neptune_hash().values(), &output_randomness.values());
     tx.outputs.push((utxo, output_randomness.into()));
 
     // Add addition record for this output
@@ -423,11 +421,8 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment = block
-        .body
-        .next_mutator_set_accumulator
-        .get_commitment()
-        .into();
+    block.header.mutator_set_commitment =
+        Digest::new(block.body.next_mutator_set_accumulator.get_commitment());
     block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
@@ -468,11 +463,13 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment = block
-        .body
-        .next_mutator_set_accumulator
-        .get_commitment()
-        .into();
+    block.header.mutator_set_commitment = Digest::new(
+        block
+            .body
+            .next_mutator_set_accumulator
+            .get_commitment()
+            .into(),
+    );
     block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
@@ -485,7 +482,7 @@ pub fn add_unsigned_input_to_block(
     let input_removal_record = block
         .body
         .previous_mutator_set_accumulator
-        .drop(&item.into(), &membership_proof);
+        .drop(&item.values(), &membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(
         block,
         consumed_utxo,
@@ -506,14 +503,14 @@ pub async fn add_unsigned_input_to_block_ams(
     let input_membership_proof = ams
         .lock()
         .await
-        .restore_membership_proof(&item.into(), &randomness.into(), aocl_leaf_index)
+        .restore_membership_proof(&item.values(), &randomness.values(), aocl_leaf_index)
         .unwrap();
 
     // Sanity check that restored membership proof agrees with AMS
     assert!(
         ams.lock()
             .await
-            .verify(&item.into(), &input_membership_proof),
+            .verify(&item.values(), &input_membership_proof),
         "Restored MS membership proof must validate against own AMS"
     );
 
@@ -522,7 +519,7 @@ pub async fn add_unsigned_input_to_block_ams(
         block
             .body
             .previous_mutator_set_accumulator
-            .verify(&item.into(), &input_membership_proof),
+            .verify(&item.values(), &input_membership_proof),
         "Restored MS membership proof must validate against input block"
     );
 
@@ -530,7 +527,7 @@ pub async fn add_unsigned_input_to_block_ams(
         .lock()
         .await
         .set_commitment
-        .drop(&item.into(), &input_membership_proof);
+        .drop(&item.values(), &input_membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(
         block,
         consumed_utxo,
@@ -551,15 +548,15 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
         data_index: 0,
         authentication_path: vec![],
     };
+    let randomness = Digest::default().values();
     let mock_ms_membership_proof = MsMembershipProof {
-        randomness: Digest::default().into(),
+        randomness,
         auth_path_aocl: mock_mmr_membership_proof,
         target_chunks: ChunkDictionary::default(),
         cached_bits: None,
     };
     let mut mock_ms_acc = MutatorSetAccumulator::default();
-    let mock_removal_record =
-        mock_ms_acc.drop(&Digest::default().into(), &mock_ms_membership_proof);
+    let mock_removal_record = mock_ms_acc.drop(&randomness, &mock_ms_membership_proof);
 
     let utxo = Utxo {
         amount,
@@ -577,7 +574,6 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
 
 pub fn make_mock_signed_valid_tx() -> Transaction {
     // Build a transaction
-    let mut rng = thread_rng();
     let wallet_1 = new_random_wallet();
     let output_amount_1: Amount = 42.into();
     let output_1 = Utxo {
@@ -677,7 +673,7 @@ pub fn make_mock_block(
     let coinbase_digest: Digest = coinbase_utxo.neptune_hash();
 
     let mut coinbase_addition_record: AdditionRecord<Hash> =
-        new_ms.commit(&coinbase_digest.into(), &output_randomness);
+        new_ms.commit(&coinbase_digest.values(), &output_randomness.values());
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
@@ -700,7 +696,7 @@ pub fn make_mock_block(
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
-        mutator_set_commitment: new_ms.get_commitment().into(),
+        mutator_set_commitment: Digest::new(new_ms.get_commitment()),
         prev_block_digest: previous_block.hash,
         timestamp: block_body.transaction.timestamp,
         nonce: [zero, zero, zero],

@@ -1,4 +1,4 @@
-use num_bigint::BigUint;
+use num_bigint::{BigUint, TryFromBigIntError};
 use num_traits::Zero;
 use serde::Serialize;
 
@@ -30,15 +30,15 @@ impl PartialOrd for OrderedDigest {
 }
 
 impl OrderedDigest {
-    pub const fn max() -> Self {
+    pub fn max() -> Self {
         Self([BFieldElement::new(BFieldElement::MAX); DIGEST_LENGTH])
     }
 
-    pub const fn default() -> Self {
+    pub fn default() -> Self {
         Self([BFieldElement::zero(); DIGEST_LENGTH])
     }
 
-    pub const fn new(digest: [BFieldElement; DIGEST_LENGTH]) -> Self {
+    pub fn new(digest: [BFieldElement; DIGEST_LENGTH]) -> Self {
         Self(digest)
     }
 
@@ -52,27 +52,32 @@ impl OrderedDigest {
         let max_threshold_as_bui: BigUint = Self::max().into();
         let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
 
-        threshold_as_bui.into()
+        threshold_as_bui.try_into().unwrap()
     }
 }
 
-impl From<BigUint> for OrderedDigest {
-    fn from(biguint: BigUint) -> Self {
-        let mut remaining = biguint;
+impl TryFrom<BigUint> for OrderedDigest {
+    type Error = String;
+
+    fn try_from(value: BigUint) -> Result<Self, Self::Error> {
+        let mut remaining = value;
         let mut ret = OrderedDigest::default();
         let modulus: BigUint = BFieldElement::QUOTIENT.into();
         for i in 0..DIGEST_LENGTH {
-            let resulting_u64: u64 = (remaining.clone() % modulus.clone()).try_into().unwrap();
+            let resulting_u64: u64 = (remaining.clone() % modulus.clone()).try_into().map_err(
+                |err: TryFromBigIntError<BigUint>| {
+                    format!("Could not convert remainder back to u64: {:?}", err)
+                },
+            )?;
             ret.0[i] = BFieldElement::new(resulting_u64);
             remaining /= modulus.clone();
         }
 
-        assert!(
-            remaining.is_zero(),
-            "Overflow when converting from BigUint to OrderedDigest"
-        );
+        if !remaining.is_zero() {
+            return Err("Overflow when converting from BigUint to OrderedDigest".to_string());
+        }
 
-        ret
+        Ok(ret)
     }
 }
 
@@ -104,20 +109,42 @@ mod ordered_digest_tests {
     use super::*;
 
     #[test]
+    fn conversion_test() {
+        let u32_max_difficulty_actual = U32s::<5>::from(u32::MAX);
+        let u32_max_difficulty_expected = U32s::<5>::new([u32::MAX, 0, 0, 0, 0]);
+        assert_eq!(u32_max_difficulty_actual, u32_max_difficulty_expected);
+    }
+
+    #[test]
     fn difficulty_to_threshold_test() {
         // Verify that a difficulty of 2 accepts half of the digests
-        let two = U32s::<5>::one() + U32s::<5>::one();
-        let threshold_for_difficulty_two: OrderedDigest = OrderedDigest::to_digest_threshold(two);
-        assert_eq!(
-            BFieldElement::MAX / 2,
-            threshold_for_difficulty_two.0[5].value()
-        );
+        let difficulty: u32 = 2;
+        let difficulty_u32s = U32s::<5>::from(difficulty);
+        let threshold_for_difficulty_two: OrderedDigest =
+            OrderedDigest::to_digest_threshold(difficulty_u32s);
+
+        for elem in threshold_for_difficulty_two.0 {
+            assert_eq!(BFieldElement::MAX / u64::from(difficulty), elem.value());
+        }
 
         // Verify that a difficulty of BFieldElement::MAX accepts all digests where the last BFieldElement is zero
-        let bfe_max = U32s::<5>::new([1, u32::MAX, 0, 0, 0]);
-        let threshold_for_bfe_max: OrderedDigest = OrderedDigest::to_digest_threshold(bfe_max);
-        assert_eq!(0u64, threshold_for_bfe_max.0[5].value());
-        assert_eq!(BFieldElement::MAX, threshold_for_bfe_max.0[4].value());
+        let some_difficulty = U32s::<5>::new([1, u32::MAX, 0, 0, 0]);
+        let some_threshold_actual: OrderedDigest =
+            OrderedDigest::to_digest_threshold(some_difficulty);
+
+        println!("{:?}", some_threshold_actual);
+        let bfe_max_elem = BFieldElement::new(BFieldElement::MAX);
+        let some_threshold_expected = OrderedDigest::new([
+            bfe_max_elem,
+            bfe_max_elem,
+            bfe_max_elem,
+            bfe_max_elem,
+            BFieldElement::zero(),
+        ]);
+
+        assert_eq!(0u64, some_threshold_actual.0[4].value());
+        assert_eq!(some_threshold_actual, some_threshold_expected);
+        assert_eq!(bfe_max_elem, some_threshold_actual.0[3]);
     }
 
     #[test]
@@ -125,7 +152,7 @@ mod ordered_digest_tests {
     fn digest_biguint_overflow_test() {
         let mut two_pow_384: BigUint = (1u128 << 96).into();
         two_pow_384 = two_pow_384.pow(4);
-        let _failing_conversion: OrderedDigest = two_pow_384.into();
+        let _failing_conversion: OrderedDigest = two_pow_384.try_into().unwrap();
     }
 
     #[test]
@@ -175,53 +202,78 @@ mod ordered_digest_tests {
             BFieldElement::zero(),
         ]);
 
-        let mut two_pow_351: BigUint = (1u128 << 70).into();
-        two_pow_351 = two_pow_351.pow(5);
-        two_pow_351 *= 2u32;
+        let two_pow_315: BigUint = BigUint::from(2u128).pow(315);
+
         // Result calculated on Wolfram alpha
-        let two_pow_351_converted_expected = OrderedDigest([
-            BFieldElement::new(9223372032559808513),
-            BFieldElement::new(6442450940),
-            BFieldElement::new(9223372041149743112),
-            BFieldElement::new(18446744037202329596),
-            BFieldElement::new(9223372056182128637),
-            // BFieldElement::new(2147483650), // FIXME: This test will break. Re-calculate with Wolfram Alpha.
+        let two_pow_315_converted_expected = OrderedDigest([
+            BFieldElement::new(18446744069280366593),
+            BFieldElement::new(1729382257312923647),
+            BFieldElement::new(13258597298683772929),
+            BFieldElement::new(3458764513015234559),
+            BFieldElement::new(576460752840294400),
         ]);
 
         // Verify conversion from BigUint to OrderedDigest
-        assert_eq!(fourteen_converted_expected, fourteen.clone().into());
-        assert_eq!(bfe_max_converted_expected, bfe_max.clone().into());
+        assert_eq!(
+            fourteen_converted_expected,
+            fourteen.clone().try_into().unwrap()
+        );
+        assert_eq!(
+            bfe_max_converted_expected,
+            bfe_max.clone().try_into().unwrap()
+        );
         assert_eq!(
             bfe_max_plus_one_converted_expected,
-            bfe_max_plus_one.clone().into()
+            bfe_max_plus_one.clone().try_into().unwrap()
         );
-        assert_eq!(two_pow_64_converted_expected, two_pow_64.clone().into());
-        assert_eq!(two_pow_123_converted_expected, two_pow_123.clone().into());
-        assert_eq!(two_pow_351_converted_expected, two_pow_351.clone().into());
+        assert_eq!(
+            two_pow_64_converted_expected,
+            two_pow_64.clone().try_into().unwrap()
+        );
+        assert_eq!(
+            two_pow_123_converted_expected,
+            two_pow_123.clone().try_into().unwrap()
+        );
+        assert_eq!(
+            two_pow_315_converted_expected,
+            two_pow_315.clone().try_into().unwrap()
+        );
 
         // Verify conversion from OrderedDigest to BigUint
-        assert_eq!(fourteen, fourteen_converted_expected.into());
-        assert_eq!(bfe_max, bfe_max_converted_expected.into());
-        assert_eq!(bfe_max_plus_one, bfe_max_plus_one_converted_expected.into());
-        assert_eq!(two_pow_64, two_pow_64_converted_expected.into());
-        assert_eq!(two_pow_123, two_pow_123_converted_expected.into());
-        assert_eq!(two_pow_351, two_pow_351_converted_expected.into());
+        assert_eq!(fourteen, fourteen_converted_expected.try_into().unwrap());
+        assert_eq!(bfe_max, bfe_max_converted_expected.try_into().unwrap());
+        assert_eq!(
+            bfe_max_plus_one,
+            bfe_max_plus_one_converted_expected.try_into().unwrap()
+        );
+        assert_eq!(
+            two_pow_64,
+            two_pow_64_converted_expected.try_into().unwrap()
+        );
+        assert_eq!(
+            two_pow_123,
+            two_pow_123_converted_expected.try_into().unwrap()
+        );
+        assert_eq!(
+            two_pow_315,
+            two_pow_315_converted_expected.try_into().unwrap()
+        );
     }
 
     #[test]
     fn digest_biguint_conversion_pbt() {
         let count = 100;
-        let mut prng = thread_rng();
+        let mut rng = thread_rng();
         for _ in 0..count {
             // Generate a random BigUint that will fit into an ordered digest
             let mut biguint: BigUint = BigUint::one();
-            for _ in 0..5 {
-                biguint *= prng.next_u64();
+            for _ in 0..4 {
+                biguint *= rng.next_u64();
             }
-            biguint *= prng.next_u32();
+            biguint *= rng.next_u32();
 
             // Verify that conversion back and forth is the identity operator
-            let as_digest: OrderedDigest = biguint.clone().into();
+            let as_digest: OrderedDigest = biguint.clone().try_into().unwrap();
             let converted_back: BigUint = as_digest.into();
             assert_eq!(biguint, converted_back);
         }

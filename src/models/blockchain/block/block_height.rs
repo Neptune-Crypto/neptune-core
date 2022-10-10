@@ -27,7 +27,7 @@ impl BlockHeight {
         Self(self.0 - BFieldElement::one())
     }
 
-    pub const fn genesis() -> Self {
+    pub fn genesis() -> Self {
         Self(BFieldElement::zero())
     }
 }
