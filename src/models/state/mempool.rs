@@ -187,11 +187,12 @@ impl Mempool {
     }
 }
 
+#[allow(rustdoc::invalid_codeblock_attributes)]
 /// The fundamental data type in this module.
 ///
 /// # Example
 ///
-/// ```
+/// ```norun
 /// // Instantiate Mempool, insert and get a transaction.
 /// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
 /// use neptune_core::models::state::mempool::Mempool;
