@@ -375,9 +375,9 @@ impl MempoolInternal {
     /// of this newly mined block. It also updates all mutator set data for the monitored
     /// transactions that were not removed due to being included in the block.
     fn update_with_block(&mut self, block: &Block) {
-        //! Checks if the `input_utxos` in `canonical_transaction`
-        //! and any `transaction` in the mempool is disjoint.
-        //! Removes the `transaction` from mempool otherwise.
+        //! Checks if the of sets of flipped bits in the block transaction
+        //! and any `transaction` in the mempool are disjoint.
+        //! Removes the transaction from the mempool if they are not.
         let flipped_bloom_filter_indices: HashSet<_> = block
             .body
             .transaction
@@ -408,6 +408,11 @@ impl MempoolInternal {
             tx.update_ms_data(block)
                 .expect("Updating mempool transaction must succeed");
         }
+
+        // Maintaining the mutator set data could have increased the size of the
+        // transactions in the mempool. So we should shrink it to max size after
+        // applying the block.
+        self.shrink_to_max_size();
     }
 
     fn shrink_to_max_size(&mut self) {
