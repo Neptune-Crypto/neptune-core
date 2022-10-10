@@ -9,7 +9,6 @@ use crate::models::database::{
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
-use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::mempool::MempoolInternal;
 use crate::models::state::GlobalState;
 use crate::Hash;
