@@ -220,22 +220,56 @@ impl RPC for NeptuneRPCServer {
     fn get_public_key(self, _context: tarpc::context::Context) -> Self::GetPublicKeyFut {
         future::ready(self.state.wallet_state.wallet.get_public_key())
     }
+
+    fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> Self::GetMempoolTxCountFut {
+        future::ready(self.state.mempool.len())
+    }
+
+    fn get_mempool_size(self, _context: tarpc::context::Context) -> Self::GetMempoolSizeFut {
+        future::ready(self.state.mempool.get_size())
+    }
 }
 
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
     use crate::{
-        config_models::network::Network, models::peer::PeerSanctionReason,
-        rpc_server::NeptuneRPCServer, tests::shared::get_test_genesis_setup, RPC_CHANNEL_CAPACITY,
+        config_models::network::Network,
+        models::{
+            peer::PeerSanctionReason,
+            state::wallet::{generate_secret_key, Wallet},
+        },
+        rpc_server::NeptuneRPCServer,
+        tests::shared::{get_mock_global_state, get_test_genesis_setup},
+        RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
+    use num_traits::Zero;
     use std::{
         collections::HashMap,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         sync::MutexGuard,
     };
     use tracing_test::traced_test;
+
+    #[traced_test]
+    #[tokio::test]
+    async fn balance_is_zero_at_init() -> Result<()> {
+        // Verify that a wallet not receiving a premine is empty at startup
+        let state =
+            get_mock_global_state(Network::Main, 2, Some(Wallet::new(generate_secret_key()))).await;
+        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+        let rpc_server = NeptuneRPCServer {
+            socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+            state: state.clone(),
+            rpc_server_to_main_tx: dummy_tx,
+        };
+
+        let balance = rpc_server.get_balance(context::current()).await;
+        assert!(balance.is_zero());
+
+        Ok(())
+    }
 
     #[traced_test]
     #[tokio::test]
