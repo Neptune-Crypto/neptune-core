@@ -175,7 +175,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                 main_to_miner_rx,
                 miner_to_main_tx,
                 latest_block,
-                state_clone_for_miner.wallet_state.wallet.get_public_key(),
                 state_clone_for_miner,
             )
             .await

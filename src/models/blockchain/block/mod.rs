@@ -151,6 +151,7 @@ impl Block {
     }
 
     /// Merge a transaction into this block's transaction using the authority signature on the transaction
+    /// Mutator set data must be valid in all inputs.
     pub fn authority_merge_transaction(&mut self, transaction: Transaction) {
         let new_transaction = self.body.transaction.clone().merge_with(transaction);
 
@@ -432,7 +433,7 @@ mod block_tests {
     async fn merge_transaction_test() -> Result<()> {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let global_state = get_mock_global_state(Network::Main, 2).await;
+        let global_state = get_mock_global_state(Network::Main, 2, None).await;
         let genesis_block = Block::genesis_block();
         let mut block_1 = make_mock_block(
             &genesis_block,
@@ -450,7 +451,10 @@ mod block_tests {
             amount: 5.into(),
             public_key: other_wallet.get_public_key(),
         };
-        let new_tx = global_state.create_transaction(new_utxo).await.unwrap();
+        let new_tx = global_state
+            .create_transaction(vec![new_utxo])
+            .await
+            .unwrap();
         block_1.authority_merge_transaction(new_tx);
         assert!(
             block_1.devnet_is_valid(&genesis_block),

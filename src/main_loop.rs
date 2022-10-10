@@ -385,7 +385,7 @@ impl MainLoopHandler {
                 // that became invalid/was mined by this block.
                 self.global_state
                     .mempool
-                    .remove_transactions_with(&new_block.body.transaction, &mut mempool_write_lock);
+                    .update_with_block(&new_block, &mut mempool_write_lock);
 
                 *light_state_locked = *new_block;
 
@@ -516,10 +516,9 @@ impl MainLoopHandler {
 
                         // Update mempool with UTXOs from this block. This is done by removing all transaction
                         // that became invalid/was mined by this block.
-                        self.global_state.mempool.remove_transactions_with(
-                            &new_block.body.transaction,
-                            &mut mempool_write_lock,
-                        );
+                        self.global_state
+                            .mempool
+                            .update_with_block(&new_block, &mut mempool_write_lock);
                     }
 
                     // When receiving a block from a peer thread, we assume it is verified.
@@ -952,7 +951,7 @@ impl MainLoopHandler {
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(notification))?;
 
-                // insert transaction into
+                // insert transaction into mempool
                 self.global_state.mempool.insert(&transaction);
 
                 // do not shut down

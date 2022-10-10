@@ -700,6 +700,7 @@ impl PeerLoopHandler {
                     .mempool
                     .contains(&transaction_notification.transaction_digest);
                 if transaction_is_known {
+                    debug!("transaction was already known");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -709,6 +710,11 @@ impl PeerLoopHandler {
                         - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
                 {
                     // TODO: Consider punishing here
+                    debug!(
+                        "transaction was too old. Got: {:?}. Current time: {:?}",
+                        transaction_notification.timestamp,
+                        SystemTime::now()
+                    );
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -720,10 +726,12 @@ impl PeerLoopHandler {
                         )
                 {
                     // TODO: Consider punishing here
+                    debug!("transaction was too far into the future");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // 4. Request the actual `Transaction` from peer
+                debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(
                     transaction_notification.transaction_digest,
                 ))

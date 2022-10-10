@@ -157,10 +157,11 @@ async fn mine_devnet_block(
 fn make_coinbase_transaction(
     public_key: secp256k1::PublicKey,
     previous_block_header: &BlockHeader,
+    total_transaction_fees: Amount,
 ) -> Transaction {
     let next_block_height: BlockHeight = previous_block_header.height.next();
     let coinbase_utxo = Utxo {
-        amount: Block::get_mining_reward(next_block_height),
+        amount: Block::get_mining_reward(next_block_height) + total_transaction_fees,
         public_key,
     };
 
@@ -183,12 +184,47 @@ fn make_coinbase_transaction(
     }
 }
 
+/// Create the transaction that goes into the block template. The transaction is
+/// built from the mempool and from the coinbase transaction.
+fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transaction {
+    let block_capacity_for_transactions = SIZE_1MB_IN_BYTES;
+
+    // Get most valuable transactions from mempool
+    let transactions_to_include = state
+        .mempool
+        .get_densest_transactions(block_capacity_for_transactions);
+
+    // Build coinbase transaction
+    let transaction_fees = transactions_to_include
+        .iter()
+        .fold(Amount::zero(), |acc, x| acc + x.fee);
+    let coinbase_transaction = make_coinbase_transaction(
+        state.wallet_state.wallet.get_public_key(),
+        &latest_block.header,
+        transaction_fees,
+    );
+
+    // Merge incoming transactions with the coinbase transaction
+    let mut merged_transaction = transactions_to_include
+        .into_iter()
+        .fold(coinbase_transaction, |acc, transaction| {
+            Transaction::merge_with(acc, transaction)
+        });
+
+    // Then set fee to zero as we've already sent it all to ourself in the coinbase output
+    merged_transaction.fee = Amount::zero();
+
+    // Resign the transaction since we changed the fee
+    merged_transaction.devnet_authority_sign();
+
+    merged_transaction
+}
+
 #[tracing::instrument(skip_all)]
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block: Block,
-    own_public_key: secp256k1::PublicKey,
     state: GlobalState,
 ) -> Result<()> {
     loop {
@@ -197,29 +233,14 @@ pub async fn mock_regtest_mine(
             info!("Not mining because we are syncing");
             None
         } else {
-            // For now, we just mine blocks with only the coinbase transaction.
-            let coinbase_transaction =
-                make_coinbase_transaction(own_public_key, &latest_block.header);
-
-            let block_capacity_for_transactions = SIZE_1MB_IN_BYTES;
-
-            let transactions = state
-                .mempool
-                .get_densest_transactions(block_capacity_for_transactions);
-
-            // Merge incoming transactions with the coinbase transaction
-            let merged_transaction = transactions
-                .into_iter()
-                .fold(coinbase_transaction.clone(), |acc, transaction| {
-                    Transaction::merge_with(acc, transaction)
-                });
-
-            let (block_header, block_body) =
-                make_devnet_block_template(&latest_block, merged_transaction);
+            // Build the block template and spawn the worker thread to mine on it
+            let transaction = create_block_transaction(&latest_block, &state);
+            let (block_header, block_body) = make_devnet_block_template(&latest_block, transaction);
             let miner_task = mine_devnet_block(block_header, block_body, sender, state.clone());
             Some(tokio::spawn(miner_task))
         };
 
+        // Await a message from either the worker thread or from the main loop
         select! {
             changed = from_main.changed() => {
                 info!("Mining thread got message from main");
@@ -287,27 +308,78 @@ pub async fn mock_regtest_mine(
 
 #[cfg(test)]
 mod mine_loop_tests {
-    use crate::tests::shared::{get_mock_wallet_state, make_mock_block};
+    use crate::{config_models::network::Network, tests::shared::get_mock_global_state};
 
     use super::*;
 
     #[tokio::test]
-    async fn make_devnet_block_template_is_valid_test() {
-        let previous_block = Block::genesis_block();
-        let wallet_state = get_mock_wallet_state(None).await;
-        let coinbase_tx =
-            make_coinbase_transaction(wallet_state.wallet.get_public_key(), &previous_block.header);
-        let (block_header, block_body) = make_devnet_block_template(&previous_block, coinbase_tx);
-        let block_template_1 = Block::new(block_header, block_body);
-        assert!(block_template_1.devnet_is_valid(&previous_block));
+    async fn block_template_is_valid_test() -> Result<()> {
+        // Verify that a block template made with transaction from the mempool is a valid block
+        let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
+        assert!(
+            premine_receiver_global_state.mempool.is_empty(),
+            "Mempool must be empty at startup"
+        );
 
-        let mock_block_1 =
-            make_mock_block(&previous_block, None, wallet_state.wallet.get_public_key());
-        let coinbase_tx_2 =
-            make_coinbase_transaction(wallet_state.wallet.get_public_key(), &mock_block_1.header);
-        let (block_header_2, block_body_2) =
-            make_devnet_block_template(&mock_block_1, coinbase_tx_2);
-        let block_template_2 = Block::new(block_header_2, block_body_2);
-        assert!(block_template_2.devnet_is_valid(&mock_block_1));
+        // Verify constructed coinbase transaction and block template when mempool is empty
+        let genesis_block = Block::genesis_block();
+        let transaction_empty_mempool =
+            create_block_transaction(&genesis_block, &premine_receiver_global_state);
+        assert_eq!(
+            1,
+            transaction_empty_mempool.outputs.len(),
+            "Coinbase transaction with empty mempool must have exactly one output"
+        );
+        assert!(
+            transaction_empty_mempool.inputs.is_empty(),
+            "Coinbase transaction with empty mempool must have zero inputs"
+        );
+        let (block_header_template_empty_mempool, block_body_empty_mempool) =
+            make_devnet_block_template(&genesis_block, transaction_empty_mempool);
+        let block_template_empty_mempool = Block::new(
+            block_header_template_empty_mempool,
+            block_body_empty_mempool,
+        );
+        assert!(
+            block_template_empty_mempool.devnet_is_valid(&genesis_block),
+            "Block template created by miner with empty mempool must be valid"
+        );
+
+        // Add a transaction to the mempool
+        let tx_output = Utxo {
+            amount: 4.into(),
+            public_key: premine_receiver_global_state
+                .wallet_state
+                .wallet
+                .get_public_key(),
+        };
+        let tx_by_preminer = premine_receiver_global_state
+            .create_transaction(vec![tx_output])
+            .await?;
+        premine_receiver_global_state
+            .mempool
+            .insert(&tx_by_preminer);
+        assert_eq!(1, premine_receiver_global_state.mempool.len());
+
+        // Build transaction
+        let transaction_non_empty_mempool =
+            create_block_transaction(&genesis_block, &premine_receiver_global_state);
+        assert_eq!(
+            3,
+            transaction_non_empty_mempool.outputs.len(),
+            "Transaction for block with non-empty mempool must contain coinbase output, send output, and change output"
+        );
+        assert_eq!(1, transaction_non_empty_mempool.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
+
+        // Build and verify block template
+        let (block_header_template, block_body) =
+            make_devnet_block_template(&genesis_block, transaction_non_empty_mempool);
+        let block_template_non_empty_mempool = Block::new(block_header_template, block_body);
+        assert!(
+            block_template_non_empty_mempool.devnet_is_valid(&genesis_block),
+            "Block template created by miner with non-empty mempool must be valid"
+        );
+
+        Ok(())
     }
 }

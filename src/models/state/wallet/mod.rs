@@ -588,7 +588,7 @@ impl WalletState {
             .map(|(_key, value)| value.as_wallet_block_utxos())
             .map(|wallet_block| wallet_block.get_io_sums())
             .reduce(|a, b| a + b)
-            .unwrap();
+            .unwrap_or_default();
         sums.output_sum - sums.input_sum
     }
 

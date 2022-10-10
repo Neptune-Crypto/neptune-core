@@ -175,7 +175,11 @@ pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeDat
     (handshake, socket_address)
 }
 
-pub async fn get_mock_global_state(network: Network, peer_count: u8) -> GlobalState {
+pub async fn get_mock_global_state(
+    network: Network,
+    peer_count: u8,
+    wallet: Option<Wallet>,
+) -> GlobalState {
     let (block_databases, peer_databases, root_data_dir_path) =
         unit_test_databases(network).unwrap();
     let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
@@ -206,7 +210,7 @@ pub async fn get_mock_global_state(network: Network, peer_count: u8) -> GlobalSt
         chain: blockchain_state,
         cli: cli_default_args,
         net: networking_state,
-        wallet_state: get_mock_wallet_state(None).await,
+        wallet_state: get_mock_wallet_state(wallet).await,
         mempool,
     }
 }
@@ -232,7 +236,7 @@ pub async fn get_test_genesis_setup(
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let state = get_mock_global_state(network, peer_count).await;
+    let state = get_mock_global_state(network, peer_count, None).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx_clone,

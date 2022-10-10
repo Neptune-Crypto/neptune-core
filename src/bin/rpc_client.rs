@@ -23,6 +23,8 @@ enum Command {
     Balance,
     WalletStatus,
     GetPublicKey,
+    MempoolTxCount,
+    MempoolSize,
 }
 
 #[derive(Debug, Parser)]
@@ -111,6 +113,16 @@ async fn main() -> Result<()> {
         Command::GetPublicKey => {
             let pub_key: secp256k1::PublicKey = client.get_public_key(context::current()).await?;
             println!("{}", pub_key)
+        }
+
+        Command::MempoolTxCount => {
+            let count: usize = client.get_mempool_tx_count(context::current()).await?;
+            println!("{}", count);
+        }
+
+        Command::MempoolSize => {
+            let size_in_bytes: usize = client.get_mempool_size(context::current()).await?;
+            println!("{} bytes", size_in_bytes);
         }
     }
 

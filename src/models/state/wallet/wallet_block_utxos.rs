@@ -1,3 +1,4 @@
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 
@@ -17,6 +18,15 @@ pub struct WalletBlockUtxos {
 pub struct WalletBlockIOSums {
     pub input_sum: Amount,
     pub output_sum: Amount,
+}
+
+impl Default for WalletBlockIOSums {
+    fn default() -> Self {
+        Self {
+            input_sum: Amount::zero(),
+            output_sum: Amount::zero(),
+        }
+    }
 }
 
 impl Add for WalletBlockIOSums {

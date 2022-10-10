@@ -50,6 +50,11 @@ pub trait RPC {
     async fn get_wallet_status() -> WalletStatus;
 
     async fn get_public_key() -> secp256k1::PublicKey;
+
+    async fn get_mempool_tx_count() -> usize;
+
+    // TODO: Change to return current size and max size
+    async fn get_mempool_size() -> usize;
 }
 
 #[derive(Clone)]
@@ -72,6 +77,8 @@ impl RPC for NeptuneRPCServer {
     type GetWalletStatusFut = Ready<WalletStatus>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
     type GetPublicKeyFut = Ready<secp256k1::PublicKey>;
+    type GetMempoolTxCountFut = Ready<usize>;
+    type GetMempoolSizeFut = Ready<usize>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
@@ -157,27 +164,19 @@ impl RPC for NeptuneRPCServer {
             self.state.wallet_state.wallet.get_public_key()
         );
 
-        // Construct and send a transaction object for each of the elements in the user-submitted transactions
-        let mut response: Result<(), SendError<RPCServerToMain>> = Ok(());
-        for utxo in recipient_utxos {
-            // 1. Build transaction objects.
-            let transaction_res: Result<Transaction> =
-                executor::block_on(self.state.create_transaction(utxo));
-            let transaction = match transaction_res {
-                Ok(tx) => tx,
-                Err(err) => panic!("Could not create transaction: {}", err),
-            };
+        // 1. Build transaction object
+        let transaction_res: Result<Transaction> =
+            executor::block_on(self.state.create_transaction(recipient_utxos));
+        let transaction = match transaction_res {
+            Ok(tx) => tx,
+            Err(err) => panic!("Could not create transaction: {}", err),
+        };
 
-            // 2. Send transaction message to main
-            response = executor::block_on(
-                self.rpc_server_to_main_tx
-                    .send(RPCServerToMain::Send(transaction)),
-            );
-
-            if response.is_err() {
-                break;
-            }
-        }
+        // 2. Send transaction message to main
+        let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
+            self.rpc_server_to_main_tx
+                .send(RPCServerToMain::Send(transaction)),
+        );
 
         // 3. Send acknowledgement to client.
         future::ready(response.is_ok())
@@ -221,22 +220,56 @@ impl RPC for NeptuneRPCServer {
     fn get_public_key(self, _context: tarpc::context::Context) -> Self::GetPublicKeyFut {
         future::ready(self.state.wallet_state.wallet.get_public_key())
     }
+
+    fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> Self::GetMempoolTxCountFut {
+        future::ready(self.state.mempool.len())
+    }
+
+    fn get_mempool_size(self, _context: tarpc::context::Context) -> Self::GetMempoolSizeFut {
+        future::ready(self.state.mempool.get_size())
+    }
 }
 
 #[cfg(test)]
 mod rpc_server_tests {
     use super::*;
     use crate::{
-        config_models::network::Network, models::peer::PeerSanctionReason,
-        rpc_server::NeptuneRPCServer, tests::shared::get_test_genesis_setup, RPC_CHANNEL_CAPACITY,
+        config_models::network::Network,
+        models::{
+            peer::PeerSanctionReason,
+            state::wallet::{generate_secret_key, Wallet},
+        },
+        rpc_server::NeptuneRPCServer,
+        tests::shared::{get_mock_global_state, get_test_genesis_setup},
+        RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
+    use num_traits::Zero;
     use std::{
         collections::HashMap,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         sync::MutexGuard,
     };
     use tracing_test::traced_test;
+
+    #[traced_test]
+    #[tokio::test]
+    async fn balance_is_zero_at_init() -> Result<()> {
+        // Verify that a wallet not receiving a premine is empty at startup
+        let state =
+            get_mock_global_state(Network::Main, 2, Some(Wallet::new(generate_secret_key()))).await;
+        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+        let rpc_server = NeptuneRPCServer {
+            socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+            state: state.clone(),
+            rpc_server_to_main_tx: dummy_tx,
+        };
+
+        let balance = rpc_server.get_balance(context::current()).await;
+        assert!(balance.is_zero());
+
+        Ok(())
+    }
 
     #[traced_test]
     #[tokio::test]
