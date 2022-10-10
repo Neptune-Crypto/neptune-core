@@ -1,14 +1,15 @@
 use super::chunk_dictionary::ChunkDictionary;
 use serde::{Deserialize, Serialize};
 
-use twenty_first::util_types::{mmr, simple_hasher};
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use twenty_first::util_types::simple_hasher;
 
 /// Type to transfer membership proof without risking that `cached_bits` are shared between
 /// peers.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransferMsMembershipProof<H: simple_hasher::Hasher> {
     pub randomness: H::Digest,
-    pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
+    pub auth_path_aocl: MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
 }
 

@@ -10,7 +10,7 @@ use super::{
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct MutatorSetAccumulator<H: Hasher>
 where
     u128: Hashable<<H as Hasher>::T>,

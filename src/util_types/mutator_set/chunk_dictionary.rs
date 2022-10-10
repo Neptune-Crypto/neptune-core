@@ -19,6 +19,8 @@ impl<H: Hasher> PartialEq for ChunkDictionary<H> {
     }
 }
 
+impl<H: Hasher> Eq for ChunkDictionary<H> {}
+
 impl<H: Hasher> ChunkDictionary<H>
 where
     u128: Hashable<<H as Hasher>::T>,

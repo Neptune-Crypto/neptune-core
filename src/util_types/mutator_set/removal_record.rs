@@ -37,7 +37,7 @@ pub enum RemovalRecordError {
     MissingChunkOnUpdateFromRemove(u128),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RemovalRecord<H: Hasher> {
     #[serde(with = "BigArray")]
     pub bit_indices: [u128; NUM_TRIALS],

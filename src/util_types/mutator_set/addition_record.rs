@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use twenty_first::util_types::simple_hasher::{Hashable, Hasher};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AdditionRecord<H: Hasher> {
     pub canonical_commitment: H::Digest,
 }
