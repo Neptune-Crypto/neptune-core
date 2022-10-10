@@ -169,24 +169,8 @@ impl MsBlockSyncValue {
     }
 }
 
-pub struct BlockDatabases {
-    pub block_index: RustyLevelDB<BlockIndexKey, BlockIndexValue>,
-}
-
 pub struct PeerDatabases {
     pub peer_standings: RustyLevelDB<IpAddr, PeerStanding>,
-}
-
-// We have to implement `Debug` for `Databases` as the `State` struct
-// contains a database object, and `State` is used as input argument
-// to multiple functions where logging is enabled with the `instrument`
-// attributes from the `tracing` crate, and this requires all input
-// arguments to the function to implement the `Debug` trait as this
-// info is written on all logging events.
-impl fmt::Debug for BlockDatabases {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("").finish()
-    }
 }
 
 impl fmt::Debug for PeerDatabases {

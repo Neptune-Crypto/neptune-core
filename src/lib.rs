@@ -15,6 +15,8 @@ use crate::config_models::data_directory::get_data_directory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::main_loop::MainLoopHandler;
 use crate::models::channel::RPCServerToMain;
+use crate::models::database::BlockIndexKey;
+use crate::models::database::BlockIndexValue;
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
@@ -34,7 +36,7 @@ use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
 use models::database::MsBlockSyncKey;
 use models::database::MsBlockSyncValue;
-use models::database::{BlockDatabases, PeerDatabases};
+use models::database::PeerDatabases;
 use models::peer::PeerInfo;
 use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use std::collections::HashMap;
@@ -82,9 +84,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network).await;
 
     // Connect to or create databases for block state, and for peer state
-    let block_databases = ArchivalState::initialize_block_databases(root_data_dir_path)?;
+    let block_databases = ArchivalState::initialize_block_index_database(root_data_dir_path)?;
     let peer_databases = NetworkingState::initialize_peer_databases(root_data_dir_path)?;
-    let block_databases: Arc<tokio::sync::Mutex<BlockDatabases>> =
+    let block_index_db: Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>> =
         Arc::new(tokio::sync::Mutex::new(block_databases));
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
         Arc::new(tokio::sync::Mutex::new(peer_databases));
@@ -96,7 +98,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         Arc::new(tokio::sync::Mutex::new(archival_mutator_set));
     let ms_block_sync_db = Arc::new(tokio::sync::Mutex::new(ms_block_sync_db));
     let archival_state = ArchivalState::new(
-        block_databases,
+        block_index_db,
         archival_mutator_set,
         root_data_dir_path_buf,
         ms_block_sync_db,

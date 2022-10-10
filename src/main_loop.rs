@@ -4,7 +4,7 @@ use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::database::{
-    BlockDatabases, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
+    BlockIndexKey, BlockIndexValue, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
 };
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
@@ -308,13 +308,15 @@ impl MainLoopHandler {
                 let mut wallet_state_db: tokio::sync::MutexGuard<
                     RustyLevelDB<WalletDbKey, WalletDbValue>,
                 > = self.global_state.wallet_state.wallet_db.lock().await;
-                let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
+                let mut db_lock: tokio::sync::MutexGuard<
+                    RustyLevelDB<BlockIndexKey, BlockIndexValue>,
+                > = self
                     .global_state
                     .chain
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .block_databases
+                    .block_index_db
                     .lock()
                     .await;
                 let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
@@ -414,13 +416,15 @@ impl MainLoopHandler {
                     let mut wallet_state_db: tokio::sync::MutexGuard<
                         RustyLevelDB<WalletDbKey, WalletDbValue>,
                     > = self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
+                    let mut block_db_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
+                    > = self
                         .global_state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .block_databases
+                        .block_index_db
                         .lock()
                         .await;
                     let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
@@ -930,6 +934,7 @@ impl MainLoopHandler {
                 }
             }
         }
+
         self.graceful_shutdown().await?;
         info!("Shutdown completed.");
         Ok(())
@@ -970,9 +975,6 @@ impl MainLoopHandler {
     async fn graceful_shutdown(self: &MainLoopHandler) -> Result<()> {
         info!("Shutdown initiated.");
 
-        // Peer-map is owned by main-loop, so there is no need to lock it
-        // to prevent new peers joining while shutting down.
-
         // flush walletblock db
         self.global_state
             .wallet_state
@@ -998,13 +1000,12 @@ impl MainLoopHandler {
             .archival_state
             .as_ref()
             .unwrap()
-            .block_databases
+            .block_index_db
             .lock()
             .await
-            .block_index
             .flush();
 
-        //flush archival_mutator_set
+        // flush archival_mutator_set
         self.global_state
             .chain
             .archival_state
