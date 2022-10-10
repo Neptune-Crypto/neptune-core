@@ -679,6 +679,7 @@ impl ArchivalState {
         };
 
         // As long as mutator set isn't synced with previous block, roll back
+        // TODO: We are not handling the genesis block correctly here
         let mut ms_block_rollback_digest = ms_block_sync_digest;
         while ms_block_rollback_digest != new_block.header.prev_block_digest {
             // Roll back mutator set
