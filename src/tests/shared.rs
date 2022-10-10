@@ -404,7 +404,7 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
         .body
         .previous_mutator_set_accumulator
         .commit(&utxo.neptune_hash().values(), &output_randomness.values());
-    tx.outputs.push((utxo, output_randomness.into()));
+    tx.outputs.push((utxo, output_randomness));
 
     // Add addition record for this output
     block
@@ -463,13 +463,8 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment = Digest::new(
-        block
-            .body
-            .next_mutator_set_accumulator
-            .get_commitment()
-            .into(),
-    );
+    block.header.mutator_set_commitment =
+        Digest::new(block.body.next_mutator_set_accumulator.get_commitment());
     block.header.block_body_merkle_root = block.body.neptune_hash();
 }
 
@@ -664,10 +659,7 @@ pub fn make_mock_block(
         public_key: coinbase_beneficiary,
     };
     let output_randomness: Digest = Digest::new(random_elements_array());
-    let transaction = make_mock_transaction(
-        vec![],
-        vec![(coinbase_utxo, output_randomness.clone().into())],
-    );
+    let transaction = make_mock_transaction(vec![], vec![(coinbase_utxo, output_randomness)]);
     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
     let coinbase_digest: Digest = coinbase_utxo.neptune_hash();
