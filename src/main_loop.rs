@@ -951,7 +951,7 @@ impl MainLoopHandler {
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(notification))?;
 
-                // insert transaction into
+                // insert transaction into mempool
                 self.global_state.mempool.insert(&transaction);
 
                 // do not shut down

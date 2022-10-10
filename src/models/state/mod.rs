@@ -1,7 +1,10 @@
 use anyhow::Result;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use num_traits::{One, Zero};
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::{SystemTime, UNIX_EPOCH},
+};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use self::{
@@ -105,7 +108,12 @@ impl GlobalState {
             outputs,
             public_scripts: vec![],
             fee,
-            timestamp: BFieldElement::new(1655916990),
+            timestamp: BFieldElement::new(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            ),
             authority_proof: None,
         };
         transaction.sign(&self.wallet_state.wallet);
