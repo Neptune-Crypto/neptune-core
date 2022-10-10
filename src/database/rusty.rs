@@ -62,12 +62,6 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Lev
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
         let value_bytes: Vec<u8> = bincode::serialize(&value).unwrap();
         self.database.put(&key_bytes, &value_bytes).unwrap();
-
-        // TODO: We probably don't have to flush after each writing mutation. But then we would have
-        // to flush on shutdown.
-        self.database
-            .flush()
-            .expect("Database flushing to disk must succeed");
     }
 
     fn batch_write(&mut self, entries: &[(Key, Value)]) {
@@ -87,11 +81,6 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Lev
         let value_object = value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap());
         let status = self.database.delete(&key_bytes);
 
-        // TODO: We probably don't have to flush after each mutation. But then we would have
-        // to flush on shutdown.
-        self.database
-            .flush()
-            .expect("Database flushing to disk must succeed");
         match status {
             Ok(_) => value_object, // could be None, if record is not present
             Err(err) => panic!("database failure: {}", err),
@@ -104,6 +93,12 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
 {
     pub fn new_iter(&mut self) -> RustyLevelDBIterator<Key, Value> {
         RustyLevelDBIterator::new(self)
+    }
+
+    pub fn flush(&mut self) {
+        self.database
+            .flush()
+            .expect("Database flushing to disk must succeed");
     }
 }
 

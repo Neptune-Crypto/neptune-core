@@ -49,9 +49,10 @@ use crate::models::blockchain::transaction::Amount;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
+use crate::models::database::BlockIndexValue;
+use crate::models::database::PeerDatabases;
 use crate::models::database::WalletDbKey;
 use crate::models::database::WalletDbValue;
-use crate::models::database::{BlockDatabases, PeerDatabases};
 use crate::models::peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding};
 use crate::models::shared::LatestBlockInfo;
 use crate::models::state::archival_state::ArchivalState;
@@ -77,7 +78,7 @@ pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
 pub fn unit_test_databases(
     network: Network,
 ) -> Result<(
-    Arc<tokio::sync::Mutex<BlockDatabases>>,
+    Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
     Arc<tokio::sync::Mutex<PeerDatabases>>,
     PathBuf,
 )> {
@@ -102,7 +103,7 @@ pub fn unit_test_databases(
 
     // The `initialize_databases` function call should create a new directory for the databases
     // meaning that all directories above this are also created.
-    let block_dbs = ArchivalState::initialize_block_databases(&database_dir)?;
+    let block_dbs = ArchivalState::initialize_block_index_database(&database_dir)?;
     let peer_dbs = NetworkingState::initialize_peer_databases(&database_dir)?;
 
     Ok((
@@ -251,14 +252,12 @@ pub async fn add_block_to_archival_state(
     archival_state: &ArchivalState,
     new_block: Block,
 ) -> Result<()> {
-    let mut db_lock = archival_state.block_databases.lock().await;
+    let mut db_lock = archival_state.block_index_db.lock().await;
     let tip_digest: Option<Digest> = db_lock
-        .block_index
         .get(BlockIndexKey::BlockTipDigest)
         .map(|x| x.as_tip_digest());
     let tip_header: Option<BlockHeader> = tip_digest.map(|digest| {
         db_lock
-            .block_index
             .get(BlockIndexKey::Block(digest))
             .unwrap()
             .as_block_record()
@@ -288,7 +287,7 @@ pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
         .archival_state
         .as_ref()
         .unwrap()
-        .block_databases
+        .block_index_db
         .lock()
         .await;
     let mut light_state_locked: tokio::sync::MutexGuard<Block> =

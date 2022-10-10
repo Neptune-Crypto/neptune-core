@@ -4,7 +4,7 @@ use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::database::{
-    BlockDatabases, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
+    BlockIndexKey, BlockIndexValue, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
 };
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
@@ -304,90 +304,97 @@ impl MainLoopHandler {
                 );
 
                 // Store block in database
-                // Acquire both locks before updating
-                let mut wallet_state_db: tokio::sync::MutexGuard<
-                    RustyLevelDB<WalletDbKey, WalletDbValue>,
-                > = self.global_state.wallet_state.wallet_db.lock().await;
-                let mut db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
-                    .global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .block_databases
-                    .lock()
-                    .await;
-                let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
-                    .global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .archival_mutator_set
-                    .lock()
-                    .await;
-                let mut ms_block_sync_lock: tokio::sync::MutexGuard<
-                    RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
-                > = self
-                    .global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .ms_block_sync_db
-                    .lock()
-                    .await;
-                let mut light_state_locked = self
-                    .global_state
-                    .chain
-                    .light_state
-                    .latest_block
-                    .lock()
-                    .await;
-                let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
-                    .global_state
-                    .mempool
-                    .internal
-                    .write()
-                    .expect("Locking mempool for write must succeed");
+                // Acquire all locks before updating
+                {
+                    let mut wallet_state_db: tokio::sync::MutexGuard<
+                        RustyLevelDB<WalletDbKey, WalletDbValue>,
+                    > = self.global_state.wallet_state.wallet_db.lock().await;
+                    let mut db_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
+                    > = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .block_index_db
+                        .lock()
+                        .await;
+                    let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .archival_mutator_set
+                        .lock()
+                        .await;
+                    let mut ms_block_sync_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
+                    > = self
+                        .global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .ms_block_sync_db
+                        .lock()
+                        .await;
+                    let mut light_state_locked = self
+                        .global_state
+                        .chain
+                        .light_state
+                        .latest_block
+                        .lock()
+                        .await;
+                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
+                        .global_state
+                        .mempool
+                        .internal
+                        .write()
+                        .expect("Locking mempool for write must succeed");
 
-                // Apply the updates
-                self.global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .write_block(
-                        new_block.clone(),
-                        &mut db_lock,
-                        Some(light_state_locked.header.proof_of_work_family),
-                    )?;
+                    // Apply the updates
+                    self.global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .write_block(
+                            new_block.clone(),
+                            &mut db_lock,
+                            Some(light_state_locked.header.proof_of_work_family),
+                        )?;
 
-                // update the mutator set with the UTXOs from this block
-                self.global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .update_mutator_set(
-                        &mut db_lock,
-                        &mut ams_lock,
-                        &mut ms_block_sync_lock,
-                        &new_block,
-                    )?;
+                    // update the mutator set with the UTXOs from this block
+                    self.global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .update_mutator_set(
+                            &mut db_lock,
+                            &mut ams_lock,
+                            &mut ms_block_sync_lock,
+                            &new_block,
+                        )?;
 
-                // update wallet state with relevant UTXOs from this block
-                self.global_state
-                    .wallet_state
-                    .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+                    // update wallet state with relevant UTXOs from this block
+                    self.global_state
+                        .wallet_state
+                        .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
 
-                // Update mempool with UTXOs from this block. This is done by removing all transaction
-                // that became invalid/was mined by this block.
-                self.global_state
-                    .mempool
-                    .update_with_block(&new_block, &mut mempool_write_lock);
+                    // Update mempool with UTXOs from this block. This is done by removing all transaction
+                    // that became invalid/was mined by this block.
+                    self.global_state
+                        .mempool
+                        .update_with_block(&new_block, &mut mempool_write_lock);
 
-                *light_state_locked = *new_block;
+                    *light_state_locked = *new_block;
+                }
+
+                // Flush databases
+                self.flush_databases().await?;
 
                 // Inform miner that mempool has been updated and that it is safe
                 // to mine the next block
@@ -414,13 +421,15 @@ impl MainLoopHandler {
                     let mut wallet_state_db: tokio::sync::MutexGuard<
                         RustyLevelDB<WalletDbKey, WalletDbValue>,
                     > = self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut block_db_lock: tokio::sync::MutexGuard<BlockDatabases> = self
+                    let mut block_db_lock: tokio::sync::MutexGuard<
+                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
+                    > = self
                         .global_state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .block_databases
+                        .block_index_db
                         .lock()
                         .await;
                     let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
@@ -533,6 +542,9 @@ impl MainLoopHandler {
                     // Update information about latest block
                     *light_state_locked = last_block.clone();
                 }
+
+                // Flush databases
+                self.flush_databases().await?;
 
                 // Inform all peers about new block
                 self.main_to_peer_broadcast_tx
@@ -849,11 +861,9 @@ impl MainLoopHandler {
             // Set a timer to run peer discovery process every N seconds
 
             // Set a timer for synchronization handling, but only if we are in synchronization mod
-
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
-                    self.graceful_shutdown().await?;
                     break;
                 }
 
@@ -932,12 +942,12 @@ impl MainLoopHandler {
                 }
             }
         }
+
+        self.graceful_shutdown().await?;
         info!("Shutdown completed.");
         Ok(())
     }
-}
 
-impl MainLoopHandler {
     async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::Send(transaction) => {
@@ -959,32 +969,105 @@ impl MainLoopHandler {
             }
             RPCServerToMain::Shutdown() => {
                 info!("Recived RPC shutdown request.");
-                self.graceful_shutdown().await?;
 
                 // shut down
                 Ok(true)
             }
         }
     }
-}
 
-impl MainLoopHandler {
-    async fn graceful_shutdown(self: &MainLoopHandler) -> Result<()> {
+    async fn flush_databases(&self) -> Result<()> {
+        // flush wallet databases
+        self.global_state
+            .wallet_state
+            .outgoing_utxo_counter_db
+            .lock()
+            .await
+            .flush();
+        self.global_state
+            .wallet_state
+            .wallet_db
+            .as_ref()
+            .lock()
+            .await
+            .flush();
+
+        // flush block_index database
+        self.global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .block_index_db
+            .lock()
+            .await
+            .flush();
+
+        // flush archival_mutator_set
+        self.global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .archival_mutator_set
+            .lock()
+            .await
+            .flush();
+
+        // Write back active part of Bloom filter to database
+        let _active_window_db = self
+            .global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .flush_active_window()
+            .await;
+
+        // flush ms_block_sync_db
+        self.global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .ms_block_sync_db
+            .as_ref()
+            .lock()
+            .await
+            .flush();
+
+        // flush peer_standings
+        self.global_state
+            .net
+            .peer_databases
+            .as_ref()
+            .lock()
+            .await
+            .peer_standings
+            .flush();
+        debug!("Flushed all databases");
+
+        Ok(())
+    }
+
+    async fn graceful_shutdown(&self) -> Result<()> {
         info!("Shutdown initiated.");
 
-        // Peer-map is owned by main-loop, so there is no need to lock it
-        // to prevent new peers joining while shutting down.
+        // Stop mining
+        let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+
+        // Flush all databases
+        self.flush_databases().await?;
 
         // Send 'bye' message to alle peers.
         let _result = self
             .main_to_peer_broadcast_tx
             .send(MainToPeerThread::DisconnectAll());
-
-        let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
+        debug!("sent bye");
 
         //TODO: wait for child processes to finish - using stored tokio JoinHandles.
 
-        sleep(Duration::new(0, 10 * 500000)); // ten miliseconds
+        sleep(Duration::new(0, 100 * 1_000_000)); // wait 0.1 seconds
 
         Ok(())
     }

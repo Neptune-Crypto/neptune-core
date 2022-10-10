@@ -34,9 +34,8 @@ use crate::{
             shared::Hash,
         },
         database::{
-            BlockDatabases, BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord,
-            FileRecord, LastFileRecord, MsBlockSyncKey, MsBlockSyncValue,
-            DATABASE_DIRECTORY_ROOT_NAME,
+            BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord,
+            LastFileRecord, MsBlockSyncKey, MsBlockSyncValue, DATABASE_DIRECTORY_ROOT_NAME,
         },
     },
 };
@@ -52,7 +51,7 @@ const MS_BLOCK_SYNC_DB_NAME: &str = "ms_block_sync";
 #[derive(Clone)]
 pub struct ArchivalState {
     // Since this is a database, we use the tokio Mutex here.
-    pub block_databases: Arc<TokioMutex<BlockDatabases>>,
+    pub block_index_db: Arc<TokioMutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
 
     root_data_dir: PathBuf,
 
@@ -60,6 +59,12 @@ pub struct ArchivalState {
     // this object in a spawned worker thread.
     genesis_block: Box<Block>,
 
+    // The archival mutator set is three databases and one array that lives in memory that needs
+    // to be persisted in a database. So it involves four databases where the last one is opened
+    // and closed as needed and the other ones are kept open throughout the lifetime of the program.
+    // The fourth database is the active window that is small enough to that we can keep it in RAM
+    // but we need to persist it when the program is shut down and started again. The database of
+    // the active window is not exposed outside of this module.
     pub archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
 
     pub ms_block_sync_db: Arc<TokioMutex<RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>>>,
@@ -67,7 +72,9 @@ pub struct ArchivalState {
 
 impl ArchivalState {
     /// Create databases for block persistence
-    pub fn initialize_block_databases(root_path: &Path) -> Result<BlockDatabases> {
+    pub fn initialize_block_index_database(
+        root_path: &Path,
+    ) -> Result<RustyLevelDB<BlockIndexKey, BlockIndexValue>> {
         let mut path = root_path.to_owned();
         path.push(DATABASE_DIRECTORY_ROOT_NAME);
 
@@ -85,7 +92,7 @@ impl ArchivalState {
             default_options(),
         )?;
 
-        Ok(BlockDatabases { block_index })
+        Ok(block_index)
     }
 
     /// Return the database for active window. This should not be public.
@@ -154,7 +161,7 @@ impl ArchivalState {
 impl core::fmt::Debug for ArchivalState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArchivalState")
-            .field("block_databases", &self.block_databases)
+            .field("block_index_db", &self.block_index_db)
             .field("root_data_dir", &self.root_data_dir)
             .field("genesis_block", &self.genesis_block)
             .finish()
@@ -163,7 +170,7 @@ impl core::fmt::Debug for ArchivalState {
 
 impl ArchivalState {
     pub async fn new(
-        initial_block_databases: Arc<TokioMutex<BlockDatabases>>,
+        initial_block_index_db: Arc<TokioMutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
         archival_mutator_set: Arc<TokioMutex<ArchivalMutatorSet<Hash>>>,
         root_data_dir: PathBuf,
         ms_block_sync_db: Arc<TokioMutex<RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>>>,
@@ -183,7 +190,7 @@ impl ArchivalState {
         }
 
         Self {
-            block_databases: initial_block_databases,
+            block_index_db: initial_block_index_db,
             root_data_dir,
             genesis_block,
             archival_mutator_set,
@@ -196,14 +203,13 @@ impl ArchivalState {
     pub fn write_block(
         &self,
         new_block: Box<Block>,
-        db_lock: &mut tokio::sync::MutexGuard<'_, BlockDatabases>,
+        db_lock: &mut tokio::sync::MutexGuard<'_, RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
         current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
         let mut last_rec: LastFileRecord = match db_lock
-            .block_index
             .get(BlockIndexKey::LastFile)
             .map(|x| x.as_last_file_record())
         {
@@ -241,7 +247,6 @@ impl ArchivalState {
         // Get associated file record from database, otherwise create it
         let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
         let file_record_value: Option<FileRecord> = db_lock
-            .block_index
             .get(file_record_key.clone())
             .map(|x| x.as_file_record());
         let file_record_value: FileRecord = match file_record_value {
@@ -271,11 +276,10 @@ impl ArchivalState {
         );
 
         let height_record_key = BlockIndexKey::Height(new_block.header.height);
-        let mut blocks_at_same_height: Vec<Digest> =
-            match db_lock.block_index.get(height_record_key.clone()) {
-                Some(rec) => rec.as_height_record(),
-                None => vec![],
-            };
+        let mut blocks_at_same_height: Vec<Digest> = match db_lock.get(height_record_key.clone()) {
+            Some(rec) => rec.as_height_record(),
+            None => vec![],
+        };
 
         // Write to file with mmap, only map relevant part of file into memory
         let mmap = unsafe {
@@ -319,7 +323,7 @@ impl ArchivalState {
             ));
         }
 
-        db_lock.block_index.batch_write(&block_index_entries);
+        db_lock.batch_write(&block_index_entries);
 
         Ok(())
     }
@@ -353,16 +357,15 @@ impl ArchivalState {
     /// Given a mutex lock on the database, return the latest block
     fn get_latest_block_from_disk(
         &self,
-        databases: &mut tokio::sync::MutexGuard<BlockDatabases>,
+        block_index_db: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
     ) -> Result<Option<Block>> {
-        let tip_digest = databases.block_index.get(BlockIndexKey::BlockTipDigest);
+        let tip_digest = block_index_db.get(BlockIndexKey::BlockTipDigest);
         let tip_digest: Digest = match tip_digest {
             Some(digest) => digest.as_tip_digest(),
             None => return Ok(None),
         };
 
-        let tip_block_record: BlockRecord = databases
-            .block_index
+        let tip_block_record: BlockRecord = block_index_db
             .get(BlockIndexKey::Block(tip_digest))
             .unwrap()
             .as_block_record();
@@ -375,7 +378,7 @@ impl ArchivalState {
     /// Return latest block from database, or genesis block if no other block
     /// is known.
     pub async fn get_latest_block(&self) -> Block {
-        let mut dbs = self.block_databases.lock().await;
+        let mut dbs = self.block_index_db.lock().await;
         let lookup_res_info: Option<Block> = self
             .get_latest_block_from_disk(&mut dbs)
             .expect("Failed to read block from disk");
@@ -388,10 +391,9 @@ impl ArchivalState {
 
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
         let mut ret = self
-            .block_databases
+            .block_index_db
             .lock()
             .await
-            .block_index
             .get(BlockIndexKey::Block(block_digest))
             .map(|x| x.as_block_record().block_header);
 
@@ -407,11 +409,10 @@ impl ArchivalState {
     // Takes a lock on the block databases as argument.
     fn get_block_with_lock(
         &self,
-        block_db_lock: &mut tokio::sync::MutexGuard<BlockDatabases>,
+        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
         block_digest: Digest,
     ) -> Option<Block> {
         let maybe_record: Option<BlockRecord> = block_db_lock
-            .block_index
             .get(BlockIndexKey::Block(block_digest))
             .map(|x| x.as_block_record());
         let record: BlockRecord = match maybe_record {
@@ -436,10 +437,9 @@ impl ArchivalState {
     // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record: Option<BlockRecord> = self
-            .block_databases
+            .block_index_db
             .lock()
             .await
-            .block_index
             .get(BlockIndexKey::Block(block_digest))
             .map(|x| x.as_block_record());
         let record: BlockRecord = match maybe_record {
@@ -462,10 +462,9 @@ impl ArchivalState {
     /// Return the number of blocks with the given height
     async fn block_height_to_block_count(&self, height: BlockHeight) -> usize {
         match self
-            .block_databases
+            .block_index_db
             .lock()
             .await
-            .block_index
             .get(BlockIndexKey::Height(height))
             .map(|x| x.as_height_record())
         {
@@ -480,10 +479,9 @@ impl ArchivalState {
         block_height: BlockHeight,
     ) -> Vec<BlockHeader> {
         let maybe_digests = self
-            .block_databases
+            .block_index_db
             .lock()
             .await
-            .block_index
             .get(BlockIndexKey::Height(block_height))
             .map(|x| x.as_height_record());
 
@@ -494,10 +492,9 @@ impl ArchivalState {
                 let mut block_headers = vec![];
                 for block_digest in block_digests {
                     let block_header = self
-                        .block_databases
+                        .block_index_db
                         .lock()
                         .await
-                        .block_index
                         .get(BlockIndexKey::Block(block_digest))
                         .map(|x| x.as_block_record())
                         .unwrap();
@@ -640,12 +637,25 @@ impl ArchivalState {
         ret
     }
 
+    pub async fn flush_active_window(&self) -> Result<()> {
+        let ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> =
+            self.archival_mutator_set.lock().await;
+        // Store active window onto disk for persistence
+        let active_window_db = Self::active_window_db(&self.root_data_dir)?;
+        let _active_window_db = ams_lock
+            .set_commitment
+            .swbf_active
+            .store_to_database(active_window_db);
+
+        Ok(())
+    }
+
     /// Update the mutator set with a block after this block has been stored to the database.
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
     /// rolled back are present in the DB. The input block is considered chain tip.
     pub fn update_mutator_set(
         &self,
-        block_db_lock: &mut tokio::sync::MutexGuard<BlockDatabases>,
+        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
         ams_lock: &mut tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>>,
         ms_block_sync_lock: &mut tokio::sync::MutexGuard<
             RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
@@ -669,6 +679,7 @@ impl ArchivalState {
         };
 
         // As long as mutator set isn't synced with previous block, roll back
+        // TODO: We are not handling the genesis block correctly here
         let mut ms_block_rollback_digest = ms_block_sync_digest;
         while ms_block_rollback_digest != new_block.header.prev_block_digest {
             // Roll back mutator set
@@ -841,7 +852,7 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .block_databases
+                .block_index_db
                 .lock()
                 .await;
             add_block_to_archival_state(&archival_state0, block_1.clone())
@@ -886,7 +897,7 @@ mod archival_state_tests {
             genesis_wallet.get_public_key(),
         );
         {
-            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
             {
                 // Before updating the AMS, the active window DB must be empty.
@@ -944,7 +955,7 @@ mod archival_state_tests {
         // Remove an element from the mutator set, verify that the active window DB
         // is updated.
         {
-            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
             let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
             archival_state.update_mutator_set(
@@ -986,7 +997,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
         let archival_state: ArchivalState = make_unit_test_archival_state().await;
-        let mut block_db_lock = archival_state.block_databases.lock().await;
+        let mut block_db_lock = archival_state.block_index_db.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
@@ -1071,7 +1082,7 @@ mod archival_state_tests {
         assert!(block_1a.devnet_is_valid(&genesis_block));
 
         {
-            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
             let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
             archival_state.write_block(
@@ -1185,7 +1196,7 @@ mod archival_state_tests {
 
             // Store the produced block
             {
-                let mut block_db_lock = archival_state.block_databases.lock().await;
+                let mut block_db_lock = archival_state.block_index_db.lock().await;
                 let mut ams_lock = archival_state.archival_mutator_set.lock().await;
                 let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
                 archival_state.write_block(
@@ -1229,7 +1240,7 @@ mod archival_state_tests {
                 None,
                 genesis_wallet.get_public_key(),
             );
-            let mut block_db_lock = archival_state.block_databases.lock().await;
+            let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
             let mut ms_block_sync_lock = archival_state.ms_block_sync_db.lock().await;
             archival_state.write_block(
@@ -1319,7 +1330,7 @@ mod archival_state_tests {
         // Verify that we store this block and that we can update the mutator set with it
         {
             // Before updating, the active window must be all zeros
-            let mut db_bc_lock = archival_state.block_databases.lock().await;
+            let mut db_bc_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
             assert!(ams_lock
                 .set_commitment
@@ -2003,7 +2014,7 @@ mod archival_state_tests {
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
             Secp256k1::new().generate_keypair(&mut thread_rng());
         let mock_block_1 = make_mock_block(&genesis.clone(), None, public_key);
-        let mut db_lock = archival_state.block_databases.lock().await;
+        let mut db_lock = archival_state.block_index_db.lock().await;
         archival_state.write_block(
             Box::new(mock_block_1.clone()),
             &mut db_lock,
@@ -2012,7 +2023,6 @@ mod archival_state_tests {
 
         // Verify that `LastFile` value is stored correctly
         let read_last_file: LastFileRecord = db_lock
-            .block_index
             .get(BlockIndexKey::LastFile)
             .unwrap()
             .as_last_file_record();
@@ -2023,7 +2033,6 @@ mod archival_state_tests {
         {
             let expected_height: u64 = 1;
             let blocks_with_height_1: Vec<Digest> = db_lock
-                .block_index
                 .get(BlockIndexKey::Height(expected_height.into()))
                 .unwrap()
                 .as_height_record();
@@ -2035,7 +2044,6 @@ mod archival_state_tests {
         // Verify that `File` value is stored correctly
         let expected_file: u32 = read_last_file.last_file;
         let last_file_record_1: FileRecord = db_lock
-            .block_index
             .get(BlockIndexKey::File(expected_file))
             .unwrap()
             .as_file_record();
@@ -2055,7 +2063,6 @@ mod archival_state_tests {
 
         // Verify that `BlockTipDigest` is stored correctly
         let tip_digest: Digest = db_lock
-            .block_index
             .get(BlockIndexKey::BlockTipDigest)
             .unwrap()
             .as_tip_digest();
@@ -2064,7 +2071,6 @@ mod archival_state_tests {
 
         // Verify that `Block` is stored correctly
         let actual_block: BlockRecord = db_lock
-            .block_index
             .get(BlockIndexKey::Block(mock_block_1.hash))
             .unwrap()
             .as_block_record();
@@ -2093,7 +2099,6 @@ mod archival_state_tests {
 
         // Verify that `LastFile` value is updated correctly, unchanged
         let read_last_file_2: LastFileRecord = db_lock
-            .block_index
             .get(BlockIndexKey::LastFile)
             .unwrap()
             .as_last_file_record();
@@ -2102,7 +2107,6 @@ mod archival_state_tests {
         // Verify that `Height` value is updated correctly
         {
             let blocks_with_height_1: Vec<Digest> = db_lock
-                .block_index
                 .get(BlockIndexKey::Height(1.into()))
                 .unwrap()
                 .as_height_record();
@@ -2112,7 +2116,6 @@ mod archival_state_tests {
 
         {
             let blocks_with_height_2: Vec<Digest> = db_lock
-                .block_index
                 .get(BlockIndexKey::Height(2.into()))
                 .unwrap()
                 .as_height_record();
@@ -2122,7 +2125,6 @@ mod archival_state_tests {
         // Verify that `File` value is updated correctly
         let expected_file_2: u32 = read_last_file.last_file;
         let last_file_record_2: FileRecord = db_lock
-            .block_index
             .get(BlockIndexKey::File(expected_file_2))
             .unwrap()
             .as_file_record();
@@ -2143,7 +2145,6 @@ mod archival_state_tests {
 
         // Verify that `BlockTipDigest` is updated correctly
         let tip_digest_2: Digest = db_lock
-            .block_index
             .get(BlockIndexKey::BlockTipDigest)
             .unwrap()
             .as_tip_digest();
@@ -2151,7 +2152,6 @@ mod archival_state_tests {
 
         // Verify that `Block` is stored correctly
         let actual_block_record_2: BlockRecord = db_lock
-            .block_index
             .get(BlockIndexKey::Block(mock_block_2.hash))
             .unwrap()
             .as_block_record();
