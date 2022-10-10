@@ -145,8 +145,11 @@ impl Transaction {
             .collect();
         let mut transaction_membership_proofs: Vec<&mut MsMembershipProof<Hash>> =
             transaction_membership_proofs.iter_mut().collect();
-        let transaction_items: Vec<Digest> =
-            self.inputs.iter().map(|x| x.utxo.neptune_hash()).collect();
+        let transaction_items: Vec<_> = self
+            .inputs
+            .iter()
+            .map(|x| x.utxo.neptune_hash().values())
+            .collect();
 
         let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
@@ -179,8 +182,11 @@ impl Transaction {
             };
 
             // Batch update block's removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(&mut block_removal_records, &mut msa_state)
-                .expect("MS removal record update from add must succeed in wallet handler");
+            RemovalRecord::batch_update_from_addition(
+                &mut block_removal_records,
+                &mut msa_state.set_commitment,
+            )
+            .expect("MS removal record update from add must succeed in wallet handler");
 
             // Batch update transaction's removal records
             RemovalRecord::batch_update_from_addition(
