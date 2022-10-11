@@ -35,6 +35,7 @@ pub struct PeerInfo {
     pub last_seen: SystemTime,
     pub standing: PeerStanding,
     pub version: String,
+    pub is_archival_node: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -150,6 +151,7 @@ pub struct HandshakeData {
     pub network: Network,
     pub instance_id: u128,
     pub version: String,
+    pub is_archival_node: bool,
 }
 
 /// Used to tell peers that a new block has been found without having toPeerMessage

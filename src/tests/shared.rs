@@ -126,6 +126,7 @@ pub fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
         standing: PeerStanding::default(),
         version: get_dummy_version(),
         address_for_incoming_connections: Some(address),
+        is_archival_node: true,
     }
 }
 
@@ -158,6 +159,7 @@ pub fn get_dummy_handshake_data(network: Network, id: u8) -> HandshakeData {
         listen_address: Some(get_dummy_address(id)),
         network,
         version: get_dummy_version(),
+        is_archival_node: true,
     }
 }
 

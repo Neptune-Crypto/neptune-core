@@ -970,6 +970,7 @@ impl PeerLoopHandler {
             last_seen: SystemTime::now(),
             standing,
             version: self.peer_handshake_data.version.clone(),
+            is_archival_node: self.peer_handshake_data.is_archival_node,
         };
 
         // There is potential for a race-condition in the peer_map here, as we've previously

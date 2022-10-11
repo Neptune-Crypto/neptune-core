@@ -148,6 +148,8 @@ impl GlobalState {
             network: self.cli.network,
             instance_id: self.net.instance_id,
             version: VERSION.to_string(),
+            // For now, all nodes are archival nodes
+            is_archival_node: true,
         }
     }
 
