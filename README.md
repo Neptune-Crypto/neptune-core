@@ -12,7 +12,7 @@ Reference implementation for the Neptune protocol.
  - install `vscode`
  - in `vscode` install the plugin `rust-analyzer`
  - in `vscode` activate format-on-save via `File` > `Preferences` > `Settings` then check the box for "Format on Save"
- - install `cpulimit` for nicer integration tests: `apt install cpulimit`
+ - install `cpulimit` for nicer, and more quiet integration tests: `apt install cpulimit`
 
 ## Cheatsheet
 
@@ -25,19 +25,18 @@ Reference implementation for the Neptune protocol.
  - To build, use `make build`.
  - To install, use `make install`.
  - To run lint, compile, and run tests use `make all`. Note that this does *not* run install.
- - To run the benchmarks and generate the benchmark report, use `make bench`, or run `cargo criterion --bench <specific-benchmark>`.
 
-During development you can use `cargo` instead of `make` for the above commands. using `make` makes the compiler treat all warnings as errors, which we want for higher code quality. To send arguments to the Neptune Core program in a development setting use `cargo run -- [<flag> [<value>] [<flag> [<value>]]...]`, e.g. `cargo run -- --peers 8.8.101.69:9798 --peers 8.8.2.123:9798 --mine --listen-addr 10.64.111.55`.
+During development you can use `cargo` instead of `make` for the above commands. Using `make` makes the compiler treat all warnings as errors, which we want for higher code quality. To send arguments to the Neptune Core program in a development setting use `cargo run -- [<flag> [<value>] [<flag> [<value>]]...]`, e.g: `cargo run -- --peers 8.8.101.69:9798 --peers 8.8.2.123:9798 --mine --listen-addr 10.64.111.55`.
 
 ## RPC
 This software includes an RPC client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available RPC commands, execute 
 ```
-cargo run --bin rpc -- --help
+cargo run --bin rpc_client -- --help
 ```
 
 To get e.g. the block height of a running daemon, execute
 ```
-cargo run --bin rpc -- --server-addr 127.0.0.1:<rpc_port> block-height
+cargo run --bin rpc_client -- --server-addr 127.0.0.1:<rpc_port> block-height
 ```
 
 ## Logging
@@ -45,7 +44,7 @@ All logging is output to standard out.
 
 The log level can be set through the environment variable `RUST_LOG`. Valid values are: `trace`, `debug`, `info`, `warn`, and `error`. The default value is `info`. E.g.: `RUST_LOG=trace cargo run`.
 
-For development purposes it can sometimes be nice to get a more succint logging output by piping stdout through `sed` with the below command. This will only print the namespace of the logging event and the log text.
+For development purposes it can sometimes be nice to get a more succint logging output by piping stdout through `sed` with the below command. This will only print the namespace of the logging event and the log text. The log output can also be stored to file by piping it to `tee`, like this: `cargo run 2>&1 | tee -a integration_test.log`.
 ```
 sed 's/.*neptune_core:\+\(.*\)/\1/g'
 ```
@@ -65,4 +64,4 @@ This repository contains unit tests, but multi-threaded programs are notoriously
 
 
 ## Notes
-The `Makefile` recipes set the flag `RUSTFLAGS=-Dwarnings` and this sometimes makes the recompilation **much** slower than without this flag, as `cargo` for some reason rebuilds the entire crate when this flag is set and a minor change is made in a test. So it is much faster to run the tests using cargo and then use the `make test` command before e.g. committing to ensure that the test build does not produce any warnings.
+The `Makefile` recipes set the flag `RUSTFLAGS=-Dwarnings` and this sometimes makes the recompilation **much** slower than without this flag, as `cargo` for some reason rebuilds the entire crate when this flag is set and a minor change is made in a test. So it is much faster to run the tests using cargo and then use the `make all` command before e.g. committing to ensure that the test build does not produce any warnings.
