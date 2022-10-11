@@ -530,21 +530,18 @@ impl MainLoopHandler {
                             .update_with_block(&new_block, &mut mempool_write_lock);
                     }
 
-                    // When receiving a block from a peer thread, we assume it is verified.
-                    // It is the peer thread's responsibility to verify the block.
-                    // We shouldn't start mining on the new block before we have removed the relevant
-                    // transactions from the mempool though.
-                    if self.global_state.cli.mine {
-                        self.main_to_miner_tx
-                            .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
-                    }
-
                     // Update information about latest block
                     *light_state_locked = last_block.clone();
                 }
 
                 // Flush databases
                 self.flush_databases().await?;
+
+                // Inform miner to work on a new block
+                if self.global_state.cli.mine {
+                    self.main_to_miner_tx
+                        .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
+                }
 
                 // Inform all peers about new block
                 self.main_to_peer_broadcast_tx
