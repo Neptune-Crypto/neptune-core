@@ -1,8 +1,6 @@
 [package]
 authors = [
-    "sword-smith <thor@neptune.cash>",
-    "Alan Szepieniec <alan@neptune.cash>",
-    "Philip Munksgaard <philip@munksgaard.me>",
+    "Triton Software",
 ]
 edition = "2021"
 name = "neptune-core"
