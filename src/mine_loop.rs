@@ -99,7 +99,6 @@ fn make_devnet_block_template(
 }
 
 /// Attempt to mine a valid block for the network
-#[tracing::instrument(skip_all, level = "debug")]
 async fn mine_devnet_block(
     mut block_header: BlockHeader,
     block_body: BlockBody,
@@ -220,7 +219,6 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
     merged_transaction
 }
 
-#[tracing::instrument(skip_all)]
 pub async fn mock_regtest_mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,

@@ -49,7 +49,7 @@ use tarpc::server::Channel;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
-use tracing::{debug, instrument};
+use tracing::debug;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
@@ -62,7 +62,6 @@ const MINER_CHANNEL_CAPACITY: usize = 3;
 const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[instrument]
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let root_data_dir_path_buf = get_data_directory(cli_args.network).unwrap();
 

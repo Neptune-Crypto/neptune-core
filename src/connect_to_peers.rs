@@ -10,7 +10,7 @@ use tokio_serde::{
     SymmetricallyFramed,
 };
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     models::{
@@ -69,7 +69,6 @@ async fn get_connection_status(
     ConnectionStatus::Accepted
 }
 
-#[instrument]
 pub async fn answer_peer<S>(
     stream: S,
     state: GlobalState,
@@ -150,7 +149,6 @@ where
     Ok(())
 }
 
-#[instrument]
 pub async fn call_peer_wrapper(
     peer_address: std::net::SocketAddr,
     state: GlobalState,
@@ -185,7 +183,6 @@ pub async fn call_peer_wrapper(
     info!("Connection closing");
 }
 
-#[instrument]
 async fn call_peer<S>(
     stream: S,
     state: GlobalState,
