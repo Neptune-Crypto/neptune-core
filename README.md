@@ -7,13 +7,12 @@ Reference implementation for the Neptune protocol.
  - curl -- `apt install curl`
  - rustup -- `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` (installs rustup, cargo, rustc etc.)
  - source the rust environment `source $HOME/.cargo/env`
- - gnuplot -- `apt install gnuplot`
  - build-essential (for `make`) -- `apt install build-essential`
  - levelDB (the database used for this program) -- `apt-get install libleveldb-dev libsnappy-dev cmake`
  - install `vscode`
  - in `vscode` install the plugin `rust-analyzer`
  - in `vscode` activate format-on-save via `File` > `Preferences` > `Settings` then check the box for "Format on Save"
- - install Criterion with `cargo install cargo-criterion`
+ - install `cpulimit` for nicer integration tests: `apt install cpulimit`
 
 ## Cheatsheet
 
