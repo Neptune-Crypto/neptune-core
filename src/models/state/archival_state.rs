@@ -178,7 +178,10 @@ impl ArchivalState {
         let genesis_block = Box::new(Block::genesis_block());
 
         // If archival mutator set is empty, populate it with the addition records from genesis block
-        // This assumes genesis block doesn't spend anything -- which it can't so that should be OK
+        // This assumes genesis block doesn't spend anything -- which it can't so that should be OK.
+        // We could have populated the archival mutator set with the genesis block UTXOs earlier in
+        // the setup, but we don't have the genesis block in scope before this function, so it makes
+        // sense to do it here.
         {
             let mut ams_lock = archival_mutator_set.lock().await;
             let ams_is_empty = ams_lock.set_commitment.aocl.count_leaves().is_zero();
@@ -187,6 +190,8 @@ impl ArchivalState {
                     ams_lock.add(&mut addition_record);
                 }
             }
+
+            ams_lock.flush();
         }
 
         Self {
@@ -678,10 +683,17 @@ impl ArchivalState {
             }
         };
 
-        // As long as mutator set isn't synced with previous block, roll back
-        // TODO: We are not handling the genesis block correctly here
+        // As long as mutator set isn't synced with previous block, roll back, unless we've
+        // reached the genesis block in which case, we cannot roll further back.
         let mut ms_block_rollback_digest = ms_block_sync_digest;
         while ms_block_rollback_digest != new_block.header.prev_block_digest {
+            // This should be impossible, but this function has crashed a lot, so we add this
+            // sanity check. This would indicate an invalid block ,and previous validation
+            // should have caught that.
+            if ms_block_rollback_digest == self.genesis_block.hash {
+                panic!("Attempted to roll back genesis block in archival mutator set");
+            }
+
             // Roll back mutator set
             // block_header_for_current_ms_state = get_current_ms_bh();
             let roll_back_block = self
@@ -867,6 +879,38 @@ mod archival_state_tests {
             drop(lock0);
         })
         .await?;
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn archival_state_init_test() -> Result<()> {
+        // Verify that archival mutator set is populated with outputs from genesis block
+        let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
+        let (ams, ms_block_sync) =
+            ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
+        let ams = Arc::new(TokioMutex::new(ams));
+        let ms_block_sync = Arc::new(TokioMutex::new(ms_block_sync));
+        let archival_state = ArchivalState::new(
+            block_databases.clone(),
+            ams,
+            root_data_dir_path.clone(),
+            ms_block_sync,
+        )
+        .await;
+
+        assert_eq!(
+            Block::genesis_block().body.transaction.outputs.len() as u128,
+            archival_state
+                .archival_mutator_set
+                .lock()
+                .await
+                .set_commitment
+                .aocl
+                .count_leaves(),
+            "Archival mutator set must be populated with premine outputs"
+        );
 
         Ok(())
     }

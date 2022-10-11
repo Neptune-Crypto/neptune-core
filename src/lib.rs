@@ -84,10 +84,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network).await;
 
     // Connect to or create databases for block state, and for peer state
-    let block_databases = ArchivalState::initialize_block_index_database(root_data_dir_path)?;
-    let peer_databases = NetworkingState::initialize_peer_databases(root_data_dir_path)?;
+    let block_index_db = ArchivalState::initialize_block_index_database(root_data_dir_path)?;
     let block_index_db: Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>> =
-        Arc::new(tokio::sync::Mutex::new(block_databases));
+        Arc::new(tokio::sync::Mutex::new(block_index_db));
+    let peer_databases = NetworkingState::initialize_peer_databases(root_data_dir_path)?;
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
         Arc::new(tokio::sync::Mutex::new(peer_databases));
     let (archival_mutator_set, ms_block_sync_db): (
