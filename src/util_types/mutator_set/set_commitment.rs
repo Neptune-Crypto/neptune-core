@@ -270,8 +270,9 @@ where
                 .zip(all_leafs)
                 .collect();
 
+        // TODO: Do we want/need to send membership proofs along here?
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut all_membership_proofs, mutation_data);
+            .batch_mutate_leaf_and_update_mps(&mut vec![], mutation_data);
 
         diff_indices.sort_unstable();
 

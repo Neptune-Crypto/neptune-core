@@ -80,6 +80,14 @@ where
         let hasher = H::new();
         hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
     }
+
+    fn batch_remove(
+        &mut self,
+        removal_records: Vec<RemovalRecord<H>>,
+        preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
+    ) -> Option<Vec<u128>> {
+        todo!()
+    }
 }
 
 #[cfg(test)]
