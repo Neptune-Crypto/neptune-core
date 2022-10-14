@@ -1,3 +1,5 @@
+use itertools::Itertools;
+use num_traits::Zero;
 use serde_big_array;
 use serde_big_array::BigArray;
 use serde_derive::{Deserialize, Serialize};
@@ -10,6 +12,14 @@ use super::shared::{BITS_PER_U32, CHUNK_SIZE};
 pub struct Chunk {
     #[serde(with = "BigArray")]
     pub bits: [u32; CHUNK_SIZE / BITS_PER_U32],
+}
+
+impl Default for Chunk {
+    fn default() -> Self {
+        Self {
+            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
+        }
+    }
 }
 
 impl Chunk {
@@ -42,6 +52,30 @@ impl Chunk {
         );
 
         self.bits[index / BITS_PER_U32] & (1u32 << (index % BITS_PER_U32)) != 0
+    }
+
+    pub fn xor(&mut self, other: Self) {
+        for (self_element, other_element) in self.bits.iter_mut().zip_eq(other.bits.into_iter()) {
+            *self_element ^= other_element;
+        }
+    }
+
+    pub fn and(self, other: Self) -> Self {
+        let mut ret = Self::default();
+        for ((ret_elem, self_element), other_element) in ret
+            .bits
+            .iter_mut()
+            .zip_eq(self.bits.into_iter())
+            .zip_eq(other.bits.into_iter())
+        {
+            *ret_elem = self_element & other_element;
+        }
+
+        ret
+    }
+
+    pub fn is_unset(&self) -> bool {
+        self.bits.iter().all(|x| x.is_zero())
     }
 
     /// Return the length of the Vec<u128>-representation of the active window
@@ -94,14 +128,6 @@ mod chunk_tests {
     use rand::{thread_rng, RngCore};
     use twenty_first::shared_math::b_field_element::BFieldElement;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-
-    impl Chunk {
-        fn default() -> Self {
-            Self {
-                bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
-            }
-        }
-    }
 
     #[inline]
     const fn get_hashpreimage_length() -> usize {
@@ -191,6 +217,44 @@ mod chunk_tests {
             chunk.set_bit(i);
             assert!(previous_values.insert(chunk.hash_preimage::<H>()));
         }
+    }
+
+    #[test]
+    fn xor_and_and_and_is_unset_test() {
+        let mut chunk_a = Chunk::default();
+        chunk_a.set_bit(12);
+        chunk_a.set_bit(13);
+
+        let mut chunk_b = Chunk::default();
+        chunk_b.set_bit(48);
+        chunk_b.set_bit(13);
+
+        let mut expected_xor = Chunk::default();
+        expected_xor.set_bit(12);
+        expected_xor.set_bit(48);
+
+        let mut chunk_c = chunk_a;
+        chunk_c.xor(chunk_b);
+
+        assert_eq!(
+            expected_xor, chunk_c,
+            "XOR on chunks must behave as expected"
+        );
+
+        let mut expected_and = Chunk::default();
+        expected_and.set_bit(13);
+
+        chunk_c = chunk_a.and(chunk_b);
+        assert_eq!(
+            expected_and, chunk_c,
+            "AND on chunks must behave as expected"
+        );
+
+        // Verify that `is_unset` behaves as expected
+        assert!(!chunk_a.is_unset());
+        assert!(!chunk_b.is_unset());
+        assert!(!chunk_c.is_unset());
+        assert!(Chunk::default().is_unset());
     }
 
     #[test]
