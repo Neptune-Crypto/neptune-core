@@ -199,6 +199,7 @@ where
             .swbf_inactive
             .prove_membership(chunk_index)
             .0;
+
         // This check should never fail. It would mean that chunks are missing but that the
         // archival MMR has the membership proof for the chunk. That would be a programming
         // error.
@@ -266,13 +267,51 @@ where
     ///
     /// Fails if attempting to unset a bit that wasn't set.
     pub fn revert_remove(&mut self, diff_indices: Vec<u128>) {
-        let hasher = H::new();
-        for bit_index in diff_indices {
-            assert!(
-                self.unset_bloom_filter_bit(bit_index, &hasher),
-                "Bloom filter bit must be set when reverting remove()"
-            );
+        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let mut unset_bit_encountered = false;
+        let mut chunk_index_to_revert_chunk: HashMap<u128, Chunk> = HashMap::new();
+
+        for diff_index in diff_indices {
+            if diff_index >= active_window_start {
+                let relative_index = (diff_index - active_window_start) as usize;
+                unset_bit_encountered |= !self.set_commitment.swbf_active.get_bit(relative_index);
+                self.set_commitment.swbf_active.unset_bit(relative_index);
+            } else {
+                let chunk_index = diff_index / CHUNK_SIZE as u128;
+                let index_in_chunk = (diff_index % CHUNK_SIZE as u128) as usize;
+                chunk_index_to_revert_chunk
+                    .entry(chunk_index)
+                    .or_insert_with(Chunk::default)
+                    .set_bit(index_in_chunk);
+            }
         }
+
+        let hasher = H::new();
+        for (chunk_index, revert_chunk) in chunk_index_to_revert_chunk {
+            // The bits in the chunk are flipped using xor as they must be set before this
+            // function call. So bits at the indices that we wish to flip must be set (1 or true)
+            // in both the `revert_chunk` and in the `previous_chunk`.
+            let previous_chunk = self.chunks.get(chunk_index);
+            let mut new_chunk = previous_chunk;
+            new_chunk.xor(revert_chunk);
+            self.set_commitment
+                .swbf_inactive
+                .mutate_leaf_raw(chunk_index, new_chunk.hash::<H>(&hasher));
+            self.chunks.set(chunk_index, new_chunk);
+
+            // To check if a bit was set in `revert_chunk` that was not set in previous_chunk, we can
+            // do a bit-wise AND on the `revert_chunk` and the updated `new_chunk`. If this is
+            // non-zero it means that a bit was set in `revert_chunk` but not in `previous_chunk`.
+            // If this is the case, then we have attempted to revert an unset bit, and that is an
+            // error.
+            unset_bit_encountered |= !revert_chunk.and(new_chunk).is_unset();
+        }
+
+        assert!(
+            !unset_bit_encountered,
+            "Caller may not attempt to unset a bit that was not set"
+        );
     }
 
     /// Revert the `AdditionRecord`s in a block by
@@ -322,36 +361,8 @@ where
         }
     }
 
-    /// Unsets the Bloom filter bit with a given `bit_index` in
-    /// either the active window, or in the relevant chunk.
-    ///
-    /// Returns
-    /// - `true` if the bit was flipped from 1 to 0,
-    /// - `false` if the bit was already unset (0).
-    pub fn unset_bloom_filter_bit(&mut self, bit_index: u128, hasher: &H) -> bool {
-        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
-
-        if bit_index >= active_window_start {
-            let relative_index = (bit_index - active_window_start) as usize;
-            let was_set = self.set_commitment.swbf_active.get_bit(relative_index);
-            self.set_commitment.swbf_active.unset_bit(relative_index);
-            was_set
-        } else {
-            let chunk_index = bit_index / CHUNK_SIZE as u128;
-            let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
-            let mut relevant_chunk = self.chunks.get(chunk_index);
-            let was_set = relevant_chunk.get_bit(relative_index);
-            relevant_chunk.unset_bit(relative_index);
-            self.chunks.set(chunk_index, relevant_chunk);
-            self.set_commitment
-                .swbf_inactive
-                .mutate_leaf_raw(chunk_index, relevant_chunk.hash::<H>(hasher));
-            was_set
-        }
-    }
-
-    /// Flush the DatabaseVector (chunks)
+    /// Flush the databases. Does not persist the active window as this lives in memory. The caller
+    /// must persist the active window seperately.
     pub fn flush(&mut self) {
         self.chunks.flush();
         self.set_commitment.aocl.flush();
@@ -486,7 +497,7 @@ mod archival_mutator_set_tests {
         // to being empty on every iteration.
         for _ in 0..2 * BATCH_SIZE {
             let (item, mut addition_record, membership_proof) =
-                make_random_addition(&mut archival_mutator_set);
+                prepare_random_addition(&mut archival_mutator_set);
 
             let commitment_before_add = archival_mutator_set.get_commitment();
             archival_mutator_set.add(&mut addition_record);
@@ -504,7 +515,7 @@ mod archival_mutator_set_tests {
 
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
-            let record = make_random_addition(&mut archival_mutator_set);
+            let record = prepare_random_addition(&mut archival_mutator_set);
             let (item, mut addition_record, membership_proof) = record.clone();
             records.push(record);
             commitments_before.push(archival_mutator_set.get_commitment());
@@ -531,22 +542,53 @@ mod archival_mutator_set_tests {
         }
     }
 
+    #[should_panic(expected = "Caller may not attempt to unset a bit that was not set")]
     #[test]
-    fn archival_mutator_set_revert_remove_test() {
-        type H = RescuePrimeRegular;
+    fn revert_remove_from_active_bloom_filter_panic() {
+        type H = blake3::Hasher;
+
+        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let record = prepare_random_addition(&mut archival_mutator_set);
+        let (item, mut addition_record, membership_proof) = record.clone();
+        archival_mutator_set.add(&mut addition_record);
+
+        let removal_record = archival_mutator_set.drop(&item, &membership_proof);
+
+        // This next line should panic
+        archival_mutator_set.revert_remove(removal_record.bit_indices.to_vec());
+    }
+
+    #[should_panic(expected = "Caller may not attempt to unset a bit that was not set")]
+    #[test]
+    fn revert_remove_from_inactive_bloom_filter_panic() {
+        type H = blake3::Hasher;
 
         let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
-        let n_iterations = 10 * BATCH_SIZE;
+        for _ in 0..2 * BATCH_SIZE {
+            let (_item, mut addition_record, _membership_proof) =
+                prepare_random_addition(&mut archival_mutator_set);
+            archival_mutator_set.add(&mut addition_record);
+        }
+
+        // This next line should panic
+        archival_mutator_set.revert_remove(vec![0, 2]);
+    }
+
+    #[test]
+    fn archival_mutator_set_revert_remove_test() {
+        type H = blake3::Hasher;
+
+        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+
+        let n_iterations = 11 * BATCH_SIZE;
         let mut records = Vec::with_capacity(n_iterations);
-        let mut commitments_before = Vec::with_capacity(n_iterations);
 
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
-            let record = make_random_addition(&mut archival_mutator_set);
+            let record = prepare_random_addition(&mut archival_mutator_set);
             let (item, mut addition_record, membership_proof) = record.clone();
             records.push(record);
-            commitments_before.push(archival_mutator_set.get_commitment());
             archival_mutator_set.add(&mut addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
         }
@@ -577,7 +619,7 @@ mod archival_mutator_set_tests {
         }
     }
 
-    fn make_random_addition<H: Hasher>(
+    fn prepare_random_addition<H: Hasher>(
         archival_mutator_set: &mut ArchivalMutatorSet<H>,
     ) -> (H::Digest, AdditionRecord<H>, MsMembershipProof<H>)
     where
