@@ -1,14 +1,11 @@
-use twenty_first::util_types::simple_hasher::Hasher;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use super::{
-    addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
-    removal_record::RemovalRecord,
-};
+use super::addition_record::AdditionRecord;
+use super::ms_membership_proof::MsMembershipProof;
+use super::removal_record::RemovalRecord;
 
-pub trait MutatorSet<H>
-where
-    H: Hasher,
-{
+pub trait MutatorSet<H: AlgebraicHasher> {
     /**
      * prove
      * Generates a membership proof that will be valid when the item
@@ -16,28 +13,24 @@ where
      */
     fn prove(
         &mut self,
-        item: &H::Digest,
-        randomness: &H::Digest,
+        item: &Digest,
+        randomness: &Digest,
         store_bits: bool,
     ) -> MsMembershipProof<H>;
 
-    fn verify(&mut self, item: &H::Digest, membership_proof: &MsMembershipProof<H>) -> bool;
+    fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool;
 
     /// Generates an addition record from an item and explicit random-
     /// ness. The addition record is itself a commitment to the item,
     /// but tailored to adding the item to the mutator set in its
     /// current state.
-    fn commit(&mut self, item: &H::Digest, randomness: &H::Digest) -> AdditionRecord<H>;
+    fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord;
 
     /**
      * drop
      * Generates a removal record with which to update the set commitment.
      */
-    fn drop(
-        &mut self,
-        item: &H::Digest,
-        membership_proof: &MsMembershipProof<H>,
-    ) -> RemovalRecord<H>;
+    fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
 
     ///   add
     ///   Updates the set-commitment with an addition record. The new
@@ -45,7 +38,7 @@ where
     ///   where S is the set represented by the old
     ///   commitment and c is the commitment to the new item AKA the
     ///   *addition record*.
-    fn add(&mut self, addition_record: &mut AdditionRecord<H>);
+    fn add(&mut self, addition_record: &mut AdditionRecord);
 
     /// remove
     /// Updates the mutator set so as to remove the item determined by
@@ -65,5 +58,5 @@ where
 
     /// get_commitment
     /// Return a commitment to the entire mutator set
-    fn get_commitment(&mut self) -> H::Digest;
+    fn get_commitment(&mut self) -> Digest;
 }

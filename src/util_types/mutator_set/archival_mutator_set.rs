@@ -1,72 +1,52 @@
 use rusty_leveldb::{LdbIterator, DB};
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-};
-use twenty_first::util_types::{
-    database_vector::DatabaseVector,
-    mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
-    simple_hasher::{Hashable, Hasher},
-};
+use std::collections::{HashMap, HashSet};
+use std::error::Error;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
 
-use super::{
-    active_window::ActiveWindow,
-    addition_record::AdditionRecord,
-    chunk::Chunk,
-    chunk_dictionary::ChunkDictionary,
-    ms_membership_proof::MsMembershipProof,
-    mutator_set_trait::MutatorSet,
-    removal_record::RemovalRecord,
-    set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError},
-    shared::CHUNK_SIZE,
-};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::database_vector::DatabaseVector;
+use twenty_first::util_types::mmr;
+use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-pub struct ArchivalMutatorSet<H: Hasher>
-where
-    u128: Hashable<<H as Hasher>::T>,
-{
+use super::active_window::ActiveWindow;
+use super::addition_record::AdditionRecord;
+use super::chunk::Chunk;
+use super::chunk_dictionary::ChunkDictionary;
+use super::ms_membership_proof::MsMembershipProof;
+use super::mutator_set_trait::MutatorSet;
+use super::removal_record::RemovalRecord;
+use super::set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError};
+use super::shared::CHUNK_SIZE;
+
+pub struct ArchivalMutatorSet<H: AlgebraicHasher> {
     pub set_commitment: SetCommitment<H, ArchivalMmr<H>>,
     pub chunks: DatabaseVector<Chunk>,
 }
 
-impl<H: Hasher> MutatorSet<H> for ArchivalMutatorSet<H>
-where
-    u128: Hashable<<H as Hasher>::T>,
-{
+impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
     fn prove(
         &mut self,
-        item: &<H as Hasher>::Digest,
-        randomness: &<H as Hasher>::Digest,
+        item: &Digest,
+        randomness: &Digest,
         store_bits: bool,
     ) -> MsMembershipProof<H> {
         self.set_commitment.prove(item, randomness, store_bits)
     }
 
-    fn verify(
-        &mut self,
-        item: &<H as Hasher>::Digest,
-        membership_proof: &MsMembershipProof<H>,
-    ) -> bool {
+    fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.set_commitment.verify(item, membership_proof)
     }
 
-    fn commit(
-        &mut self,
-        item: &<H as Hasher>::Digest,
-        randomness: &<H as Hasher>::Digest,
-    ) -> AdditionRecord<H> {
+    fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord {
         self.set_commitment.commit(item, randomness)
     }
 
-    fn drop(
-        &mut self,
-        item: &<H as Hasher>::Digest,
-        membership_proof: &MsMembershipProof<H>,
-    ) -> RemovalRecord<H> {
+    fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         self.set_commitment.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &mut AdditionRecord<H>) {
+    fn add(&mut self, addition_record: &mut AdditionRecord) {
         let new_chunk: Option<(u128, Chunk)> = self.set_commitment.add_helper(addition_record);
         match new_chunk {
             None => (),
@@ -92,12 +72,15 @@ where
         Some(diff_indices)
     }
 
-    fn get_commitment(&mut self) -> <H as Hasher>::Digest {
+    fn get_commitment(&mut self) -> Digest {
         let aocl_mmr_bagged = self.set_commitment.aocl.bag_peaks();
         let inactive_swbf_bagged = self.set_commitment.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = self.set_commitment.swbf_active.hash();
-        let hasher = H::new();
-        hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
+        let active_swbf_bagged = H::hash(&self.set_commitment.swbf_active);
+
+        H::hash_pair(
+            &aocl_mmr_bagged,
+            &H::hash_pair(&inactive_swbf_bagged, &active_swbf_bagged),
+        )
     }
 
     /// Apply a list of removal records while keeping a list of mutator-set membership proofs
@@ -120,10 +103,7 @@ where
 }
 
 /// Methods that only work when implementing using archival MMRs as the underlying two MMRs
-impl<H: Hasher> ArchivalMutatorSet<H>
-where
-    u128: Hashable<<H as Hasher>::T>,
-{
+impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
     pub fn new_empty(aocl_mmr_db: DB, swbf_inactive_mmr_db: DB, chunks_db: DB) -> Self {
         let aocl: ArchivalMmr<H> = ArchivalMmr::new(aocl_mmr_db);
         let swbf_inactive: ArchivalMmr<H> = ArchivalMmr::new(swbf_inactive_mmr_db);
@@ -133,7 +113,7 @@ where
                 swbf_inactive,
                 swbf_active: ActiveWindow::default(),
             },
-            chunks: DatabaseVector::new(chunks_db),
+            chunks: DatabaseVector::<Chunk>::new(chunks_db),
         }
     }
 
@@ -235,8 +215,8 @@ where
     /// relevant indices.
     pub fn restore_membership_proof(
         &mut self,
-        item: &H::Digest,
-        randomness: &H::Digest,
+        item: &Digest,
+        randomness: &Digest,
         index: u128,
     ) -> Result<MsMembershipProof<H>, Box<dyn Error>> {
         if self.set_commitment.aocl.is_empty() {
@@ -305,7 +285,6 @@ where
             }
         }
 
-        let hasher = H::new();
         for (chunk_index, revert_chunk) in chunk_index_to_revert_chunk {
             // The bits in the chunk are flipped using xor as they must be set before this
             // function call. So bits at the indices that we wish to flip must be set (1 or true)
@@ -315,7 +294,7 @@ where
             new_chunk.xor(revert_chunk);
             self.set_commitment
                 .swbf_inactive
-                .mutate_leaf_raw(chunk_index, new_chunk.hash::<H>(&hasher));
+                .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
             self.chunks.set(chunk_index, new_chunk);
 
             // To check if a bit was set in `revert_chunk` that was not set in previous_chunk, we can
@@ -338,7 +317,7 @@ where
     /// - If at a boundary where the active window slides, remove a chunk
     ///   from the inactive window, and slide window back by putting the
     ///   last inactive chunk in the active window.
-    pub fn revert_add(&mut self, addition_record: &AdditionRecord<H>) {
+    pub fn revert_add(&mut self, addition_record: &AdditionRecord) {
         let removed_add_index = self.set_commitment.aocl.count_leaves() - 1;
 
         // 1. Remove last leaf from AOCL
@@ -390,18 +369,15 @@ where
 
 #[cfg(test)]
 mod archival_mutator_set_tests {
-    use super::*;
-    use crate::test_shared::mutator_set::{
-        empty_archival_ms, make_item_and_randomness_for_blake3, make_item_and_randomness_for_rp,
-    };
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use itertools::Itertools;
-    use rand::distributions::Standard;
-    use rand::prelude::Distribution;
     use rand::Rng;
-    use twenty_first::shared_math::other::random_elements;
+
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::util_types::simple_hasher::Hasher;
+
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+
+    use super::*;
 
     #[test]
     fn new_or_restore_test() {
@@ -419,7 +395,7 @@ mod archival_mutator_set_tests {
             active_window_db,
         );
 
-        let (item, randomness) = make_item_and_randomness_for_rp();
+        let (item, randomness) = make_item_and_randomness();
 
         let mut addition_record = archival_mutator_set.commit(&item, &randomness);
         let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -463,10 +439,10 @@ mod archival_mutator_set_tests {
         let num_additions = 65;
 
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
-        let mut items: Vec<<H as Hasher>::Digest> = vec![];
+        let mut items: Vec<Digest> = vec![];
 
         for i in 0..num_additions {
-            let (item, randomness) = make_item_and_randomness_for_rp();
+            let (item, randomness) = make_item_and_randomness();
 
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -652,10 +628,10 @@ mod archival_mutator_set_tests {
         let num_additions = 130;
 
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
-        let mut items: Vec<<H as Hasher>::Digest> = vec![];
+        let mut items: Vec<Digest> = vec![];
 
         for _ in 0..num_additions {
-            let (item, randomness) = make_item_and_randomness_for_blake3();
+            let (item, randomness) = make_item_and_randomness();
 
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -697,9 +673,9 @@ mod archival_mutator_set_tests {
 
         for remove_factor in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] {
             let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
-            let mut items: Vec<<H as Hasher>::Digest> = vec![];
+            let mut items: Vec<Digest> = vec![];
             for _ in 0..num_additions {
-                let (item, randomness) = make_item_and_randomness_for_blake3();
+                let (item, randomness) = make_item_and_randomness();
 
                 let mut addition_record = archival_mutator_set.commit(&item, &randomness);
                 let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
@@ -759,17 +735,10 @@ mod archival_mutator_set_tests {
         }
     }
 
-    fn prepare_random_addition<H: Hasher>(
+    fn prepare_random_addition<H: AlgebraicHasher>(
         archival_mutator_set: &mut ArchivalMutatorSet<H>,
-    ) -> (H::Digest, AdditionRecord<H>, MsMembershipProof<H>)
-    where
-        u128: Hashable<<H as Hasher>::T>,
-        Standard: Distribution<<H as Hasher>::T>,
-    {
-        let random_elements = random_elements(6);
-        let item: <H as Hasher>::Digest = H::new().hash_sequence(&random_elements[0..3]);
-        let randomness: <H as Hasher>::Digest = H::new().hash_sequence(&random_elements[3..6]);
-
+    ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
+        let (item, randomness) = make_item_and_randomness();
         let addition_record = archival_mutator_set
             .set_commitment
             .commit(&item, &randomness);

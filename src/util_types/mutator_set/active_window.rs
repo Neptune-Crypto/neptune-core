@@ -2,19 +2,15 @@ use num_traits::identities::Zero;
 use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use twenty_first::util_types::{
-    database_array::DatabaseArray,
-    simple_hasher::{Hashable, Hasher},
-};
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::database_array::DatabaseArray;
 
-use super::{
-    chunk::Chunk,
-    shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE},
-};
-use crate::util_types::mutator_set::boxed_big_array::CompositeBigArray;
+use super::boxed_big_array::CompositeBigArray;
+use super::chunk::Chunk;
+use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ActiveWindow<H: Hasher> {
+pub struct ActiveWindow<H: AlgebraicHasher> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     // The byte array is boxed to prevent stack-overflows when deserializing this data
     // structure. Cf. https://neptune.builders/core-team/neptune-core/issues/32
@@ -23,10 +19,7 @@ pub struct ActiveWindow<H: Hasher> {
     _hasher: PhantomData<H>,
 }
 
-impl<H: Hasher> ActiveWindow<H>
-where
-    u128: Hashable<<H as Hasher>::T>,
-{
+impl<H: AlgebraicHasher> ActiveWindow<H> {
     pub fn get_sliding_chunk_bits(&self) -> [u32; CHUNK_SIZE / BITS_PER_U32] {
         self.bits[0..CHUNK_SIZE / BITS_PER_U32].try_into().unwrap()
     }
@@ -135,20 +128,18 @@ where
 
         u128s
     }
+}
 
-    /// Get a commitment to the active part of the sliding-window bloom filter
-    pub fn hash(&self) -> H::Digest {
-        let seq: Vec<H::T> = self
-            .get_u128s()
+impl<H: AlgebraicHasher> Hashable for ActiveWindow<H> {
+    fn to_sequence(&self) -> Vec<twenty_first::shared_math::b_field_element::BFieldElement> {
+        self.get_u128s()
             .into_iter()
             .flat_map(|u128| u128.to_sequence())
-            .collect();
-
-        H::new().hash_sequence(&seq)
+            .collect()
     }
 }
 
-impl<H: Hasher> Default for ActiveWindow<H> {
+impl<H: AlgebraicHasher> Default for ActiveWindow<H> {
     /// The default instance has no bits set in the active window
     fn default() -> Self {
         Self {
@@ -164,7 +155,7 @@ mod active_window_tests {
     use rand::{thread_rng, RngCore};
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
-    impl<H: Hasher> ActiveWindow<H> {
+    impl<H: AlgebraicHasher> ActiveWindow<H> {
         fn new(bits: Box<[u32; WINDOW_SIZE / BITS_PER_U32]>) -> Self {
             Self {
                 bits,
@@ -302,8 +293,10 @@ mod active_window_tests {
 
     #[test]
     fn u128s_length_test() {
+        type H = RescuePrimeRegular;
+
         // Let's just compare the output of this function to the result from my calculator
-        assert_eq!(250, ActiveWindow::<RescuePrimeRegular>::get_u128s_length());
+        assert_eq!(250, ActiveWindow::<H>::get_u128s_length());
     }
 
     #[test]
@@ -322,31 +315,31 @@ mod active_window_tests {
         );
     }
 
+    fn hash_no_crash_gen<H: AlgebraicHasher>() {
+        H::hash(&ActiveWindow::<H>::default());
+
+        let aw_1 = ActiveWindow::<H>::new(Box::new([0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32]));
+        let aw_2 = ActiveWindow::<H>::default();
+
+        assert_ne!(H::hash(&aw_1), H::hash(&aw_2));
+    }
+
     #[test]
     fn hash_no_crash_test() {
         // This is just a test to ensure that the hashing of the active part of the SWBF
         // works in the runtime, for relevant hash functions. It also tests that different
         // bits being set results in different digests.
-        let hash_0 = ActiveWindow::<RescuePrimeRegular>::default().hash();
-        let hash_1 = ActiveWindow::<RescuePrimeRegular>::new(Box::new(
-            [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32],
-        ))
-        .hash();
-        let hash_2 = ActiveWindow::<blake3::Hasher>::default().hash();
-        let hash_3 = ActiveWindow::<blake3::Hasher>::new(Box::new(
-            [0xFFFFFFFFu32; WINDOW_SIZE / BITS_PER_U32],
-        ))
-        .hash();
-
-        assert_ne!(hash_0, hash_1);
-        assert_ne!(hash_2, hash_3);
+        hash_no_crash_gen::<blake3::Hasher>();
+        hash_no_crash_gen::<RescuePrimeRegular>();
     }
 
     #[test]
     fn active_window_serialize_test() {
-        let aw0 = ActiveWindow::<RescuePrimeRegular>::default();
+        type H = RescuePrimeRegular;
+
+        let aw0 = ActiveWindow::<H>::default();
         let json_aw0 = serde_json::to_string(&aw0).unwrap();
-        let aw0_back = serde_json::from_str::<ActiveWindow<RescuePrimeRegular>>(&json_aw0).unwrap();
+        let aw0_back = serde_json::from_str::<ActiveWindow<H>>(&json_aw0).unwrap();
         assert_eq!(aw0.bits, aw0_back.bits);
     }
 }

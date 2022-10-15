@@ -1,26 +1,24 @@
 use serde_big_array;
 use serde_big_array::BigArray;
 use serde_derive::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    fmt,
-    ops::IndexMut,
-};
+use std::collections::{HashMap, HashSet};
+use std::error::Error;
+use std::fmt;
+use std::ops::IndexMut;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
-use super::{
-    chunk::Chunk,
-    chunk_dictionary::ChunkDictionary,
-    set_commitment::SetCommitment,
-    shared::{
-        bit_indices_to_hash_map, get_batch_mutation_argument_for_removal_record, BATCH_SIZE,
-        CHUNK_SIZE, NUM_TRIALS,
-    },
+use super::chunk::Chunk;
+use super::chunk_dictionary::ChunkDictionary;
+use super::set_commitment::SetCommitment;
+use super::shared::{
+    bit_indices_to_hash_map, get_batch_mutation_argument_for_removal_record, BATCH_SIZE,
+    CHUNK_SIZE, NUM_TRIALS,
 };
-use twenty_first::util_types::{
-    mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-    simple_hasher::{Hashable, Hasher},
-};
+use twenty_first::util_types::mmr;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 impl Error for RemovalRecordError {}
 
@@ -38,16 +36,13 @@ pub enum RemovalRecordError {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RemovalRecord<H: Hasher> {
+pub struct RemovalRecord<H: AlgebraicHasher> {
     #[serde(with = "BigArray")]
     pub bit_indices: [u128; NUM_TRIALS],
     pub target_chunks: ChunkDictionary<H>,
 }
 
-impl<H: Hasher> RemovalRecord<H>
-where
-    u128: Hashable<<H as Hasher>::T>,
-{
+impl<H: AlgebraicHasher> RemovalRecord<H> {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         removal_records: &mut [&mut Self],
         mutator_set: &mut SetCommitment<H, MMR>,
@@ -63,8 +58,7 @@ where
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
         };
-        let hasher = H::new();
-        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&hasher);
+        let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Insert the new chunk digest into the accumulator-version of the
         // SWBF MMR to get its authentication path. It's important to convert the MMR
@@ -74,7 +68,7 @@ where
         // kilobytes.
         let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
         let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
-            mmra.append(new_chunk_digest.clone());
+            mmra.append(new_chunk_digest);
 
         // Collect all bit indices for all removal records that are being updated
         let mut chunk_index_to_mp_index: HashMap<u128, Vec<usize>> = HashMap::new();
@@ -196,64 +190,50 @@ where
         M: Mmr<H>,
     {
         let peaks = mutator_set.swbf_inactive.get_peaks();
-        self.target_chunks.dictionary.iter().all(|(_i, (p, c))| {
-            p.verify(
-                &peaks,
-                &c.hash::<H>(&H::new()),
-                mutator_set.swbf_inactive.count_leaves(),
-            )
-            .0
-        })
+        self.target_chunks
+            .dictionary
+            .iter()
+            .all(|(_i, (proof, chunk))| {
+                let leaf_digest = H::hash(chunk);
+                let leaf_count = mutator_set.swbf_inactive.count_leaves();
+                let (verified, _final_state) = proof.verify(&peaks, &leaf_digest, leaf_count);
+
+                verified
+            })
     }
 
     /// Returns a hashmap from chunk index to chunk.
     pub fn get_chunk_index_to_bit_indices(&self) -> HashMap<u128, Vec<u128>> {
         bit_indices_to_hash_map(&self.bit_indices)
     }
+}
 
-    // Return a digest of the removal record
-    pub fn hash(&self) -> H::Digest {
-        // This method assumes that the bit_indices field is sorted. If they are not,
-        // then this method's output will not be deterministic. So we need a test for that,
-        // that the bit indices are sorted. This is what `verify_that_bit_indices_are_sorted_test`
-        // verifies.
-        H::new().hash_sequence(&self.get_preimage())
-    }
-
-    fn get_preimage(&self) -> Vec<H::T> {
-        let preimage: Vec<H::T> = self
-            .bit_indices
+impl<H: AlgebraicHasher> Hashable for RemovalRecord<H> {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        self.bit_indices
             .iter()
             .flat_map(|bi| bi.to_sequence())
-            .chain(self.target_chunks.hash().to_sequence())
-            .collect();
-
-        preimage
+            .chain(self.target_chunks.to_sequence())
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod removal_record_tests {
-    use super::*;
     use itertools::Itertools;
     use rand::seq::SliceRandom;
 
-    use crate::{
-        test_shared::mutator_set::{
-            make_item_and_randomness_for_blake3, make_item_and_randomness_for_rp,
-        },
-        util_types::mutator_set::{
-            addition_record::AdditionRecord,
-            ms_membership_proof::MsMembershipProof,
-            mutator_set_accumulator::MutatorSetAccumulator,
-            mutator_set_trait::MutatorSet,
-            shared::{CHUNK_SIZE, NUM_TRIALS},
-        },
-    };
-    use twenty_first::{
-        shared_math::rescue_prime_regular::RescuePrimeRegular,
-        utils::{self, has_unique_elements},
-    };
+    use crate::test_shared::mutator_set::make_item_and_randomness;
+    use crate::util_types::mutator_set::addition_record::AdditionRecord;
+    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
+
+    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::utils::{self, has_unique_elements};
+
+    use super::*;
 
     fn get_mp_and_removal_record() -> (
         MsMembershipProof<RescuePrimeRegular>,
@@ -261,7 +241,7 @@ mod removal_record_tests {
     ) {
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness_for_rp();
+        let (item, randomness) = make_item_and_randomness();
         let mp: MsMembershipProof<RescuePrimeRegular> = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         (mp, removal_record)
@@ -294,8 +274,8 @@ mod removal_record_tests {
 
         let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
         assert_eq!(
-            removal_record.hash(),
-            removal_record_alt.hash(),
+            H::hash(&removal_record),
+            H::hash(&removal_record_alt),
             "Same removal record must hash to same value"
         );
         removal_record_alt.bit_indices[NUM_TRIALS / 4] += 1;
@@ -306,8 +286,8 @@ mod removal_record_tests {
             "Sanity check to ensure that bit indices are still all unique"
         );
         assert_ne!(
-            removal_record.hash(),
-            removal_record_alt.hash(),
+            H::hash(&removal_record),
+            H::hash(&removal_record_alt),
             "Changing a bit index must produce a new hash"
         );
     }
@@ -356,8 +336,8 @@ mod removal_record_tests {
         // Verify that a single element can be added to and removed from the mutator set
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness_for_rp();
-        let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
+        let (item, randomness) = make_item_and_randomness();
+        let mut addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
         let mp = accumulator.prove(&item, &randomness, true);
 
         assert!(
@@ -389,9 +369,9 @@ mod removal_record_tests {
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
-                let (item, randomness) = make_item_and_randomness_for_rp();
+                let (item, randomness) = make_item_and_randomness();
 
-                let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
+                let mut addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
                 let mp = accumulator.prove(&item, &randomness, true);
 
                 // Update all removal records from addition, then add the element
@@ -458,9 +438,9 @@ mod removal_record_tests {
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
-            let (item, randomness) = make_item_and_randomness_for_blake3();
+            let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record: AdditionRecord<H> = accumulator.commit(&item, &randomness);
+            let mut addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
             let mp = accumulator.prove(&item, &randomness, true);
 
             // Update all removal records from addition, then add the element

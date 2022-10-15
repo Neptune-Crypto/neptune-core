@@ -1,26 +1,26 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    fmt,
-    ops::IndexMut,
-};
-use twenty_first::util_types::{
-    mmr::{self, mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
-    simple_hasher::{Hashable, Hasher},
-};
+use std::collections::{HashMap, HashSet};
+use std::error::Error;
+use std::fmt;
+use std::ops::IndexMut;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use twenty_first::util_types::mmr;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::{
     addition_record::AdditionRecord,
     boxed_big_array::CompositeBigArray,
+    chunk::Chunk,
     chunk_dictionary::ChunkDictionary,
     removal_record::RemovalRecord,
+    set_commitment::get_swbf_indices,
     set_commitment::SetCommitment,
+    shared::BATCH_SIZE,
     shared::{get_batch_mutation_argument_for_removal_record, CHUNK_SIZE, NUM_TRIALS},
     transfer_ms_membership_proof::TransferMsMembershipProof,
-};
-use crate::util_types::mutator_set::{
-    chunk::Chunk, set_commitment::get_swbf_indices, shared::BATCH_SIZE,
 };
 
 impl Error for MembershipProofError {}
@@ -41,8 +41,8 @@ pub enum MembershipProofError {
 // In order to store this structure in the database, it needs to be serializable. But it should not be
 // transferred between peers as the `cached_bits` fields cannot be trusted and must be calculated by each peer
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MsMembershipProof<H: Hasher> {
-    pub randomness: H::Digest,
+pub struct MsMembershipProof<H: AlgebraicHasher> {
+    pub randomness: Digest,
     pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
 
@@ -56,7 +56,7 @@ pub struct MsMembershipProof<H: Hasher> {
 
 /// Convert a transfer version of the membership proof to one for internal use.
 /// The important thing here is that `cached_bits` is not shared between peers.
-impl<H: Hasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
+impl<H: AlgebraicHasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
     fn from(transfer: TransferMsMembershipProof<H>) -> Self {
         Self {
             randomness: transfer.randomness,
@@ -69,7 +69,7 @@ impl<H: Hasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
 
 // This conversion is kept here to avoid circular dependencies -- not sure if we have
 // to avoid that, though.
-impl<H: Hasher> From<MsMembershipProof<H>> for TransferMsMembershipProof<H> {
+impl<H: AlgebraicHasher> From<MsMembershipProof<H>> for TransferMsMembershipProof<H> {
     fn from(mp: MsMembershipProof<H>) -> Self {
         Self {
             randomness: mp.randomness,
@@ -79,7 +79,7 @@ impl<H: Hasher> From<MsMembershipProof<H>> for TransferMsMembershipProof<H> {
     }
 }
 
-impl<H: Hasher> PartialEq for MsMembershipProof<H> {
+impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
     // Equality for a membership proof does not look at cached bits, as they are just cached data
     // Whether they are set or not, does not change the membership proof.
     fn eq(&self, other: &Self) -> bool {
@@ -89,21 +89,18 @@ impl<H: Hasher> PartialEq for MsMembershipProof<H> {
     }
 }
 
-impl<H: Hasher> MsMembershipProof<H>
-where
-    u128: Hashable<<H as Hasher>::T>,
-{
+impl<H: AlgebraicHasher> MsMembershipProof<H> {
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
-    pub fn cache_indices(&mut self, item: &H::Digest) {
+    pub fn cache_indices(&mut self, item: &Digest) {
         let bits = get_swbf_indices::<H>(item, &self.randomness, self.auth_path_aocl.data_index);
         self.cached_bits = Some(bits);
     }
 
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
-        own_items: &[H::Digest],
+        own_items: &[Digest],
         mutator_set: &mut SetCommitment<H, MMR>,
-        addition_record: &AdditionRecord<H>,
+        addition_record: &AdditionRecord,
     ) -> Result<Vec<usize>, Box<dyn Error>> {
         assert!(
             membership_proofs
@@ -142,8 +139,7 @@ where
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
         };
-        let hasher = H::new();
-        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&hasher);
+        let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Insert the new chunk digest into the accumulator-version of the
         // SWBF MMR to get its authentication path. It's important to convert the MMR
@@ -153,7 +149,7 @@ where
         // kilobytes.
         let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
         let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
-            mmra.append(new_chunk_digest.clone());
+            mmra.append(new_chunk_digest);
 
         // Collect all bit indices for all membership proofs that are being updated
         // Notice that this is a *very* expensive operation if the bit indices are
@@ -274,9 +270,9 @@ where
      */
     pub fn update_from_addition<MMR: Mmr<H>>(
         &mut self,
-        own_item: &H::Digest,
+        own_item: &Digest,
         mutator_set: &mut SetCommitment<H, MMR>,
-        addition_record: &AdditionRecord<H>,
+        addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
         assert!(self.auth_path_aocl.data_index < mutator_set.aocl.count_leaves());
         let new_item_index = mutator_set.aocl.count_leaves();
@@ -297,9 +293,7 @@ where
         let new_chunk = Chunk {
             bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
         };
-
-        let hasher = H::new();
-        let new_chunk_digest: H::Digest = new_chunk.hash::<H>(&hasher);
+        let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Get bit indices from either the cached bits, or by recalculating them. Notice
         // that the latter is an expensive operation.
@@ -323,7 +317,7 @@ where
         // kilobytes.
         let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
         let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
-            mmra.append(new_chunk_digest.clone());
+            mmra.append(new_chunk_digest);
 
         let mut swbf_chunk_dictionary_updated = false;
         let batch_index = new_item_index / BATCH_SIZE as u128;
@@ -462,21 +456,20 @@ where
 #[cfg(test)]
 mod ms_proof_tests {
     use super::*;
-    use crate::test_shared::mutator_set::make_item_and_randomness_for_rp;
+    use crate::test_shared::mutator_set::make_item_and_randomness;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::BITS_PER_U32;
     use num_traits::Zero;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-    use twenty_first::util_types::simple_hasher::Hasher;
 
     #[test]
     fn mp_cache_bits_test() {
         type H = RescuePrimeRegular;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness_for_rp();
-        let mut mp = accumulator.prove(&item, &randomness, false);
+
+        let mut accumulator = MutatorSetAccumulator::<H>::default();
+        let (item, randomness) = make_item_and_randomness();
+        let mut mp = accumulator.set_commitment.prove(&item, &randomness, false);
 
         // Verify that bits are not cached, then cache them with the helper function
         assert!(mp.cached_bits.is_none());
@@ -485,50 +478,41 @@ mod ms_proof_tests {
 
         // Verify that cached bits are the same as those generated from a new membership proof
         // made with the `cache_bits` argument set to true.
-        let mp_generated_with_cached_bits = accumulator.prove(&item, &randomness, true);
+        let mp_generated_with_cached_bits =
+            accumulator.set_commitment.prove(&item, &randomness, true);
         assert_eq!(mp_generated_with_cached_bits.cached_bits, mp.cached_bits);
     }
 
     #[test]
     fn mp_equality_test() {
         type H = RescuePrimeRegular;
-        let hasher = H::new();
 
-        let (randomness, other_randomness) = make_item_and_randomness_for_rp();
+        let (randomness, other_randomness) = make_item_and_randomness();
 
         let mp_with_cached_bits = MsMembershipProof::<H> {
             randomness,
-            auth_path_aocl: MmrMembershipProof::<H> {
-                data_index: 0,
-                authentication_path: vec![],
-            },
+            auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
             cached_bits: Some([1u128; NUM_TRIALS]),
         };
+
         let mp_without_cached_bits = MsMembershipProof::<H> {
             randomness,
-            auth_path_aocl: MmrMembershipProof::<H> {
-                data_index: 0,
-                authentication_path: vec![],
-            },
+            auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
             cached_bits: None,
         };
+
         let mp_with_different_data_index = MsMembershipProof::<H> {
             randomness,
-            auth_path_aocl: MmrMembershipProof::<H> {
-                data_index: 100073,
-                authentication_path: vec![],
-            },
+            auth_path_aocl: MmrMembershipProof::<H>::new(100073, vec![]),
             target_chunks: ChunkDictionary::default(),
             cached_bits: None,
         };
+
         let mp_with_different_randomness = MsMembershipProof::<H> {
             randomness: other_randomness,
-            auth_path_aocl: MmrMembershipProof::<H> {
-                data_index: 0,
-                authentication_path: vec![],
-            },
+            auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
             cached_bits: None,
         };
@@ -546,14 +530,14 @@ mod ms_proof_tests {
         // For this test to be performed, we first need an MMR membership proof and a chunk.
 
         // Construct an MMR with 7 leafs
-        let mmr_digests = hasher.get_n_hash_rounds(&randomness, 7);
+        let mmr_digests = H::get_n_hash_rounds(&randomness, 7);
         let mut mmra: MmrAccumulator<H> = MmrAccumulator::new(mmr_digests);
 
         // Get an MMR membership proof by adding the 8th leaf
         let zero_chunk = Chunk {
             bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
         };
-        let mmr_mp = mmra.append(zero_chunk.hash(&hasher));
+        let mmr_mp = mmra.append(H::hash(&zero_chunk));
 
         // Verify that the MMR membership proof has the expected length of 3 (sanity check)
         assert_eq!(3, mmr_mp.authentication_path.len());
@@ -576,9 +560,9 @@ mod ms_proof_tests {
         type H = RescuePrimeRegular;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         for _ in 0..10 {
-            let (item, randomness) = make_item_and_randomness_for_rp();
+            let (item, randomness) = make_item_and_randomness();
 
-            let mp_with_cached_bits = accumulator.prove(&item, &randomness, true);
+            let mp_with_cached_bits = accumulator.set_commitment.prove(&item, &randomness, true);
             assert!(mp_with_cached_bits.cached_bits.is_some());
 
             let json_cached: String = serde_json::to_string(&mp_with_cached_bits).unwrap();
@@ -595,7 +579,7 @@ mod ms_proof_tests {
                 mp_with_cached_bits.target_chunks
             );
 
-            let mp_no_cached_bits = accumulator.prove(&item, &randomness, false);
+            let mp_no_cached_bits = accumulator.set_commitment.prove(&item, &randomness, false);
             assert!(mp_no_cached_bits.cached_bits.is_none());
 
             let json_no_cached: String = serde_json::to_string(&mp_no_cached_bits).unwrap();

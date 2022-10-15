@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use twenty_first::util_types::{
-    mmr::mmr_membership_proof::MmrMembershipProof,
-    simple_hasher::{Hashable, Hasher},
+use twenty_first::{
+    shared_math::rescue_prime_digest::Digest,
+    util_types::{
+        algebraic_hasher::AlgebraicHasher, mmr::mmr_membership_proof::MmrMembershipProof,
+    },
 };
 
 use super::{chunk_dictionary::ChunkDictionary, removal_record::RemovalRecord};
@@ -32,15 +34,11 @@ pub fn bit_indices_to_hash_map(all_bit_indices: &[u128; NUM_TRIALS]) -> HashMap<
 /// This function is factored out because it is shared by `update_from_remove`
 /// and `batch_update_from_remove`.
 #[allow(clippy::type_complexity)]
-pub fn get_batch_mutation_argument_for_removal_record<H: Hasher>(
+pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
     removal_record: &RemovalRecord<H>,
     chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
-) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, H::Digest)>)
-where
-    u128: Hashable<<H as Hasher>::T>,
-{
-    let hasher = H::new();
-    let mut mutation_argument_hash_map: HashMap<u128, (MmrMembershipProof<H>, H::Digest)> =
+) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, Digest)>) {
+    let mut mutation_argument_hash_map: HashMap<u128, (MmrMembershipProof<H>, Digest)> =
         HashMap::new();
     let rem_record_chunk_idx_to_bit_indices: HashMap<u128, Vec<u128>> =
         removal_record.get_chunk_index_to_bit_indices();
@@ -50,13 +48,13 @@ where
         for (i, chunk_dictionary) in chunk_dictionaries.iter_mut().enumerate() {
             match chunk_dictionary.dictionary.get_mut(chunk_index) {
                 // Leaf exists in own membership proof
-                Some((mp, chnk)) => {
+                Some((mp, chunk)) => {
                     for bit_index in bit_indices.iter() {
                         let index = (bit_index % CHUNK_SIZE as u128) as usize;
-                        if !chnk.get_bit(index) {
+                        if !chunk.get_bit(index) {
                             mutated_chunks_by_input_indices.insert(i);
                         }
-                        chnk.set_bit(index);
+                        chunk.set_bit(index);
                     }
 
                     // If this leaf/membership proof pair has not already been collected,
@@ -64,7 +62,7 @@ where
                     // proofs in all chunk dictionaries are valid.
                     if !mutation_argument_hash_map.contains_key(chunk_index) {
                         mutation_argument_hash_map
-                            .insert(*chunk_index, (mp.to_owned(), chnk.hash::<H>(&hasher)));
+                            .insert(*chunk_index, (mp.to_owned(), H::hash(chunk)));
                     }
                 }
 
@@ -76,17 +74,15 @@ where
                             // SWBF. But we have no way of checking that AFAIK. So we just continue.
                             continue;
                         }
-                        Some((mp, chnk)) => {
-                            let mut target_chunk = chnk.to_owned();
+                        Some((mp, chunk)) => {
+                            let mut target_chunk = chunk.to_owned();
                             for bit_index in bit_indices.iter() {
                                 target_chunk.set_bit((bit_index % CHUNK_SIZE as u128) as usize);
                             }
 
                             if !mutation_argument_hash_map.contains_key(chunk_index) {
-                                mutation_argument_hash_map.insert(
-                                    *chunk_index,
-                                    (mp.to_owned(), target_chunk.hash::<H>(&hasher)),
-                                );
+                                mutation_argument_hash_map
+                                    .insert(*chunk_index, (mp.to_owned(), H::hash(&target_chunk)));
                             }
                         }
                     };

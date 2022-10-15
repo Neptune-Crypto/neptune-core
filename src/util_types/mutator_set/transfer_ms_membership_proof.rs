@@ -1,14 +1,15 @@
 use super::chunk_dictionary::ChunkDictionary;
 use serde::{Deserialize, Serialize};
 
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::simple_hasher;
 
 /// Type to transfer membership proof without risking that `cached_bits` are shared between
 /// peers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TransferMsMembershipProof<H: simple_hasher::Hasher> {
-    pub randomness: H::Digest,
+pub struct TransferMsMembershipProof<H: AlgebraicHasher> {
+    pub randomness: Digest,
     pub auth_path_aocl: MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
 }
@@ -16,14 +17,11 @@ pub struct TransferMsMembershipProof<H: simple_hasher::Hasher> {
 #[cfg(test)]
 mod transfer_ms_membership_proof_tests {
     use crate::test_shared::mutator_set::insert_item;
+    use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::{
-        ms_membership_proof::MsMembershipProof, set_commitment::SetCommitment,
-    };
-    use twenty_first::{
-        shared_math::rescue_prime_regular::RescuePrimeRegular,
-        util_types::mmr::mmr_accumulator::MmrAccumulator,
-    };
+    use crate::util_types::mutator_set::set_commitment::SetCommitment;
+    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
     use super::*;
 
