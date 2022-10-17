@@ -165,6 +165,14 @@ where
         Self::window_slides(removed_index)
     }
 
+    /// Return the batch index for the latest addition to the mutator set
+    pub fn get_batch_index(&mut self) -> u128 {
+        match self.aocl.count_leaves() {
+            0 => 0,
+            n => (n - 1) / BATCH_SIZE as u128,
+        }
+    }
+
     /// Helper function. Like `add` but also returns the chunk that was added to the inactive SWBF
     /// since this is needed by the archival version of the mutator set.
     pub fn add_helper(&mut self, addition_record: &mut AdditionRecord<H>) -> Option<(u128, Chunk)>
@@ -217,7 +225,7 @@ where
     where
         u128: Hashable<<H as Hasher>::T>,
     {
-        let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let batch_index = self.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         // set all bits
@@ -359,7 +367,7 @@ where
         let mut all_auth_paths_are_valid = true;
 
         // prepare parameters of inactive part
-        let current_batch_index: u128 = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let current_batch_index: u128 = self.get_batch_index();
         let window_start = current_batch_index * CHUNK_SIZE as u128;
 
         // We use the cached bits if we have them, otherwise they are recalculated
@@ -427,7 +435,7 @@ where
         mut removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     ) -> (HashMap<u128, Chunk>, Vec<u128>) {
-        let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let batch_index = self.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         // Collect all bits that that are set by the removal records
@@ -563,6 +571,39 @@ mod accumulation_scheme_tests {
     use super::*;
 
     #[test]
+    fn get_batch_index_test() {
+        // Verify that the method to get batch index returns sane results
+        type H = blake3::Hasher;
+        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        assert_eq!(
+            0,
+            mutator_set.set_commitment.get_batch_index(),
+            "Batch index for empty MS must be zero"
+        );
+
+        for i in 0..BATCH_SIZE {
+            let (item, randomness) = make_item_and_randomness_for_blake3();
+            let mut addition_record = mutator_set.commit(&item, &randomness);
+            mutator_set.add(&mut addition_record);
+            assert_eq!(
+                0,
+                mutator_set.set_commitment.get_batch_index(),
+                "Batch index must be 0 after adding {} elements",
+                i
+            );
+        }
+
+        let (item, randomness) = make_item_and_randomness_for_blake3();
+        let mut addition_record = mutator_set.commit(&item, &randomness);
+        mutator_set.add(&mut addition_record);
+        assert_eq!(
+            1,
+            mutator_set.set_commitment.get_batch_index(),
+            "Batch index must be one after adding BATCH_SIZE+1 elements"
+        );
+    }
+
+    #[test]
     fn mutator_set_commitment_test() {
         type H = RescuePrimeRegular;
 
@@ -649,8 +690,20 @@ mod accumulation_scheme_tests {
     fn init_test() {
         type H = RescuePrimeRegular;
 
-        let _accumulator = MutatorSetAccumulator::<H>::default().set_commitment;
-        let _archival: ArchivalMutatorSet<RescuePrimeRegular> = empty_archival_ms();
+        let mut accumulator = MutatorSetAccumulator::<H>::default();
+        let mut archival: ArchivalMutatorSet<RescuePrimeRegular> = empty_archival_ms();
+
+        // Verify that function to get batch index does not overflow for the empty MS
+        assert_eq!(
+            0,
+            accumulator.set_commitment.get_batch_index(),
+            "Batch index must be zero for empty MS accumulator"
+        );
+        assert_eq!(
+            0,
+            archival.set_commitment.get_batch_index(),
+            "Batch index must be zero for empty archival MS"
+        );
     }
 
     #[test]

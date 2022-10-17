@@ -18,7 +18,7 @@ use super::{
     mutator_set_trait::MutatorSet,
     removal_record::RemovalRecord,
     set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError},
-    shared::{BATCH_SIZE, CHUNK_SIZE},
+    shared::CHUNK_SIZE,
 };
 
 pub struct ArchivalMutatorSet<H: Hasher>
@@ -246,7 +246,7 @@ where
         let auth_path_aocl = self.get_aocl_authentication_path(index)?;
         let bits = get_swbf_indices::<H>(item, randomness, index);
 
-        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let batch_index = self.set_commitment.get_batch_index();
         let window_start = batch_index * CHUNK_SIZE as u128;
 
         let chunk_indices: HashSet<u128> = bits
@@ -285,7 +285,7 @@ where
     ///
     /// Fails if attempting to unset a bit that wasn't set.
     pub fn revert_remove(&mut self, diff_indices: Vec<u128>) {
-        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let batch_index = self.set_commitment.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
         let mut unset_bit_encountered = false;
         let mut chunk_index_to_revert_chunk: HashMap<u128, Chunk> = HashMap::new();
@@ -365,7 +365,7 @@ where
     /// Retrieves the Bloom filter bit with a given `bit_index` in
     /// either the active window, or in the relevant chunk.
     pub fn get_bloom_filter_bit(&mut self, bit_index: u128) -> bool {
-        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
+        let batch_index = self.set_commitment.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         if bit_index >= active_window_start {
@@ -394,6 +394,7 @@ mod archival_mutator_set_tests {
     use crate::test_shared::mutator_set::{
         empty_archival_ms, make_item_and_randomness_for_blake3, make_item_and_randomness_for_rp,
     };
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
     use itertools::Itertools;
     use rand::distributions::Standard;
     use rand::prelude::Distribution;
