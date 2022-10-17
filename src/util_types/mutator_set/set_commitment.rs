@@ -208,7 +208,8 @@ where
 
     /// Remove a record and return the chunks that have been updated in this process,
     /// after applying the update. Also returns the indices at which bits were flipped
-    /// from 0 to 1 in either the active or the inactive window.
+    /// from 0 to 1 in either the active or the inactive window. Does not mutate the
+    /// removal record.
     pub fn remove_helper(
         &mut self,
         removal_record: &RemovalRecord<H>,
@@ -258,25 +259,21 @@ where
         // update mmr
         // to do this, we need to keep track of all membership proofs
         let hasher = H::new();
-        let all_mmr_membership_proofs: Vec<_> = new_target_chunks
+        let all_mmr_membership_proofs = new_target_chunks
             .dictionary
             .values()
-            .map(|(p, _c)| p.to_owned())
-            .collect();
+            .map(|(p, _c)| p.to_owned());
         let all_leafs = new_target_chunks
             .dictionary
             .values()
             .map(|(_p, c)| c.hash::<H>(&hasher));
         let mutation_data: Vec<(mmr::mmr_membership_proof::MmrMembershipProof<H>, H::Digest)> =
-            all_mmr_membership_proofs
-                .clone()
-                .into_iter()
-                .zip(all_leafs)
-                .collect();
+            all_mmr_membership_proofs.zip(all_leafs).collect();
 
-        // TODO: Do we want/need to send membership proofs along here?
+        // If we want to update the membership proof with this removal, we
+        // could use the below function.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut vec![], mutation_data);
+            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data);
 
         diff_indices.sort_unstable();
 
@@ -428,7 +425,7 @@ where
     pub fn batch_remove(
         &mut self,
         mut removal_records: Vec<RemovalRecord<H>>,
-        preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
+        preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     ) -> (HashMap<u128, Chunk>, Vec<u128>) {
         let batch_index = (self.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
         let active_window_start = batch_index * CHUNK_SIZE as u128;
@@ -482,9 +479,8 @@ where
 
                 // Sanity check that all removal records agree on both chunks and MMR membership
                 // proofs.
-                match prev_val {
-                    Some((c, mm)) => assert!(mm == *mmr_mp && chunk_hash == c.hash(&H::new())),
-                    None => (),
+                if let Some((c, mm)) = prev_val {
+                    assert!(mm == *mmr_mp && chunk_hash == c.hash(&H::new()))
                 }
             }
         }
@@ -492,7 +488,7 @@ where
         // Apply the bit-flipping operation that calculates Bloom filter values after
         // applying the removal records
         for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
-            let mut flipped_bits = chunk.clone();
+            let mut flipped_bits = **chunk;
             **chunk = chunk.or(chunk_index_to_chunk_mutation[chunk_index]);
 
             flipped_bits.xor(**chunk);
@@ -541,10 +537,8 @@ where
                 .collect();
 
         // Apply the batch-update to the inactive part of the sliding window Bloom filter.
-        self.swbf_inactive.batch_mutate_leaf_and_update_mps(
-            &mut preseved_mmr_membership_proofs,
-            mutation_data.clone(),
-        );
+        self.swbf_inactive
+            .batch_mutate_leaf_and_update_mps(&mut preseved_mmr_membership_proofs, mutation_data);
 
         (chunk_index_to_chunk_mutation, changed_indices)
     }
