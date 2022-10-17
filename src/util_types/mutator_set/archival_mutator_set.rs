@@ -105,7 +105,7 @@ where
     fn batch_remove(
         &mut self,
         removal_records: Vec<RemovalRecord<H>>,
-        preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
+        preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     ) -> Option<Vec<u128>> {
         let (chunk_index_to_chunk_mutation, changed_indices) = self
             .set_commitment
@@ -735,7 +735,10 @@ mod archival_mutator_set_tests {
 
             let commitment_prior_to_removal = archival_mutator_set.get_commitment();
             let changed_indices: Vec<u128> = archival_mutator_set
-                .batch_remove(removal_records, &mut membership_proofs.iter_mut().collect())
+                .batch_remove(
+                    removal_records,
+                    &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                )
                 .unwrap();
 
             for ((mp, item), skipped) in membership_proofs

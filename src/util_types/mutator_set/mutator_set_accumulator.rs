@@ -84,7 +84,7 @@ where
     fn batch_remove(
         &mut self,
         removal_records: Vec<RemovalRecord<H>>,
-        preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
+        preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     ) -> Option<Vec<u128>> {
         let (_chunk_index_to_chunk_mutation, _changed_indices) = self
             .set_commitment
@@ -151,7 +151,10 @@ mod ms_accumulator_tests {
         }
 
         // Remove the entries with batch_remove
-        accumulator.batch_remove(removal_records, &mut membership_proofs.iter_mut().collect());
+        accumulator.batch_remove(
+            removal_records,
+            &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+        );
 
         // Verify that the expected membership proofs fail/pass
         for ((mp, item), skipped) in membership_proofs

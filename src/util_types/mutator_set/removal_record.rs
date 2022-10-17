@@ -190,6 +190,7 @@ where
         Ok(())
     }
 
+    /// Validates that a removal record is synchronized against the inactive part of the SWBF
     pub fn validate<M>(&self, mutator_set: &mut SetCommitment<H, M>) -> bool
     where
         M: Mmr<H>,

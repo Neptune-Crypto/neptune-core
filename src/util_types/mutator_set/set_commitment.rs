@@ -474,8 +474,7 @@ where
         });
 
         // Collect all affected chunks as they look before these removal records are applied
-        // These could be fetched from both `self` (archival mutator set) and from the removal
-        // records. Here, we fetch them from the removal records.
+        // These chunks are part of the removal records, so we fetch them there.
         let mut mutation_data_preimage: HashMap<u128, (&mut Chunk, MmrMembershipProof<H>)> =
             HashMap::new();
         for removal_record in removal_records.iter_mut() {
@@ -524,10 +523,11 @@ where
         // Bloom filter such that we can apply a batch-update operation to the MMR through which
         // this part of the Bloom filter is represented.
         let hasher = H::new();
-        let mutation_data: Vec<_> = mutation_data_preimage
-            .into_values()
-            .map(|x| (x.1, x.0.hash(&hasher)))
-            .collect();
+        let swbf_inactive_mutation_data: Vec<(MmrMembershipProof<H>, H::Digest)> =
+            mutation_data_preimage
+                .into_values()
+                .map(|x| (x.1, x.0.hash(&hasher)))
+                .collect();
 
         // Create a vector of pointers to the MMR-membership part of the mutator set membership
         // proofs that we want to preserve. This is used as input to a batch-call to the
@@ -545,8 +545,11 @@ where
                 .collect();
 
         // Apply the batch-update to the inactive part of the sliding window Bloom filter.
-        self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut preseved_mmr_membership_proofs, mutation_data);
+        // This updates both the inactive part of the SWBF and the MMR membership proofs
+        self.swbf_inactive.batch_mutate_leaf_and_update_mps(
+            &mut preseved_mmr_membership_proofs,
+            swbf_inactive_mutation_data,
+        );
 
         (chunk_index_to_chunk_mutation, changed_indices)
     }

@@ -54,10 +54,13 @@ where
     /// were flipped from 0 to 1 by the `RemovalRecord`.
     fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>>;
 
+    /// batch_remove
+    /// Apply multiple removal records, and update a list of membership proofs to
+    /// be valid after the application of these removal records.
     fn batch_remove(
         &mut self,
         removal_records: Vec<RemovalRecord<H>>,
-        preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
+        preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     ) -> Option<Vec<u128>>;
 
     /// get_commitment
