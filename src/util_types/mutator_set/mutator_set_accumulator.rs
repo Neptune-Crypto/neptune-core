@@ -80,16 +80,89 @@ where
         let hasher = H::new();
         hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
     }
+
+    fn batch_remove(
+        &mut self,
+        removal_records: Vec<RemovalRecord<H>>,
+        preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
+    ) -> Option<Vec<u128>> {
+        let (_chunk_index_to_chunk_mutation, _changed_indices) = self
+            .set_commitment
+            .batch_remove(removal_records, preserved_membership_proofs);
+
+        None
+    }
 }
 
 #[cfg(test)]
 mod ms_accumulator_tests {
     use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness_for_blake3};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+    use itertools::Itertools;
     use proptest::prelude::Rng;
     use twenty_first::util_types::simple_hasher::Hasher;
 
     use super::*;
+
+    #[test]
+    fn mutator_set_batch_remove_accumulator_test() {
+        // Test the batch-remove function for mutator set accumulator
+        type H = blake3::Hasher;
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
+        let mut items: Vec<<H as Hasher>::Digest> = vec![];
+
+        // Add N elements to the MS
+        let num_additions = 44;
+        for _ in 0..num_additions {
+            let (item, randomness) = make_item_and_randomness_for_blake3();
+
+            let mut addition_record = accumulator.commit(&item, &randomness);
+            let membership_proof = accumulator.prove(&item, &randomness, false);
+
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &mut accumulator.set_commitment,
+                &addition_record,
+            )
+            .expect("MS membership update must work");
+
+            accumulator.add(&mut addition_record);
+
+            membership_proofs.push(membership_proof);
+            items.push(item);
+        }
+
+        // Now build removal records for about half of the elements
+        let mut rng = rand::thread_rng();
+        let mut skipped_removes: Vec<bool> = vec![];
+        let mut removal_records: Vec<RemovalRecord<H>> = vec![];
+        for (_, (mp, item)) in membership_proofs.iter().zip_eq(items.iter()).enumerate() {
+            let skipped = rng.gen_range(0.0..1.0) < 0.5;
+            skipped_removes.push(skipped);
+            if !skipped {
+                removal_records.push(accumulator.drop(item, mp));
+            }
+        }
+
+        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+            assert!(accumulator.verify(item, mp));
+        }
+
+        // Remove the entries with batch_remove
+        accumulator.batch_remove(removal_records, &mut membership_proofs.iter_mut().collect());
+
+        // Verify that the expected membership proofs fail/pass
+        for ((mp, item), skipped) in membership_proofs
+            .iter()
+            .zip_eq(items.iter())
+            .zip_eq(skipped_removes.into_iter())
+        {
+            // If this removal record was not applied, then the membership proof must verify
+            assert!(skipped == accumulator.verify(item, mp));
+        }
+    }
 
     #[test]
     fn mutator_set_accumulator_pbt() {

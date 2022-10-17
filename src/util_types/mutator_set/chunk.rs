@@ -54,6 +54,20 @@ impl Chunk {
         self.bits[index / BITS_PER_U32] & (1u32 << (index % BITS_PER_U32)) != 0
     }
 
+    pub fn or(self, other: Self) -> Self {
+        let mut ret = Self::default();
+        for ((ret_elem, self_element), other_element) in ret
+            .bits
+            .iter_mut()
+            .zip_eq(self.bits.into_iter())
+            .zip_eq(other.bits.into_iter())
+        {
+            *ret_elem = self_element | other_element;
+        }
+
+        ret
+    }
+
     pub fn xor(&mut self, other: Self) {
         for (self_element, other_element) in self.bits.iter_mut().zip_eq(other.bits.into_iter()) {
             *self_element ^= other_element;

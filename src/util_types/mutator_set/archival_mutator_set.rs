@@ -99,6 +99,24 @@ where
         let hasher = H::new();
         hasher.hash_many(&[aocl_mmr_bagged, inactive_swbf_bagged, active_swbf_bagged])
     }
+
+    /// Apply a list of removal records while keeping a list of mutator-set membership proofs
+    /// updated
+    fn batch_remove(
+        &mut self,
+        removal_records: Vec<RemovalRecord<H>>,
+        preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
+    ) -> Option<Vec<u128>> {
+        let (chunk_index_to_chunk_mutation, changed_indices) = self
+            .set_commitment
+            .batch_remove(removal_records, preserved_membership_proofs);
+
+        for (chnk_idx, new_chunk_value) in chunk_index_to_chunk_mutation {
+            self.chunks.set(chnk_idx, new_chunk_value);
+        }
+
+        Some(changed_indices)
+    }
 }
 
 /// Methods that only work when implementing using archival MMRs as the underlying two MMRs
@@ -373,9 +391,13 @@ where
 #[cfg(test)]
 mod archival_mutator_set_tests {
     use super::*;
-    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness_for_rp};
+    use crate::test_shared::mutator_set::{
+        empty_archival_ms, make_item_and_randomness_for_blake3, make_item_and_randomness_for_rp,
+    };
+    use itertools::Itertools;
     use rand::distributions::Standard;
     use rand::prelude::Distribution;
+    use rand::Rng;
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::simple_hasher::Hasher;
@@ -554,7 +576,8 @@ mod archival_mutator_set_tests {
 
         let removal_record = archival_mutator_set.drop(&item, &membership_proof);
 
-        // This next line should panic
+        // This next line should panic, as we're attempting to unflip an unset bit
+        // in the active window
         archival_mutator_set.revert_remove(removal_record.bit_indices.to_vec());
     }
 
@@ -571,7 +594,8 @@ mod archival_mutator_set_tests {
             archival_mutator_set.add(&mut addition_record);
         }
 
-        // This next line should panic
+        // This next line should panic, as we're attempting to unflip an unset bit
+        // in the inactive part of the Bloom filter
         archival_mutator_set.revert_remove(vec![0, 2]);
     }
 
@@ -616,6 +640,118 @@ mod archival_mutator_set_tests {
             let commitment_after_revert = archival_mutator_set.get_commitment();
             assert_eq!(commitment_before_remove, commitment_after_revert);
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
+        }
+    }
+
+    #[test]
+    fn archival_set_batch_remove_simple_test() {
+        type H = blake3::Hasher;
+        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+
+        let num_additions = 130;
+
+        let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
+        let mut items: Vec<<H as Hasher>::Digest> = vec![];
+
+        for _ in 0..num_additions {
+            let (item, randomness) = make_item_and_randomness_for_blake3();
+
+            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+
+            MsMembershipProof::batch_update_from_addition(
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                &items,
+                &mut archival_mutator_set.set_commitment,
+                &addition_record,
+            )
+            .expect("MS membership update must work");
+
+            archival_mutator_set.add(&mut addition_record);
+
+            membership_proofs.push(membership_proof);
+            items.push(item);
+        }
+
+        let mut removal_records: Vec<RemovalRecord<H>> = vec![];
+        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+            removal_records.push(archival_mutator_set.drop(item, mp));
+        }
+
+        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+            assert!(archival_mutator_set.verify(item, mp));
+        }
+        archival_mutator_set.batch_remove(removal_records, &mut vec![]);
+        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+            assert!(!archival_mutator_set.verify(item, mp));
+        }
+    }
+
+    #[test]
+    fn archival_set_batch_remove_dynamic_test() {
+        type H = blake3::Hasher;
+        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+
+        let num_additions = 4 * BATCH_SIZE;
+
+        for remove_factor in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] {
+            let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
+            let mut items: Vec<<H as Hasher>::Digest> = vec![];
+            for _ in 0..num_additions {
+                let (item, randomness) = make_item_and_randomness_for_blake3();
+
+                let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+                let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+
+                MsMembershipProof::batch_update_from_addition(
+                    &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+                    &items,
+                    &mut archival_mutator_set.set_commitment,
+                    &addition_record,
+                )
+                .expect("MS membership update must work");
+
+                archival_mutator_set.add(&mut addition_record);
+
+                membership_proofs.push(membership_proof);
+                items.push(item);
+            }
+
+            let mut rng = rand::thread_rng();
+            let mut skipped_removes: Vec<bool> = vec![];
+            let mut removal_records: Vec<RemovalRecord<H>> = vec![];
+            for (_, (mp, item)) in membership_proofs.iter().zip_eq(items.iter()).enumerate() {
+                let skipped = rng.gen_range(0.0..1.0) < remove_factor;
+                skipped_removes.push(skipped);
+                if !skipped {
+                    removal_records.push(archival_mutator_set.drop(item, mp));
+                }
+            }
+
+            for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+                assert!(archival_mutator_set.verify(item, mp));
+            }
+
+            let commitment_prior_to_removal = archival_mutator_set.get_commitment();
+            let changed_indices: Vec<u128> = archival_mutator_set
+                .batch_remove(removal_records, &mut membership_proofs.iter_mut().collect())
+                .unwrap();
+
+            for ((mp, item), skipped) in membership_proofs
+                .iter()
+                .zip_eq(items.iter())
+                .zip_eq(skipped_removes.into_iter())
+            {
+                // If this removal record was not applied, then the membership proof must verify
+                assert!(skipped == archival_mutator_set.verify(item, mp));
+            }
+
+            // Check the return value: That all reported bits were actually flipped.
+            // This function call should panic if that was not the case.
+            archival_mutator_set.revert_remove(changed_indices);
+
+            // Verify that mutator set before and after removal are the same
+            assert_eq!(commitment_prior_to_removal, archival_mutator_set.get_commitment(), "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");
         }
     }
 
