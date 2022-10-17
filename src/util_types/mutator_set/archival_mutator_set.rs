@@ -5,13 +5,9 @@ use std::{
 };
 use twenty_first::util_types::{
     database_vector::DatabaseVector,
-    mmr::{
-        self, archival_mmr::ArchivalMmr, mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr,
-    },
+    mmr::{self, archival_mmr::ArchivalMmr, mmr_trait::Mmr},
     simple_hasher::{Hashable, Hasher},
 };
-
-use crate::util_types::mutator_set::shared::NUM_TRIALS;
 
 use super::{
     active_window::ActiveWindow,
@@ -108,126 +104,13 @@ where
     /// updated
     fn batch_remove(
         &mut self,
-        mut removal_records: Vec<RemovalRecord<H>>,
+        removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut Vec<&mut MsMembershipProof<H>>,
     ) -> Option<Vec<u128>> {
-        let batch_index = (self.set_commitment.aocl.count_leaves() - 1) / BATCH_SIZE as u128;
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let (chunk_index_to_chunk_mutation, changed_indices) = self
+            .set_commitment
+            .batch_remove(removal_records, preserved_membership_proofs);
 
-        // Collect all bits that that are set by the removal records
-        let all_removal_records_bits: HashSet<u128> = removal_records
-            .iter()
-            .flat_map(|x| x.bit_indices.to_vec())
-            .collect();
-
-        // Keep track of which bits are flipped in the Bloom filter. This value
-        // is returned to allow rollback of blocks.
-        // TODO: It would be cool if we get these through xor-operations
-        // instead.
-        let mut changed_indices: Vec<u128> = Vec::with_capacity(all_removal_records_bits.len());
-
-        // Loop over all bits from removal records in order to create a mapping
-        // {chunk index => chunk mutation } where "chunk mutation" has the type of
-        // `Chunk` but only represents the values which are set by the removal records
-        // being handled. We do this since we can then apply bit-wise OR with the
-        // "chunk mutations" and the existing chunk values in the sliding window
-        // Bloom filter.
-        let mut chunk_index_to_chunk_mutation: HashMap<u128, Chunk> = HashMap::new();
-        all_removal_records_bits.iter().for_each(|bit_index| {
-            if *bit_index >= active_window_start {
-                let relative_index = (bit_index - active_window_start) as usize;
-                if !self.set_commitment.swbf_active.get_bit(relative_index) {
-                    changed_indices.push(*bit_index);
-                }
-
-                self.set_commitment.swbf_active.set_bit(relative_index);
-            } else {
-                chunk_index_to_chunk_mutation
-                    .entry(bit_index / CHUNK_SIZE as u128)
-                    .or_insert_with(Chunk::default)
-                    .set_bit(*bit_index as usize % CHUNK_SIZE);
-            }
-        });
-
-        // Collect all affected chunks as they look before these removal records are applied
-        // These could be fetched from both `self` (archival mutator set) and from the removal
-        // records. Here, we fetch them from the removal records.
-        let mut mutation_data_preimage: HashMap<u128, (&mut Chunk, MmrMembershipProof<H>)> =
-            HashMap::new();
-        for removal_record in removal_records.iter_mut() {
-            for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.dictionary.iter_mut()
-            {
-                let chunk_hash = chunk.hash(&H::new());
-                let prev_val =
-                    mutation_data_preimage.insert(*chunk_index, (chunk, mmr_mp.to_owned()));
-
-                // Sanity check that all removal records agree on both chunks and MMR membership
-                // proofs.
-                match prev_val {
-                    Some((c, mm)) => assert!(mm == *mmr_mp && chunk_hash == c.hash(&H::new())),
-                    None => (),
-                }
-            }
-        }
-
-        // Apply the bit-flipping operation that calculates Bloom filter values after
-        // applying the removal records
-        for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
-            let mut flipped_bits = chunk.clone();
-            **chunk = chunk.or(chunk_index_to_chunk_mutation[chunk_index]);
-
-            flipped_bits.xor(**chunk);
-
-            for j in 0..CHUNK_SIZE as u128 {
-                if flipped_bits.get_bit(j as usize) {
-                    changed_indices.push(j + chunk_index * CHUNK_SIZE as u128);
-                }
-            }
-        }
-
-        // Set the chunk values in the membership proofs that we want to preserve to the
-        // newly calculated chunk values where the bit-wise OR has been applied.
-        // This is done by looping over all membership proofs and checking if they contain
-        // any of the chunks that are affected by the removal records.
-        for mp in preserved_membership_proofs.iter_mut() {
-            for (chunk_index, (_, chunk)) in mp.target_chunks.dictionary.iter_mut() {
-                if mutation_data_preimage.contains_key(chunk_index) {
-                    *chunk = mutation_data_preimage[chunk_index].0.to_owned();
-                }
-            }
-        }
-
-        // Calculate the digests of the affected leafs in the inactive part of the sliding-window
-        // Bloom filter such that we can apply a batch-update operation to the MMR through which
-        // this part of the Bloom filter is represented.
-        let hasher = H::new();
-        let mutation_data: Vec<_> = mutation_data_preimage
-            .into_values()
-            .map(|x| (x.1, x.0.hash(&hasher)))
-            .collect();
-
-        // Create a vector of pointers to the MMR-membership part of the mutator set membership
-        // proofs that we want to preserve. This is used as input to a batch-call to the
-        // underlying MMR.
-        let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof<H>> =
-            preserved_membership_proofs
-                .iter_mut()
-                .flat_map(|x| {
-                    x.target_chunks
-                        .dictionary
-                        .iter_mut()
-                        .map(|y| &mut y.1 .0)
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-
-        // Apply the batch-update to the inactive part of the sliding window Bloom filter.
-        self.set_commitment
-            .swbf_inactive
-            .batch_mutate_leaf_and_update_mps(
-                &mut preseved_mmr_membership_proofs,
-                mutation_data.clone(),
-            );
         for (chnk_idx, new_chunk_value) in chunk_index_to_chunk_mutation {
             self.chunks.set(chnk_idx, new_chunk_value);
         }
