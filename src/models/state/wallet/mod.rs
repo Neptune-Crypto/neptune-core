@@ -1143,7 +1143,7 @@ mod wallet_tests {
         // Sign the transaction with the premine-wallet (since it owns the single input into
         // the block), and verify its validity.
         block_1.body.transaction.sign(&premine_wallet);
-        assert!(block_1.devnet_is_valid(&genesis_block));
+        assert!(block_1.is_valid_for_devnet(&genesis_block));
 
         // Update wallet state with block_1
         let mut monitored_utxos = own_wallet_state.get_monitored_utxos().await;
@@ -1329,7 +1329,7 @@ mod wallet_tests {
         );
         add_output_to_block(&mut block_3_b, forked_utxo);
         block_3_b.body.transaction.sign(&own_wallet_state.wallet);
-        assert!(block_3_b.devnet_is_valid(&block_2_b));
+        assert!(block_3_b.is_valid_for_devnet(&block_2_b));
         own_wallet_state.update_wallet_state_with_new_block(
             &block_3_b,
             &mut own_wallet_state.wallet_db.lock().await,

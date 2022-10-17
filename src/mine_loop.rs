@@ -339,7 +339,7 @@ mod mine_loop_tests {
             block_body_empty_mempool,
         );
         assert!(
-            block_template_empty_mempool.devnet_is_valid(&genesis_block),
+            block_template_empty_mempool.is_valid_for_devnet(&genesis_block),
             "Block template created by miner with empty mempool must be valid"
         );
 
@@ -374,7 +374,7 @@ mod mine_loop_tests {
             make_devnet_block_template(&genesis_block, transaction_non_empty_mempool);
         let block_template_non_empty_mempool = Block::new(block_header_template, block_body);
         assert!(
-            block_template_non_empty_mempool.devnet_is_valid(&genesis_block),
+            block_template_non_empty_mempool.is_valid_for_devnet(&genesis_block),
             "Block template created by miner with non-empty mempool must be valid"
         );
 

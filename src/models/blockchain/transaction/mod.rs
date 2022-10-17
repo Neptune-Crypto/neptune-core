@@ -292,7 +292,7 @@ impl Transaction {
     /// When a transaction occurs in a mined block, `coinbase_amount` is
     /// derived from that block. When a transaction is received from a peer,
     /// and is not yet mined, the coinbase amount is None.
-    pub fn devnet_is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
+    pub fn is_valid_for_devnet(&self, coinbase_amount: Option<Amount>) -> bool {
         // What belongs here are the things that would otherwise
         // be verified by the transaction validity proof.
 
@@ -410,31 +410,31 @@ mod transaction_tests {
         let coinbase_transaction = make_mock_transaction(vec![], vec![(output_1, randomness)]);
         let coinbase_amount = Some(output_amount_1);
 
-        assert!(coinbase_transaction.devnet_is_valid(coinbase_amount));
+        assert!(coinbase_transaction.is_valid_for_devnet(coinbase_amount));
 
         let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
         let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
 
-        assert!(!transaction_1.devnet_is_valid(None));
+        assert!(!transaction_1.is_valid_for_devnet(None));
         transaction_1.sign(&wallet_1);
-        assert!(transaction_1.devnet_is_valid(None));
+        assert!(transaction_1.is_valid_for_devnet(None));
 
         let input_2 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
         let mut transaction_2 = make_mock_transaction(vec![input_2], vec![(output_1, randomness)]);
 
-        assert!(!transaction_2.devnet_is_valid(None));
+        assert!(!transaction_2.is_valid_for_devnet(None));
         transaction_2.sign(&wallet_1);
-        assert!(transaction_2.devnet_is_valid(None));
+        assert!(transaction_2.is_valid_for_devnet(None));
 
         let mut merged_transaction = transaction_1.merge_with(transaction_2);
         assert!(
-            merged_transaction.devnet_is_valid(coinbase_amount),
+            merged_transaction.is_valid_for_devnet(coinbase_amount),
             "Merged transaction must be valid because of authority proof"
         );
 
         merged_transaction.authority_proof = None;
         assert!(
-            !merged_transaction.devnet_is_valid(coinbase_amount),
+            !merged_transaction.is_valid_for_devnet(coinbase_amount),
             "Merged transaction must not be valid without authority proof"
         );
 
@@ -444,14 +444,14 @@ mod transaction_tests {
         let bad_authority_signature = wallet_1.sign_digest(kernel_digest);
         merged_transaction.authority_proof = Some(bad_authority_signature);
         assert!(
-            !merged_transaction.devnet_is_valid(coinbase_amount),
+            !merged_transaction.is_valid_for_devnet(coinbase_amount),
             "Merged transaction must not be valid with wrong authority proof"
         );
 
         // Restore valid proof
         merged_transaction.devnet_authority_sign();
         assert!(
-            merged_transaction.devnet_is_valid(coinbase_amount),
+            merged_transaction.is_valid_for_devnet(coinbase_amount),
             "Merged transaction must be valid because of authority proof, 2"
         );
     }
@@ -477,7 +477,7 @@ mod transaction_tests {
         let genesis_block = Block::genesis_block();
         let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());
         assert!(
-            block_1.devnet_is_valid(&genesis_block),
+            block_1.is_valid_for_devnet(&genesis_block),
             "Block 1 must be valid with only coinbase output"
         );
 
@@ -486,7 +486,7 @@ mod transaction_tests {
         // Insert the updated transaction into block 2 and verify that this block is valid
         let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
         block_2.authority_merge_transaction(updated_tx.clone());
-        assert!(block_2.devnet_is_valid(&block_1));
+        assert!(block_2.is_valid_for_devnet(&block_1));
 
         // Mine 26 blocks, keep the transaction updated, and verify that it is valid after
         // all blocks
@@ -501,7 +501,7 @@ mod transaction_tests {
         _previous_block = next_block.clone();
         next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
         next_block.authority_merge_transaction(updated_tx.clone());
-        assert!(next_block.devnet_is_valid(&_previous_block));
+        assert!(next_block.is_valid_for_devnet(&_previous_block));
 
         Ok(())
     }
@@ -534,18 +534,18 @@ mod transaction_tests {
         let block_1 = make_mock_block(&genesis_block, None, own_wallet.get_public_key());
         let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
         assert!(
-            block_1.devnet_is_valid(&genesis_block),
+            block_1.is_valid_for_devnet(&genesis_block),
             "Block 1 must be valid with only coinbase output"
         );
         assert!(
-            block_2.devnet_is_valid(&block_1),
+            block_2.is_valid_for_devnet(&block_1),
             "Block 2 must be valid with only coinbase output"
         );
 
         let mut block_2_with_deprecated_tx = block_2.clone();
         block_2_with_deprecated_tx.authority_merge_transaction(tx.clone());
         assert!(
-            !block_2_with_deprecated_tx.devnet_is_valid(&block_1),
+            !block_2_with_deprecated_tx.is_valid_for_devnet(&block_1),
             "Block with transaction with deprecated mutator set data must be invalid"
         );
 
@@ -555,7 +555,7 @@ mod transaction_tests {
         let mut block_2_with_updated_tx = block_2.clone();
         block_2_with_updated_tx.authority_merge_transaction(tx.clone());
         assert!(
-            block_2_with_updated_tx.devnet_is_valid(&block_1),
+            block_2_with_updated_tx.is_valid_for_devnet(&block_1),
             "Block with transaction with updated mutator set data must be valid"
         );
 
@@ -607,7 +607,7 @@ mod transaction_tests {
 
             next_block.authority_merge_transaction(other_transaction);
             assert!(
-                next_block.devnet_is_valid(&_previous_block),
+                next_block.is_valid_for_devnet(&_previous_block),
                 "Produced block must be valid after merging new transaction"
             );
 
@@ -638,7 +638,7 @@ mod transaction_tests {
         next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
         next_block.authority_merge_transaction(updated_tx.clone());
         assert!(
-            next_block.devnet_is_valid(&_previous_block),
+            next_block.is_valid_for_devnet(&_previous_block),
             "Block is valid when merged transaction is updated"
         );
 

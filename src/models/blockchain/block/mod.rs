@@ -223,7 +223,7 @@ impl Block {
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
-    pub(crate) fn devnet_is_valid(&self, previous_block: &Block) -> bool {
+    pub(crate) fn is_valid_for_devnet(&self, previous_block: &Block) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
         let mut block_copy = self.to_owned();
@@ -231,6 +231,9 @@ impl Block {
         // be verified by the block validity proof.
 
         // 0. `previous_block` is consistent with current block
+        //   a) Block height is previous plus one
+        //   b) Block header points to previous block
+        //   c) Next mutator set of previous block matches previous MS of current block
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
         // (with coinbase UTXO flag set)
@@ -245,18 +248,19 @@ impl Block {
         //   e) transaction timestamp <= block timestamp
         //   f) call: `transaction.devnet_is_valid()`
 
-        // `previous_block` is parent of new block
+        // 0.a) Block height is previous plus one
         if previous_block.header.height.next() != block_copy.header.height {
             warn!("Height does not match previous height");
             return false;
         }
 
+        // 0.b) Block header points to previous block
         if previous_block.hash != block_copy.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }
 
-        // `previous_block`'s accumuluator must agree with current block's `parent_accumulator`
+        // 0.c) Next mutator set of previous block matches previous MS of current block
         if previous_block.body.next_mutator_set_accumulator
             != block_copy.body.previous_mutator_set_accumulator
         {
@@ -274,6 +278,10 @@ impl Block {
                 return false;
             }
         }
+
+        // 1.b) Verify validity of removal records: That their MMR MPs match the SWBF, and
+        // that at least one of their bits is not set yet.
+        // TODO
 
         // 1.c) Verify that transactions and mutator_set_update agree
         if block_copy.count_inputs() != block_copy.body.mutator_set_update.removals.len() {
@@ -362,7 +370,7 @@ impl Block {
         if !block_copy
             .body
             .transaction
-            .devnet_is_valid(Some(miner_reward))
+            .is_valid_for_devnet(Some(miner_reward))
         {
             warn!("Invalid transaction found in block");
             return false;
@@ -406,7 +414,7 @@ impl Block {
         // `devnet_is_valid` contains the rest of the block validation logic. `devnet_is_valid`
         // is factored out such that we can also test if block templates are valid without having
         // to build a block with a valid PoW digest.
-        if !self.devnet_is_valid(previous_block) {
+        if !self.is_valid_for_devnet(previous_block) {
             warn!("Block devnet test failed");
             return false;
         }
@@ -441,7 +449,7 @@ mod block_tests {
             global_state.wallet_state.wallet.get_public_key(),
         );
         assert!(
-            block_1.devnet_is_valid(&genesis_block),
+            block_1.is_valid_for_devnet(&genesis_block),
             "Block 1 must be valid with only coinbase output"
         );
 
@@ -457,7 +465,7 @@ mod block_tests {
             .unwrap();
         block_1.authority_merge_transaction(new_tx);
         assert!(
-            block_1.devnet_is_valid(&genesis_block),
+            block_1.is_valid_for_devnet(&genesis_block),
             "Block 1 must be valid after adding a transaction"
         );
 

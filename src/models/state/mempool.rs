@@ -647,7 +647,7 @@ mod tests {
 
         block_3_with_updated_tx.authority_merge_transaction(tx_by_other_updated.clone());
         assert!(
-            block_3_with_updated_tx.devnet_is_valid(&block_2),
+            block_3_with_updated_tx.is_valid_for_devnet(&block_2),
             "Block with tx with updated mutator set data must be valid"
         );
 
@@ -666,7 +666,7 @@ mod tests {
         tx_by_other_updated = m.get_densest_transactions(usize::MAX)[0].clone();
         block_14.authority_merge_transaction(tx_by_other_updated);
         assert!(
-            block_14.devnet_is_valid(&previous_block),
+            block_14.is_valid_for_devnet(&previous_block),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 

@@ -204,7 +204,7 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        assert!(tx.devnet_is_valid(None));
+        assert!(tx.is_valid_for_devnet(None));
         assert_eq!(
             2,
             tx.outputs.len(),
@@ -227,7 +227,7 @@ mod global_state_tests {
         }
 
         let new_tx: Transaction = global_state.create_transaction(output_utxos).await.unwrap();
-        assert!(new_tx.devnet_is_valid(None));
+        assert!(new_tx.is_valid_for_devnet(None));
         assert_eq!(
             4,
             new_tx.outputs.len(),

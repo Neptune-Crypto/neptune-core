@@ -1123,7 +1123,7 @@ mod archival_state_tests {
         );
         add_output_to_block(&mut block_1a, output_utxo_2);
         block_1a.body.transaction.sign(&genesis_wallet);
-        assert!(block_1a.devnet_is_valid(&genesis_block));
+        assert!(block_1a.is_valid_for_devnet(&genesis_block));
 
         {
             let mut block_db_lock = archival_state.block_index_db.lock().await;
@@ -1236,7 +1236,7 @@ mod archival_state_tests {
             );
             add_output_to_block(&mut next_block, output_utxo_2);
             next_block.body.transaction.sign(&genesis_wallet);
-            assert!(next_block.devnet_is_valid(&previous_block));
+            assert!(next_block.is_valid_for_devnet(&previous_block));
 
             // Store the produced block
             {
@@ -1465,7 +1465,7 @@ mod archival_state_tests {
 
         // Sign and verify validity
         block_1.body.transaction.sign(&genesis_wallet);
-        assert!(block_1.devnet_is_valid(&genesis_block));
+        assert!(block_1.is_valid_for_devnet(&genesis_block));
 
         // Add one output to the block's transaction
         let output_utxo_0: Utxo = Utxo::new(Amount::one(), genesis_wallet.get_public_key());
@@ -1473,7 +1473,7 @@ mod archival_state_tests {
 
         // Sign the transaction
         block_1.body.transaction.sign(&genesis_wallet);
-        assert!(block_1.devnet_is_valid(&genesis_block));
+        assert!(block_1.is_valid_for_devnet(&genesis_block));
 
         // Add two more outputs and verify validity
         // Add one output to the block's transaction
@@ -1490,7 +1490,7 @@ mod archival_state_tests {
 
         // Sign the transaction and verify validity
         block_1.body.transaction.sign(&genesis_wallet);
-        assert!(block_1.devnet_is_valid(&genesis_block));
+        assert!(block_1.is_valid_for_devnet(&genesis_block));
 
         Ok(())
     }
