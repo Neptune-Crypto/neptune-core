@@ -191,7 +191,7 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
     // Get most valuable transactions from mempool
     let transactions_to_include = state
         .mempool
-        .get_densest_transactions(block_capacity_for_transactions);
+        .get_transactions_for_block(block_capacity_for_transactions);
 
     // Build coinbase transaction
     let transaction_fees = transactions_to_include
@@ -352,7 +352,7 @@ mod mine_loop_tests {
                 .get_public_key(),
         };
         let tx_by_preminer = premine_receiver_global_state
-            .create_transaction(vec![tx_output])
+            .create_transaction(vec![tx_output], 1.into())
             .await?;
         premine_receiver_global_state
             .mempool

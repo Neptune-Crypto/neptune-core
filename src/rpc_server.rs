@@ -165,8 +165,11 @@ impl RPC for NeptuneRPCServer {
         );
 
         // 1. Build transaction object
+        // TODO: Allow user to set fee here. Don't set it automatically as we want the user
+        // to be in control of this. But we could add an endpoint to get recommended fee
+        // density.
         let transaction_res: Result<Transaction> =
-            executor::block_on(self.state.create_transaction(recipient_utxos));
+            executor::block_on(self.state.create_transaction(recipient_utxos, 1.into()));
         let transaction = match transaction_res {
             Ok(tx) => tx,
             Err(err) => panic!("Could not create transaction: {}", err),

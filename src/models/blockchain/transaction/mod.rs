@@ -470,7 +470,7 @@ mod transaction_tests {
             public_key: other_wallet.get_public_key(),
         };
         let mut updated_tx = global_state
-            .create_transaction(vec![new_utxo])
+            .create_transaction(vec![new_utxo], 1.into())
             .await
             .unwrap();
 
@@ -525,7 +525,9 @@ mod transaction_tests {
         }
 
         // Create a transaction that's valid after genesis block
-        let mut tx = own_global_state.create_transaction(output_utxos).await?;
+        let mut tx = own_global_state
+            .create_transaction(output_utxos, 1.into())
+            .await?;
         let original_tx = tx.clone();
 
         // Create next block and verify that transaction is not valid with this block as tip
@@ -601,7 +603,7 @@ mod transaction_tests {
                 public_key: other_wallet.get_public_key(),
             };
             let other_transaction = other_global_state
-                .create_transaction(vec![utxo_a, utxo_b, utxo_c])
+                .create_transaction(vec![utxo_a, utxo_b, utxo_c], 1.into())
                 .await?;
             next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
 

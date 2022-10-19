@@ -460,7 +460,7 @@ mod block_tests {
             public_key: other_wallet.get_public_key(),
         };
         let new_tx = global_state
-            .create_transaction(vec![new_utxo])
+            .create_transaction(vec![new_utxo], 1.into())
             .await
             .unwrap();
         block_1.authority_merge_transaction(new_tx);

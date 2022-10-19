@@ -178,6 +178,9 @@ pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeDat
     (handshake, socket_address)
 }
 
+/// Get a global state object for unit test purposes. This global state
+/// populated with state from the genesis block, e.g. in the archival mutator
+/// set and the wallet.
 pub async fn get_mock_global_state(
     network: Network,
     peer_count: u8,
@@ -711,7 +714,8 @@ pub fn make_mock_block(
     Block::new(block_header, block_body)
 }
 
-/// Return a dummy-wallet used for testing
+/// Return a dummy-wallet used for testing. The returned wallet is populated with
+/// whatever UTXOs are present in the genesis block.
 pub async fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
     let wallet = match wallet {
         Some(wallet) => wallet,

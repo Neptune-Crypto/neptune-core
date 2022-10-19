@@ -21,10 +21,7 @@ use num_traits::Zero;
 use priority_queue::{double_priority_queue::iterators::IntoSortedIter, DoublePriorityQueue};
 use std::sync::RwLock as StdRwLock;
 use std::{
-    collections::{
-        hash_map::{Entry, RandomState},
-        HashMap, HashSet,
-    },
+    collections::{hash_map::RandomState, HashMap, HashSet},
     iter::Rev,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -93,12 +90,11 @@ impl Mempool {
         lock.get(transaction_id).cloned()
     }
 
-    /// Returns `None` if transaction was not already in the mempool and `Some(&Transaction)`
-    /// to the existing item otherwise.
-    /// Computes in θ(log(N)) time.
-    pub fn insert(&self, transaction: &Transaction) -> Option<Transaction> {
+    /// Returns `None` if transaction was not already in the mempool and did
+    /// not conflict with other transactions. Otherwise returns `Some(Digest)`.
+    pub fn insert(&self, transaction: &Transaction) -> Option<TransactionDigest> {
         let mut lock = self.internal.write().unwrap();
-        lock.insert(transaction).cloned()
+        lock.insert(transaction)
     }
 
     /// The operation is performed in Ο(log(N)) time (worst case).
@@ -124,9 +120,9 @@ impl Mempool {
     /// Return a vector with copies of the transactions, in descending order, with
     /// the highest fee density not using more than `remaining_storage` bytes.
     /// Typically a block is about 0MB, meaning that the return value of this function is also less than 1MB.
-    pub fn get_densest_transactions(&self, remaining_storage: usize) -> Vec<Transaction> {
+    pub fn get_transactions_for_block(&self, remaining_storage: usize) -> Vec<Transaction> {
         let lock = self.internal.read().unwrap();
-        lock.get_densest_transactions(remaining_storage)
+        lock.get_transactions_for_block(remaining_storage)
     }
 
     /// Prune based on `Transaction.timestamp`
@@ -243,7 +239,31 @@ impl MempoolInternal {
         self.table.get(transaction_id)
     }
 
-    fn insert(&mut self, transaction: &Transaction) -> Option<&Transaction> {
+    /// Returns `Some(txid, transaction)` iff a transcation conflicts with a block that's already in
+    /// the mempool. Returns `None` otherwise.
+    fn transaction_conflicts_with(
+        &self,
+        transaction: &Transaction,
+    ) -> Option<(TransactionDigest, Transaction)> {
+        // This check could be made a lot more efficient, for example with an invertible Bloom filter
+        let flipped_bloom_filter_indices: HashSet<_> = transaction
+            .inputs
+            .iter()
+            .map(|x| x.removal_record.bit_indices)
+            .collect();
+
+        for tx in self.table.iter() {
+            for input in tx.1.inputs.iter() {
+                if flipped_bloom_filter_indices.contains(&input.removal_record.bit_indices) {
+                    return Some((*tx.0, tx.1.to_owned()));
+                }
+            }
+        }
+
+        None
+    }
+
+    fn insert(&mut self, transaction: &Transaction) -> Option<TransactionDigest> {
         {
             // Early exit on transactions too long into the future.
             let horizon =
@@ -254,17 +274,36 @@ impl MempoolInternal {
             }
         }
 
+        // If transaction to be inserted conflicts with a transaction that's already
+        // in the mempool we preserve only the one with the highest fee density.
+        if let Some((txid, tx)) = self.transaction_conflicts_with(transaction) {
+            if tx.fee_density() < transaction.fee_density() {
+                // If new transaction has a higher fee density than the one previously seen
+                // remove the old one.
+                self.remove(&txid);
+            } else {
+                // If new transaction has a lower fee density than the one previous seen,
+                // ignore it. Stop execution here.
+                return Some(txid);
+            }
+        };
+
         let transaction_id: TransactionDigest = Transaction::neptune_hash(transaction);
 
-        if let Entry::Vacant(slot) = self.table.entry(transaction_id) {
-            self.queue.push(transaction_id, transaction.fee_density());
-            slot.insert(transaction.to_owned());
-            debug_assert_eq!(self.table.len(), self.queue.len());
-            self.shrink_to_max_size();
-            None
-        } else {
-            self.table.get(&transaction_id)
-        }
+        self.queue.push(transaction_id, transaction.fee_density());
+        self.table.insert(transaction_id, transaction.to_owned());
+        assert_eq!(
+            self.table.len(),
+            self.queue.len(),
+            "mempool's table and queue length must agree prior to shrink"
+        );
+        self.shrink_to_max_size();
+        assert_eq!(
+            self.table.len(),
+            self.queue.len(),
+            "mempool's table and queue length must agree after shrink"
+        );
+        None
     }
 
     fn remove(&mut self, transaction_id: &TransactionDigest) -> Option<Transaction> {
@@ -285,7 +324,7 @@ impl MempoolInternal {
         self.table.is_empty()
     }
 
-    fn get_densest_transactions(&self, mut remaining_storage: usize) -> Vec<Transaction> {
+    fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
         let mut transactions = vec![];
         let mut _fee_acc = Amount::zero();
 
@@ -506,7 +545,7 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in mempool.get_densest_transactions(SIZE_1MB_IN_BYTES) {
+        for curr_transaction in mempool.get_transactions_for_block(SIZE_1MB_IN_BYTES) {
             let curr_fee_density = curr_transaction.fee_density();
             println!("curr:{} <= prev: {}", curr_fee_density, prev_fee_density);
             assert!(curr_fee_density <= prev_fee_density);
@@ -605,7 +644,7 @@ mod tests {
         }
 
         let tx_by_preminer = premine_receiver_global_state
-            .create_transaction(output_utxos_generated_by_me)
+            .create_transaction(output_utxos_generated_by_me, 1.into())
             .await?;
 
         // Add this transaction to the mempool
@@ -622,7 +661,7 @@ mod tests {
             public_key: other_wallet.get_public_key(),
         }];
         let tx_by_other_original = other_global_state
-            .create_transaction(output_utxos_by_other)
+            .create_transaction(output_utxos_by_other, 1.into())
             .await
             .unwrap();
         m.insert(&tx_by_other_original);
@@ -639,7 +678,7 @@ mod tests {
         // Create a new block to verify that the non-mined transaction still contains
         // valid mutator set data
         let mut tx_by_other_updated: Transaction =
-            m.get_densest_transactions(usize::MAX)[0].clone();
+            m.get_transactions_for_block(usize::MAX)[0].clone();
 
         let block_3_with_no_input =
             make_mock_block(&block_2, None, premine_wallet.get_public_key());
@@ -663,11 +702,71 @@ mod tests {
 
         let mut block_14 = make_mock_block(&previous_block, None, other_wallet.get_public_key());
         assert_eq!(Into::<BlockHeight>::into(14), block_14.header.height);
-        tx_by_other_updated = m.get_densest_transactions(usize::MAX)[0].clone();
+        tx_by_other_updated = m.get_transactions_for_block(usize::MAX)[0].clone();
         block_14.authority_merge_transaction(tx_by_other_updated);
         assert!(
             block_14.is_valid_for_devnet(&previous_block),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    pub async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
+        // Create a global state object, controlled by a preminer who receives a premine-UTXO.
+        let preminer_state = get_mock_global_state(Network::Main, 2, None).await;
+        let premine_wallet = &preminer_state.wallet_state.wallet;
+
+        // Create a transaction and insert it into the mempool
+        let new_utxo = Utxo {
+            amount: 1.into(),
+            public_key: premine_wallet.get_public_key(),
+        };
+        let tx_by_preminer_low_fee = preminer_state
+            .create_transaction(vec![new_utxo], 1.into())
+            .await?;
+
+        assert_eq!(0, preminer_state.mempool.len());
+        preminer_state.mempool.insert(&tx_by_preminer_low_fee);
+
+        assert_eq!(1, preminer_state.mempool.len());
+        assert_eq!(
+            tx_by_preminer_low_fee,
+            preminer_state
+                .mempool
+                .get(&tx_by_preminer_low_fee.neptune_hash())
+                .unwrap()
+        );
+
+        // Insert a transaction that spends the same UTXO and has a higher fee.
+        // Verify that this replaces the previous transaction.
+        let tx_by_preminer_high_fee = preminer_state
+            .create_transaction(vec![new_utxo], 10.into())
+            .await?;
+        preminer_state.mempool.insert(&tx_by_preminer_high_fee);
+        assert_eq!(1, preminer_state.mempool.len());
+        assert_eq!(
+            tx_by_preminer_high_fee,
+            preminer_state
+                .mempool
+                .get(&tx_by_preminer_high_fee.neptune_hash())
+                .unwrap()
+        );
+
+        // Insert a conflicting transaction with a lower fee and verify that it
+        // does *not* replace the existing transaction.
+        let tx_by_preminer_medium_fee = preminer_state
+            .create_transaction(vec![new_utxo], 4.into())
+            .await?;
+        preminer_state.mempool.insert(&tx_by_preminer_medium_fee);
+        assert_eq!(1, preminer_state.mempool.len());
+        assert_eq!(
+            tx_by_preminer_high_fee,
+            preminer_state
+                .mempool
+                .get(&tx_by_preminer_high_fee.neptune_hash())
+                .unwrap()
         );
 
         Ok(())

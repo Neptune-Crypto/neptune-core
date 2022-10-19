@@ -1,6 +1,6 @@
 use anyhow::Result;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use num_traits::{One, Zero};
+use num_traits::Zero;
 use std::{
     net::{IpAddr, SocketAddr},
     time::{SystemTime, UNIX_EPOCH},
@@ -53,8 +53,13 @@ pub struct GlobalState {
 
 impl GlobalState {
     /// Create a transaction from own UTXOs. A change UTXO will be added if needed, the caller
-    /// does not need to supply this.
-    pub async fn create_transaction(&self, output_utxos: Vec<Utxo>) -> Result<Transaction> {
+    /// does not need to supply this. The caller must however supply the fee that they are willing
+    /// to spend to have this transaction mined.
+    pub async fn create_transaction(
+        &self,
+        output_utxos: Vec<Utxo>,
+        fee: Amount,
+    ) -> Result<Transaction> {
         // acquire a lock on `WalletState` to prevent it from being updated
         let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
 
@@ -62,7 +67,6 @@ impl GlobalState {
         let light_state_lock = self.chain.light_state.latest_block.lock().await;
 
         // Get the UTXOs required for this transaction
-        let fee = Amount::one(); // TODO: Set this to something more sane
         let total_spend: Amount = output_utxos.iter().map(|x| x.amount).sum::<Amount>() + fee;
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
             .wallet_state
@@ -200,7 +204,7 @@ mod global_state_tests {
             public_key: other_wallet.get_public_key(),
         };
         let tx: Transaction = global_state
-            .create_transaction(vec![output_utxo])
+            .create_transaction(vec![output_utxo], 1.into())
             .await
             .unwrap();
 
@@ -226,7 +230,10 @@ mod global_state_tests {
             output_utxos.push(utxo);
         }
 
-        let new_tx: Transaction = global_state.create_transaction(output_utxos).await.unwrap();
+        let new_tx: Transaction = global_state
+            .create_transaction(output_utxos, 1.into())
+            .await
+            .unwrap();
         assert!(new_tx.is_valid_for_devnet(None));
         assert_eq!(
             4,
