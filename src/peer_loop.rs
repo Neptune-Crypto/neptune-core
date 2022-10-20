@@ -1,9 +1,9 @@
+use super::models::blockchain::shared::Hash;
 use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
@@ -23,6 +23,8 @@ use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
@@ -453,7 +455,7 @@ impl PeerLoopHandler {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .get_block(header_of_canonical_child.neptune_hash())
+                        .get_block(Hash::hash(&header_of_canonical_child))
                         .await?
                         .unwrap();
 
@@ -630,7 +632,7 @@ impl PeerLoopHandler {
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .get_block(canonical_chain_block_header.neptune_hash())
+                    .get_block(Hash::hash(&canonical_chain_block_header))
                     .await?
                     .unwrap();
                 let block_response: PeerMessage =
@@ -1050,7 +1052,6 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
-    use clap::Parser;
     use rand::thread_rng;
     use secp256k1::Secp256k1;
     use tokio::sync::mpsc::error::TryRecvError;
@@ -1060,7 +1061,7 @@ mod peer_loop_tests {
     use crate::{
         config_models::{cli_args, network::Network},
         models::{
-            blockchain::{block::block_header::TARGET_DIFFICULTY_U32_SIZE, digest::Hashable2},
+            blockchain::block::block_header::TARGET_DIFFICULTY_U32_SIZE, blockchain::shared::Hash,
             peer::TransactionNotification,
         },
         tests::shared::{
@@ -1164,7 +1165,7 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
         different_genesis_block.header.nonce[2].increment();
-        different_genesis_block.hash = different_genesis_block.header.neptune_hash();
+        different_genesis_block.hash = Hash::hash(&different_genesis_block.header);
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
             Secp256k1::new().generate_keypair(&mut thread_rng());
         let block_1_with_different_genesis =
@@ -1663,9 +1664,10 @@ mod peer_loop_tests {
             get_test_genesis_setup(Network::Main, 1).await?;
 
         // Restrict max number of blocks held in memory to 2.
-        let mut a = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
-        a.max_number_of_blocks_before_syncing = 2;
-        state.cli = a;
+        state.cli = cli_args::Args {
+            max_number_of_blocks_before_syncing: 2,
+            ..Default::default()
+        };
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data(Network::Main, 1);
         let genesis_block: Block = state

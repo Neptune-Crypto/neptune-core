@@ -1,17 +1,15 @@
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, fmt, net::IpAddr};
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
-use super::{
-    blockchain::{
-        block::{block_header::BlockHeader, block_height::BlockHeight},
-        digest::Digest,
-        transaction::utxo::Utxo,
-    },
-    peer::PeerStanding,
-    state::wallet::wallet_block_utxos::WalletBlockUtxos,
-};
+use super::blockchain::block::block_header::BlockHeader;
+use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::transaction::utxo::Utxo;
+use super::peer::PeerStanding;
+use super::state::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::database::rusty::RustyLevelDB;
 use crate::Hash;
 
@@ -210,7 +208,7 @@ impl MonitoredUtxo {
     pub fn new(utxo: Utxo) -> Self {
         Self {
             utxo,
-            blockhash_to_membership_proof: VecDeque::from([]),
+            blockhash_to_membership_proof: VecDeque::<(Digest, MsMembershipProof<Hash>)>::from([]),
             max_number_of_mps_stored: MAX_NUMBER_OF_MPS_STORED,
             has_synced_membership_proof: true,
             spent_in_block: None,

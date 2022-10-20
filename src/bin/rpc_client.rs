@@ -1,13 +1,15 @@
 use anyhow::Result;
 use clap::Parser;
-use neptune_core::models::blockchain::digest::Digest;
-use neptune_core::models::blockchain::transaction::utxo::Utxo;
-use neptune_core::models::state::wallet::wallet_status::WalletStatus;
-use neptune_core::rpc_server::RPCClient;
+
 use num_bigint::BigUint;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
+
+use neptune_core::models::blockchain::transaction::utxo::Utxo;
+use neptune_core::models::state::wallet::wallet_status::WalletStatus;
+use neptune_core::rpc_server::RPCClient;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
 
 #[derive(Debug, Parser)]
 enum Command {
@@ -39,7 +41,7 @@ struct Config {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Config = Config::from_args();
+    let args: Config = Config::parse();
     let transport = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default);
     let client = RPCClient::new(client::Config::default(), transport.await?).spawn();
 

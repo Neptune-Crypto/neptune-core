@@ -1,16 +1,14 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use mutator_set_tf::util_types::mutator_set::{
-    mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
-};
 use num_traits::{One, Zero};
 use secp256k1::ecdsa;
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
-use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
-    util_types::simple_hasher::Hasher,
-};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::{amount::u32s::U32s, shared_math::rescue_prime_digest::Digest};
 
 pub mod block_body;
 pub mod block_header;
@@ -18,14 +16,14 @@ pub mod block_height;
 pub mod mutator_set_update;
 pub mod transfer_block;
 
-use self::{
-    block_body::BlockBody, block_header::BlockHeader, block_height::BlockHeight,
-    mutator_set_update::MutatorSetUpdate, transfer_block::TransferBlock,
-};
-use super::{
-    digest::{ordered_digest::OrderedDigest, *},
-    transaction::{utxo::Utxo, Amount, Transaction},
-};
+use self::block_body::BlockBody;
+use self::block_header::BlockHeader;
+use self::block_height::BlockHeight;
+use self::mutator_set_update::MutatorSetUpdate;
+use self::transfer_block::TransferBlock;
+use super::digest::ordered_digest::OrderedDigest;
+use super::transaction::utxo::Utxo;
+use super::transaction::{Amount, Transaction};
 use crate::models::blockchain::shared::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,7 +36,7 @@ pub struct Block {
 impl From<TransferBlock> for Block {
     fn from(t_block: TransferBlock) -> Self {
         Self {
-            hash: t_block.header.neptune_hash(),
+            hash: Hash::hash(&t_block.header),
             header: t_block.header,
             body: t_block.body,
         }
@@ -84,14 +82,13 @@ impl Block {
 
         for premine_utxo in Self::premine_utxos() {
             // A commitment to the pre-mine UTXO
-            let utxo_commitment = premine_utxo.neptune_hash();
+            let utxo_commitment = Hash::hash(&premine_utxo);
 
             // This isn't random.
             let bad_randomness = Digest::default();
 
             // Add pre-mine UTXO to MutatorSet
-            let mut addition_record =
-                genesis_mutator_set.commit(&utxo_commitment.values(), &bad_randomness.values());
+            let mut addition_record = genesis_mutator_set.commit(&utxo_commitment, &bad_randomness);
             ms_update.additions.push(addition_record.clone());
             genesis_mutator_set.add(&mut addition_record);
 
@@ -112,7 +109,7 @@ impl Block {
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
-            mutator_set_commitment: Digest::new(genesis_mutator_set.get_commitment()),
+            mutator_set_commitment: genesis_mutator_set.get_commitment(),
             prev_block_digest: Digest::default(),
             timestamp,
             nonce: [
@@ -124,7 +121,7 @@ impl Block {
             proof_of_work_line: U32s::zero(),
             proof_of_work_family: U32s::zero(),
             target_difficulty: U32s::one(),
-            block_body_merkle_root: body.neptune_hash(),
+            block_body_merkle_root: Hash::hash(&body),
             uncles: vec![],
         };
 
@@ -142,12 +139,8 @@ impl Block {
     }
 
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {
-        let digest = header.neptune_hash();
-        Self {
-            body,
-            header,
-            hash: digest,
-        }
+        let hash = Hash::hash(&header);
+        Self { hash, header, body }
     }
 
     /// Merge a transaction into this block's transaction using the authority signature on the transaction
@@ -160,8 +153,8 @@ impl Block {
         let mut next_mutator_set_accumulator = self.body.previous_mutator_set_accumulator.clone();
 
         for (output_utxo, randomness) in new_transaction.outputs.iter() {
-            let addition_record = next_mutator_set_accumulator
-                .commit(&output_utxo.neptune_hash().values(), &randomness.values());
+            let addition_record =
+                next_mutator_set_accumulator.commit(&Hash::hash(output_utxo), randomness);
             additions.push(addition_record);
         }
 
@@ -195,7 +188,7 @@ impl Block {
         let block_header = BlockHeader {
             version: self.header.version,
             height: self.header.height,
-            mutator_set_commitment: Digest::new(next_mutator_set_accumulator.get_commitment()),
+            mutator_set_commitment: next_mutator_set_accumulator.get_commitment(),
             prev_block_digest: self.header.prev_block_digest,
             timestamp: block_timestamp,
             nonce: self.header.nonce,
@@ -203,12 +196,12 @@ impl Block {
             proof_of_work_line: self.header.proof_of_work_line,
             proof_of_work_family: self.header.proof_of_work_family,
             target_difficulty: self.header.target_difficulty,
-            block_body_merkle_root: block_body.neptune_hash(),
+            block_body_merkle_root: Hash::hash(&block_body),
             uncles: vec![],
         };
 
         self.body = block_body;
-        self.hash = block_header.neptune_hash();
+        self.hash = Hash::hash(&block_header);
         self.header = block_header;
     }
 
@@ -271,7 +264,7 @@ impl Block {
         for (i, input) in block_copy.body.transaction.inputs.iter().enumerate() {
             // 1.a) Verify validity of membership proofs
             if !block_copy.body.previous_mutator_set_accumulator.verify(
-                &input.utxo.neptune_hash().values(),
+                &Hash::hash(&input.utxo),
                 &input.membership_proof.clone().into(),
             ) {
                 warn!("Invalid membership proof found in block for input {}", i);
@@ -308,12 +301,8 @@ impl Block {
         // Go over all output UTXOs and verify that the addition record is found at the same index
         // in the `mutator_set_update` data structure
         i = 0;
-        let hasher = Hash::new();
         for (utxo, randomness) in block_copy.body.transaction.outputs.iter() {
-            let expected_commitment = hasher.hash_pair(
-                &utxo.neptune_hash().values(),
-                &randomness.to_owned().values(),
-            );
+            let expected_commitment = Hash::hash_pair(&Hash::hash(utxo), &randomness.to_owned());
             if block_copy.body.mutator_set_update.additions[i].canonical_commitment
                 != expected_commitment
             {
@@ -354,7 +343,7 @@ impl Block {
         }
 
         // Verify that the locally constructed mutator set matches that in the received block's header
-        if Digest::new(ms.get_commitment()) != block_copy.header.mutator_set_commitment {
+        if ms.get_commitment() != block_copy.header.mutator_set_commitment {
             warn!("Mutator set commitment does not match calculated object");
             return false;
         }
@@ -393,7 +382,7 @@ impl Block {
         //  4.2. verify that all uncles' hash are below parent's target_difficulty
 
         // 5. `block_body_merkle_root`
-        if block_copy.header.block_body_merkle_root != block_copy.body.neptune_hash() {
+        if block_copy.header.block_body_merkle_root != Hash::hash(&block_copy.body) {
             warn!("Block body does not match referenced block body Merkle root");
             return false;
         }

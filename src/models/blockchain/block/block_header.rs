@@ -1,12 +1,10 @@
-use std::fmt::Display;
-
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::Hashable;
+
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::simple_hasher::Hasher;
-
-use crate::models::blockchain::digest::{Digest, Hashable2};
-use crate::models::blockchain::shared::Hash;
 
 use super::block_height::BlockHeight;
 
@@ -58,14 +56,8 @@ impl Display for BlockHeader {
     }
 }
 
-impl Hashable2 for BlockHeader {
-    fn neptune_hash(&self) -> Digest {
-        Digest::new(Hash::new().hash_sequence(&self.accumulate()))
-    }
-}
-
-impl BlockHeader {
-    fn accumulate(&self) -> Vec<BFieldElement> {
+impl Hashable for BlockHeader {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
         let mut ret: Vec<BFieldElement> = vec![self.version, self.height.into()];
         ret.append(&mut self.mutator_set_commitment.values().to_vec());
         ret.append(&mut self.prev_block_digest.values().to_vec());

@@ -4,7 +4,7 @@ authors = [
 ]
 edition = "2021"
 name = "neptune-core"
-version = "0.1.0"
+version = "0.3.0"
 default-run = "neptune-core"
 
 [dev-dependencies.cargo-husky]
@@ -13,13 +13,13 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", branch = "master" }
-mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", branch = "master" }
-anyhow = "1" # Error trait and generalized error handling
+twenty-first = { version = "0.3.0" }
+mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", tag = "v0.3.0" }
+anyhow = "1"
 bincode = "1"
 bytes = "1"
 chrono = "0.4"
-clap = { version = "3", features = ["derive"] } # command-line parsing
+clap = { version = "4", features = ["derive"] }
 directories = "4"
 futures = "0.3"
 itertools = "0.10"

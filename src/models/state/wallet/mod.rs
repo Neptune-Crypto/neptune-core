@@ -13,6 +13,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::other::random_elements_array;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -21,24 +23,22 @@ use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
-use twenty_first::util_types::simple_hasher::Hasher;
 
+use self::wallet_block_utxos::WalletBlockIOSums;
+use self::wallet_status::{WalletStatus, WalletStatusElement};
 use crate::config_models::data_directory::get_data_directory;
 use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::digest::{
-    Digest, Hashable2, DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
+    DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
 };
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
 use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::Hash;
-
-use self::wallet_block_utxos::WalletBlockIOSums;
-use self::wallet_status::{WalletStatus, WalletStatusElement};
 
 const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
@@ -197,17 +197,28 @@ impl Wallet {
     /// Return the secret key that is used for signatures
     fn get_signing_key(&self) -> Digest {
         let secret_seed = self.secret_seed;
-        let signature_secret_key_marker = Digest::default().values();
-        Digest::new(Hash::new().hash_pair(&secret_seed.values(), &signature_secret_key_marker))
+        Hash::hash_pair(&secret_seed, &Self::signature_secret_key_marker())
     }
 
     /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
     /// for the mutator set.
     fn get_commitment_randomness_seed(&self) -> Digest {
         let secret_seed = self.secret_seed;
-        let mut commitment_marker = Digest::default().values();
-        commitment_marker[0] = BFieldElement::one();
-        Digest::new(Hash::new().hash_pair(&secret_seed.values(), &commitment_marker))
+        Hash::hash_pair(&secret_seed, &Self::commitment_marker())
+    }
+
+    fn signature_secret_key_marker() -> Digest {
+        Digest::new([BFieldElement::zero(); DIGEST_LENGTH])
+    }
+
+    fn commitment_marker() -> Digest {
+        Digest::new([
+            BFieldElement::one(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+        ])
     }
 }
 
@@ -311,19 +322,21 @@ impl WalletState {
         let mut own_membership_proofs: Vec<MsMembershipProof<Hash>> = vec![];
         let mut own_items_as_digests: Vec<Digest> = vec![];
         for mut monitored_utxo in monitored_utxos.iter_mut() {
+            let utxo_digest = Hash::hash(&monitored_utxo.utxo);
             let relevant_membership_proof: Option<MsMembershipProof<Hash>> =
                 monitored_utxo.get_membership_proof_for_block(&block.header.prev_block_digest);
+
             match relevant_membership_proof {
                 Some(ms_mp) => {
                     debug!("Found valid mp for UTXO");
                     own_membership_proofs.push(ms_mp.to_owned());
-                    own_items_as_digests.push(monitored_utxo.utxo.neptune_hash());
+                    own_items_as_digests.push(utxo_digest);
                     monitored_utxo.has_synced_membership_proof = true;
                 }
                 None => {
                     warn!(
                         "Unable to find membership proof for UTXO with digest {}",
-                        monitored_utxo.utxo.neptune_hash()
+                        utxo_digest
                     );
                     monitored_utxo.has_synced_membership_proof = false;
                 }
@@ -349,10 +362,7 @@ impl WalletState {
             let res: Result<Vec<usize>, Box<dyn Error>> =
                 MsMembershipProof::batch_update_from_addition(
                     &mut own_membership_proofs.iter_mut().collect::<Vec<_>>(),
-                    &own_items_as_digests
-                        .iter()
-                        .map(|digest| digest.values())
-                        .collect::<Vec<_>>(),
+                    &own_items_as_digests,
                     &mut msa_state.set_commitment,
                     &addition_record,
                 );
@@ -376,14 +386,12 @@ impl WalletState {
                     "Received UTXO in block {}, height {}: value = {:?}",
                     block.hash, block.header.height, utxo.amount
                 );
-                let new_own_membership_proof = msa_state.prove(
-                    &utxo.neptune_hash().values(),
-                    &commitment_randomness.values(),
-                    true,
-                );
+                let utxo_digest = Hash::hash(&utxo);
+                let new_own_membership_proof =
+                    msa_state.prove(&utxo_digest, &commitment_randomness, true);
 
                 own_membership_proofs.push(new_own_membership_proof);
-                own_items_as_digests.push(utxo.neptune_hash());
+                own_items_as_digests.push(utxo_digest);
 
                 // In case of forks, it can happen that a UTXO is dropped from the abandoned chain
                 // but exists in the new chain. If that's the case, then the membership proof was marked
@@ -403,7 +411,7 @@ impl WalletState {
                     // below this if-block and we don't want to include this monitored UTXO twice.
                     info!(
                         "Own UTXO {} repeated in forked chain, recovering.",
-                        forked_utxo.utxo.neptune_hash()
+                        Hash::hash(&forked_utxo.utxo)
                     );
                     new_monitored_utxo = monitored_utxos.remove(index_of_forked_utxo);
                     new_monitored_utxo.has_synced_membership_proof = true;
@@ -463,9 +471,10 @@ impl WalletState {
                     i
                 );
 
+                let input_utxo_digest = Hash::hash(&input_utxo);
                 let mut matching_utxos: Vec<&mut MonitoredUtxo> = monitored_utxos
                     .iter_mut()
-                    .filter(|x| x.utxo.neptune_hash() == input_utxo.neptune_hash())
+                    .filter(|monitored_utxo| Hash::hash(&monitored_utxo.utxo) == input_utxo_digest)
                     .collect();
                 match matching_utxos.len() {
                     0 => panic!(
@@ -481,20 +490,25 @@ impl WalletState {
                         // proof from the block for this. In MainNet, where the input membership
                         // proofs are not included in the blocks, we can probably just check which
                         // of our own membership proofs that have become invalid with this block.
-                        let matching_match = matching_utxos
+                        let matching_monitored_utxo = matching_utxos
                             .iter_mut()
-                            .find(|x| {
-                                x.get_membership_proof_for_block(&block.header.prev_block_digest)
+                            .find(|monitored_utxo| {
+                                let monitored_utxo_data_index = monitored_utxo
+                                    .get_membership_proof_for_block(&block.header.prev_block_digest)
                                     .unwrap()
                                     .auth_path_aocl
-                                    .data_index
-                                    == block.body.transaction.inputs[i]
-                                        .membership_proof
-                                        .auth_path_aocl
-                                        .data_index
+                                    .data_index;
+                                let ms_membership_proof_data_index = block.body.transaction.inputs
+                                    [i]
+                                    .membership_proof
+                                    .auth_path_aocl
+                                    .data_index;
+
+                                monitored_utxo_data_index == ms_membership_proof_data_index
                             })
                             .unwrap();
-                        matching_match.spent_in_block =
+
+                        matching_monitored_utxo.spent_in_block =
                             Some((block.hash, block.header.height, block.header.timestamp));
                     }
                 }
@@ -535,7 +549,7 @@ impl WalletState {
             // by this block
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || msa_state.verify(&monitored_utxo.utxo.neptune_hash().values(), &updated_mp),
+                    || msa_state.verify(&Hash::hash(&monitored_utxo.utxo), &updated_mp),
                 "{}",
                 format!(
                     "Updated membership proof for unspent UTXO must be valid. Invalid: {:?}",
@@ -683,10 +697,7 @@ impl WalletState {
         let counter_as_digest: Digest = counter_as_digest.try_into().unwrap();
         let commitment_pseudo_randomness_seed = self.wallet.get_commitment_randomness_seed();
 
-        Digest::new(Hash::new().hash_pair(
-            &counter_as_digest.values(),
-            &commitment_pseudo_randomness_seed.values(),
-        ))
+        Hash::hash_pair(&counter_as_digest, &commitment_pseudo_randomness_seed)
     }
 
     pub fn allocate_sufficient_input_funds_with_lock(
@@ -728,23 +739,19 @@ impl WalletState {
 
 #[cfg(test)]
 mod wallet_tests {
-    use super::*;
-    use crate::{
-        models::{
-            blockchain::{
-                block::block_height::BlockHeight, digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES,
-                shared::Hash,
-            },
-            state::archival_state::ArchivalState,
-        },
-        tests::shared::{
-            add_output_to_block, add_unsigned_input_to_block, add_unsigned_input_to_block_ams,
-            get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
-        },
-    };
     use num_traits::One;
     use tracing_test::traced_test;
-    use twenty_first::util_types::simple_hasher::Hasher;
+
+    use crate::models::blockchain::block::block_height::BlockHeight;
+    use crate::models::blockchain::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
+    use crate::models::blockchain::shared::Hash;
+    use crate::models::state::archival_state::ArchivalState;
+    use crate::tests::shared::{
+        add_output_to_block, add_unsigned_input_to_block, add_unsigned_input_to_block_ams,
+        get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
+    };
+
+    use super::*;
 
     #[tokio::test]
     async fn increase_output_counter_test() {
@@ -822,15 +829,15 @@ mod wallet_tests {
             monitored_utxos.len(),
             "monitored UTXOs must be 1 after applying N blocks not mined by wallet"
         );
+
+        let genesis_block_output_utxo = genesis_block.body.transaction.outputs[0].0;
+        let ms_membership_proof = monitored_utxos[0]
+            .get_membership_proof_for_block(&next_block.hash)
+            .unwrap();
         assert!(
             next_block.body.next_mutator_set_accumulator.verify(
-                &genesis_block.body.transaction.outputs[0]
-                    .0
-                    .neptune_hash()
-                    .values(),
-                &monitored_utxos[0]
-                    .get_membership_proof_for_block(&next_block.hash)
-                    .unwrap()
+                &Hash::hash(&genesis_block_output_utxo),
+                &ms_membership_proof
             ),
             "Membership proof must be valid after updating wallet state with generated blocks"
         );
@@ -864,34 +871,39 @@ mod wallet_tests {
         );
 
         // Ensure that the membership proof is valid
-        assert!(block_1.body.next_mutator_set_accumulator.verify(
-            &block_1.body.transaction.outputs[0]
-                .0
-                .neptune_hash()
-                .values(),
-            &monitored_utxos[0]
+        {
+            let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
+            let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
+            let ms_membership_proof = monitored_utxos[0]
                 .get_membership_proof_for_block(&block_1.hash)
-                .unwrap()
-        ));
+                .unwrap();
+            let membership_proof_is_valid = block_1
+                .body
+                .next_mutator_set_accumulator
+                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+            assert!(membership_proof_is_valid);
+        }
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
         let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
         let mut block_3 = make_mock_block(&block_2, None, other_wallet.get_public_key());
         monitored_utxos = wallet_state.get_monitored_utxos().await;
-        assert!(
-            !block_3.body.next_mutator_set_accumulator.verify(
-                &block_1.body.transaction.outputs[0]
-                    .0
-                    .neptune_hash()
-                    .values(),
-                &monitored_utxos[0]
-                    .get_membership_proof_for_block(&block_1.hash)
-                    .unwrap()
-            ),
-            "membership proof must be invalid before updating wallet state"
-        );
-
+        {
+            let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
+            let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
+            let ms_membership_proof = monitored_utxos[0]
+                .get_membership_proof_for_block(&block_1.hash)
+                .unwrap();
+            let membership_proof_is_valid = block_3
+                .body
+                .next_mutator_set_accumulator
+                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+            assert!(
+                !membership_proof_is_valid,
+                "membership proof must be invalid before updating wallet state"
+            );
+        }
         // Verify that the membership proof is valid *after* running the updater
         wallet_state.update_wallet_state_with_new_block(
             &block_2,
@@ -902,18 +914,22 @@ mod wallet_tests {
             &mut wallet_state.wallet_db.lock().await,
         )?;
         monitored_utxos = wallet_state.get_monitored_utxos().await;
-        assert!(
-            block_3.body.next_mutator_set_accumulator.verify(
-                &block_1.body.transaction.outputs[0]
-                    .0
-                    .neptune_hash()
-                    .values(),
-                &monitored_utxos[0]
-                    .get_membership_proof_for_block(&block_3.hash)
-                    .unwrap()
-            ),
-            "Membership proof must be valid after updating wallet state with generated blocks"
-        );
+
+        {
+            let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
+            let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
+            let ms_membership_proof = monitored_utxos[0]
+                .get_membership_proof_for_block(&block_3.hash)
+                .unwrap();
+            let membership_proof_is_valid = block_3
+                .body
+                .next_mutator_set_accumulator
+                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+            assert!(
+                membership_proof_is_valid,
+                "Membership proof must be valid after updating wallet state with generated blocks"
+            );
+        }
 
         Ok(())
     }
@@ -1169,7 +1185,7 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos {
             assert!(
                 block_1.body.next_mutator_set_accumulator.verify(
-                    &monitored_utxo.utxo.neptune_hash().values(),
+                    &Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(&block_1.hash)
                         .unwrap()
@@ -1204,7 +1220,7 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos {
             assert!(
                 block_18.body.next_mutator_set_accumulator.verify(
-                    &monitored_utxo.utxo.neptune_hash().values(),
+                    &Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(&block_18.hash)
                         .unwrap()
@@ -1263,7 +1279,7 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_at_2b.iter() {
             assert!(
                 block_2_b.body.next_mutator_set_accumulator.verify(
-                    &monitored_utxo.utxo.neptune_hash().values(),
+                    &Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(&block_2_b.hash)
                         .unwrap()
@@ -1284,7 +1300,7 @@ mod wallet_tests {
             .get_monitored_utxos()
             .await
             .into_iter()
-            .filter(|x| x.has_synced_membership_proof)
+            .filter(|monitored_utxo| monitored_utxo.has_synced_membership_proof)
             .collect();
         assert_eq!(
             4 + 17,
@@ -1296,7 +1312,7 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_block_19.iter() {
             assert!(
                 block_19.body.next_mutator_set_accumulator.verify(
-                    &monitored_utxo.utxo.neptune_hash().values(),
+                    &Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
                         .get_membership_proof_for_block(&block_19.hash)
                         .unwrap()
@@ -1318,15 +1334,8 @@ mod wallet_tests {
             .get_membership_proof_for_block(&block_2_b.hash)
             .unwrap();
         add_unsigned_input_to_block(&mut block_3_b, consumed_utxo_1, consumed_utxo_1_mp);
-        let forked_utxo: Utxo = Utxo::new(
-            Amount::one()
-                + Amount::one()
-                + Amount::one()
-                + Amount::one()
-                + Amount::one()
-                + Amount::one(),
-            own_wallet_state.wallet.get_public_key(),
-        );
+        let forked_utxo: Utxo =
+            Utxo::new(Amount::from(6u32), own_wallet_state.wallet.get_public_key());
         add_output_to_block(&mut block_3_b, forked_utxo);
         block_3_b.body.transaction.sign(&own_wallet_state.wallet);
         assert!(block_3_b.is_valid_for_devnet(&block_2_b));
@@ -1360,7 +1369,7 @@ mod wallet_tests {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
                     || block_3_b.body.next_mutator_set_accumulator.verify(
-                        &monitored_utxo.utxo.neptune_hash().values(),
+                        &Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
                             .get_membership_proof_for_block(&block_3_b.hash)
                             .unwrap()
@@ -1403,7 +1412,7 @@ mod wallet_tests {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
                     || block_20.body.next_mutator_set_accumulator.verify(
-                        &monitored_utxo.utxo.neptune_hash().values(),
+                        &Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
                             .get_membership_proof_for_block(&block_20.hash)
                             .unwrap()
@@ -1417,14 +1426,15 @@ mod wallet_tests {
             1,
             monitored_utxos_20
                 .iter()
-                .filter(|x| x.utxo.neptune_hash() == forked_utxo.neptune_hash())
+                .filter(|x| Hash::hash(&x.utxo) == Hash::hash(&forked_utxo))
                 .count()
         );
 
         // Verify that we have two membership proofs for forked UTXO
+        let forked_utxo_digest = Hash::hash(&forked_utxo);
         let forked_utxo_info: MonitoredUtxo = monitored_utxos_20
             .into_iter()
-            .find(|x| x.utxo.neptune_hash() == forked_utxo.neptune_hash())
+            .find(|monitored_utxo| Hash::hash(&monitored_utxo.utxo) == forked_utxo_digest)
             .unwrap();
         assert!(
             forked_utxo_info
@@ -1454,7 +1464,7 @@ mod wallet_tests {
         let wallet_state = get_mock_wallet_state(Some(random_wallet)).await;
         let pk = wallet_state.wallet.get_public_key();
         let msg_vec: Vec<BFieldElement> = wallet_state.wallet.secret_seed.values().to_vec();
-        let digest: Digest = Digest::new(Hash::new().hash_sequence(&msg_vec));
+        let digest: Digest = Hash::hash_slice(&msg_vec);
         let signature = wallet_state.wallet.sign_digest(digest);
         let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = digest.into();
         let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();

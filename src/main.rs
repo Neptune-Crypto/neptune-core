@@ -6,7 +6,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 #[tokio::main]
 pub async fn main() -> Result<()> {
     // Fetch the CLI arguments
-    let args: cli_args::Args = cli_args::Args::from_args();
+    let args: cli_args::Args = cli_args::Args::parse();
 
     // Configure logger to use ISO-8601, of which rfc3339 is a subset.
     // install global collector configured based on RUST_LOG env var.

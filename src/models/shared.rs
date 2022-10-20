@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::blockchain::{
-    block::{block_height::BlockHeight, Block},
-    digest::Digest,
-};
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+
+use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::Block;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LatestBlockInfo {

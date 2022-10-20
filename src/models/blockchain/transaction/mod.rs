@@ -5,11 +5,6 @@ pub mod utxo;
 use anyhow::{bail, Result};
 use get_size::GetSize;
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::{
-    addition_record::AdditionRecord, ms_membership_proof::MsMembershipProof,
-    mutator_set_accumulator::MutatorSetAccumulator, mutator_set_trait::MutatorSet,
-    removal_record::RemovalRecord,
-};
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
 use num_traits::Zero;
@@ -18,20 +13,27 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+
+use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::simple_hasher::Hashable;
-use twenty_first::util_types::simple_hasher::Hasher;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
 
-use self::{devnet_input::DevNetInput, transaction_kernel::TransactionKernel, utxo::Utxo};
+use self::devnet_input::DevNetInput;
+use self::transaction_kernel::TransactionKernel;
+use self::utxo::Utxo;
 use super::block::Block;
-use super::digest::{Digest, Hashable2, DEVNET_MSG_DIGEST_SIZE_IN_BYTES};
+use super::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
 use super::shared::Hash;
 use crate::models::state::wallet::Wallet;
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
-pub type TransactionDigest = Digest;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Transaction {
@@ -60,55 +62,42 @@ impl GetSize for Transaction {
     }
 }
 
-impl Hashable2 for Transaction {
-    fn neptune_hash(&self) -> Digest {
-        let hasher = Hash::new();
-
-        // Hash outputs
-        let outputs_preimage: Vec<BFieldElement> = self
-            .outputs
-            .iter()
-            .flat_map(|(output_utxo, _)| Utxo::neptune_hash(output_utxo).values())
-            .collect();
-
-        // Hash inputs
-        let inputs_preimage: Vec<BFieldElement> = self
+impl Hashable for Transaction {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        let inputs_preimage = self
             .inputs
             .iter()
-            .flat_map(|input| input.utxo.neptune_hash().values())
-            .collect();
+            .flat_map(|input| input.utxo.to_sequence());
 
-        // Hash fee
-        let fee_preimage: Vec<BFieldElement> = self.fee.to_sequence();
+        let outputs_preimage = self
+            .outputs
+            .iter()
+            .flat_map(|output| output.0.to_sequence());
 
-        // Hash timestamp
-        let timestamp_preimage = vec![self.timestamp];
-
-        // Hash public_scripts
         // If public scripts are not padded or end with a specific instruction, then it might
         // be possible to find a collission for this digest. If that's the case, each public script
         // can be padded with a B field element that's not a valid VM instruction.
-        let public_scripts_preimage: Vec<BFieldElement> = self.public_scripts.concat();
+        let public_scripts_preimage = self.public_scripts.concat().into_iter();
+        let fee_preimage = self.fee.to_sequence().into_iter();
+        let timestamp_preimage = vec![self.timestamp].into_iter();
 
-        let all_digests = vec![
-            inputs_preimage,
-            outputs_preimage,
-            fee_preimage,
-            timestamp_preimage,
-            public_scripts_preimage,
-        ]
-        .concat();
-
-        Digest::new(hasher.hash_sequence(&all_digests))
+        inputs_preimage
+            .chain(outputs_preimage)
+            .chain(public_scripts_preimage)
+            .chain(fee_preimage)
+            .chain(timestamp_preimage)
+            .collect_vec()
     }
 }
 
 /// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
+///
+/// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Transaction {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = Transaction::neptune_hash(self);
-        <Digest as StdHash>::hash(&our_hash, state);
+        let neptune_hash = Hash::hash(self);
+        StdHash::hash(&neptune_hash, state);
     }
 }
 
@@ -148,12 +137,12 @@ impl Transaction {
         let transaction_items: Vec<_> = self
             .inputs
             .iter()
-            .map(|x| x.utxo.neptune_hash().values())
+            .map(|input| Hash::hash(&input.utxo))
             .collect();
 
         let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
-        let block_addition_records: Vec<AdditionRecord<Hash>> =
+        let block_addition_records: Vec<AdditionRecord> =
             block.body.mutator_set_update.additions.clone();
         let mut transaction_removal_records: Vec<RemovalRecord<Hash>> = self
             .inputs
@@ -266,7 +255,7 @@ impl Transaction {
     /// Sign all transaction inputs with the same signature
     pub fn sign(&mut self, wallet: &Wallet) {
         let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = kernel.neptune_hash();
+        let kernel_digest: Digest = Hash::hash(&kernel);
         let signature = wallet.sign_digest(kernel_digest);
         for input in self.inputs.iter_mut() {
             input.signature = Some(signature);
@@ -280,7 +269,7 @@ impl Transaction {
     /// current signature scheme.
     pub fn devnet_authority_sign(&mut self) {
         let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = kernel.neptune_hash();
+        let kernel_digest: Digest = Hash::hash(&kernel);
         let authority_wallet = Wallet::devnet_authority_wallet();
         let signature = authority_wallet.sign_digest(kernel_digest);
 
@@ -316,7 +305,7 @@ impl Transaction {
         //  - for all inputs
         //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
         let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = kernel.neptune_hash();
+        let kernel_digest: Digest = Hash::hash(&kernel);
         let kernel_digest_as_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = kernel_digest.into();
         let msg: Message = Message::from_slice(&kernel_digest_as_bytes).unwrap();
 
@@ -440,7 +429,7 @@ mod transaction_tests {
 
         // Make an authority sign with a wrong secret key and verify failure
         let kernel: TransactionKernel = merged_transaction.get_kernel();
-        let kernel_digest: Digest = kernel.neptune_hash();
+        let kernel_digest: Digest = Hash::hash(&kernel);
         let bad_authority_signature = wallet_1.sign_digest(kernel_digest);
         merged_transaction.authority_proof = Some(bad_authority_signature);
         assert!(

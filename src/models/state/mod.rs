@@ -1,26 +1,25 @@
 use anyhow::Result;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use num_traits::Zero;
-use std::{
-    net::{IpAddr, SocketAddr},
-    time::{SystemTime, UNIX_EPOCH},
-};
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use std::net::{IpAddr, SocketAddr};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use self::{
-    blockchain_state::BlockchainState, mempool::Mempool, networking_state::NetworkingState,
-    wallet::WalletState,
-};
-use super::blockchain::{
-    digest::{Digest, Hashable2},
-    transaction::{devnet_input::DevNetInput, utxo::Utxo, Amount, Transaction},
-};
-use crate::{
-    config_models::cli_args,
-    database::{leveldb::LevelDB, rusty::RustyLevelDBIterator},
-    models::peer::{HandshakeData, PeerStanding},
-    Hash, VERSION,
-};
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use self::blockchain_state::BlockchainState;
+use self::mempool::Mempool;
+use self::networking_state::NetworkingState;
+use self::wallet::WalletState;
+use super::blockchain::transaction::devnet_input::DevNetInput;
+use super::blockchain::transaction::utxo::Utxo;
+use super::blockchain::transaction::{Amount, Transaction};
+use crate::config_models::cli_args;
+use crate::database::leveldb::LevelDB;
+use crate::database::rusty::RustyLevelDBIterator;
+use crate::models::peer::{HandshakeData, PeerStanding};
+use crate::{Hash, VERSION};
 
 pub mod archival_state;
 pub mod blockchain_state;
@@ -79,7 +78,7 @@ impl GlobalState {
         for (spendable_utxo, mp) in spendable_utxos_and_mps {
             let removal_record = msa_tip
                 .set_commitment
-                .drop(&spendable_utxo.neptune_hash().values(), &mp);
+                .drop(&Hash::hash(&spendable_utxo), &mp);
             input_amount = input_amount + spendable_utxo.amount;
             inputs.push(DevNetInput {
                 utxo: spendable_utxo,

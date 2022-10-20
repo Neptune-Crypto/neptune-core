@@ -5,10 +5,10 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
 
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::digest::Digest;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::channel::RPCServerToMain;

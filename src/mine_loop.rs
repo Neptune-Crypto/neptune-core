@@ -4,7 +4,6 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::digest::ordered_digest::*;
-use crate::models::blockchain::digest::*;
 use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
@@ -24,6 +23,8 @@ use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
@@ -39,10 +40,8 @@ fn make_devnet_block_template(
         previous_block.body.next_mutator_set_accumulator.clone();
 
     for (output_utxo, randomness) in transaction.outputs.iter() {
-        let addition_record = next_mutator_set_accumulator.commit(
-            &output_utxo.neptune_hash().values(),
-            &(*randomness).values(),
-        );
+        let addition_record =
+            next_mutator_set_accumulator.commit(&Hash::hash(output_utxo), randomness);
         additions.push(addition_record);
     }
 
@@ -71,7 +70,7 @@ fn make_devnet_block_template(
     let zero = BFieldElement::zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
     let new_pow_line: U32s<5> = previous_block.header.proof_of_work_family + difficulty;
-    let mutator_set_commitment: Digest = Digest::new(next_mutator_set_accumulator.get_commitment());
+    let mutator_set_commitment: Digest = next_mutator_set_accumulator.get_commitment();
     let next_block_height = previous_block.header.height.next();
     let block_timestamp = BFieldElement::new(
         SystemTime::now()
@@ -84,14 +83,14 @@ fn make_devnet_block_template(
         version: zero,
         height: next_block_height,
         mutator_set_commitment,
-        prev_block_digest: previous_block.header.neptune_hash(),
+        prev_block_digest: Hash::hash(&previous_block.header),
         timestamp: block_timestamp,
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
         proof_of_work_line: new_pow_line,
         proof_of_work_family: new_pow_line,
         target_difficulty: difficulty,
-        block_body_merkle_root: block_body.neptune_hash(),
+        block_body_merkle_root: Hash::hash(&block_body),
         uncles: vec![],
     };
 
@@ -110,7 +109,7 @@ async fn mine_devnet_block(
         block_body.transaction.outputs.len()
     );
     // Mining takes place here
-    while Into::<OrderedDigest>::into(block_header.neptune_hash())
+    while Into::<OrderedDigest>::into(Hash::hash(&block_header))
         >= OrderedDigest::to_digest_threshold(block_header.target_difficulty)
     {
         // If the sender is cancelled, the parent to this thread most

@@ -1,43 +1,32 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
-use mutator_set_tf::util_types::mutator_set::{
-    addition_record::AdditionRecord, archival_mutator_set::ArchivalMutatorSet,
-    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
-};
 use num_traits::Zero;
 use rusty_leveldb::DB;
-use std::{
-    fs,
-    io::{Seek, SeekFrom, Write},
-    ops::DerefMut,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::fs;
+use std::io::{Seek, SeekFrom, Write};
+use std::ops::DerefMut;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
-use twenty_first::{amount::u32s::U32s, util_types::mmr::mmr_trait::Mmr};
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+
+use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
+use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
+use twenty_first::amount::u32s::U32s;
+use twenty_first::util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_trait::Mmr};
 
 use super::shared::{get_block_file_path, new_block_file_is_needed};
-use crate::{
-    database::{
-        leveldb::LevelDB,
-        rusty::{default_options, RustyLevelDB},
-    },
-    models::{
-        blockchain::{
-            block::{
-                block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE},
-                block_height::BlockHeight,
-                Block,
-            },
-            digest::{Digest, Hashable2},
-            shared::Hash,
-        },
-        database::{
-            BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord,
-            LastFileRecord, MsBlockSyncKey, MsBlockSyncValue, DATABASE_DIRECTORY_ROOT_NAME,
-        },
-    },
+use crate::database::leveldb::LevelDB;
+use crate::database::rusty::{default_options, RustyLevelDB};
+use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
+use crate::models::blockchain::block::{block_height::BlockHeight, Block};
+use crate::models::blockchain::shared::Hash;
+use crate::models::database::{
+    BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
+    MsBlockSyncKey, MsBlockSyncValue, DATABASE_DIRECTORY_ROOT_NAME,
 };
 
 const BLOCK_INDEX_DB_NAME: &str = "block_index";
@@ -512,16 +501,19 @@ impl ArchivalState {
         }
     }
 
-    pub async fn get_children_blocks(&self, block_header: &BlockHeader) -> Vec<BlockHeader> {
+    pub async fn get_children_blocks(&self, parent_block_header: &BlockHeader) -> Vec<BlockHeader> {
         // Get all blocks with height n + 1
         let blocks_from_childrens_generation: Vec<BlockHeader> = self
-            .block_height_to_block_headers(block_header.height.next())
+            .block_height_to_block_headers(parent_block_header.height.next())
             .await;
 
         // Filter out those that don't have the right parent
+        let parent_block_header_digest = Hash::hash(parent_block_header);
         blocks_from_childrens_generation
             .into_iter()
-            .filter(|x| x.prev_block_digest == block_header.neptune_hash())
+            .filter(|child_block_header| {
+                child_block_header.prev_block_digest == parent_block_header_digest
+            })
             .collect()
     }
 
@@ -542,9 +534,9 @@ impl ArchivalState {
 
         // If tip header height is less than this block, or the same but with a different hash,
         // then it cannot belong to the canonical chain
+        let tip_header_digest = Hash::hash(tip_header);
         if tip_header.height < block_height
-            || tip_header.height == block_height
-                && tip_header.neptune_hash() != block_header.neptune_hash()
+            || tip_header.height == block_height && tip_header_digest != Hash::hash(block_header)
         {
             return false;
         }
@@ -566,14 +558,14 @@ impl ArchivalState {
 
         if previous_generation_blocks
             .iter()
-            .any(|x| x.neptune_hash() == tip_header.neptune_hash())
+            .any(|prev_block_header| tip_header_digest == Hash::hash(prev_block_header))
         {
             return true;
         }
 
         if offspring_of_generation_x
             .iter()
-            .any(|x| x.neptune_hash() == tip_header.neptune_hash())
+            .any(|offspring_block_header| tip_header_digest == Hash::hash(offspring_block_header))
         {
             return true;
         }
@@ -588,11 +580,10 @@ impl ArchivalState {
 
         if offspring_of_generation_x.len() == 1 {
             let offspring_candidate: BlockHeader = offspring_of_generation_x[0].clone();
-            if self
+            let number_of_blocks_with_height = self
                 .block_height_to_block_count(offspring_candidate.height)
-                .await
-                == 1
-            {
+                .await;
+            if number_of_blocks_with_height == 1 {
                 return true;
             } else {
                 // Track backwards from tip and check if we find offspring candidate
@@ -606,7 +597,7 @@ impl ArchivalState {
                         .unwrap();
                 }
 
-                return tip_ancestor.neptune_hash() == offspring_candidate.neptune_hash();
+                return Hash::hash(&tip_ancestor) == Hash::hash(&offspring_candidate);
             }
         }
 
@@ -631,7 +622,7 @@ impl ArchivalState {
         let mut parent_digest = input_block_header.prev_block_digest;
         let mut ret = vec![];
         while let Some(parent) = self.get_block_header(parent_digest).await {
-            ret.push(parent.neptune_hash());
+            ret.push(Hash::hash(&parent));
             parent_digest = parent.prev_block_digest;
             count -= 1;
             if count == 0 {
@@ -727,7 +718,7 @@ impl ArchivalState {
             ms_block_rollback_digest = roll_back_block.header.prev_block_digest;
         }
 
-        let mut addition_records: Vec<AdditionRecord<Hash>> =
+        let mut addition_records: Vec<AdditionRecord> =
             new_block.body.mutator_set_update.additions.clone();
         addition_records.reverse();
         let mut removal_records = new_block.body.mutator_set_update.removals.clone();
@@ -2253,8 +2244,8 @@ mod archival_state_tests {
             .get_ancestor_block_digests(mock_block_2.hash, 10)
             .await;
         assert_eq!(2, ancestor_digests.len());
-        assert_eq!(mock_block_1.header.neptune_hash(), ancestor_digests[0]);
-        assert_eq!(genesis.header.neptune_hash(), ancestor_digests[1]);
+        assert_eq!(Hash::hash(&mock_block_1.header), ancestor_digests[0]);
+        assert_eq!(Hash::hash(&genesis.header), ancestor_digests[1]);
 
         Ok(())
     }

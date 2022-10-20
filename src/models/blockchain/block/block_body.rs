@@ -1,10 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::simple_hasher::Hasher;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
-use crate::models::blockchain::digest::{Digest, Hashable2};
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 
@@ -19,9 +19,12 @@ pub struct BlockBody {
     pub stark_proof: Vec<BFieldElement>,
 }
 
-impl Hashable2 for BlockBody {
-    fn neptune_hash(&self) -> Digest {
-        let transaction_digest = self.transaction.neptune_hash().values();
+impl Hashable for BlockBody {
+    // FIXME: This .to_sequence() currently creates three digests and serializes those,
+    // rather than return the concatenated serialization of the three. For more predictable
+    // hashing behavior, consider changing `mutator_set.get_commitment()` into Hashable?
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        let transaction_digest = Hash::hash(&self.transaction);
 
         // Append mutator set's commitment
         //
@@ -35,12 +38,13 @@ impl Hashable2 for BlockBody {
             .get_commitment();
 
         // Append digest of STARK proof
-        let stark_proof_digest = Hash::new().hash_sequence(&self.stark_proof);
+        let stark_proof_digest = Hash::hash_slice(&self.stark_proof);
 
-        Digest::new(Hash::new().hash_many(&[
-            transaction_digest,
-            next_ms_acc_digest,
-            stark_proof_digest,
-        ]))
+        [
+            transaction_digest.to_sequence(),
+            next_ms_acc_digest.to_sequence(),
+            stark_proof_digest.to_sequence(),
+        ]
+        .concat()
     }
 }

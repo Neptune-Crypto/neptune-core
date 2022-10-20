@@ -1,11 +1,12 @@
-use super::{Amount, AMOUNT_SIZE_FOR_U32};
-use crate::models::blockchain::digest::{Digest, Hashable2};
-use crate::models::blockchain::shared::Hash;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::str::FromStr;
+
+use crate::models::blockchain::shared::Hash;
+
+use super::{Amount, AMOUNT_SIZE_FOR_U32};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::simple_hasher::Hasher;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 pub const PUBLIC_KEY_LENGTH_IN_BYTES: usize = 33;
 pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
@@ -31,30 +32,29 @@ impl Utxo {
     pub fn matches_pubkey(&self, public_key: secp256k1::PublicKey) -> bool {
         self.public_key == public_key
     }
+}
 
-    fn accumulate(&self) -> Vec<BFieldElement> {
+impl Hashable for Utxo {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
         let amount_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.amount.into();
         let bytes: [u8; PUBLIC_KEY_LENGTH_IN_BYTES] = self.public_key.serialize();
+
+        // FIXME: This is the only caller of `BFieldElement::from_byte_array`. All these
+        // sizes are fixed, so there's no reason to convert this into Vec<_> and back, and
+        // into Vec<_> again. ([u8] -> Vec<BFE> -> [BFE] -> Vec<BFE>)
         let pk_bfes: [BFieldElement; PUBLIC_KEY_LENGTH_IN_BFES] =
             BFieldElement::from_byte_array(bytes).try_into().unwrap();
         vec![amount_bfes.to_vec(), pk_bfes.to_vec()].concat()
     }
 }
 
-impl Hashable2 for Utxo {
-    fn neptune_hash(&self) -> Digest {
-        Digest::new(Hash::new().hash_sequence(&self.accumulate()))
-    }
-}
-
-// This implements the `std::hash::Hash` trait by hashing our digest type.  This
-// allows us to use it as keys in `HashMap`.  We must implement `Hash` manually,
-// but we must also derive `Eq`.  The Clippy warning is safe to suppress,
-// because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
+/// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
+///
+/// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
 #[allow(clippy::derive_hash_xor_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
-        let our_hash = Utxo::neptune_hash(self);
-        <Digest as StdHash>::hash(&our_hash, state);
+        let neptune_hash = Hash::hash(self);
+        StdHash::hash(&neptune_hash, state);
     }
 }

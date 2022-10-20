@@ -12,8 +12,8 @@
 //! all interaction should go through the wrapper.
 
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::digest::Hashable2;
-use crate::models::blockchain::transaction::{Amount, Transaction, TransactionDigest};
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::{Amount, Transaction};
 use crate::models::shared::SIZE_1GB_IN_BYTES;
 
 use get_size::GetSize;
@@ -26,6 +26,8 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
 /// transactions.  Different strategies are possible for selecting transactions
@@ -53,7 +55,7 @@ pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
-type LookupItem<'a> = (TransactionDigest, &'a Transaction);
+type LookupItem<'a> = (Digest, &'a Transaction);
 
 /// Timestamp of 'now' encoded as the duration since epoch.
 fn now() -> Duration {
@@ -79,27 +81,27 @@ impl Mempool {
     }
 
     /// Computes in O(1) from HashMap
-    pub fn contains(&self, transaction_id: &TransactionDigest) -> bool {
+    pub fn contains(&self, transaction_id: &Digest) -> bool {
         let lock = self.internal.read().unwrap();
         lock.contains(transaction_id)
     }
 
     /// Computes in O(1) from HashMap
-    pub fn get(&self, transaction_id: &TransactionDigest) -> Option<Transaction> {
+    pub fn get(&self, transaction_id: &Digest) -> Option<Transaction> {
         let lock = self.internal.read().unwrap();
         lock.get(transaction_id).cloned()
     }
 
     /// Returns `None` if transaction was not already in the mempool and did
     /// not conflict with other transactions. Otherwise returns `Some(Digest)`.
-    pub fn insert(&self, transaction: &Transaction) -> Option<TransactionDigest> {
+    pub fn insert(&self, transaction: &Transaction) -> Option<Digest> {
         let mut lock = self.internal.write().unwrap();
         lock.insert(transaction)
     }
 
     /// The operation is performed in Ο(log(N)) time (worst case).
     /// Computes in θ(lg N)
-    pub fn remove(&self, transaction_id: &TransactionDigest) -> Option<Transaction> {
+    pub fn remove(&self, transaction_id: &Digest) -> Option<Transaction> {
         let mut lock = self.internal.write().unwrap();
         lock.remove(transaction_id)
     }
@@ -175,9 +177,7 @@ impl Mempool {
     /// Yields the `transaction_digest` in order of descending `fee_density`, since
     /// users (miner or transaction merger) will likely only care about the most valuable transactions
     /// Computes in O(N lg N)
-    pub fn get_sorted_iter(
-        &self,
-    ) -> Rev<IntoSortedIter<TransactionDigest, FeeDensity, RandomState>> {
+    pub fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
         let lock = self.internal.read().unwrap();
         lock.get_sorted_iter()
     }
@@ -213,29 +213,28 @@ impl Mempool {
 pub struct MempoolInternal {
     max_size: usize,
     // Maintain for constant lookup
-    table: HashMap<TransactionDigest, Transaction>,
+    table: HashMap<Digest, Transaction>,
     // Maintain for fast min and max
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
-    queue: DoublePriorityQueue<TransactionDigest, FeeDensity>,
+    queue: DoublePriorityQueue<Digest, FeeDensity>,
 }
 
 impl Default for MempoolInternal {
     fn default() -> Self {
         Self {
-            table: HashMap::default(),
+            table: HashMap::<Digest, Transaction>::default(),
             queue: DoublePriorityQueue::default(),
-            // 1GB in bytes
             max_size: SIZE_1GB_IN_BYTES,
         }
     }
 }
 
 impl MempoolInternal {
-    fn contains(&self, transaction_id: &TransactionDigest) -> bool {
+    fn contains(&self, transaction_id: &Digest) -> bool {
         self.table.contains_key(transaction_id)
     }
 
-    fn get(&self, transaction_id: &TransactionDigest) -> Option<&Transaction> {
+    fn get(&self, transaction_id: &Digest) -> Option<&Transaction> {
         self.table.get(transaction_id)
     }
 
@@ -244,7 +243,7 @@ impl MempoolInternal {
     fn transaction_conflicts_with(
         &self,
         transaction: &Transaction,
-    ) -> Option<(TransactionDigest, Transaction)> {
+    ) -> Option<(Digest, Transaction)> {
         // This check could be made a lot more efficient, for example with an invertible Bloom filter
         let flipped_bloom_filter_indices: HashSet<_> = transaction
             .inputs
@@ -263,7 +262,7 @@ impl MempoolInternal {
         None
     }
 
-    fn insert(&mut self, transaction: &Transaction) -> Option<TransactionDigest> {
+    fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         {
             // Early exit on transactions too long into the future.
             let horizon =
@@ -288,7 +287,7 @@ impl MempoolInternal {
             }
         };
 
-        let transaction_id: TransactionDigest = Transaction::neptune_hash(transaction);
+        let transaction_id: Digest = Hash::hash(transaction);
 
         self.queue.push(transaction_id, transaction.fee_density());
         self.table.insert(transaction_id, transaction.to_owned());
@@ -306,7 +305,7 @@ impl MempoolInternal {
         None
     }
 
-    fn remove(&mut self, transaction_id: &TransactionDigest) -> Option<Transaction> {
+    fn remove(&mut self, transaction_id: &Digest) -> Option<Transaction> {
         if let rv @ Some(_) = self.table.remove(transaction_id) {
             self.queue.remove(transaction_id);
             debug_assert_eq!(self.table.len(), self.queue.len());
@@ -468,7 +467,7 @@ impl MempoolInternal {
         self.table.shrink_to_fit()
     }
 
-    fn get_sorted_iter(&self) -> Rev<IntoSortedIter<TransactionDigest, FeeDensity, RandomState>> {
+    fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
         let dpq_clone = self.queue.clone();
         dpq_clone.into_sorted_iter().rev()
     }
@@ -503,7 +502,7 @@ mod tests {
         let wallet_state = get_mock_wallet_state(None).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
-        let transaction_digest = &Transaction::neptune_hash(&transaction);
+        let transaction_digest = &Hash::hash(&transaction);
         assert!(!mempool.contains(transaction_digest));
         mempool.insert(&transaction);
         assert!(mempool.contains(transaction_digest));
@@ -735,7 +734,7 @@ mod tests {
             tx_by_preminer_low_fee,
             preminer_state
                 .mempool
-                .get(&tx_by_preminer_low_fee.neptune_hash())
+                .get(&Hash::hash(&tx_by_preminer_low_fee))
                 .unwrap()
         );
 
@@ -750,7 +749,7 @@ mod tests {
             tx_by_preminer_high_fee,
             preminer_state
                 .mempool
-                .get(&tx_by_preminer_high_fee.neptune_hash())
+                .get(&Hash::hash(&tx_by_preminer_high_fee))
                 .unwrap()
         );
 
@@ -765,7 +764,7 @@ mod tests {
             tx_by_preminer_high_fee,
             preminer_state
                 .mempool
-                .get(&tx_by_preminer_high_fee.neptune_hash())
+                .get(&Hash::hash(&tx_by_preminer_high_fee))
                 .unwrap()
         );
 

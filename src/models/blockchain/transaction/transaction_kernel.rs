@@ -1,8 +1,7 @@
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::simple_hasher::{Hashable, Hasher};
-
-use crate::models::blockchain::digest::{Digest, Hashable2};
-use crate::models::blockchain::shared::Hash;
+use itertools::Itertools;
+use twenty_first::{
+    shared_math::b_field_element::BFieldElement, util_types::algebraic_hasher::Hashable,
+};
 
 use super::{utxo::Utxo, Amount};
 
@@ -14,40 +13,27 @@ pub struct TransactionKernel {
     pub timestamp: BFieldElement,
 }
 
-impl Hashable2 for TransactionKernel {
-    fn neptune_hash(&self) -> Digest {
-        // Hash all inputs
-        let inputs_preimage: Vec<BFieldElement> = self
+impl Hashable for TransactionKernel {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        let inputs_preimage = self
             .input_utxos
             .iter()
-            .flat_map(|input_utxo| input_utxo.neptune_hash().values())
-            .collect();
+            .flat_map(|input_utxo| input_utxo.to_sequence());
 
-        // Hash all outputs
-        let outputs_preimage: Vec<BFieldElement> = self
+        let outputs_preimage = self
             .output_utxos
             .iter()
-            .flat_map(|output_utxo| output_utxo.neptune_hash().values())
-            .collect();
+            .flat_map(|output_utxo| output_utxo.to_sequence());
 
-        // Hash all public scripts
-        let public_scripts_preimage: Vec<BFieldElement> = self.public_scripts.concat();
+        let public_scripts_preimage = self.public_scripts.concat().into_iter();
+        let fee_preimage = self.fee.to_sequence().into_iter();
+        let timestamp_preimage = vec![self.timestamp].into_iter();
 
-        // Hash fee
-        let fee_preimage: Vec<BFieldElement> = self.fee.to_sequence();
-
-        // Hash timestamp
-        let timestamp_preimage = vec![self.timestamp];
-
-        let all_digests = vec![
-            inputs_preimage,
-            outputs_preimage,
-            fee_preimage,
-            timestamp_preimage,
-            public_scripts_preimage,
-        ]
-        .concat();
-
-        Digest::new(Hash::new().hash_sequence(&all_digests))
+        inputs_preimage
+            .chain(outputs_preimage)
+            .chain(public_scripts_preimage)
+            .chain(fee_preimage)
+            .chain(timestamp_preimage)
+            .collect_vec()
     }
 }

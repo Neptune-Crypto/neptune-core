@@ -1,18 +1,9 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
-use clap::Parser;
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
-use mutator_set_tf::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
-use num_traits::One;
-use num_traits::Zero;
+use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
 use rand::{distributions::Alphanumeric, Rng};
 use rusty_leveldb;
@@ -31,19 +22,29 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
+use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+use mutator_set_tf::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
+use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
+
+use twenty_first::amount::u32s::U32s;
+use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
-use crate::config_models::{cli_args, network::Network};
+use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::digest::Digest;
-use crate::models::blockchain::digest::Hashable2;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::Amount;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
@@ -193,7 +194,6 @@ pub async fn get_mock_global_state(
     let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
     let archival_state =
         ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync).await;
-    let cli_default_args = cli_args::Args::from_iter::<Vec<String>, _>(vec![]);
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
     for i in 0..peer_count {
@@ -214,7 +214,7 @@ pub async fn get_mock_global_state(
     let mempool = Mempool::default();
     GlobalState {
         chain: blockchain_state,
-        cli: cli_default_args,
+        cli: Default::default(),
         net: networking_state,
         wallet_state: get_mock_wallet_state(wallet).await,
         mempool,
@@ -408,10 +408,10 @@ impl<Item> stream::Stream for Mock<Item> {
 pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     let tx = &mut block.body.transaction;
     let output_randomness: Digest = Digest::new(random_elements_array());
-    let addition_record: AdditionRecord<Hash> = block
+    let addition_record: AdditionRecord = block
         .body
         .previous_mutator_set_accumulator
-        .commit(&utxo.neptune_hash().values(), &output_randomness.values());
+        .commit(&Hash::hash(&utxo), &output_randomness);
     tx.outputs.push((utxo, output_randomness));
 
     // Add addition record for this output
@@ -429,9 +429,8 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment =
-        Digest::new(block.body.next_mutator_set_accumulator.get_commitment());
-    block.header.block_body_merkle_root = block.body.neptune_hash();
+    block.header.mutator_set_commitment = block.body.next_mutator_set_accumulator.get_commitment();
+    block.header.block_body_merkle_root = Hash::hash(&block.body);
 }
 
 /// Add an unsigned (incorrectly signed) devnet input to a transaction
@@ -471,9 +470,8 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment =
-        Digest::new(block.body.next_mutator_set_accumulator.get_commitment());
-    block.header.block_body_merkle_root = block.body.neptune_hash();
+    block.header.mutator_set_commitment = block.body.next_mutator_set_accumulator.get_commitment();
+    block.header.block_body_merkle_root = Hash::hash(&block.body);
 }
 
 pub fn add_unsigned_input_to_block(
@@ -481,11 +479,11 @@ pub fn add_unsigned_input_to_block(
     consumed_utxo: Utxo,
     membership_proof: MsMembershipProof<Hash>,
 ) {
-    let item = consumed_utxo.neptune_hash();
+    let item = Hash::hash(&consumed_utxo);
     let input_removal_record = block
         .body
         .previous_mutator_set_accumulator
-        .drop(&item.values(), &membership_proof);
+        .drop(&item, &membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(
         block,
         consumed_utxo,
@@ -502,18 +500,16 @@ pub async fn add_unsigned_input_to_block_ams(
     ams: &Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>>,
     aocl_leaf_index: u128,
 ) {
-    let item = consumed_utxo.neptune_hash();
+    let item = Hash::hash(&consumed_utxo);
     let input_membership_proof = ams
         .lock()
         .await
-        .restore_membership_proof(&item.values(), &randomness.values(), aocl_leaf_index)
+        .restore_membership_proof(&item, &randomness, aocl_leaf_index)
         .unwrap();
 
     // Sanity check that restored membership proof agrees with AMS
     assert!(
-        ams.lock()
-            .await
-            .verify(&item.values(), &input_membership_proof),
+        ams.lock().await.verify(&item, &input_membership_proof),
         "Restored MS membership proof must validate against own AMS"
     );
 
@@ -522,7 +518,7 @@ pub async fn add_unsigned_input_to_block_ams(
         block
             .body
             .previous_mutator_set_accumulator
-            .verify(&item.values(), &input_membership_proof),
+            .verify(&item, &input_membership_proof),
         "Restored MS membership proof must validate against input block"
     );
 
@@ -530,7 +526,7 @@ pub async fn add_unsigned_input_to_block_ams(
         .lock()
         .await
         .set_commitment
-        .drop(&item.values(), &input_membership_proof);
+        .drop(&item, &input_membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(
         block,
         consumed_utxo,
@@ -547,11 +543,8 @@ pub fn new_random_wallet() -> Wallet {
 ///
 /// This mock currently contains a lot of things that don't pass block validation.
 pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNetInput {
-    let mock_mmr_membership_proof = MmrMembershipProof {
-        data_index: 0,
-        authentication_path: vec![],
-    };
-    let randomness = Digest::default().values();
+    let mock_mmr_membership_proof = MmrMembershipProof::new(0, vec![]);
+    let randomness = Digest::default();
     let mock_ms_membership_proof = MsMembershipProof {
         randomness,
         auth_path_aocl: mock_mmr_membership_proof,
@@ -632,7 +625,7 @@ pub fn make_mock_transaction_with_wallet(
     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
     let output_utxos_with_digest = outputs
         .into_iter()
-        .map(|out_utxo| (out_utxo, Utxo::neptune_hash(&out_utxo)))
+        .map(|out_utxo| (out_utxo, Hash::hash(&out_utxo)))
         .collect::<Vec<_>>();
 
     let timestamp = timestamp.unwrap_or_else(|| {
@@ -670,10 +663,10 @@ pub fn make_mock_block(
     let transaction = make_mock_transaction(vec![], vec![(coinbase_utxo, output_randomness)]);
     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
     let previous_ms = new_ms.clone();
-    let coinbase_digest: Digest = coinbase_utxo.neptune_hash();
+    let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
-    let mut coinbase_addition_record: AdditionRecord<Hash> =
-        new_ms.commit(&coinbase_digest.values(), &output_randomness.values());
+    let mut coinbase_addition_record: AdditionRecord =
+        new_ms.commit(&coinbase_digest, &output_randomness);
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
@@ -696,7 +689,7 @@ pub fn make_mock_block(
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
-        mutator_set_commitment: Digest::new(new_ms.get_commitment()),
+        mutator_set_commitment: new_ms.get_commitment(),
         prev_block_digest: previous_block.hash,
         timestamp: block_body.transaction.timestamp,
         nonce: [zero, zero, zero],
@@ -707,7 +700,7 @@ pub fn make_mock_block(
             Some(td) => td,
             None => U32s::one(),
         },
-        block_body_merkle_root: block_body.neptune_hash(),
+        block_body_merkle_root: Hash::hash(&block_body),
         uncles: vec![],
     };
 

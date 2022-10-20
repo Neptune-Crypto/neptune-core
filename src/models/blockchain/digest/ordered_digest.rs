@@ -4,9 +4,8 @@ use serde::Serialize;
 
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
-
-use super::Digest;
 
 // The data structure `RescuePrimeDigest` is primarily needed, so we can make
 // database keys out of rescue prime digests.

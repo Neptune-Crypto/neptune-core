@@ -1,20 +1,18 @@
-use super::blockchain::{
-    block::{
-        block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE},
-        block_height::BlockHeight,
-        transfer_block::TransferBlock,
-        Block,
-    },
-    digest::{Digest, Hashable2},
-    transaction::{Transaction, TransactionDigest},
-};
-use crate::config_models::network::Network;
 use serde::{Deserialize, Serialize};
-use std::{
-    net::SocketAddr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::net::SocketAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
+use twenty_first::shared_math::rescue_prime_digest::Digest;
+
 use twenty_first::amount::u32s::U32s;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use super::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
+use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::transfer_block::TransferBlock;
+use super::blockchain::block::Block;
+use super::blockchain::shared::Hash;
+use super::blockchain::transaction::Transaction;
+use crate::config_models::network::Network;
 
 const BAD_BLOCK_BATCH_REQUEST_SEVERITY: u16 = 10;
 const INVALID_BLOCK_SEVERITY: u16 = 10;
@@ -203,7 +201,7 @@ pub enum ConnectionStatus {
 /// sender.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionNotification {
-    pub transaction_digest: TransactionDigest,
+    pub transaction_digest: Digest,
     // The timestamp of a transaction notification is the associated transaction's timestamp.
     // The timestamp is used for mempool purposes.
     pub timestamp: SystemTime,
@@ -211,10 +209,12 @@ pub struct TransactionNotification {
 
 impl From<Transaction> for TransactionNotification {
     fn from(transaction: Transaction) -> Self {
+        let transaction_digest = Hash::hash(&transaction);
+        let timestamp =
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(transaction.timestamp.value());
         Self {
-            transaction_digest: transaction.neptune_hash(),
-            timestamp: std::time::UNIX_EPOCH
-                + std::time::Duration::from_secs(transaction.timestamp.value()),
+            transaction_digest,
+            timestamp,
         }
     }
 }
@@ -236,7 +236,7 @@ pub enum PeerMessage {
     TransactionNotification(TransactionNotification),
     /// Send a request that this node would like a copy of the transaction with
     /// digest as specified by the argument.
-    TransactionRequest(TransactionDigest),
+    TransactionRequest(Digest),
     PeerListRequest,
     /// (socket address, instance_id)
     PeerListResponse(Vec<(SocketAddr, u128)>),

@@ -271,19 +271,17 @@ mod connect_tests {
     use anyhow::{bail, Result};
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
+    use twenty_first::shared_math::rescue_prime_digest::Digest;
 
-    use crate::{
-        config_models::network::Network,
-        models::{
-            blockchain::digest::Digest,
-            peer::{ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding},
-        },
-        tests::shared::{
-            get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block,
-            get_dummy_peer_connection_data, get_test_genesis_setup, to_bytes,
-        },
-        MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
+    use crate::config_models::network::Network;
+    use crate::models::peer::{
+        ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
     };
+    use crate::tests::shared::{
+        get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block,
+        get_dummy_peer_connection_data, get_test_genesis_setup, to_bytes,
+    };
+    use crate::{MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE};
 
     #[traced_test]
     #[tokio::test]

@@ -10,7 +10,7 @@ pub struct Args {
     /// List IP addresses to ban connections from. You can still make outgoing connections to these IPs by setting the `peers` argument.
     /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8.
     #[clap(long)]
-    pub ban: Vec<std::net::IpAddr>,
+    pub ban: Vec<IpAddr>,
 
     /// Set threshhold for autobanning peers.
     #[clap(long, default_value = "50")]
@@ -47,7 +47,7 @@ pub struct Args {
 
     /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
     #[structopt(long)]
-    pub peers: Vec<std::net::SocketAddr>,
+    pub peers: Vec<SocketAddr>,
 
     /// Specify network, `main`, `testnet`, or `regtest`
     #[structopt(long, short, default_value = "main")]
@@ -58,5 +58,30 @@ impl Args {
     pub fn get_own_listen_address(&self) -> Option<SocketAddr> {
         // TODO: Should this function return Option<SocketAddr> or SocketAddr?
         Some(SocketAddr::new(self.listen_addr, self.peer_port))
+    }
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        let empty: Vec<String> = vec![];
+        Self::parse_from(empty)
+    }
+}
+
+#[cfg(test)]
+mod cli_args_tests {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+
+    #[test]
+    fn default_args_test() {
+        let default_args = Args::default();
+
+        assert_eq!(50, default_args.peer_tolerance);
+        assert_eq!(8, default_args.max_peers);
+        assert_eq!(9798, default_args.peer_port);
+        assert_eq!(9799, default_args.rpc_port);
+        assert_eq!(Ipv4Addr::new(127, 0, 0, 1), default_args.listen_addr);
     }
 }
