@@ -14,14 +14,6 @@ pub struct Chunk {
     pub bits: [u32; CHUNK_SIZE / BITS_PER_U32],
 }
 
-impl Default for Chunk {
-    fn default() -> Self {
-        Self {
-            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
-        }
-    }
-}
-
 impl Chunk {
     pub fn empty_chunk() -> Self {
         let bits = [0; CHUNK_SIZE / BITS_PER_U32];
@@ -60,7 +52,7 @@ impl Chunk {
     }
 
     pub fn or(self, other: Self) -> Self {
-        let mut ret = Self::default();
+        let mut ret = Self::empty_chunk();
         for ((ret_elem, self_element), other_element) in ret
             .bits
             .iter_mut()
@@ -80,7 +72,7 @@ impl Chunk {
     }
 
     pub fn and(self, other: Self) -> Self {
-        let mut ret = Self::default();
+        let mut ret = Self::empty_chunk();
         for ((ret_elem, self_element), other_element) in ret
             .bits
             .iter_mut()
@@ -217,15 +209,15 @@ mod chunk_tests {
 
     #[test]
     fn xor_and_and_and_is_unset_test() {
-        let mut chunk_a = Chunk::default();
+        let mut chunk_a = Chunk::empty_chunk();
         chunk_a.set_bit(12);
         chunk_a.set_bit(13);
 
-        let mut chunk_b = Chunk::default();
+        let mut chunk_b = Chunk::empty_chunk();
         chunk_b.set_bit(48);
         chunk_b.set_bit(13);
 
-        let mut expected_xor = Chunk::default();
+        let mut expected_xor = Chunk::empty_chunk();
         expected_xor.set_bit(12);
         expected_xor.set_bit(48);
 
@@ -237,7 +229,7 @@ mod chunk_tests {
             "XOR on chunks must behave as expected"
         );
 
-        let mut expected_and = Chunk::default();
+        let mut expected_and = Chunk::empty_chunk();
         expected_and.set_bit(13);
 
         chunk_c = chunk_a.and(chunk_b);
@@ -250,7 +242,7 @@ mod chunk_tests {
         assert!(!chunk_a.is_unset());
         assert!(!chunk_b.is_unset());
         assert!(!chunk_c.is_unset());
-        assert!(Chunk::default().is_unset());
+        assert!(Chunk::empty_chunk().is_unset());
     }
 
     #[test]

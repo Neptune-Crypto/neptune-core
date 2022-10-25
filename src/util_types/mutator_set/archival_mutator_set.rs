@@ -280,7 +280,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
                 let index_in_chunk = (diff_index % CHUNK_SIZE as u128) as usize;
                 chunk_index_to_revert_chunk
                     .entry(chunk_index)
-                    .or_insert_with(Chunk::default)
+                    .or_insert_with(Chunk::empty_chunk)
                     .set_bit(index_in_chunk);
             }
         }

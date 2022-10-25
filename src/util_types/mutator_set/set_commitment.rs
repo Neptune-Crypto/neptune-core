@@ -442,7 +442,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             } else {
                 chunk_index_to_chunk_mutation
                     .entry(bit_index / CHUNK_SIZE as u128)
-                    .or_insert_with(Chunk::default)
+                    .or_insert_with(Chunk::empty_chunk)
                     .set_bit(*bit_index as usize % CHUNK_SIZE);
             }
         });
