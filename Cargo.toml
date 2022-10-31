@@ -1,7 +1,5 @@
 [package]
-authors = [
-    "Triton Software",
-]
+authors = ["Triton Software"]
 edition = "2021"
 name = "neptune-core"
 version = "0.3.0"

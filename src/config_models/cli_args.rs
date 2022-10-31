@@ -3,25 +3,51 @@ use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
 use clap::Parser;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 
-/// Decalarative specification of command-line arguments
+/// The `neptune-core` command-line program starts a Neptune node.
 #[derive(Parser, Debug, Clone)]
 #[clap(author, version, about)]
 pub struct Args {
-    /// List IP addresses to ban connections from. You can still make outgoing connections to these IPs by setting the `peers` argument.
-    /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8.
-    #[clap(long)]
+    /// The data directory that contains the wallet and blockchain state
+    ///
+    /// The default varies by operating system, and includes the network, e.g.
+    ///
+    /// Linux:   /home/alice/.config/neptune/core/main
+    ///
+    /// Windows: C:\Users\Alice\AppData\Roaming\neptune\core\main
+    ///
+    /// macOS:   /Users/Alice/Library/Application Support/neptune/main
+    #[clap(long, value_name = "DIR")]
+    pub data_dir: Option<PathBuf>,
+
+    /// Ban connections to this node from IP address.
+    ///
+    /// This node can still make outgoing connections to IP address.
+    ///
+    /// To do this, see `--peers`.
+    ///
+    /// E.g.: --ban 1.2.3.4 --ban 5.6.7.8
+    #[clap(long, value_name = "IP")]
     pub ban: Vec<IpAddr>,
 
-    /// Set threshhold for autobanning peers.
-    #[clap(long, default_value = "50")]
+    /// Refuse connection if peer is in bad standing.
+    ///
+    /// This sets the threshold for when a peer should be automatically refused.
+    ///
+    /// For a list of reasons that cause bad standing, see <MISSING>.
+    #[clap(long, default_value = "50", value_name = "VALUE")]
     pub peer_tolerance: u16,
 
-    /// Set maximum number of peers, will not prevent outgoing connections as specified in the `peers` argument.
-    #[clap(long, default_value = "8")]
+    /// Maximum number of peers to accept connections from.
+    ///
+    /// Will not prevent outgoing connections made with `--peers`.
+    #[clap(long, default_value = "8", value_name = "COUNT")]
     pub max_peers: u16,
 
-    /// Set mining argument to participate in competitive mining.
+    /// Should this node participate in competitive mining?
+    ///
+    /// Mining is disabled by default.
     #[clap(long)]
     pub mine: bool,
 
@@ -30,23 +56,23 @@ pub struct Args {
     /// Units: B (bytes), K (kilobytes), M (megabytes), G (gigabytes)
     ///
     /// E.g. --max-mempool-size 500M
-    #[clap(long, default_value = "1G")]
+    #[clap(long, default_value = "1G", value_name = "SIZE")]
     pub max_mempool_size: ByteSize,
 
     /// Port on which to listen for peer connections.
-    #[clap(long, default_value = "9798")]
+    #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,
 
     /// Port on which to listen for RPC connections.
-    #[clap(long, default_value = "9799")]
+    #[clap(long, default_value = "9799", value_name = "PORT")]
     pub rpc_port: u16,
 
-    // TODO: Should this value be Option<IpAddr> instead?
     /// IP on which to listen for peer connections.
     #[clap(short, long, default_value = "127.0.0.1")]
     pub listen_addr: IpAddr,
 
     /// Max number of blocks that the client can catch up to before going into syncing mode.
+    ///
     /// The process running this program should have access to at least the number of blocks
     /// in this field multiplied with the max block size amounts of RAM. Probably 1.5 to 2 times
     /// that amount.
