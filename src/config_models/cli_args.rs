@@ -1,4 +1,5 @@
 use super::network::Network;
+use bytesize::ByteSize;
 use clap::builder::RangedI64ValueParser;
 use clap::Parser;
 use std::net::{IpAddr, SocketAddr};
@@ -23,6 +24,14 @@ pub struct Args {
     /// Set mining argument to participate in competitive mining.
     #[clap(long)]
     pub mine: bool,
+
+    /// Prune the mempool when it exceeds this size in RAM.
+    ///
+    /// Units: B (bytes), K (kilobytes), M (megabytes), G (gigabytes)
+    ///
+    /// E.g. --max-mempool-size 500M
+    #[clap(long, default_value = "1G")]
+    pub max_mempool_size: ByteSize,
 
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798")]

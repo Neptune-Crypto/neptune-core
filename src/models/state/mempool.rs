@@ -14,8 +14,8 @@
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::{Amount, Transaction};
-use crate::models::shared::SIZE_1GB_IN_BYTES;
 
+use bytesize::ByteSize;
 use get_size::GetSize;
 use num_traits::Zero;
 use priority_queue::{double_priority_queue::iterators::IntoSortedIter, DoublePriorityQueue};
@@ -69,13 +69,17 @@ pub struct Mempool {
 
 impl Default for Mempool {
     fn default() -> Self {
-        Self {
-            internal: Arc::new(StdRwLock::new(MempoolInternal::default())),
-        }
+        Mempool::new(ByteSize::gb(1))
     }
 }
 
 impl Mempool {
+    pub fn new(max_size: ByteSize) -> Self {
+        let mempool_internal = MempoolInternal::new(max_size);
+        let internal = Arc::new(StdRwLock::new(mempool_internal));
+        Mempool { internal }
+    }
+
     pub fn get_size(&self) -> usize {
         self.internal.get_size()
     }
@@ -219,17 +223,18 @@ pub struct MempoolInternal {
     queue: DoublePriorityQueue<Digest, FeeDensity>,
 }
 
-impl Default for MempoolInternal {
-    fn default() -> Self {
+impl MempoolInternal {
+    fn new(max_size: ByteSize) -> Self {
+        let max_size = max_size.0.try_into().unwrap();
+        let table = Default::default();
+        let queue = Default::default();
         Self {
-            table: HashMap::<Digest, Transaction>::default(),
-            queue: DoublePriorityQueue::default(),
-            max_size: SIZE_1GB_IN_BYTES,
+            max_size,
+            table,
+            queue,
         }
     }
-}
 
-impl MempoolInternal {
     fn contains(&self, transaction_id: &Digest) -> bool {
         self.table.contains_key(transaction_id)
     }
@@ -498,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
-        let mempool = Mempool::default();
+        let mempool = Mempool::new(ByteSize::gb(1));
         let wallet_state = get_mock_wallet_state(None).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);

@@ -52,6 +52,7 @@ tarpc = { version = "0.30", features = ["tokio1", "serde-transport", "tcp"] }
 priority-queue = "1.2"
 get-size = { version = "^0.1", features = ["derive"] }
 num-rational = "0.4"
+bytesize = "1.1"
 
 [dev-dependencies]
 pin-project-lite = "0.2"
