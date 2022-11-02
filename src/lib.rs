@@ -11,7 +11,7 @@ pub mod rpc_server;
 #[cfg(test)]
 mod tests;
 
-use crate::config_models::data_directory::get_data_directory;
+use crate::config_models::data_directory::DataDirectory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::main_loop::MainLoopHandler;
 use crate::models::channel::RPCServerToMain;
@@ -63,43 +63,39 @@ const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    let root_data_dir_path_buf = get_data_directory(cli_args.network).unwrap();
+    // Clone for injecting into `GlobalState`
+    let cli = cli_args.clone();
 
-    // The root path is where both the wallet and all databases are stored
-    let root_data_dir_path = root_data_dir_path_buf.as_path();
-
-    // Create root directory for databases and wallet if it does not already exist
-    std::fs::create_dir_all(root_data_dir_path).unwrap_or_else(|_| {
-        panic!(
-            "Failed to create data directory in {}",
-            root_data_dir_path_buf.to_string_lossy()
-        )
-    });
+    // Get data directory (wallet, block database), create one if none exists
+    let data_dir = DataDirectory::get(cli_args.data_dir, cli_args.network)?;
+    DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path())?;
+    debug!("Data directory is {}", data_dir);
 
     // Get wallet object, create one if none exists
-    debug!("Data root path is {:?}", root_data_dir_path_buf);
-    let wallet_file = Wallet::wallet_path(root_data_dir_path);
-    let wallet: Wallet = Wallet::read_from_file_or_create(&wallet_file);
-    let wallet_state = WalletState::new_from_wallet(wallet, cli_args.network).await;
+    let wallet: Wallet = Wallet::read_from_file_or_create(&data_dir.wallet_file_path())?;
+    let wallet_state = WalletState::new_from_wallet(&data_dir, wallet).await;
 
-    // Connect to or create databases for block state, and for peer state
-    let block_index_db = ArchivalState::initialize_block_index_database(root_data_dir_path)?;
+    // Connect to or create databases for block index, peers, mutator set, block sync
+    let block_index_db = ArchivalState::initialize_block_index_database(&data_dir)?;
     let block_index_db: Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>> =
         Arc::new(tokio::sync::Mutex::new(block_index_db));
-    let peer_databases = NetworkingState::initialize_peer_databases(root_data_dir_path)?;
+
+    let peer_databases = NetworkingState::initialize_peer_databases(&data_dir)?;
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
         Arc::new(tokio::sync::Mutex::new(peer_databases));
+
     let (archival_mutator_set, ms_block_sync_db): (
         ArchivalMutatorSet<Hash>,
         RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
-    ) = ArchivalState::initialize_mutator_set(root_data_dir_path).unwrap();
+    ) = ArchivalState::initialize_mutator_set(&data_dir)?;
     let archival_mutator_set: Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>> =
         Arc::new(tokio::sync::Mutex::new(archival_mutator_set));
     let ms_block_sync_db = Arc::new(tokio::sync::Mutex::new(ms_block_sync_db));
+
     let archival_state = ArchivalState::new(
+        data_dir,
         block_index_db,
         archival_mutator_set,
-        root_data_dir_path_buf,
         ms_block_sync_db,
     )
     .await;
@@ -136,7 +132,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let mempool = Mempool::default();
     let state = GlobalState {
         chain: blockchain_state,
-        cli: cli_args,
+        cli,
         net: networking_state,
         wallet_state,
         mempool,

@@ -1,7 +1,7 @@
 pub mod wallet_block_utxos;
 pub mod wallet_status;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use itertools::Itertools;
 use num_traits::{One, Zero};
 use secp256k1::{ecdsa, Secp256k1};
@@ -26,8 +26,7 @@ use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 
 use self::wallet_block_utxos::WalletBlockIOSums;
 use self::wallet_status::{WalletStatus, WalletStatusElement};
-use crate::config_models::data_directory::get_data_directory;
-use crate::config_models::network::Network;
+use crate::config_models::data_directory::DataDirectory;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::Block;
@@ -40,11 +39,11 @@ use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
 use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::Hash;
 
-const WALLET_FILE_NAME: &str = "wallet.dat";
+pub const WALLET_FILE_NAME: &str = "wallet.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
 const STANDARD_WALLET_VERSION: u8 = 0;
-const WALLET_DB_NAME: &str = "wallet_block_db";
-const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
+pub const WALLET_DB_NAME: &str = "wallet_block_db";
+pub const WALLET_OUTPUT_COUNT_DB_NAME: &str = "wallout_output_count_db";
 
 /// Generate a new secret
 pub fn generate_secret_key() -> Digest {
@@ -90,65 +89,58 @@ impl Wallet {
 
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
     /// and save it to `wallet_file`.
-    pub fn read_from_file_or_create(wallet_file: &Path) -> Self {
-        let ret = if wallet_file.exists() {
-            Self::read_from_file(wallet_file)
+    pub fn read_from_file_or_create(wallet_file_path: &Path) -> Result<Self> {
+        let wallet = if wallet_file_path.exists() {
+            Self::read_from_file(wallet_file_path)?
         } else {
             let new_secret: Digest = generate_secret_key();
             let new_wallet: Wallet = Wallet::new(new_secret);
-            new_wallet.create_wallet_file(wallet_file);
+            new_wallet.create_wallet_file(wallet_file_path)?;
             new_wallet
         };
 
         // Sanity check that wallet file was stored on disk.
-        assert!(
-            wallet_file.exists(),
-            "wallet file must exist on disk after creation or opening."
-        );
+        if !wallet_file_path.exists() {
+            bail!(
+                "Wallet file '{}' must exist on disk after reading/creating it.",
+                wallet_file_path.to_string_lossy()
+            );
+        }
 
-        ret
+        Ok(wallet)
     }
 
     /// Read Wallet from file as JSON
-    fn read_from_file(wallet_file: &Path) -> Self {
-        let wallet_file_content: String = fs::read_to_string(wallet_file).unwrap_or_else(|err| {
-            panic!(
-                "Failed to read wallet from {}: {}",
+    fn read_from_file(wallet_file: &Path) -> Result<Self> {
+        let wallet_file_content: String = fs::read_to_string(wallet_file).with_context(|| {
+            format!(
+                "Failed to read wallet from {}",
                 wallet_file.to_string_lossy(),
-                err
             )
-        });
+        })?;
 
-        serde_json::from_str::<Wallet>(&wallet_file_content).unwrap_or_else(|err| {
-            panic!(
-                "Failed to decode wallet from {}: {}",
+        serde_json::from_str::<Wallet>(&wallet_file_content).with_context(|| {
+            format!(
+                "Failed to decode wallet from {}",
                 wallet_file.to_string_lossy(),
-                err
             )
         })
     }
 
     /// Create wallet file with restrictive permissions and save this wallet to disk
-    fn create_wallet_file(&self, wallet_file: &Path) {
+    fn create_wallet_file(&self, wallet_file: &Path) -> Result<()> {
         let wallet_as_json: String = serde_json::to_string(self).unwrap();
 
         if cfg!(windows) {
-            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_as_json);
+            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_as_json)
         } else {
-            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_as_json);
+            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_as_json)
         }
-    }
-
-    /// Derive the filesystem path for Wallet within data directory
-    pub fn wallet_path(root_data_dir_path: &Path) -> PathBuf {
-        let mut pb = root_data_dir_path.to_path_buf();
-        pb.push(WALLET_FILE_NAME);
-        pb
     }
 
     #[cfg(target_family = "unix")]
     /// Create a wallet file, and set restrictive permissions
-    fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) {
+    fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) -> Result<()> {
         // On Unix/Linux we set the file permissions to 600, to disallow
         // other users on the same machine to access the secrets.
         // I don't think the `std::os::unix` library can be imported on a Windows machine,
@@ -160,17 +152,17 @@ impl Wallet {
             .mode(0o600)
             .open(path)
             .unwrap();
-        fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
+        fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
     }
 
     /// Create a wallet file, without setting restrictive UNIX permissions
-    fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) {
+    fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) -> Result<()> {
         fs::OpenOptions::new()
             .create(true)
             .write(true)
             .open(path)
             .unwrap();
-        fs::write(path.clone(), wallet_as_json).expect("Failed to write wallet file to disk");
+        fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
     }
 
     pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
@@ -239,21 +231,18 @@ pub struct WalletState {
 }
 
 impl WalletState {
-    pub async fn new_from_wallet(wallet: Wallet, network: Network) -> Self {
+    pub async fn new_from_wallet(data_dir: &DataDirectory, wallet: Wallet) -> Self {
         // Create or connect to wallet block DB
-        let wallet_db: RustyLevelDB<WalletDbKey, WalletDbValue> =
-            RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
-                get_data_directory(network).unwrap(),
-                WALLET_DB_NAME,
-                rusty_leveldb::Options::default(),
-            )
-            .unwrap();
+        let wallet_db = RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
+            &data_dir.wallet_database_dir_path(),
+            rusty_leveldb::Options::default(),
+        )
+        .unwrap();
         let wallet_db = Arc::new(TokioMutex::new(wallet_db));
 
         // Create or connect to DB for output count
-        let outgoing_utxo_count_db: RustyLevelDB<(), u128> = RustyLevelDB::<(), u128>::new(
-            get_data_directory(network).unwrap(),
-            WALLET_OUTPUT_COUNT_DB_NAME,
+        let outgoing_utxo_count_db = RustyLevelDB::<(), u128>::new(
+            &data_dir.wallet_output_count_database_dir_path(),
             rusty_leveldb::Options::default(),
         )
         .unwrap();
@@ -742,10 +731,10 @@ mod wallet_tests {
     use num_traits::One;
     use tracing_test::traced_test;
 
+    use crate::config_models::network::Network;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
     use crate::models::blockchain::shared::Hash;
-    use crate::models::state::archival_state::ArchivalState;
     use crate::tests::shared::{
         add_output_to_block, add_unsigned_input_to_block, add_unsigned_input_to_block_ams,
         get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
@@ -1110,7 +1099,7 @@ mod wallet_tests {
         // an archival state is needed for how we currently add inputs to a transaction.
         // So it's just used to generate test data, not in any of the functions that are
         // actually tested.
-        let archival_state: ArchivalState = make_unit_test_archival_state().await;
+        let (archival_state, _peer_databases) = make_unit_test_archival_state(Network::Main).await;
         let own_wallet = Wallet::new(generate_secret_key());
         let own_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
         let premine_wallet = get_mock_wallet_state(None).await.wallet;

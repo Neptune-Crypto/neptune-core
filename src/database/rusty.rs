@@ -1,25 +1,31 @@
 use super::leveldb::LevelDB;
 use anyhow::Result;
 use rusty_leveldb::{DBIterator, LdbIterator, WriteBatch, DB};
-use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    marker::PhantomData,
-    path::{Path, PathBuf},
-};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use std::marker::PhantomData;
+use std::path::Path;
 
-pub struct RustyLevelDB<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> {
+pub struct RustyLevelDB<Key, Value>
+where
+    Key: Serialize + DeserializeOwned,
+    Value: Serialize + DeserializeOwned,
+{
     database: DB,
     _key: PhantomData<Key>,
     _value: PhantomData<Value>,
 }
+
 // We have to implement `Debug` for `RustyLevelDB` as the `State` struct
 // contains a database object, and `State` is used as input argument
 // to multiple functions where logging is enabled with the `instrument`
 // attributes from the `tracing` crate, and this requires all input
 // arguments to the function to implement the `Debug` trait as this
 // info is written on all logging events.
-impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> core::fmt::Debug
-    for RustyLevelDB<Key, Value>
+impl<Key, Value> core::fmt::Debug for RustyLevelDB<Key, Value>
+where
+    Key: Serialize + DeserializeOwned,
+    Value: Serialize + DeserializeOwned,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("").finish()
@@ -30,26 +36,19 @@ pub fn default_options() -> rusty_leveldb::Options {
     rusty_leveldb::Options::default()
 }
 
-impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> LevelDB<Key, Value>
-    for RustyLevelDB<Key, Value>
+impl<Key, Value> LevelDB<Key, Value> for RustyLevelDB<Key, Value>
+where
+    Key: Serialize + DeserializeOwned,
+    Value: Serialize + DeserializeOwned,
 {
-    fn new<P: AsRef<Path>>(
-        db_path: P,
-        db_name: &str,
-        options: rusty_leveldb::Options,
-    ) -> Result<Self> {
-        let mut path = PathBuf::new();
-        path.push(db_path);
-        path.push(db_name);
-
-        // Depending on the options sent as parameter: if the DB already exists at that path, it is used.
-        let db = DB::open(path, options)?;
-
-        Ok(Self {
-            database: db,
+    /// Open or create a new or existing database
+    fn new(db_path: &Path, options: rusty_leveldb::Options) -> Result<Self> {
+        let database = Self {
+            database: DB::open(db_path, options)?,
             _key: PhantomData,
             _value: PhantomData,
-        })
+        };
+        Ok(database)
     }
 
     fn get(&mut self, key: Key) -> Option<Value> {

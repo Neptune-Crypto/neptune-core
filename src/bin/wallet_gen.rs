@@ -1,29 +1,23 @@
 use anyhow::Result;
-use neptune_core::{
-    config_models::{data_directory::get_data_directory, network::Network},
-    models::state::wallet::{Wallet, WalletState},
-};
+use neptune_core::config_models::data_directory::DataDirectory;
+use neptune_core::config_models::network::Network;
+use neptune_core::models::state::wallet::{Wallet, WalletState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let network = Network::Main;
 
     // The root path is where both the wallet and all databases are stored
-    let root_data_dir_path = get_data_directory(network)?;
+    let root_data_dir = DataDirectory::get(None, network)?;
+    let root_data_dir_path = root_data_dir.database_dir_path();
 
     // Create root directory for databases and wallet if it does not already exist
-    std::fs::create_dir_all(&root_data_dir_path).unwrap_or_else(|err| {
-        panic!(
-            "Failed to create data directory in {}: {}",
-            root_data_dir_path.to_string_lossy(),
-            err
-        )
-    });
+    DataDirectory::create_dir_if_not_exists(&root_data_dir_path).unwrap();
 
-    let wallet_file = Wallet::wallet_path(&root_data_dir_path);
-    let wallet = Wallet::read_from_file_or_create(&wallet_file);
+    let wallet_file = root_data_dir.wallet_file_path();
+    let wallet = Wallet::read_from_file_or_create(&wallet_file).unwrap();
 
-    let wallet_state: WalletState = WalletState::new_from_wallet(wallet, network).await;
+    let wallet_state: WalletState = WalletState::new_from_wallet(&root_data_dir, wallet).await;
 
     println!("Wallet stored in: {}", wallet_file.display());
     println!(

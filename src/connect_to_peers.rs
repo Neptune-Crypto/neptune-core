@@ -41,6 +41,7 @@ async fn get_connection_status(
     let standing = state
         .get_peer_standing_from_database(peer_address.ip())
         .await;
+
     if standing.is_some() && standing.unwrap().standing > state.cli.peer_tolerance {
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }

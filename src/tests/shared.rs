@@ -5,9 +5,11 @@ use futures::stream;
 use futures::task::{Context, Poll};
 use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::distributions::Alphanumeric;
+use rand::distributions::DistString;
 use rusty_leveldb;
 use secp256k1::ecdsa;
+use std::path::Path;
 use std::path::PathBuf;
 use std::{
     collections::HashMap,
@@ -38,6 +40,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
+use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
@@ -81,37 +84,17 @@ pub fn unit_test_databases(
 ) -> Result<(
     Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
     Arc<tokio::sync::Mutex<PeerDatabases>>,
-    PathBuf,
+    DataDirectory,
 )> {
-    // Create databases for unit tests on disk, and return objects for them.
-    // For now, we use databases on disk, but it would be nicer to use
-    // something that is in-memory only.
-    let mut root_data_dir: PathBuf = get_data_director_for_unit_tests()?;
+    let data_dir: DataDirectory = unit_test_data_directory(network)?;
 
-    // Create a randomly named directory to allow the tests to run in parallel.
-    // If this is not done, the parallel execution of unit tests will fail as
-    // they each hold a lock on the database.
-    let random_directory: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(20)
-        .map(char::from)
-        .collect();
-    root_data_dir.push(random_directory);
+    let block_db = ArchivalState::initialize_block_index_database(&data_dir)?;
+    let block_db_lock = Arc::new(tokio::sync::Mutex::new(block_db));
 
-    root_data_dir.push(network.to_string());
-    let mut database_dir = root_data_dir.clone();
-    database_dir.push("databases");
+    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)?;
+    let peer_db_lock = Arc::new(tokio::sync::Mutex::new(peer_db));
 
-    // The `initialize_databases` function call should create a new directory for the databases
-    // meaning that all directories above this are also created.
-    let block_dbs = ArchivalState::initialize_block_index_database(&database_dir)?;
-    let peer_dbs = NetworkingState::initialize_peer_databases(&database_dir)?;
-
-    Ok((
-        Arc::new(tokio::sync::Mutex::new(block_dbs)),
-        Arc::new(tokio::sync::Mutex::new(peer_dbs)),
-        root_data_dir,
-    ))
+    Ok((block_db_lock, peer_db_lock, data_dir))
 }
 
 pub fn get_dummy_address(count: u8) -> SocketAddr {
@@ -187,13 +170,8 @@ pub async fn get_mock_global_state(
     peer_count: u8,
     wallet: Option<Wallet>,
 ) -> GlobalState {
-    let (block_databases, peer_databases, root_data_dir_path) =
-        unit_test_databases(network).unwrap();
-    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
-    let ams = Arc::new(tokio::sync::Mutex::new(ams));
-    let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
-    let archival_state =
-        ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync).await;
+    let (archival_state, peer_db_lock) = make_unit_test_archival_state(network).await;
+
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
     for i in 0..peer_count {
@@ -204,7 +182,7 @@ pub async fn get_mock_global_state(
             .unwrap()
             .insert(peer_address, get_dummy_peer(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
+    let networking_state = NetworkingState::new(peer_map, peer_db_lock, syncing);
     let (block, _, _) = get_dummy_latest_block(None);
     let light_state: LightState = LightState::new(block);
     let blockchain_state = BlockchainState {
@@ -277,12 +255,18 @@ pub async fn add_block_to_archival_state(
     Ok(())
 }
 
-/// Return an appropriate data directory for unit tests
-fn get_data_director_for_unit_tests() -> Result<PathBuf> {
-    let mut dir: PathBuf = env::temp_dir();
-    dir.push("neptune-unit-tests");
+/// Create a randomly named `DataDirectory` so filesystem-bound tests can run
+/// in parallel. If this is not done, parallel execution of unit tests will
+/// fail as they each hold a lock on the database.
+///
+/// For now we use databases on disk. In-memory databases would be nicer.
+pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
+    let mut rng = rand::thread_rng();
+    let tmp_root: PathBuf = env::temp_dir()
+        .join("neptune-unit-tests")
+        .join(Path::new(&Alphanumeric.sample_string(&mut rng, 16)));
 
-    Ok(dir)
+    DataDirectory::get(Some(tmp_root), network)
 }
 
 /// Helper function for tests to update state with a new block
@@ -715,13 +699,11 @@ pub async fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
         None => Wallet::devnet_authority_wallet(),
     };
 
-    let test_path = get_data_director_for_unit_tests().unwrap();
-    let wallet_block_db_name = "mock_wallet_block_db";
+    let data_dir = unit_test_data_directory(Network::Main).unwrap();
 
     let wallet_db = Arc::new(TokioMutex::new(
         RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
-            &test_path,
-            wallet_block_db_name,
+            &data_dir.wallet_database_dir_path(),
             rusty_leveldb::in_memory(),
         )
         .unwrap(),
@@ -729,8 +711,7 @@ pub async fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
 
     let outgoing_utxo_counter_db = Arc::new(TokioMutex::new(
         RustyLevelDB::<(), u128>::new(
-            &test_path,
-            "outgoing_utxo_counter_db",
+            &data_dir.wallet_output_count_database_dir_path(),
             rusty_leveldb::in_memory(),
         )
         .unwrap(),
@@ -751,13 +732,17 @@ pub async fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
     ret
 }
 
-pub async fn make_unit_test_archival_state() -> ArchivalState {
-    let (block_databases, _, root_data_dir_path) = unit_test_databases(Network::Main).unwrap();
-    println!("root_data_dir_path = {:?}", root_data_dir_path);
+pub async fn make_unit_test_archival_state(
+    network: Network,
+) -> (ArchivalState, Arc<tokio::sync::Mutex<PeerDatabases>>) {
+    let (block_index_db_lock, peer_db_lock, data_dir) = unit_test_databases(network).unwrap();
 
-    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&root_data_dir_path).unwrap();
-    let ams = Arc::new(tokio::sync::Mutex::new(ams));
-    let ms_block_sync = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
+    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
+    let ams_lock = Arc::new(tokio::sync::Mutex::new(ams));
+    let ms_block_sync_lock = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
 
-    ArchivalState::new(block_databases, ams, root_data_dir_path, ms_block_sync).await
+    let archival_state =
+        ArchivalState::new(data_dir, block_index_db_lock, ams_lock, ms_block_sync_lock).await;
+
+    (archival_state, peer_db_lock)
 }
