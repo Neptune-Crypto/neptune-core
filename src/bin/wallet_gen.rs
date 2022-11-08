@@ -1,7 +1,8 @@
 use anyhow::Result;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
-use neptune_core::models::state::wallet::{Wallet, WalletState};
+use neptune_core::models::state::wallet::wallet_state::WalletState;
+use neptune_core::models::state::wallet::Wallet;
 
 #[tokio::main]
 async fn main() -> Result<()> {

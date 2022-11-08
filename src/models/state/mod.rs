@@ -11,7 +11,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
-use self::wallet::WalletState;
+use self::wallet::wallet_state::WalletState;
 use super::blockchain::transaction::devnet_input::DevNetInput;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::{Amount, Transaction};
