@@ -1036,8 +1036,8 @@ dependencies = [
 
 [[package]]
 name = "mutator-set-tf"
-version = "0.3.0"
-source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?tag=v0.3.0#cc973ce0fe699a4a74e2b9df5b2d07e3b9163377"
+version = "0.6.0"
+source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git?tag=v0.6.0#e02c8d60296a79064205c840a3fcc37ed8a3b19b"
 dependencies = [
  "blake3",
  "itertools",
@@ -2229,9 +2229,9 @@ dependencies = [
 
 [[package]]
 name = "twenty-first"
-version = "0.3.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2ac50eb9d27948b122e69fa6b9d89b34dd3fb49920eb2c1585ab3562c8e4cd"
+checksum = "cf2a3192a3cdd84f587b7106ed42814e4bd118e84c0fbc2f6ffc81054df6af9f"
 dependencies = [
  "anyhow",
  "bincode",
