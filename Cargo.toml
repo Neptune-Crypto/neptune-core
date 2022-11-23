@@ -1,6 +1,6 @@
 [package]
 name = "mutator-set-tf"
-version = "0.7.0"
+version = "0.7.2"
 authors = ["Triton Software AG"]
 edition = "2021"
 
@@ -17,7 +17,7 @@ default-features = false
 features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 
 [dependencies]
-twenty-first = { version = "0.7.0" }
+twenty-first = { version = "0.7.2" }
 blake3 = "1"
 itertools = "0"
 num-traits = "0"
