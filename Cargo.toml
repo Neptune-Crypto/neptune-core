@@ -2,8 +2,9 @@
 authors = ["Triton Software"]
 edition = "2021"
 name = "neptune-core"
-version = "0.3.0"
+version = "0.7.2"
 default-run = "neptune-core"
+publish = false
 
 [dev-dependencies.cargo-husky]
 default-features = false                                           # Disable features which are enabled by default
@@ -11,8 +12,8 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = { version = "0.6.0" }
-mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", tag = "v0.6.0" }
+twenty-first = { version = "0.7.2" }
+mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", tag = "v0.7.2" }
 anyhow = "1"
 bincode = "1"
 bytes = "1"

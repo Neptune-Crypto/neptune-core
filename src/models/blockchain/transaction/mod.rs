@@ -306,8 +306,10 @@ impl Transaction {
         //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = Hash::hash(&kernel);
-        let kernel_digest_as_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = kernel_digest.into();
-        let msg: Message = Message::from_slice(&kernel_digest_as_bytes).unwrap();
+        let kernel_digest_as_bytes: [u8; Digest::BYTES] = kernel_digest.into();
+        let msg: Message =
+            Message::from_slice(&kernel_digest_as_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
+                .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
 
         if let Some(signature) = self.authority_proof {
             let authority_public_key = Wallet::devnet_authority_wallet().get_public_key();

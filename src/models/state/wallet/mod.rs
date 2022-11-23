@@ -146,10 +146,15 @@ impl Wallet {
         fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
     }
 
+    // **Note:** `Message::from_slice()` has to take a slice that is a cryptographically
+    // secure hash of the actual message that's going to be signed. Otherwise the result
+    // of signing isn't a secure signature. Since `msg_digest` is expected to come from
+    // Rescue-Prime.
     pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
         let sk = self.get_ecdsa_signing_secret_key();
-        let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = msg_digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
+        let msg_bytes: [u8; Digest::BYTES] = msg_digest.into();
+        let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
+            .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
         sk.sign_ecdsa(msg)
     }
 
@@ -160,11 +165,13 @@ impl Wallet {
     }
 
     // This is a temporary workaround until our own cryptography is ready.
-    // At that point we can return `Digest` as is.
+    // At that point we can return `Digest` as is. Note that `Digest::BYTES`
+    // is 5 * 8 = 40 bytes, while SecretKey expects 32 bytes.
     fn get_ecdsa_signing_secret_key(&self) -> secp256k1::SecretKey {
-        let signing_key = self.get_signing_key();
-        let bytes: [u8; DEVNET_SECRET_KEY_SIZE_IN_BYTES] = signing_key.into();
-        secp256k1::SecretKey::from_slice(&bytes).unwrap()
+        let signing_key: Digest = self.get_signing_key();
+        let bytes: [u8; Digest::BYTES] = signing_key.into();
+        secp256k1::SecretKey::from_slice(&bytes[..DEVNET_SECRET_KEY_SIZE_IN_BYTES])
+            .expect("a byte slice that is DEVNET_SECRET_KEY_SIZE_IN_BYTES long")
     }
 
     /// Return the secret key that is used for signatures
@@ -916,8 +923,9 @@ mod wallet_tests {
         let msg_vec: Vec<BFieldElement> = wallet_state.wallet.secret_seed.values().to_vec();
         let digest: Digest = Hash::hash_slice(&msg_vec);
         let signature = wallet_state.wallet.sign_digest(digest);
-        let msg_bytes: [u8; DEVNET_MSG_DIGEST_SIZE_IN_BYTES] = digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes).unwrap();
+        let msg_bytes: [u8; Digest::BYTES] = digest.into();
+        let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
+            .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
         assert!(
             signature.verify(&msg, &pk).is_ok(),
             "DEVNET signature must verify"

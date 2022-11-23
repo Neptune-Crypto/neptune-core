@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::models::blockchain::shared::Hash;
 
-use super::{Amount, AMOUNT_SIZE_FOR_U32};
+use super::Amount;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
@@ -36,16 +36,30 @@ impl Utxo {
 
 impl Hashable for Utxo {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        let amount_bfes: [BFieldElement; AMOUNT_SIZE_FOR_U32] = self.amount.into();
-        let bytes: [u8; PUBLIC_KEY_LENGTH_IN_BYTES] = self.public_key.serialize();
+        let amount_bfes: Vec<BFieldElement> = self
+            .amount
+            .as_ref()
+            .iter()
+            .copied()
+            .map(BFieldElement::from)
+            .collect();
 
-        // FIXME: This is the only caller of `BFieldElement::from_byte_array`. All these
-        // sizes are fixed, so there's no reason to convert this into Vec<_> and back, and
-        // into Vec<_> again. ([u8] -> Vec<BFE> -> [BFE] -> Vec<BFE>)
-        let pk_bfes: [BFieldElement; PUBLIC_KEY_LENGTH_IN_BFES] =
-            BFieldElement::from_byte_array(bytes).try_into().unwrap();
-        vec![amount_bfes.to_vec(), pk_bfes.to_vec()].concat()
+        let mut pk_bfes = Vec::with_capacity(PUBLIC_KEY_LENGTH_IN_BFES);
+        let pk_bfe_bytes: [u8; PUBLIC_KEY_LENGTH_IN_BYTES] = self.public_key.serialize();
+        pk_bfes.push(convert::<7>(&pk_bfe_bytes[0..7]));
+        pk_bfes.push(convert::<7>(&pk_bfe_bytes[7..14]));
+        pk_bfes.push(convert::<7>(&pk_bfe_bytes[14..21]));
+        pk_bfes.push(convert::<7>(&pk_bfe_bytes[21..28]));
+        pk_bfes.push(convert::<5>(&pk_bfe_bytes[28..33]));
+
+        vec![amount_bfes, pk_bfes].concat()
     }
+}
+
+fn convert<const N: usize>(bytes: &[u8]) -> BFieldElement {
+    let mut u64_input: [u8; 8] = [0; 8];
+    u64_input[..N].copy_from_slice(bytes);
+    BFieldElement::new(u64::from_le_bytes(u64_input))
 }
 
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
@@ -56,5 +70,25 @@ impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
         let neptune_hash = Hash::hash(self);
         StdHash::hash(&neptune_hash, state);
+    }
+}
+
+#[cfg(test)]
+mod utxo_tests {
+    use twenty_first::util_types::emojihash_trait::Emojihash;
+
+    use crate::tests::shared::new_random_wallet;
+
+    use super::*;
+
+    #[test]
+    fn hash_utxo_test() {
+        let wallet = new_random_wallet();
+        let amount = Amount::from(42);
+        let public_key = wallet.get_public_key();
+        let output = Utxo { amount, public_key };
+        let digest = Hash::hash(&output);
+
+        println!("{}", digest.emojihash());
     }
 }
