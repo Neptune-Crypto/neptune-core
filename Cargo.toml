@@ -3,6 +3,7 @@ name = "mutator-set-tf"
 version = "0.7.2"
 authors = ["Triton Software AG"]
 edition = "2021"
+publish = false
 
 [dev-dependencies]
 proptest = "1.0"
