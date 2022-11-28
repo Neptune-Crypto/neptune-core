@@ -1,20 +1,17 @@
 use num_traits::identities::Zero;
 use rusty_leveldb::DB;
-use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use twenty_first::util_types::database_array::DatabaseArray;
 
-use super::boxed_big_array::CompositeBigArray;
 use super::chunk::Chunk;
 use super::shared::{BITS_PER_U32, CHUNK_SIZE, WINDOW_SIZE};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveWindow<H: AlgebraicHasher> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     // The byte array is boxed to prevent stack-overflows when deserializing this data
     // structure. Cf. https://neptune.builders/core-team/neptune-core/issues/32
-    #[serde(with = "CompositeBigArray")]
     pub bits: Box<[u32; WINDOW_SIZE / BITS_PER_U32]>,
     _hasher: PhantomData<H>,
 }
@@ -333,13 +330,13 @@ mod active_window_tests {
         hash_no_crash_gen::<RescuePrimeRegular>();
     }
 
-    #[test]
-    fn active_window_serialize_test() {
-        type H = RescuePrimeRegular;
+    // #[test]
+    // fn active_window_serialize_test() {
+    //     type H = RescuePrimeRegular;
 
-        let aw0 = ActiveWindow::<H>::default();
-        let json_aw0 = serde_json::to_string(&aw0).unwrap();
-        let aw0_back = serde_json::from_str::<ActiveWindow<H>>(&json_aw0).unwrap();
-        assert_eq!(aw0.bits, aw0_back.bits);
-    }
+    //     let aw0 = ActiveWindow::<H>::default();
+    //     let json_aw0 = serde_json::to_string(&aw0).unwrap();
+    //     let aw0_back = serde_json::from_str::<ActiveWindow<H>>(&json_aw0).unwrap();
+    //     assert_eq!(aw0.bits, aw0_back.bits);
+    // }
 }

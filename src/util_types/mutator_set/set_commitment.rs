@@ -1,4 +1,3 @@
-use serde_derive::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -39,7 +38,7 @@ pub enum SetCommitmentError {
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetCommitment<H: AlgebraicHasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
@@ -534,12 +533,9 @@ mod accumulation_scheme_tests {
     use rand::Rng;
 
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::utils::has_unique_elements;
 
-    use crate::test_shared::mutator_set::{
-        empty_archival_ms, insert_item, make_item_and_randomness, remove_item,
-    };
+    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -1024,62 +1020,62 @@ mod accumulation_scheme_tests {
         });
     }
 
-    #[test]
-    fn ms_serialization_test() {
-        // This test verifies that the mutator set structure can be serialized and deserialized.
-        // When Rust spawns threads (as it does when it runs tests, and in the Neptune Core client),
-        // the new threads only get 2MB stack memory initially. This can result in stack overflows
-        // in the runtime. This test is to verify that that does not happen.
-        // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
-        // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
-        type H = RescuePrimeRegular;
-        type Mmr = MmrAccumulator<H>;
-        type Ms = SetCommitment<H, Mmr>;
-        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
+    // #[test]
+    // fn ms_serialization_test() {
+    //     // This test verifies that the mutator set structure can be serialized and deserialized.
+    //     // When Rust spawns threads (as it does when it runs tests, and in the Neptune Core client),
+    //     // the new threads only get 2MB stack memory initially. This can result in stack overflows
+    //     // in the runtime. This test is to verify that that does not happen.
+    //     // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
+    //     // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
+    //     type H = RescuePrimeRegular;
+    //     type Mmr = MmrAccumulator<H>;
+    //     type Ms = SetCommitment<H, Mmr>;
+    //     let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
 
-        let json_empty = serde_json::to_string(&mutator_set).unwrap();
-        println!("json = \n{}", json_empty);
-        let mut s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
-        assert!(s_back.aocl.is_empty());
-        assert!(s_back.swbf_inactive.is_empty());
-        assert!(s_back.swbf_active.bits.iter().all(|&b| b == 0u32));
+    //     let json_empty = serde_json::to_string(&mutator_set).unwrap();
+    //     println!("json = \n{}", json_empty);
+    //     let mut s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
+    //     assert!(s_back.aocl.is_empty());
+    //     assert!(s_back.swbf_inactive.is_empty());
+    //     assert!(s_back.swbf_active.bits.iter().all(|&b| b == 0u32));
 
-        // Add an item, verify correct serialization
-        let (mp, item) = insert_item(&mut mutator_set);
-        let json_one_add = serde_json::to_string(&mutator_set).unwrap();
-        println!("json_one_add = \n{}", json_one_add);
-        let mut s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
-        assert_eq!(1, s_back_one_add.aocl.count_leaves());
-        assert!(s_back_one_add.swbf_inactive.is_empty());
-        assert!(s_back_one_add.swbf_active.bits.iter().all(|&b| b == 0u32));
-        assert!(s_back_one_add.verify(&item, &mp));
+    //     // Add an item, verify correct serialization
+    //     let (mp, item) = insert_item(&mut mutator_set);
+    //     let json_one_add = serde_json::to_string(&mutator_set).unwrap();
+    //     println!("json_one_add = \n{}", json_one_add);
+    //     let mut s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
+    //     assert_eq!(1, s_back_one_add.aocl.count_leaves());
+    //     assert!(s_back_one_add.swbf_inactive.is_empty());
+    //     assert!(s_back_one_add.swbf_active.bits.iter().all(|&b| b == 0u32));
+    //     assert!(s_back_one_add.verify(&item, &mp));
 
-        // Remove an item, verify correct serialization
-        remove_item(&mut mutator_set, &item, &mp);
-        let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
-        println!("json_one_add = \n{}", json_one_add_one_remove);
-        let mut s_back_one_add_one_remove =
-            serde_json::from_str::<Ms>(&json_one_add_one_remove).unwrap();
-        assert_eq!(
-            1,
-            s_back_one_add_one_remove.aocl.count_leaves(),
-            "AOCL must still have exactly one leaf"
-        );
-        assert!(
-            s_back_one_add_one_remove.swbf_inactive.is_empty(),
-            "Window should not have moved"
-        );
-        assert!(
-            !s_back_one_add_one_remove
-                .swbf_active
-                .bits
-                .iter()
-                .all(|&b| b == 0u32),
-            "Some of the bits in the active window must now be set"
-        );
-        assert!(
-            !s_back_one_add_one_remove.verify(&item, &mp),
-            "Membership proof must fail after removal"
-        );
-    }
+    //     // Remove an item, verify correct serialization
+    //     remove_item(&mut mutator_set, &item, &mp);
+    //     let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
+    //     println!("json_one_add = \n{}", json_one_add_one_remove);
+    //     let mut s_back_one_add_one_remove =
+    //         serde_json::from_str::<Ms>(&json_one_add_one_remove).unwrap();
+    //     assert_eq!(
+    //         1,
+    //         s_back_one_add_one_remove.aocl.count_leaves(),
+    //         "AOCL must still have exactly one leaf"
+    //     );
+    //     assert!(
+    //         s_back_one_add_one_remove.swbf_inactive.is_empty(),
+    //         "Window should not have moved"
+    //     );
+    //     assert!(
+    //         !s_back_one_add_one_remove
+    //             .swbf_active
+    //             .bits
+    //             .iter()
+    //             .all(|&b| b == 0u32),
+    //         "Some of the bits in the active window must now be set"
+    //     );
+    //     assert!(
+    //         !s_back_one_add_one_remove.verify(&item, &mp),
+    //         "Membership proof must fail after removal"
+    //     );
+    // }
 }
