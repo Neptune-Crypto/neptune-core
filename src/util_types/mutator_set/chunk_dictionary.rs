@@ -79,7 +79,7 @@ mod chunk_dict_tests {
         let key1: u128 = 898989;
         let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk1: Chunk = {
-            let bits = [0xFFFFFFFFu32; CHUNK_SIZE / BITS_PER_U32];
+            let bits = [0xFFFFFFFFu32; CHUNK_SIZE as usize / BITS_PER_U32 as usize];
             Chunk { bits }
         };
         let value1 = (mp1, chunk1);
@@ -90,7 +90,7 @@ mod chunk_dict_tests {
         let key2: u128 = 8989;
         let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership(2).0;
         let mut chunk2 = Chunk::empty_chunk();
-        chunk2.bits[CHUNK_SIZE / (2 * BITS_PER_U32) + 1] = 0x01;
+        chunk2.bits[(CHUNK_SIZE / (2 * BITS_PER_U32) + 1) as usize] = 0x01;
         let value2 = (mp2, chunk2);
         let chunkdict2 = ChunkDictionary::<H>::new(HashMap::from([
             (key1, value1.clone()),
@@ -152,7 +152,7 @@ mod chunk_dict_tests {
         let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
-            bits: [0xFFFFFFFFu32; CHUNK_SIZE / BITS_PER_U32],
+            bits: [0xFFFFFFFFu32; (CHUNK_SIZE / BITS_PER_U32) as usize],
         };
 
         let s_non_empty = ChunkDictionary::<H>::new(HashMap::from([(key, (mp.clone(), chunk))]));

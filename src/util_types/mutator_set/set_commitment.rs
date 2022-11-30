@@ -71,7 +71,8 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
             ]
             .concat(),
         );
-        let sample_index = H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
+        let sample_index =
+            H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE as usize);
         let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
         indices.push(sample_swbf_index);
     }
@@ -91,7 +92,8 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
             ]
             .concat(),
         );
-        let sample_index = H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
+        let sample_index =
+            H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE as usize);
         let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
         indices.push(sample_swbf_index);
         indices.sort_unstable();
@@ -181,9 +183,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
         // if window slides, update filter
         // First update the inactive part of the SWBF, the SWBF MMR
-        let chunk: Chunk = Chunk {
-            bits: self.swbf_active.get_sliding_chunk_bits(),
-        };
+        let chunk: Chunk = self.swbf_active.slid_chunk();
         let chunk_digest: Digest = H::hash(&chunk);
         self.swbf_inactive.append(chunk_digest); // ignore auth path
 
@@ -442,7 +442,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
                 chunk_index_to_chunk_mutation
                     .entry(bit_index / CHUNK_SIZE as u128)
                     .or_insert_with(Chunk::empty_chunk)
-                    .set_bit(*bit_index as usize % CHUNK_SIZE);
+                    .set_bit((*bit_index % CHUNK_SIZE as u128) as usize);
             }
         });
 

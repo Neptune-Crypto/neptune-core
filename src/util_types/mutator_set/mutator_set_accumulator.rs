@@ -20,7 +20,7 @@ impl<H: AlgebraicHasher> MutatorSetAccumulator<H> {
         let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
             swbf_inactive: MmrAccumulator::<H>::new(vec![]),
-            swbf_active: ActiveWindow::default(),
+            swbf_active: ActiveWindow::new(),
         };
 
         Self { set_commitment }

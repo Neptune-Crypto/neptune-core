@@ -6,6 +6,7 @@ pub struct SparseBloomFilter<const N: u128> {
     pub indices: Vec<u128>,
 }
 
+#[allow(clippy::new_without_default)]
 impl<const N: u128> SparseBloomFilter<N> {
     pub fn new() -> Self {
         SparseBloomFilter {

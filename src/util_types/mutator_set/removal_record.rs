@@ -9,7 +9,6 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
-use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::set_commitment::SetCommitment;
 use super::shared::{
@@ -55,9 +54,7 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
         }
 
         // window does slide
-        let new_chunk = Chunk {
-            bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
-        };
+        let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Insert the new chunk digest into the accumulator-version of the
@@ -411,7 +408,7 @@ mod removal_record_tests {
                 }
 
                 let rr = accumulator.drop(&item, &mp);
-                removal_records.push((i, rr));
+                removal_records.push((i as usize, rr));
             }
 
             // pick a random removal record from the list of all removal records and check that it still
@@ -480,7 +477,7 @@ mod removal_record_tests {
             }
 
             let rr = accumulator.drop(&item, &mp);
-            removal_records.push((i, rr));
+            removal_records.push((i as usize, rr));
         }
 
         // Now apply all removal records one at a time and batch update the remaining removal records

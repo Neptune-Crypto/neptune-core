@@ -11,7 +11,6 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::{
     addition_record::AdditionRecord,
-    chunk::Chunk,
     chunk_dictionary::ChunkDictionary,
     removal_record::RemovalRecord,
     set_commitment::get_swbf_indices,
@@ -134,9 +133,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // window does slide
         let batch_index = new_item_index / BATCH_SIZE as u128;
         let old_window_start_batch_index = batch_index - 1;
-        let new_chunk = Chunk {
-            bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
-        };
+        let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Insert the new chunk digest into the accumulator-version of the
@@ -288,9 +285,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         }
 
         // window does slide
-        let new_chunk = Chunk {
-            bits: mutator_set.swbf_active.get_sliding_chunk_bits(),
-        };
+        let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Get bit indices from either the cached bits, or by recalculating them. Notice
@@ -455,6 +450,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 mod ms_proof_tests {
     use super::*;
     use crate::test_shared::mutator_set::make_item_and_randomness;
+    use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::shared::BITS_PER_U32;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
@@ -532,7 +528,7 @@ mod ms_proof_tests {
 
         // Get an MMR membership proof by adding the 8th leaf
         let zero_chunk = Chunk {
-            bits: [0u32; CHUNK_SIZE / BITS_PER_U32],
+            bits: [0u32; (CHUNK_SIZE / BITS_PER_U32) as usize],
         };
         let mmr_mp = mmra.append(H::hash(&zero_chunk));
 
