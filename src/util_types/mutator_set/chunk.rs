@@ -1,86 +1,98 @@
-use itertools::Itertools;
 use num_traits::Zero;
-use serde_big_array;
-use serde_big_array::BigArray;
 use serde_derive::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
-use super::shared::{BITS_PER_U32, CHUNK_SIZE};
+use super::shared::CHUNK_SIZE;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Chunk {
-    #[serde(with = "BigArray")]
-    pub bits: [u32; CHUNK_SIZE as usize / BITS_PER_U32 as usize],
+    pub bits: Vec<u32>,
 }
 
 impl Chunk {
     pub fn empty_chunk() -> Self {
-        let bits = [0; CHUNK_SIZE as usize / BITS_PER_U32 as usize];
+        let bits = vec![];
         Chunk { bits }
     }
 
-    pub fn set_bit(&mut self, index: usize) {
+    pub fn set_bit(&mut self, index: u32) {
         assert!(
-            index < CHUNK_SIZE as usize,
+            index < CHUNK_SIZE as u32,
             "index cannot exceed chunk size in `set_bit`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
         );
-        self.bits[index / BITS_PER_U32 as usize] |= 1u32 << (index % BITS_PER_U32 as usize);
+        self.bits.push(index);
+        self.bits.sort();
     }
 
-    pub fn unset_bit(&mut self, index: usize) {
+    pub fn unset_bit(&mut self, index: u32) {
         assert!(
-            index < CHUNK_SIZE as usize,
+            index < CHUNK_SIZE as u32,
             "index cannot exceed chunk size in `unset_bit`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
         );
-        self.bits[index / BITS_PER_U32 as usize] &=
-            0xFFFFFFFFu32 ^ (1u32 << (index % BITS_PER_U32 as usize));
+        let mut drops = vec![];
+        for i in 0..self.bits.len() {
+            if self.bits[i] == index {
+                drops.push(i);
+            }
+        }
+
+        for d in drops.iter().rev() {
+            self.bits.remove(*d);
+        }
     }
 
-    pub fn get_bit(&self, index: usize) -> bool {
+    pub fn get_bit(&self, index: u32) -> bool {
         assert!(
-            index < CHUNK_SIZE as usize,
+            index < CHUNK_SIZE as u32,
             "index cannot exceed chunk size in `get_bit`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
         );
 
-        self.bits[index / BITS_PER_U32 as usize] & (1u32 << (index % BITS_PER_U32 as usize)) != 0
+        self.bits.contains(&index)
     }
 
     pub fn or(self, other: Self) -> Self {
         let mut ret = Self::empty_chunk();
-        for ((ret_elem, self_element), other_element) in ret
-            .bits
-            .iter_mut()
-            .zip_eq(self.bits.into_iter())
-            .zip_eq(other.bits.into_iter())
-        {
-            *ret_elem = self_element | other_element;
+        for idx in self.bits {
+            ret.bits.push(idx);
         }
-
+        for idx in other.bits {
+            ret.bits.push(idx);
+        }
+        ret.bits.sort();
         ret
     }
 
-    pub fn xor(&mut self, other: Self) {
-        for (self_element, other_element) in self.bits.iter_mut().zip_eq(other.bits.into_iter()) {
-            *self_element ^= other_element;
+    pub fn xor_assign(&mut self, other: Self) {
+        let mut drops = vec![];
+        for (i, idx) in self.bits.iter().enumerate() {
+            if other.bits.contains(idx) {
+                drops.push(i);
+            }
         }
+        for idx in other.bits {
+            if !self.bits.contains(&idx) {
+                self.bits.push(idx);
+            }
+        }
+        for d in drops.iter().rev() {
+            self.bits.remove(*d);
+        }
+        self.bits.sort();
     }
 
     pub fn and(self, other: Self) -> Self {
         let mut ret = Self::empty_chunk();
-        for ((ret_elem, self_element), other_element) in ret
-            .bits
-            .iter_mut()
-            .zip_eq(self.bits.into_iter())
-            .zip_eq(other.bits.into_iter())
-        {
-            *ret_elem = self_element & other_element;
+        for idx in self.bits {
+            if other.bits.contains(&idx) {
+                ret.bits.push(idx);
+            }
         }
 
         ret
@@ -90,61 +102,23 @@ impl Chunk {
         self.bits.iter().all(|x| x.is_zero())
     }
 
-    /// Return the length of the Vec<u128>-representation of the active window
-    const fn get_u128s_length() -> usize {
-        if CHUNK_SIZE % (8 * 16) == 0 {
-            CHUNK_SIZE as usize / (8 * 16)
-        } else {
-            CHUNK_SIZE as usize / (8 * 16) + 1
-        }
-    }
-
-    /// Return the Vec<u128> representation of the bits in ActiveWindow.
-    /// todo: improve comment or drop function
-    fn get_u128s(&self) -> Vec<u128> {
-        let mut u128s: Vec<u128> = vec![0u128; Self::get_u128s_length()];
-        for i in 0..(CHUNK_SIZE / BITS_PER_U32) as usize {
-            let shift = 32 * (i % 4) as u128;
-            u128s[i / 4] += (self.bits[i] as u128 * (1 << shift)) as u128;
-        }
-
-        u128s
-    }
-
     pub fn to_indices(&self) -> Vec<u128> {
-        let mut vector = vec![];
-        for (i, int) in self.bits.iter().enumerate() {
-            for sh in (0..32).rev() {
-                if int & (1 << sh) != 0 {
-                    vector.push((i as u128) << 5 | sh);
-                }
-            }
-        }
-        vector
+        self.bits.iter().map(|i| *i as u128).collect()
     }
 
     pub fn from_indices(indices: &[u128]) -> Self {
-        let bits = [0u32; (CHUNK_SIZE / BITS_PER_U32) as usize];
-        let mut chunk = Chunk { bits };
-        for index in indices.iter() {
-            chunk.set_bit(*index as usize);
-        }
-        chunk
+        let bits = indices.iter().map(|i| *i as u32).collect();
+        Chunk { bits }
     }
 
     pub fn from_slice(sl: &[u32]) -> Chunk {
-        assert!(sl.len() <= (CHUNK_SIZE / BITS_PER_U32) as usize);
-        let mut bits = [0u32; (CHUNK_SIZE / BITS_PER_U32) as usize];
-        for (i, int) in sl.iter().enumerate() {
-            bits[i] = *int;
-        }
-        Chunk { bits }
+        Chunk { bits: sl.to_vec() }
     }
 }
 
 impl Hashable for Chunk {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.get_u128s()
+        self.bits
             .iter()
             .flat_map(|&val| val.to_sequence())
             .collect()
@@ -172,12 +146,12 @@ mod chunk_tests {
     fn get_set_unset_bits_pbt() {
         let mut aw = Chunk::empty_chunk();
         for i in 0..CHUNK_SIZE {
-            assert!(!aw.get_bit(i as usize));
+            assert!(!aw.get_bit(i as u32));
         }
 
         let mut prng = thread_rng();
         for _ in 0..CHUNK_SIZE {
-            let index = prng.next_u32() as usize % CHUNK_SIZE as usize;
+            let index = prng.next_u32() % CHUNK_SIZE as u32;
             let set = prng.next_u32() % 2 == 0;
             if set {
                 aw.set_bit(index);
@@ -185,20 +159,16 @@ mod chunk_tests {
                 aw.unset_bit(index);
             }
 
-            assert!(set == aw.get_bit(index));
+            assert_eq!(set, aw.get_bit(index));
         }
 
         // Set all bits, then check that they are set
         for i in 0..CHUNK_SIZE {
-            aw.set_bit(i as usize);
-        }
-
-        for i in 0..CHUNK_SIZE / BITS_PER_U32 {
-            assert_eq!(0xFFFFFFFFu32, aw.bits[i as usize]);
+            aw.set_bit(i as u32);
         }
 
         for i in 0..CHUNK_SIZE {
-            assert!(aw.get_bit(i as usize));
+            assert!(aw.get_bit(i as u32));
         }
     }
 
@@ -226,7 +196,7 @@ mod chunk_tests {
         let mut previous_values: HashSet<Vec<BFieldElement>> = HashSet::new();
         for i in 0..CHUNK_SIZE {
             let mut chunk = Chunk::empty_chunk();
-            chunk.set_bit(i as usize);
+            chunk.set_bit(i as u32);
             assert!(previous_values.insert(chunk.to_sequence()));
         }
     }
@@ -245,8 +215,8 @@ mod chunk_tests {
         expected_xor.set_bit(12);
         expected_xor.set_bit(48);
 
-        let mut chunk_c = chunk_a;
-        chunk_c.xor(chunk_b);
+        let mut chunk_c = chunk_a.clone();
+        chunk_c.xor_assign(chunk_b.clone());
 
         assert_eq!(
             expected_xor, chunk_c,
@@ -256,7 +226,7 @@ mod chunk_tests {
         let mut expected_and = Chunk::empty_chunk();
         expected_and.set_bit(13);
 
-        chunk_c = chunk_a.and(chunk_b);
+        chunk_c = chunk_a.clone().and(chunk_b.clone());
         assert_eq!(
             expected_and, chunk_c,
             "AND on chunks must behave as expected"
@@ -286,7 +256,7 @@ mod chunk_tests {
         let mut rng = thread_rng();
         let num_insertions = 100;
         for _ in 0..num_insertions {
-            let index = (rng.next_u32() as usize) % (CHUNK_SIZE as usize);
+            let index = rng.next_u32() % (CHUNK_SIZE as u32);
             chunk.set_bit(index);
         }
 

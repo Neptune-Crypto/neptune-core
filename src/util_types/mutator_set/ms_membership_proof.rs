@@ -201,7 +201,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 .dictionary
                 .insert(
                     old_window_start_batch_index,
-                    (new_swbf_auth_path.clone(), new_chunk),
+                    (new_swbf_auth_path.clone(), new_chunk.clone()),
                 );
         }
 
@@ -354,7 +354,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 // add dictionary entry
                 self.target_chunks
                     .dictionary
-                    .insert(chunk_index, (new_auth_path.clone(), new_chunk));
+                    .insert(chunk_index, (new_auth_path.clone(), new_chunk.clone()));
                 swbf_chunk_dictionary_updated = true;
 
                 continue 'outer;
@@ -452,7 +452,6 @@ mod ms_proof_tests {
     use crate::test_shared::mutator_set::make_item_and_randomness;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::shared::BITS_PER_U32;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
@@ -527,9 +526,7 @@ mod ms_proof_tests {
         let mut mmra: MmrAccumulator<H> = MmrAccumulator::new(mmr_digests);
 
         // Get an MMR membership proof by adding the 8th leaf
-        let zero_chunk = Chunk {
-            bits: [0u32; (CHUNK_SIZE / BITS_PER_U32) as usize],
-        };
+        let zero_chunk = Chunk::empty_chunk();
         let mmr_mp = mmra.append(H::hash(&zero_chunk));
 
         // Verify that the MMR membership proof has the expected length of 3 (sanity check)

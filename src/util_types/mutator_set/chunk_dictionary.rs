@@ -52,7 +52,7 @@ impl<H: AlgebraicHasher> Hashable for ChunkDictionary<H> {
 
 #[cfg(test)]
 mod chunk_dict_tests {
-    use crate::util_types::mutator_set::shared::{BITS_PER_U32, CHUNK_SIZE};
+    use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::rescue_prime_digest::Digest;
@@ -79,8 +79,9 @@ mod chunk_dict_tests {
         let key1: u128 = 898989;
         let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk1: Chunk = {
-            let bits = [0xFFFFFFFFu32; CHUNK_SIZE as usize / BITS_PER_U32 as usize];
-            Chunk { bits }
+            Chunk {
+                bits: (0..CHUNK_SIZE as u32).collect(),
+            }
         };
         let value1 = (mp1, chunk1);
         let chunkdict1 = ChunkDictionary::<H>::new(HashMap::from([(key1, value1.clone())]));
@@ -90,7 +91,7 @@ mod chunk_dict_tests {
         let key2: u128 = 8989;
         let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership(2).0;
         let mut chunk2 = Chunk::empty_chunk();
-        chunk2.bits[(CHUNK_SIZE / (2 * BITS_PER_U32) + 1) as usize] = 0x01;
+        chunk2.set_bit(CHUNK_SIZE as u32 / 2 + 1);
         let value2 = (mp2, chunk2);
         let chunkdict2 = ChunkDictionary::<H>::new(HashMap::from([
             (key1, value1.clone()),
@@ -127,8 +128,8 @@ mod chunk_dict_tests {
         // Negative: Construct data structure where the keys and values are switched
         let chunkdict3_switched = ChunkDictionary::<H>::new(HashMap::from([
             (key1, value2.clone()),
-            (key2, value1.clone()),
-            (key3, value2.clone()),
+            (key2, value1),
+            (key3, value2),
         ]));
 
         assert_ne!(H::hash(&chunkdict3), H::hash(&chunkdict3_switched));
@@ -152,15 +153,16 @@ mod chunk_dict_tests {
         let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
-            bits: [0xFFFFFFFFu32; (CHUNK_SIZE / BITS_PER_U32) as usize],
+            bits: (0..CHUNK_SIZE as u32).collect(),
         };
 
-        let s_non_empty = ChunkDictionary::<H>::new(HashMap::from([(key, (mp.clone(), chunk))]));
+        let s_non_empty =
+            ChunkDictionary::<H>::new(HashMap::from([(key, (mp.clone(), chunk.clone()))]));
         let json_non_empty = serde_json::to_string(&s_non_empty).unwrap();
         println!("json_non_empty = {}", json_non_empty);
         let s_back_non_empty = serde_json::from_str::<ChunkDictionary<H>>(&json_non_empty).unwrap();
         assert!(!s_back_non_empty.dictionary.is_empty());
         assert!(s_back_non_empty.dictionary.contains_key(&key));
-        assert_eq!((mp.clone(), chunk), s_back_non_empty.dictionary[&key]);
+        assert_eq!((mp, chunk), s_back_non_empty.dictionary[&key]);
     }
 }

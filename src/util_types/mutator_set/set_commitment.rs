@@ -237,7 +237,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             // If chunk index is not in the active part, set the bits in the relevant chunk
             let relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
             for bit_index in bit_indices {
-                let relative_bit_index = (bit_index % CHUNK_SIZE as u128) as usize;
+                let relative_bit_index = (bit_index % CHUNK_SIZE as u128) as u32;
                 let was_set = relevant_chunk.1.get_bit(relative_bit_index);
                 if !was_set {
                     diff_indices.push(bit_index)
@@ -382,7 +382,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
                 'inner_inactive: for bit_index in bit_indices {
                     let index_within_chunk = bit_index % CHUNK_SIZE as u128;
-                    if !mp_and_chunk.1.get_bit(index_within_chunk as usize) {
+                    if !mp_and_chunk.1.get_bit(index_within_chunk as u32) {
                         has_unset_bits = true;
                         break 'inner_inactive;
                     }
@@ -442,7 +442,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
                 chunk_index_to_chunk_mutation
                     .entry(bit_index / CHUNK_SIZE as u128)
                     .or_insert_with(Chunk::empty_chunk)
-                    .set_bit((*bit_index % CHUNK_SIZE as u128) as usize);
+                    .set_bit((*bit_index % CHUNK_SIZE as u128) as u32);
             }
         });
 
@@ -468,13 +468,16 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         // Apply the bit-flipping operation that calculates Bloom filter values after
         // applying the removal records
         for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
-            let mut flipped_bits = **chunk;
-            **chunk = chunk.or(chunk_index_to_chunk_mutation[chunk_index]);
+            let mut flipped_bits = chunk.clone();
+            **chunk = chunk
+                .clone()
+                .or(chunk_index_to_chunk_mutation[chunk_index].clone())
+                .clone();
 
-            flipped_bits.xor(**chunk);
+            flipped_bits.xor_assign(chunk.clone());
 
             for j in 0..CHUNK_SIZE as u128 {
-                if flipped_bits.get_bit(j as usize) {
+                if flipped_bits.get_bit(j as u32) {
                     changed_indices.push(j + chunk_index * CHUNK_SIZE as u128);
                 }
             }

@@ -164,7 +164,7 @@ mod active_window_tests {
         }
 
         // Set all bits, then check that they are set
-        for i in 0..100 as usize {
+        for i in 0..100 {
             aw.set_bit(i);
         }
 
@@ -196,14 +196,21 @@ mod active_window_tests {
         type Hasher = blake3::Hasher;
 
         let mut active_window = ActiveWindow::<Hasher>::new();
-        let num_insertions = 100;
+        let num_insertions = 1000;
         let mut rng = thread_rng();
         for _ in 0..num_insertions {
             active_window.increment((rng.next_u32() as u128) % WINDOW_SIZE as u128);
         }
-        let dummy_chunk = Chunk { bits: [0u32; 128] };
+        let dummy_chunk = active_window.slid_chunk();
+        active_window.slide_window();
+        assert!(!active_window
+            .sbf
+            .hasset((WINDOW_SIZE - CHUNK_SIZE) as u128, WINDOW_SIZE as u128));
+
         active_window.slide_window_back(&dummy_chunk);
-        assert!(!active_window.sbf.hasset(0, CHUNK_SIZE as u128));
+        for index in dummy_chunk.bits {
+            assert!(active_window.isset(index as u128));
+        }
     }
 
     #[test]

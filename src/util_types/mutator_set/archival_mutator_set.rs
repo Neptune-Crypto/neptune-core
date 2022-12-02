@@ -277,7 +277,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
                 self.set_commitment.swbf_active.unset_bit(relative_index);
             } else {
                 let chunk_index = diff_index / CHUNK_SIZE as u128;
-                let index_in_chunk = (diff_index % CHUNK_SIZE as u128) as usize;
+                let index_in_chunk = (diff_index % CHUNK_SIZE as u128) as u32;
                 chunk_index_to_revert_chunk
                     .entry(chunk_index)
                     .or_insert_with(Chunk::empty_chunk)
@@ -291,11 +291,11 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             // in both the `revert_chunk` and in the `previous_chunk`.
             let previous_chunk = self.chunks.get(chunk_index);
             let mut new_chunk = previous_chunk;
-            new_chunk.xor(revert_chunk);
+            new_chunk.xor_assign(revert_chunk.clone());
             self.set_commitment
                 .swbf_inactive
                 .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
-            self.chunks.set(chunk_index, new_chunk);
+            self.chunks.set(chunk_index, new_chunk.clone());
 
             // To check if a bit was set in `revert_chunk` that was not set in previous_chunk, we can
             // do a bit-wise AND on the `revert_chunk` and the updated `new_chunk`. If this is
@@ -352,9 +352,9 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             self.set_commitment.swbf_active.get_bit(relative_index)
         } else {
             let chunk_index = bit_index / CHUNK_SIZE as u128;
-            let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
+            let relative_index = bit_index % CHUNK_SIZE as u128;
             let relevant_chunk = self.chunks.get(chunk_index);
-            relevant_chunk.get_bit(relative_index)
+            relevant_chunk.get_bit(relative_index as u32)
         }
     }
 
@@ -604,7 +604,7 @@ mod archival_mutator_set_tests {
 
         let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
         let record = prepare_random_addition(&mut archival_mutator_set);
-        let (item, mut addition_record, membership_proof) = record.clone();
+        let (item, mut addition_record, membership_proof) = record;
         archival_mutator_set.add(&mut addition_record);
 
         let removal_record = archival_mutator_set.drop(&item, &membership_proof);
@@ -714,7 +714,7 @@ mod archival_mutator_set_tests {
         for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(archival_mutator_set.verify(item, mp));
         }
-        archival_mutator_set.batch_remove(removal_records, &mut vec![]);
+        archival_mutator_set.batch_remove(removal_records, &mut []);
         for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(!archival_mutator_set.verify(item, mp));
         }
@@ -815,7 +815,7 @@ mod archival_mutator_set_tests {
             active_window.increment((rng.next_u32() as u128) % WINDOW_SIZE as u128);
         }
 
-        let mut active_window_db = DB::open("active_window", opt.clone()).unwrap();
+        let mut active_window_db = DB::open("active_window", opt).unwrap();
 
         active_window_db.flush().expect("Cannot flush database.");
 

@@ -50,7 +50,7 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
                 // Leaf exists in own membership proof
                 Some((mp, chunk)) => {
                     for bit_index in bit_indices.iter() {
-                        let index = (bit_index % CHUNK_SIZE as u128) as usize;
+                        let index = (bit_index % CHUNK_SIZE as u128) as u32;
                         if !chunk.get_bit(index) {
                             mutated_chunks_by_input_indices.insert(i);
                         }
@@ -77,7 +77,7 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
                         Some((mp, chunk)) => {
                             let mut target_chunk = chunk.to_owned();
                             for bit_index in bit_indices.iter() {
-                                target_chunk.set_bit((bit_index % CHUNK_SIZE as u128) as usize);
+                                target_chunk.set_bit((bit_index % CHUNK_SIZE as u128) as u32);
                             }
 
                             if !mutation_argument_hash_map.contains_key(chunk_index) {

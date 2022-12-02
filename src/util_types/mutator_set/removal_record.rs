@@ -112,7 +112,7 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
                 .dictionary
                 .insert(
                     old_window_start_batch_index,
-                    (new_swbf_auth_path.clone(), new_chunk),
+                    (new_swbf_auth_path.clone(), new_chunk.clone()),
                 );
         }
 
