@@ -3,6 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
+use super::ibf::InvertibleBloomFilter;
 use super::shared::CHUNK_SIZE;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +123,33 @@ impl Hashable for Chunk {
             .iter()
             .flat_map(|&val| val.to_sequence())
             .collect()
+    }
+}
+
+impl InvertibleBloomFilter for Chunk {
+    fn increment(&mut self, location: u128) {
+        self.bits.push(location as u32);
+        self.bits.sort();
+    }
+
+    fn decrement(&mut self, location: u128) {
+        let mut drop_index = 0;
+        let mut found = false;
+        for (i, b) in self.bits.iter().enumerate() {
+            if *b == location as u32 {
+                drop_index = i;
+                found = true;
+            }
+        }
+        if found {
+            self.bits.remove(drop_index);
+        } else {
+            panic!("Cannot decrement integer that is already zero.");
+        }
+    }
+
+    fn isset(&self, location: u128) -> bool {
+        self.bits.contains(&(location as u32))
     }
 }
 
