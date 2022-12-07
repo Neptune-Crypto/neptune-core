@@ -14,13 +14,13 @@ use twenty_first::{
     util_types::mmr::mmr_membership_proof::MmrMembershipProof,
 };
 
-use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::RemovalRecord;
 use super::shared::{bit_indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE};
+use super::{active_window::ActiveWindow, removal_record::BitSet};
 
 impl Error for SetCommitmentError {}
 
@@ -115,22 +115,23 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         AdditionRecord::new(canonical_commitment)
     }
 
-    /**
-     * drop
-     * Generates a removal record with which to update the set commitment.
-     */
+    /// Generates a removal record with which to update the set commitment.
     pub fn drop(
         &mut self,
         item: &Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
-        let bit_indices = membership_proof.cached_bits.unwrap_or_else(|| {
-            get_swbf_indices::<H>(
-                item,
-                &membership_proof.randomness,
-                membership_proof.auth_path_aocl.data_index,
-            )
-        });
+        let bit_indices: BitSet = membership_proof
+            .cached_bits
+            .clone()
+            .unwrap_or_else(|| {
+                BitSet::new(&get_swbf_indices::<H>(
+                    item,
+                    &membership_proof.randomness,
+                    membership_proof.auth_path_aocl.data_index,
+                ))
+            })
+            .to_owned();
 
         RemovalRecord {
             bit_indices,
@@ -295,12 +296,12 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
 
         // Store the bit indices for later use, as they are expensive to calculate
-        let cached_bits: Option<[u128; NUM_TRIALS]> = if store_bits {
-            Some(get_swbf_indices::<H>(
+        let cached_bits: Option<_> = if store_bits {
+            Some(BitSet::new(&get_swbf_indices::<H>(
                 item,
                 randomness,
                 self.aocl.count_leaves(),
-            ))
+            )))
         } else {
             None
         };
@@ -344,16 +345,16 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let window_start = current_batch_index * CHUNK_SIZE as u128;
 
         // We use the cached bits if we have them, otherwise they are recalculated
-        let all_bit_indices = match membership_proof.cached_bits {
-            Some(bits) => bits,
-            None => get_swbf_indices::<H>(
+        let all_bit_indices = match &membership_proof.cached_bits {
+            Some(bits) => bits.clone(),
+            None => BitSet::new(&get_swbf_indices::<H>(
                 item,
                 &membership_proof.randomness,
                 membership_proof.auth_path_aocl.data_index,
-            ),
+            )),
         };
 
-        let chunk_index_to_bit_indices = bit_indices_to_hash_map(&all_bit_indices);
+        let chunk_index_to_bit_indices = bit_indices_to_hash_map(&all_bit_indices.to_array());
         'outer: for (chunk_index, bit_indices) in chunk_index_to_bit_indices.into_iter() {
             if chunk_index < current_batch_index {
                 // verify mmr auth path

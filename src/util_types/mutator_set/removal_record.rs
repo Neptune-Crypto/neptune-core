@@ -1,9 +1,11 @@
-use serde_big_array;
-use serde_big_array::BigArray;
-use serde_derive::{Deserialize, Serialize};
+use serde::de::{SeqAccess, Visitor};
+use serde::ser::SerializeTuple;
+use serde::Deserialize;
+use serde_derive::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
+use std::marker::PhantomData;
 use std::ops::IndexMut;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
@@ -18,6 +20,91 @@ use super::shared::{
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitSet([u128; NUM_TRIALS]);
+
+impl BitSet {
+    pub fn new(bits: &[u128; NUM_TRIALS]) -> Self {
+        Self { 0: *bits }
+    }
+
+    pub fn sort_unstable(&mut self) {
+        self.0.sort_unstable();
+    }
+
+    pub fn to_vec(&self) -> Vec<u128> {
+        self.0.to_vec()
+    }
+
+    pub fn to_array(&self) -> [u128; NUM_TRIALS] {
+        self.0
+    }
+
+    pub fn to_array_mut(&mut self) -> &mut [u128; NUM_TRIALS] {
+        &mut self.0
+    }
+}
+
+impl serde::Serialize for BitSet {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_tuple(NUM_TRIALS)?;
+        for b in self.0 {
+            seq.serialize_element(&b)?;
+        }
+        seq.end()
+    }
+}
+
+/// ArrayVisitor
+/// Used for deserializing large arrays, with size known at compile time.
+/// Credit: MikailBag https://github.com/serde-rs/serde/issues/1937
+struct ArrayVisitor<T, const N: usize>(PhantomData<T>);
+
+impl<'de, T, const N: usize> Visitor<'de> for ArrayVisitor<T, N>
+where
+    T: Deserialize<'de>,
+{
+    type Value = [T; N];
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str(&format!("an array of length {}", N))
+    }
+
+    #[inline]
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        // can be optimized using MaybeUninit
+        let mut data = Vec::with_capacity(N);
+        for _ in 0..N {
+            match (seq.next_element())? {
+                Some(val) => data.push(val),
+                None => return Err(serde::de::Error::invalid_length(N, &self)),
+            }
+        }
+        match data.try_into() {
+            Ok(arr) => Ok(arr),
+            Err(_) => unreachable!(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BitSet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(BitSet::new(&deserializer.deserialize_tuple(
+            NUM_TRIALS,
+            ArrayVisitor::<u128, NUM_TRIALS>(PhantomData),
+        )?))
+    }
+}
 
 impl Error for RemovalRecordError {}
 
@@ -36,8 +123,7 @@ pub enum RemovalRecordError {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RemovalRecord<H: AlgebraicHasher> {
-    #[serde(with = "BigArray")]
-    pub bit_indices: [u128; NUM_TRIALS],
+    pub bit_indices: BitSet,
     pub target_chunks: ChunkDictionary<H>,
 }
 
@@ -70,8 +156,12 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
         // Collect all bit indices for all removal records that are being updated
         let mut chunk_index_to_mp_index: HashMap<u128, Vec<usize>> = HashMap::new();
         removal_records.iter().enumerate().for_each(|(i, rr)| {
-            let bits = rr.bit_indices;
-            let chunks_set: HashSet<u128> = bits.iter().map(|x| x / CHUNK_SIZE as u128).collect();
+            let bits = &rr.bit_indices;
+            let chunks_set: HashSet<u128> = bits
+                .to_array()
+                .iter()
+                .map(|x| x / CHUNK_SIZE as u128)
+                .collect();
             chunks_set.iter().for_each(|chnkidx| {
                 chunk_index_to_mp_index
                     .entry(*chnkidx)
@@ -201,13 +291,14 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
 
     /// Returns a hashmap from chunk index to chunk.
     pub fn get_chunk_index_to_bit_indices(&self) -> HashMap<u128, Vec<u128>> {
-        bit_indices_to_hash_map(&self.bit_indices)
+        bit_indices_to_hash_map(&self.bit_indices.to_array())
     }
 }
 
 impl<H: AlgebraicHasher> Hashable for RemovalRecord<H> {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         self.bit_indices
+            .to_array()
             .iter()
             .flat_map(|bi| bi.to_sequence())
             .chain(self.target_chunks.to_sequence())
@@ -219,6 +310,7 @@ impl<H: AlgebraicHasher> Hashable for RemovalRecord<H> {
 mod removal_record_tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
+    use rand::{thread_rng, RngCore};
 
     use crate::test_shared::mutator_set::make_item_and_randomness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -249,16 +341,17 @@ mod removal_record_tests {
         let (_mp, removal_record) = get_mp_and_removal_record();
 
         let bit_indices = removal_record.bit_indices;
-        let mut bit_indices_sorted = bit_indices;
+        let mut bit_indices_sorted = bit_indices.clone();
         bit_indices_sorted.sort_unstable();
         assert_eq!(
-            bit_indices, bit_indices_sorted,
+            bit_indices.clone(),
+            bit_indices_sorted,
             "bit indices must sorted in the removal record"
         );
 
         // Alternative way of checking that the indices are sorted (thanks, IRC)
         assert!(
-            bit_indices.windows(2).all(|s| s[0] < s[1]),
+            bit_indices.to_array().windows(2).all(|s| s[0] < s[1]),
             "bit-indices must be sorted"
         );
     }
@@ -275,11 +368,11 @@ mod removal_record_tests {
             H::hash(&removal_record_alt),
             "Same removal record must hash to same value"
         );
-        removal_record_alt.bit_indices[NUM_TRIALS / 4] += 1;
+        removal_record_alt.bit_indices.to_array_mut()[NUM_TRIALS / 4] += 1;
 
-        // Sanity check (theoretically, a collission in the bit indices could have happened)
+        // Sanity check (theoretically, a collision in the bit indices could have happened)
         assert!(
-            utils::has_unique_elements(removal_record_alt.bit_indices),
+            utils::has_unique_elements(removal_record_alt.bit_indices.to_array()),
             "Sanity check to ensure that bit indices are still all unique"
         );
         assert_ne!(
@@ -509,5 +602,21 @@ mod removal_record_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_bit_set_serialization() {
+        let mut rng = thread_rng();
+        let original_bitset = BitSet::new(
+            &(0..NUM_TRIALS)
+                .map(|_| ((rng.next_u64() as u128) << 64) | (rng.next_u64() as u128))
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        );
+        let serialized_bitset = serde_json::to_string(&original_bitset).unwrap();
+        let reconstructed_bitset: BitSet = serde_json::from_str(&serialized_bitset).unwrap();
+
+        assert_eq!(original_bitset, reconstructed_bitset);
     }
 }
