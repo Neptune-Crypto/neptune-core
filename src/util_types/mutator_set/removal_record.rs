@@ -26,7 +26,7 @@ pub struct BitSet([u128; NUM_TRIALS]);
 
 impl BitSet {
     pub fn new(bits: &[u128; NUM_TRIALS]) -> Self {
-        Self { 0: *bits }
+        Self(*bits)
     }
 
     pub fn sort_unstable(&mut self) {

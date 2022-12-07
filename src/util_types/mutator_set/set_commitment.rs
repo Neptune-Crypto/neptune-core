@@ -121,17 +121,13 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         item: &Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
-        let bit_indices: BitSet = membership_proof
-            .cached_bits
-            .clone()
-            .unwrap_or_else(|| {
-                BitSet::new(&get_swbf_indices::<H>(
-                    item,
-                    &membership_proof.randomness,
-                    membership_proof.auth_path_aocl.data_index,
-                ))
-            })
-            .to_owned();
+        let bit_indices: BitSet = membership_proof.cached_bits.clone().unwrap_or_else(|| {
+            BitSet::new(&get_swbf_indices::<H>(
+                item,
+                &membership_proof.randomness,
+                membership_proof.auth_path_aocl.data_index,
+            ))
+        });
 
         RemovalRecord {
             bit_indices,
