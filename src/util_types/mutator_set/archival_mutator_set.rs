@@ -372,21 +372,26 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         let aw_as_vec = active_window.to_vec_u32();
         let length = aw_as_vec.len() as u32;
         let length_bytes = [
-            (length >> 24) as u8,
-            (length >> 16) as u8,
-            (length >> 8) as u8,
-            length as u8,
+            ((length >> 24) & 0xff) as u8,
+            ((length >> 16) & 0xff) as u8,
+            ((length >> 8) & 0xff) as u8,
+            (length & 0xff) as u8,
         ];
         active_window_db
             .put(&length_key, &length_bytes)
             .expect("Cannot put length");
         for (i, location) in aw_as_vec.iter().enumerate() {
-            let key = [(i >> 24) as u8, (i >> 16) as u8, (i >> 8) as u8, i as u8];
+            let key = [
+                ((i >> 24) & 0xff) as u8,
+                ((i >> 16) & 0xff) as u8,
+                ((i >> 8) & 0xff) as u8,
+                (i & 0xff) as u8,
+            ];
             let value = [
-                (location >> 24) as u8,
-                (location >> 16) as u8,
-                (location >> 8) as u8,
-                *location as u8,
+                ((location >> 24) & 0xff) as u8,
+                ((location >> 16) & 0xff) as u8,
+                ((location >> 8) & 0xff) as u8,
+                ((location) & 0xff) as u8,
             ];
             active_window_db
                 .put(&key, &value)

@@ -17,7 +17,7 @@ pub struct ActiveWindow<H: AlgebraicHasher> {
 
 impl<H: AlgebraicHasher> PartialEq for ActiveWindow<H> {
     fn eq(&self, other: &Self) -> bool {
-        self.sbf == other.sbf && self._hasher == other._hasher
+        self.sbf == other.sbf
     }
 }
 
@@ -36,7 +36,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
         Chunk::from_indices(
             &self
                 .sbf
-                .slice::<{ CHUNK_SIZE as u128 }>(0, CHUNK_SIZE as u128)
+                .slice::<{ CHUNK_SIZE as u128 }>(0..CHUNK_SIZE as u128)
                 .indices,
         )
     }

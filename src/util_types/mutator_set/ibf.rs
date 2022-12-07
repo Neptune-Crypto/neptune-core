@@ -1,6 +1,13 @@
+use std::ops::Range;
+
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
+/// SparseBloomFilter
+///
+/// A sparse Bloom filter of static length N (number of bits) is a
+/// list of indices of set bits, counting duplicates. The indices
+/// live in the range [0; N) and are stored sorted.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SparseBloomFilter<const N: u128> {
     pub indices: Vec<u128>,
@@ -22,17 +29,22 @@ impl<const N: u128> SparseBloomFilter<N> {
         sbf
     }
 
-    pub fn slice<const M: u128>(&self, lower: u128, upper: u128) -> SparseBloomFilter<M> {
+    /// Grab a slice from the sparse Bloom filter by supplying an
+    /// interval. Given how the
+    /// sparse Bloom filter is represented (i.e., as a list of bit
+    /// indices), this operation boils down to copying all indices
+    /// that live in the range and subtracting the lower bound from
+    /// them.
+    /// The word "slice" is used in the denotation of submatrices not
+    /// rust's contiguous memory structures.
+    pub fn slice<const M: u128>(&self, interval: Range<u128>) -> SparseBloomFilter<M> {
         let indices = self
             .indices
             .iter()
-            .filter(|l| lower <= **l && **l < upper)
+            .filter(|l| interval.contains(*l))
+            .map(|l| *l - interval.start)
             .collect_vec();
-        let mut sbf_slice = SparseBloomFilter::<M>::new();
-        for location in indices.into_iter() {
-            sbf_slice.increment(*location);
-        }
-        sbf_slice
+        SparseBloomFilter { indices }
     }
 
     /// Set range to zero.
@@ -77,7 +89,7 @@ impl<const N: u128> SparseBloomFilter<N> {
         for chunk in vector.chunks(4) {
             let mut acc = 0;
             for c in chunk {
-                acc = acc << 32 | *c as u128;
+                acc = (acc << 32) | *c as u128;
             }
             indices.push(acc);
         }
@@ -134,9 +146,8 @@ impl<const N: u128> InvertibleBloomFilter for SparseBloomFilter<N> {
     }
 
     fn isset(&self, location: u128) -> bool {
-        for (index, loc) in self.indices.iter().enumerate() {
+        for loc in self.indices.iter() {
             if *loc == location {
-                println!("Found location {} at index {}.", loc, index,);
                 return true;
             }
         }
