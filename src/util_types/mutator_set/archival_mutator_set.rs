@@ -15,7 +15,7 @@ use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_trait::MutatorSet;
-use super::removal_record::RemovalRecord;
+use super::removal_record::{BitSet, RemovalRecord};
 use super::set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError};
 use super::shared::CHUNK_SIZE;
 
@@ -111,7 +111,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             set_commitment: SetCommitment {
                 aocl,
                 swbf_inactive,
-                swbf_active: ActiveWindow::default(),
+                swbf_active: ActiveWindow::new(),
             },
             chunks: DatabaseVector::<Chunk>::new(chunks_db),
         }
@@ -146,9 +146,9 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
 
         let active_window_is_empty = active_window_db.new_iter().unwrap().next().is_none();
         let active_window: ActiveWindow<H> = if active_window_is_empty {
-            ActiveWindow::default()
+            ActiveWindow::new()
         } else {
-            ActiveWindow::restore_from_database(active_window_db)
+            Self::load_active_window(&mut active_window_db)
         };
 
         Self {
@@ -255,7 +255,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             auth_path_aocl,
             randomness: randomness.to_owned(),
             target_chunks,
-            cached_bits: Some(bits),
+            cached_bits: Some(BitSet::new(&bits)),
         })
     }
 
@@ -277,7 +277,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
                 self.set_commitment.swbf_active.unset_bit(relative_index);
             } else {
                 let chunk_index = diff_index / CHUNK_SIZE as u128;
-                let index_in_chunk = (diff_index % CHUNK_SIZE as u128) as usize;
+                let index_in_chunk = (diff_index % CHUNK_SIZE as u128) as u32;
                 chunk_index_to_revert_chunk
                     .entry(chunk_index)
                     .or_insert_with(Chunk::empty_chunk)
@@ -291,11 +291,11 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             // in both the `revert_chunk` and in the `previous_chunk`.
             let previous_chunk = self.chunks.get(chunk_index);
             let mut new_chunk = previous_chunk;
-            new_chunk.xor(revert_chunk);
+            new_chunk.xor_assign(revert_chunk.clone());
             self.set_commitment
                 .swbf_inactive
                 .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
-            self.chunks.set(chunk_index, new_chunk);
+            self.chunks.set(chunk_index, new_chunk.clone());
 
             // To check if a bit was set in `revert_chunk` that was not set in previous_chunk, we can
             // do a bit-wise AND on the `revert_chunk` and the updated `new_chunk`. If this is
@@ -352,9 +352,9 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             self.set_commitment.swbf_active.get_bit(relative_index)
         } else {
             let chunk_index = bit_index / CHUNK_SIZE as u128;
-            let relative_index = (bit_index % CHUNK_SIZE as u128) as usize;
+            let relative_index = bit_index % CHUNK_SIZE as u128;
             let relevant_chunk = self.chunks.get(chunk_index);
-            relevant_chunk.get_bit(relative_index)
+            relevant_chunk.get_bit(relative_index as u32)
         }
     }
 
@@ -365,17 +365,73 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         self.set_commitment.aocl.flush();
         self.set_commitment.swbf_inactive.flush();
     }
+
+    #[allow(dead_code)]
+    fn store_active_window(active_window: &ActiveWindow<H>, active_window_db: &mut DB) {
+        let length_key = [0u8; 1];
+        let aw_as_vec = active_window.to_vec_u32();
+        let length = aw_as_vec.len() as u32;
+        let length_bytes = [
+            ((length >> 24) & 0xff) as u8,
+            ((length >> 16) & 0xff) as u8,
+            ((length >> 8) & 0xff) as u8,
+            (length & 0xff) as u8,
+        ];
+        active_window_db
+            .put(&length_key, &length_bytes)
+            .expect("Cannot put length");
+        for (i, location) in aw_as_vec.iter().enumerate() {
+            let key = [
+                ((i >> 24) & 0xff) as u8,
+                ((i >> 16) & 0xff) as u8,
+                ((i >> 8) & 0xff) as u8,
+                (i & 0xff) as u8,
+            ];
+            let value = [
+                ((location >> 24) & 0xff) as u8,
+                ((location >> 16) & 0xff) as u8,
+                ((location >> 8) & 0xff) as u8,
+                ((location) & 0xff) as u8,
+            ];
+            active_window_db
+                .put(&key, &value)
+                .expect("Cannot put item.");
+        }
+    }
+
+    fn load_active_window(active_window_db: &mut DB) -> ActiveWindow<H> {
+        let length_key = [0u8; 1];
+        let length_bytes = active_window_db
+            .get(&length_key)
+            .expect("Cannot get length.");
+        let length = ((length_bytes[0] as u32) << 24)
+            | ((length_bytes[1] as u32) << 16)
+            | ((length_bytes[2] as u32) << 8)
+            | (length_bytes[3] as u32);
+        let mut aw_vector = Vec::<u32>::with_capacity(length as usize);
+        for i in 0..length {
+            let key = [(i >> 24) as u8, (i >> 16) as u8, (i >> 8) as u8, i as u8];
+            let value_bytes = active_window_db.get(&key).expect("Cannot get item.");
+            let value = ((value_bytes[0] as u32) << 24)
+                | ((value_bytes[1] as u32) << 16)
+                | ((value_bytes[2] as u32) << 8)
+                | (value_bytes[3] as u32);
+            aw_vector.push(value);
+        }
+        ActiveWindow::<H>::from_vec_u32(&aw_vector)
+    }
 }
 
 #[cfg(test)]
 mod archival_mutator_set_tests {
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::{thread_rng, Rng, RngCore};
 
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
     use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::ibf::InvertibleBloomFilter;
+    use crate::util_types::mutator_set::shared::{BATCH_SIZE, WINDOW_SIZE};
 
     use super::*;
 
@@ -413,11 +469,16 @@ mod archival_mutator_set_tests {
         // Let's store the active window back to the database and create
         // a new archival object from the databases it contains and then check
         // that this archival MS contains the same values
-        let active_window_db = DB::open("active_window", opt.clone()).unwrap();
-        let active_window_db = archival_mutator_set
-            .set_commitment
-            .swbf_active
-            .store_to_database(active_window_db);
+        let mut active_window_db = DB::open("active_window", opt.clone()).unwrap();
+        ArchivalMutatorSet::store_active_window(
+            &archival_mutator_set.set_commitment.swbf_active,
+            &mut active_window_db,
+        );
+
+        // let active_window_db = archival_mutator_set
+        //     .set_commitment
+        //     .swbf_active
+        //     .store_to_database(active_window_db);
         drop(archival_mutator_set);
         let chunks_db = DB::open("chunks", opt.clone()).unwrap();
         let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
@@ -508,7 +569,7 @@ mod archival_mutator_set_tests {
             assert_eq!(commitment_before_add, commitment_after_revert);
         }
 
-        let n_iterations = 10 * BATCH_SIZE;
+        let n_iterations = 10 * BATCH_SIZE as usize;
         let mut records = Vec::with_capacity(n_iterations);
         let mut commitments_before = Vec::with_capacity(n_iterations);
 
@@ -541,14 +602,14 @@ mod archival_mutator_set_tests {
         }
     }
 
-    #[should_panic(expected = "Caller may not attempt to unset a bit that was not set")]
+    #[should_panic(expected = "Decremented integer is already zero.")]
     #[test]
     fn revert_remove_from_active_bloom_filter_panic() {
         type H = blake3::Hasher;
 
         let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
         let record = prepare_random_addition(&mut archival_mutator_set);
-        let (item, mut addition_record, membership_proof) = record.clone();
+        let (item, mut addition_record, membership_proof) = record;
         archival_mutator_set.add(&mut addition_record);
 
         let removal_record = archival_mutator_set.drop(&item, &membership_proof);
@@ -582,7 +643,7 @@ mod archival_mutator_set_tests {
 
         let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
-        let n_iterations = 11 * BATCH_SIZE;
+        let n_iterations = 11 * BATCH_SIZE as usize;
         let mut records = Vec::with_capacity(n_iterations);
 
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
@@ -658,7 +719,7 @@ mod archival_mutator_set_tests {
         for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(archival_mutator_set.verify(item, mp));
         }
-        archival_mutator_set.batch_remove(removal_records, &mut vec![]);
+        archival_mutator_set.batch_remove(removal_records, &mut []);
         for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(!archival_mutator_set.verify(item, mp));
         }
@@ -745,5 +806,31 @@ mod archival_mutator_set_tests {
         let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
 
         (item, addition_record, membership_proof)
+    }
+
+    #[test]
+    fn test_store_load_database() {
+        type Hasher = RescuePrimeRegular;
+
+        let opt = rusty_leveldb::in_memory();
+        let mut active_window = ActiveWindow::<Hasher>::new();
+        let num_insertions = 1000;
+        let mut rng = thread_rng();
+        for _ in 0..num_insertions {
+            active_window.increment((rng.next_u32() as u128) % WINDOW_SIZE as u128);
+        }
+
+        let mut active_window_db = DB::open("active_window", opt).unwrap();
+
+        active_window_db.flush().expect("Cannot flush database.");
+
+        ArchivalMutatorSet::store_active_window(&active_window, &mut active_window_db);
+
+        let active_window_reconstructed =
+            ArchivalMutatorSet::load_active_window(&mut active_window_db);
+
+        active_window_db.close().expect("Cannot close database.");
+
+        assert_eq!(active_window, active_window_reconstructed);
     }
 }

@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::{
@@ -11,7 +10,7 @@ use super::{
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MutatorSetAccumulator<H: AlgebraicHasher> {
     pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
 }
@@ -21,7 +20,7 @@ impl<H: AlgebraicHasher> MutatorSetAccumulator<H> {
         let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
             swbf_inactive: MmrAccumulator::<H>::new(vec![]),
-            swbf_active: ActiveWindow::default(),
+            swbf_active: ActiveWindow::new(),
         };
 
         Self { set_commitment }

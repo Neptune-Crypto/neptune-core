@@ -10,10 +10,10 @@ use twenty_first::{
 use super::{chunk_dictionary::ChunkDictionary, removal_record::RemovalRecord};
 
 pub const BITS_PER_U32: usize = 32;
-pub const WINDOW_SIZE: usize = 32000;
-pub const CHUNK_SIZE: usize = 1600;
-pub const BATCH_SIZE: usize = 10;
-pub const NUM_TRIALS: usize = 160;
+pub const WINDOW_SIZE: usize = 1 << 20;
+pub const CHUNK_SIZE: usize = 1 << 12;
+pub const BATCH_SIZE: usize = 1 << 3;
+pub const NUM_TRIALS: usize = 45;
 
 pub fn bit_indices_to_hash_map(all_bit_indices: &[u128; NUM_TRIALS]) -> HashMap<u128, Vec<u128>> {
     let mut chunk_index_to_bit_indices: HashMap<u128, Vec<u128>> = HashMap::new();
@@ -50,7 +50,7 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
                 // Leaf exists in own membership proof
                 Some((mp, chunk)) => {
                     for bit_index in bit_indices.iter() {
-                        let index = (bit_index % CHUNK_SIZE as u128) as usize;
+                        let index = (bit_index % CHUNK_SIZE as u128) as u32;
                         if !chunk.get_bit(index) {
                             mutated_chunks_by_input_indices.insert(i);
                         }
@@ -77,7 +77,7 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
                         Some((mp, chunk)) => {
                             let mut target_chunk = chunk.to_owned();
                             for bit_index in bit_indices.iter() {
-                                target_chunk.set_bit((bit_index % CHUNK_SIZE as u128) as usize);
+                                target_chunk.set_bit((bit_index % CHUNK_SIZE as u128) as u32);
                             }
 
                             if !mutation_argument_hash_map.contains_key(chunk_index) {
