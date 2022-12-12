@@ -103,6 +103,11 @@ impl DashboardApp {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<(), Box<dyn Error>> {
         self.running = true;
+        self.screens
+            .get(&self.current_menu_item)
+            .unwrap()
+            .borrow_mut()
+            .activate();
 
         while self.running {
             terminal.draw(|f| self.render(f))?;

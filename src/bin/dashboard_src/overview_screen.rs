@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -6,7 +7,7 @@ use std::{
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::rpc_server::RPCClient;
 use tarpc::context;
-use tokio::{select, time};
+use tokio::{select, task::JoinHandle, time};
 use tui::{
     style::{Color, Style},
     text::{Span, Text},
@@ -27,7 +28,7 @@ pub struct OverviewScreen {
     bg: Color,
     data: Arc<std::sync::Mutex<OverviewData>>,
     server: Arc<RPCClient>,
-    is_polling: Arc<std::sync::Mutex<bool>>,
+    poll_thread: Option<Arc<RefCell<JoinHandle<()>>>>,
 }
 
 impl OverviewScreen {
@@ -38,12 +39,11 @@ impl OverviewScreen {
             bg: Color::Black,
             data: Arc::new(Mutex::new(OverviewData::default())),
             server: rpc_server,
-            is_polling: Arc::new(Mutex::new(false)),
+            poll_thread: None,
         }
     }
 
     async fn run_polling_loop(
-        is_polling: Arc<std::sync::Mutex<bool>>,
         server: Arc<RPCClient>,
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
     ) {
@@ -52,21 +52,14 @@ impl OverviewScreen {
         let block_height_poller = time::sleep(block_height_poller_interval);
         tokio::pin!(block_height_poller);
 
-        while *is_polling.lock().unwrap() {
-            // Set a timer to run peer discovery process every N seconds
-
-            // Set a timer for synchronization handling, but only if we are in synchronization mod
+        loop {
             select! {
                 _ = &mut block_height_poller => {
-                    if !*is_polling.lock().unwrap() {
-                        break;
-                    }
 
                     let bh = server.block_height(context::current()).await.unwrap();
                     overview_data.lock().unwrap().block_height = Some(bh);
 
-
-                    // Reset the timer to run this branch again in P seconds
+                    // Reset the timer
                     block_height_poller.as_mut().reset(tokio::time::Instant::now() + block_height_poller_interval);
                 }
             }
@@ -77,19 +70,19 @@ impl OverviewScreen {
 impl Screen for OverviewScreen {
     fn activate(&mut self) {
         self.active = true;
-        *self.is_polling.lock().unwrap() = true;
-        let polling_arc = self.is_polling.clone();
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
-        let _jh = tokio::spawn(async move {
-            OverviewScreen::run_polling_loop(polling_arc, server_arc, data_arc).await;
-        });
+        self.poll_thread = Some(Arc::new(RefCell::new(tokio::spawn(async move {
+            OverviewScreen::run_polling_loop(server_arc, data_arc).await;
+        }))));
         // _jh.abort();
     }
 
     fn deactivate(&mut self) {
         self.active = false;
-        *self.is_polling.lock().unwrap() = false;
+        if let Some(thread_handle) = &self.poll_thread {
+            thread_handle.borrow_mut().abort();
+        }
     }
 
     fn focus(&mut self) {
@@ -104,7 +97,13 @@ impl Screen for OverviewScreen {
 impl Widget for OverviewScreen {
     fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
         // render welcome text
-        let text = Span::raw("Hello, world!");
+        let text = Span::raw(format!(
+            "Block height: {}",
+            match self.data.lock().unwrap().block_height {
+                Some(h) => h.to_string(),
+                None => "-".to_string(),
+            }
+        ));
         let style = Style::default().bg(self.bg).fg(self.fg);
         let widget = Paragraph::new(Text::from(text)).style(style);
         widget
