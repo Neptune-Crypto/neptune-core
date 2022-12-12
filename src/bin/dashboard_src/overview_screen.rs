@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use neptune_core::models::blockchain::block::block_height::BlockHeight;
+use neptune_core::rpc_server::RPCClient;
 use tui::{
     style::{Color, Style},
     text::{Span, Text},
@@ -7,25 +11,28 @@ use tui::{
 use super::screen::Screen;
 
 #[derive(Debug, Clone)]
+pub struct OverviewData {
+    block_height: BlockHeight,
+}
+
+#[derive(Debug, Clone)]
 pub struct OverviewScreen {
     active: bool,
     fg: Color,
     bg: Color,
+    data: Option<OverviewData>,
+    server: Arc<RPCClient>,
 }
 
 impl OverviewScreen {
-    pub fn new() -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
         OverviewScreen {
             active: false,
             fg: Color::White,
             bg: Color::Black,
+            data: None,
+            server: rpc_server,
         }
-    }
-}
-
-impl Default for OverviewScreen {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

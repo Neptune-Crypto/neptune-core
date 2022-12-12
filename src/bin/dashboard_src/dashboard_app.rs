@@ -1,6 +1,7 @@
 use core::fmt;
 use crossterm::event::{self, Event, KeyCode};
-use std::{cell::RefCell, collections::HashMap, error::Error, io::Stdout, rc::Rc};
+use neptune_core::rpc_server::RPCClient;
+use std::{cell::RefCell, collections::HashMap, error::Error, io::Stdout, rc::Rc, sync::Arc};
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 use tui::{
@@ -80,8 +81,8 @@ pub struct DashboardApp {
 }
 
 impl DashboardApp {
-    pub fn new() -> Self {
-        let overview_screen = Rc::new(RefCell::new(OverviewScreen::new()));
+    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+        let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(rpc_server)));
         let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
@@ -270,11 +271,5 @@ impl DashboardApp {
                 f.render_widget(messages, screen_chunk);
             }
         };
-    }
-}
-
-impl Default for DashboardApp {
-    fn default() -> Self {
-        Self::new()
     }
 }
