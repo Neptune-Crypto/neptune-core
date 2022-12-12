@@ -1,7 +1,10 @@
 use core::fmt;
 use crossterm::event::{self, Event, KeyCode};
 use neptune_core::rpc_server::RPCClient;
-use std::{cell::RefCell, collections::HashMap, error::Error, io::Stdout, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell, collections::HashMap, error::Error, io::Stdout, rc::Rc, sync::Arc,
+    time::Duration,
+};
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 use tui::{
@@ -104,8 +107,10 @@ impl DashboardApp {
         while self.running {
             terminal.draw(|f| self.render(f))?;
 
-            if let Ok(event) = event::read() {
-                self.handle(event)?;
+            if event::poll(Duration::from_millis(100))? {
+                if let Ok(event) = event::read() {
+                    self.handle(event)?;
+                }
             }
         }
         Ok(())
