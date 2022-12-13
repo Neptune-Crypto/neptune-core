@@ -4,21 +4,49 @@ use std::{
     time::Duration,
 };
 
-use neptune_core::models::blockchain::block::block_height::BlockHeight;
+use itertools::Itertools;
+use neptune_core::models::blockchain::{block::block_height::BlockHeight, transaction::Amount};
 use neptune_core::rpc_server::RPCClient;
 use tarpc::context;
 use tokio::{select, task::JoinHandle, time};
 use tui::{
     style::{Color, Style},
-    text::{Span, Text},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Block, Borders, List, ListItem, Widget},
 };
+use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use super::screen::Screen;
 
 #[derive(Debug, Default, Clone)]
 pub struct OverviewData {
+    balance: Option<Amount>,
+    confirmations: Option<usize>,
+
     block_height: Option<BlockHeight>,
+    difficulty: Option<f64>,
+
+    mempool_size: Option<u32>,
+    mempool_tx_count: Option<u32>,
+
+    peer_count: Option<usize>,
+    max_peer_count: Option<usize>,
+    authenticated_peer_count: Option<usize>,
+}
+
+impl OverviewData {
+    pub fn test() -> Self {
+        OverviewData {
+            balance: Some(Amount::new([1337, 0, 0, 0])),
+            confirmations: Some(17),
+            block_height: Some(BlockHeight::from(BFieldElement::new(5005))),
+            difficulty: Some(241.03),
+            mempool_size: Some(100), // units?
+            mempool_tx_count: Some(1001),
+            peer_count: Some(11),
+            max_peer_count: Some(21),
+            authenticated_peer_count: Some(1),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -96,18 +124,58 @@ impl Screen for OverviewScreen {
 
 impl Widget for OverviewScreen {
     fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
-        // render welcome text
-        let text = Span::raw(format!(
-            "Block height: {}",
-            match self.data.lock().unwrap().block_height {
+        let data = self.data.lock().unwrap();
+        let mut items = vec![];
+        let mut depth = 0;
+        let indent = |d| format!("{}", [" "].repeat(d).concat());
+
+        items.push("# Balance".to_string());
+        items.push(" ".to_string());
+        depth = depth + 1;
+        let balance = format!(
+            "{}balance: {} {}",
+            indent(depth),
+            match data.balance {
                 Some(h) => h.to_string(),
                 None => "-".to_string(),
-            }
-        ));
+            },
+            match data.confirmations {
+                Some(c) => format!("({} confirmations)", c),
+                None => " ".to_string(),
+            },
+        );
+        items.push(balance);
+        depth -= 1;
+        items.push(" ".to_string());
+
+        items.push("# Blockchain".to_string());
+        items.push(" ".to_string());
+        depth += 1;
+        let block_height = format!(
+            "{}block height: {}",
+            indent(depth),
+            match data.block_height {
+                Some(h) => h.to_string(),
+                None => "-".to_string(),
+            },
+        );
+        items.push(block_height);
+        let difficulty = format!(
+            "{}difficulty: {}",
+            indent(depth),
+            match data.difficulty {
+                Some(d) => d.to_string(),
+                None => "-".to_string(),
+            },
+        );
+        items.push(difficulty);
+        depth -= 1;
+        items.push(" ".to_string());
+
         let style = Style::default().bg(self.bg).fg(self.fg);
-        let widget = Paragraph::new(Text::from(text)).style(style);
-        widget
-            .block(Block::default().borders(Borders::ALL).title("Overview"))
+        let list =
+            List::new(items.iter().map(|a| ListItem::new(a.clone())).collect_vec()).style(style);
+        list.block(Block::default().borders(Borders::ALL).title("Overview"))
             .render(area, buf);
     }
 }
