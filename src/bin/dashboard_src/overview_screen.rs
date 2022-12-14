@@ -110,32 +110,55 @@ impl OverviewScreen {
             active: false,
             fg: Color::White,
             bg: Color::Black,
-            data: Arc::new(Mutex::new(OverviewData::test())),
-            // data: Arc::new(Mutex::new(OverviewData::default())),
+            // data: Arc::new(Mutex::new(OverviewData::test())),
+            data: Arc::new(Mutex::new(OverviewData::default())),
             server: rpc_server,
             poll_thread: None,
         }
     }
 
     async fn run_polling_loop(
-        server: Arc<RPCClient>,
+        rpc_client: Arc<RPCClient>,
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
     ) {
-        // Set removal of transactions from mempool that have timed out to run every P seconds
-        let block_height_poller_interval = Duration::from_secs(1);
-        let block_height_poller = time::sleep(block_height_poller_interval);
+        let balance_interval = Duration::from_secs(5);
+        let balance_poller = time::sleep(balance_interval);
+        tokio::pin!(balance_poller);
+
+        // let confirmations_interval = Duration::from_secs(5);
+        // let confirmations_poller = time::sleep(confirmations_interval);
+        // tokio::pin!(confirmations_poller);
+
+        // let synchronization_interval = Duration::from_secs(5);
+        // let synchronization_poller = time::sleep(synchronization_interval);
+        // tokio::pin!(synchronization_poller);
+
+        let block_height_interval = Duration::from_secs(10);
+        let block_height_poller = time::sleep(block_height_interval);
         tokio::pin!(block_height_poller);
 
         loop {
             select! {
+                _ = &mut balance_poller => {
+                    let b = rpc_client.get_balance(context::current()).await.unwrap();
+                    overview_data.lock().unwrap().balance = Some(b);
+                    balance_poller.as_mut().reset(tokio::time::Instant::now() + balance_interval);
+                },
+                // _ = &mut confirmations_poller => {
+                //     let cons = rpc_client.get_confirmations(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().confirmations = Some(cons);
+                //     confirmations_poller.as_mut().reset(tokio::time::Instant::now() + confirmations_interval);
+                // },
+                // _ = &mut synchronization_poller => {
+                //     let status = rpc_client.get_synchronization_status(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().synchronization = Some(status);
+                //     synchronization_poller.as_mut().reset(tokio::time::Instant::now() + synchronization_interval);
+                // },
                 _ = &mut block_height_poller => {
-
-                    let bh = server.block_height(context::current()).await.unwrap();
+                    let bh = rpc_client.block_height(context::current()).await.unwrap();
                     overview_data.lock().unwrap().block_height = Some(bh);
-
-                    // Reset the timer
-                    block_height_poller.as_mut().reset(tokio::time::Instant::now() + block_height_poller_interval);
-                }
+                    block_height_poller.as_mut().reset(tokio::time::Instant::now() + balance_interval);
+                },
             }
         }
     }
