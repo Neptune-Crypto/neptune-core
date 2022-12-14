@@ -1,15 +1,20 @@
+use std::time::SystemTime;
 use std::{
     cell::RefCell,
+    cmp::min,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
+use bytesize::ByteSize;
+use chrono::DateTime;
 use itertools::Itertools;
 use neptune_core::models::blockchain::{block::block_height::BlockHeight, transaction::Amount};
 use neptune_core::rpc_server::RPCClient;
 use tarpc::context;
 use tokio::{select, task::JoinHandle, time};
 use tui::{
+    layout::{Margin, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, List, ListItem, Widget},
 };
@@ -23,7 +28,11 @@ pub struct OverviewData {
     confirmations: Option<usize>,
 
     block_height: Option<BlockHeight>,
+    block_size_limit: Option<ByteSize>,
+    block_interval: Option<u64>,
     difficulty: Option<f64>,
+    pow_line: Option<f64>,
+    pow_family: Option<f64>,
 
     mempool_size: Option<u32>,
     mempool_tx_count: Option<u32>,
@@ -31,6 +40,14 @@ pub struct OverviewData {
     peer_count: Option<usize>,
     max_peer_count: Option<usize>,
     authenticated_peer_count: Option<usize>,
+
+    up_since: Option<u64>,
+    cpu_load: Option<f64>,
+    cpu_capacity: Option<f64>,
+    cpu_temperature: Option<f64>,
+    ram_total: Option<ByteSize>,
+    ram_available: Option<ByteSize>,
+    ram_used: Option<ByteSize>,
 }
 
 impl OverviewData {
@@ -38,13 +55,33 @@ impl OverviewData {
         OverviewData {
             balance: Some(Amount::new([1337, 0, 0, 0])),
             confirmations: Some(17),
+
             block_height: Some(BlockHeight::from(BFieldElement::new(5005))),
+            block_size_limit: Some(ByteSize::b(1 << 20)),
+            block_interval: Some(558u64),
             difficulty: Some(241.03),
+            pow_line: Some(64.235),
+            pow_family: Some(65.34),
+
             mempool_size: Some(100), // units?
             mempool_tx_count: Some(1001),
+
             peer_count: Some(11),
             max_peer_count: Some(21),
             authenticated_peer_count: Some(1),
+
+            up_since: Some(
+                DateTime::parse_from_rfc2822("Tue, 1 Jul 2003 10:52:37 +0200")
+                    .unwrap()
+                    .naive_utc()
+                    .timestamp() as u64,
+            ),
+            cpu_load: Some(0.15),
+            cpu_capacity: Some(2.0),
+            cpu_temperature: Some(293.0),
+            ram_total: Some(ByteSize::b(1 << 24)),
+            ram_available: Some(ByteSize::b(1 << 20)),
+            ram_used: Some(ByteSize::b(1 << 19)),
         }
     }
 }
@@ -65,6 +102,7 @@ impl OverviewScreen {
             active: false,
             fg: Color::White,
             bg: Color::Black,
+            // data: Arc::new(Mutex::new(OverviewData::test())),
             data: Arc::new(Mutex::new(OverviewData::default())),
             server: rpc_server,
             poll_thread: None,
@@ -93,6 +131,15 @@ impl OverviewScreen {
             }
         }
     }
+
+    fn report<'a>(lines: &'a [String], title: &'a str) -> List<'a> {
+        let list = List::new(lines.iter().map(|a| ListItem::new(a.clone())).collect_vec());
+        list.block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title.to_string()),
+        )
+    }
 }
 
 impl Screen for OverviewScreen {
@@ -103,7 +150,6 @@ impl Screen for OverviewScreen {
         self.poll_thread = Some(Arc::new(RefCell::new(tokio::spawn(async move {
             OverviewScreen::run_polling_loop(server_arc, data_arc).await;
         }))));
-        // _jh.abort();
     }
 
     fn deactivate(&mut self) {
@@ -122,60 +168,143 @@ impl Screen for OverviewScreen {
     }
 }
 
+struct VerticalRectifier {
+    container: Rect,
+    y: u16,
+}
+
+impl VerticalRectifier {
+    pub fn new(container: Rect) -> Self {
+        VerticalRectifier { container, y: 0 }
+    }
+
+    pub fn next(&mut self, height: u16) -> Rect {
+        // use clamp height instead of height to avoid writing to
+        // an out of view (and hence out of buffer) region
+        let clamp_height = min(
+            self.container.y + self.container.height,
+            self.container.y + self.y + height,
+        ) - self.container.y
+            - self.y;
+        let rect = Rect {
+            x: self.container.x,
+            y: self.container.y + self.y,
+            width: self.container.width,
+            height: clamp_height,
+        };
+        self.y += clamp_height;
+        rect
+    }
+}
+
 impl Widget for OverviewScreen {
     fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
-        let data = self.data.lock().unwrap();
-        let mut items = vec![];
-        let mut depth = 0;
-        let indent = |d| format!("{}", [" "].repeat(d).concat());
+        let style = Style::default().bg(self.bg).fg(self.fg);
+        buf.set_style(area, style);
 
-        items.push("# Balance".to_string());
-        items.push(" ".to_string());
-        depth = depth + 1;
-        let balance = format!(
-            "{}balance: {} {}",
-            indent(depth),
-            match data.balance {
-                Some(h) => h.to_string(),
-                None => "-".to_string(),
-            },
+        let inner = area.inner(&Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+        let mut vrecter = VerticalRectifier::new(inner);
+
+        let data = self.data.lock().unwrap();
+        let mut lines = vec![];
+
+        macro_rules! dashifnotset {
+            ($arg:expr) => {
+                match $arg {
+                    Some(thing) => thing.to_string(),
+                    None => "-".to_string(),
+                }
+            };
+        }
+
+        // balance
+        lines.push(format!(
+            "balance: {} {}",
+            dashifnotset!(data.balance),
             match data.confirmations {
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),
             },
-        );
-        items.push(balance);
-        depth -= 1;
-        items.push(" ".to_string());
+        ));
+        Self::report(&lines, "Balance").render(vrecter.next(2 + lines.len() as u16), buf);
 
-        items.push("# Blockchain".to_string());
-        items.push(" ".to_string());
-        depth += 1;
-        let block_height = format!(
-            "{}block height: {}",
-            indent(depth),
-            match data.block_height {
-                Some(h) => h.to_string(),
-                None => "-".to_string(),
-            },
-        );
-        items.push(block_height);
-        let difficulty = format!(
-            "{}difficulty: {}",
-            indent(depth),
-            match data.difficulty {
-                Some(d) => d.to_string(),
-                None => "-".to_string(),
-            },
-        );
-        items.push(difficulty);
-        depth -= 1;
-        items.push(" ".to_string());
+        // blockchain
+        lines = vec![];
+        lines.push(format!(
+            "block height: {}",
+            dashifnotset!(data.block_height),
+        ));
+        lines.push(format!(
+            "block size limit: {}",
+            dashifnotset!(data.block_size_limit)
+        ));
+        lines.push(format!(
+            "block interval: {}",
+            dashifnotset!(data.block_interval)
+        ));
+        lines.push(format!("difficulty: {}", dashifnotset!(data.difficulty),));
+        lines.push(format!("pow line: {}", dashifnotset!(data.pow_line)));
+        lines.push(format!("pow family: {}", dashifnotset!(data.pow_family)));
+        Self::report(&lines, "Blockchain").render(vrecter.next(2 + lines.len() as u16), buf);
 
-        let style = Style::default().bg(self.bg).fg(self.fg);
-        let list =
-            List::new(items.iter().map(|a| ListItem::new(a.clone())).collect_vec()).style(style);
-        list.block(Block::default().borders(Borders::ALL).title("Overview"))
+        // mempool
+        lines = vec![];
+        lines.push(format!("size: {}", dashifnotset!(data.mempool_size)));
+        lines.push(format!(
+            "tx count: {}",
+            dashifnotset!(data.mempool_tx_count)
+        ));
+        Self::report(&lines, "Mempool").render(vrecter.next(2 + lines.len() as u16), buf);
+
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Overview")
             .render(area, buf);
+
+        // peers
+        lines = vec![];
+        lines.push(format!(
+            "number: {} / {}",
+            dashifnotset!(data.peer_count),
+            dashifnotset!(data.max_peer_count)
+        ));
+        lines.push(format!(
+            "↪ authenticated: {}",
+            dashifnotset!(data.authenticated_peer_count)
+        ));
+        Self::report(&lines, "Peers").render(vrecter.next(2 + lines.len() as u16), buf);
+
+        // machine
+        lines = vec![];
+        let uptime_string = if let Some(upsince) = data.up_since {
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let uptime = Duration::from_secs(now - upsince);
+            format!("{:?}", uptime)
+        } else {
+            "-".to_string()
+        };
+        lines.push(format!("uptime: {}", uptime_string));
+        lines.push(format!(
+            "cpu load: {}% / {}%",
+            dashifnotset!(data.cpu_load),
+            dashifnotset!(data.cpu_capacity)
+        ));
+        lines.push(format!(
+            "cpu temperature: {} K",
+            dashifnotset!(data.cpu_temperature)
+        ));
+        lines.push(format!(
+            "ram: {} / {} (/ {}) ",
+            dashifnotset!(data.ram_used),
+            dashifnotset!(data.ram_available),
+            dashifnotset!(data.ram_total)
+        ));
+        Self::report(&lines, "Machine").render(vrecter.next(2 + lines.len() as u16), buf);
     }
 }
