@@ -26,6 +26,7 @@ use super::screen::Screen;
 pub struct OverviewData {
     balance: Option<Amount>,
     confirmations: Option<usize>,
+    synchronization: Option<f64>,
 
     block_height: Option<BlockHeight>,
     block_size_limit: Option<ByteSize>,
@@ -34,7 +35,10 @@ pub struct OverviewData {
     pow_line: Option<f64>,
     pow_family: Option<f64>,
 
-    mempool_size: Option<u32>,
+    archive_size: Option<ByteSize>,
+    archive_coverage: Option<f64>,
+
+    mempool_size: Option<ByteSize>,
     mempool_tx_count: Option<u32>,
 
     peer_count: Option<usize>,
@@ -55,6 +59,7 @@ impl OverviewData {
         OverviewData {
             balance: Some(Amount::new([1337, 0, 0, 0])),
             confirmations: Some(17),
+            synchronization: Some(99.5),
 
             block_height: Some(BlockHeight::from(BFieldElement::new(5005))),
             block_size_limit: Some(ByteSize::b(1 << 20)),
@@ -63,8 +68,11 @@ impl OverviewData {
             pow_line: Some(64.235),
             pow_family: Some(65.34),
 
-            mempool_size: Some(100), // units?
+            mempool_size: Some(ByteSize::b(10000)), // units?
             mempool_tx_count: Some(1001),
+
+            archive_size: Some(ByteSize::b(100000000)),
+            archive_coverage: Some(100.0),
 
             peer_count: Some(11),
             max_peer_count: Some(21),
@@ -102,8 +110,8 @@ impl OverviewScreen {
             active: false,
             fg: Color::White,
             bg: Color::Black,
-            // data: Arc::new(Mutex::new(OverviewData::test())),
-            data: Arc::new(Mutex::new(OverviewData::default())),
+            data: Arc::new(Mutex::new(OverviewData::test())),
+            // data: Arc::new(Mutex::new(OverviewData::default())),
             server: rpc_server,
             poll_thread: None,
         }
@@ -229,7 +237,14 @@ impl Widget for OverviewScreen {
                 None => " ".to_string(),
             },
         ));
-        Self::report(&lines, "Balance").render(vrecter.next(2 + lines.len() as u16), buf);
+        lines.push(format!(
+            "synchronization: {}",
+            match data.synchronization {
+                Some(s) => format!("{}%", s),
+                None => "-".to_string(),
+            }
+        ));
+        Self::report(&lines, "Wallet").render(vrecter.next(2 + lines.len() as u16), buf);
 
         // blockchain
         lines = vec![];
@@ -249,6 +264,18 @@ impl Widget for OverviewScreen {
         lines.push(format!("pow line: {}", dashifnotset!(data.pow_line)));
         lines.push(format!("pow family: {}", dashifnotset!(data.pow_family)));
         Self::report(&lines, "Blockchain").render(vrecter.next(2 + lines.len() as u16), buf);
+
+        // archive
+        lines = vec![];
+        lines.push(format!("size {}", dashifnotset!(data.archive_size)));
+        lines.push(format!(
+            "coverage: {}",
+            match data.archive_coverage {
+                Some(percentage) => format!("{}%", percentage),
+                None => "-".to_string(),
+            }
+        ));
+        Self::report(&lines, "Archive").render(vrecter.next(2 + lines.len() as u16), buf);
 
         // mempool
         lines = vec![];
