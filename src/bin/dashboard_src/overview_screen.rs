@@ -137,6 +137,22 @@ impl OverviewScreen {
         let block_height_poller = time::sleep(block_height_interval);
         tokio::pin!(block_height_poller);
 
+        // let block_interval_interval = Duration::from_secs(10);
+        // let block_interval_poller = time::sleep(block_interval_interval);
+        // tokio::pin!(block_interval_poller);
+
+        // let difficulty_interval = Duration::from_secs(100);
+        // let difficulty_poller = time::sleep(difficulty_interval);
+        // tokio::pin!(difficulty_poller);
+
+        // let pow_line_interval = Duration::from_secs(10);
+        // let pow_line_poller = time::sleep(pow_line_interval);
+        // tokio::pin!(pow_line_poller);
+
+        // let pow_family_interval = Duration::from_secs(10);
+        // let pow_family_poller = time::sleep(pow_family_interval);
+        // tokio::pin!(pow_family_poller);
+
         loop {
             select! {
                 _ = &mut balance_poller => {
@@ -144,21 +160,47 @@ impl OverviewScreen {
                     overview_data.lock().unwrap().balance = Some(b);
                     balance_poller.as_mut().reset(tokio::time::Instant::now() + balance_interval);
                 },
+
                 // _ = &mut confirmations_poller => {
                 //     let cons = rpc_client.get_confirmations(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().confirmations = Some(cons);
                 //     confirmations_poller.as_mut().reset(tokio::time::Instant::now() + confirmations_interval);
                 // },
+
                 // _ = &mut synchronization_poller => {
                 //     let status = rpc_client.get_synchronization_status(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().synchronization = Some(status);
                 //     synchronization_poller.as_mut().reset(tokio::time::Instant::now() + synchronization_interval);
                 // },
+
                 _ = &mut block_height_poller => {
                     let bh = rpc_client.block_height(context::current()).await.unwrap();
                     overview_data.lock().unwrap().block_height = Some(bh);
                     block_height_poller.as_mut().reset(tokio::time::Instant::now() + balance_interval);
                 },
+
+                // _ = &mut block_interval_poller => {
+                //     let bh = rpc_client.block_interval(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().block_interval = Some(bh);
+                //     block_interval_poller.as_mut().reset(tokio::time::Instant::now() + block_interval_interval);
+                // },
+
+                // _ = &mut difficulty_poller => {
+                //     let bh = rpc_client.difficulty(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().block_interval = Some(bh);
+                //     difficulty_poller.as_mut().reset(tokio::time::Instant::now() + difficulty_interval);
+
+                // _ = &mut pow_line_poller => {
+                //     let bh = rpc_client.pow_line(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().pow_line = Some(bh);
+                //     pow_line_poller.as_mut().reset(tokio::time::Instant::now() + pow_line_interval);
+                // },
+
+                // _ = &mut pow_family_poller => {
+                //     let bh = rpc_client.pow_line(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().pow_family = Some(bh);
+                //     pow_family_poller.as_mut().reset(tokio::time::Instant::now() + pow_family_interval);
+                // },
             }
         }
     }
