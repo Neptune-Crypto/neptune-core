@@ -10,8 +10,9 @@ use tarpc::context;
 use tokio::time::sleep;
 use tokio::{select, task::JoinHandle};
 use tui::{
-    style::{Color, Style},
-    widgets::{Block, Borders, Widget},
+    layout::{Constraint, Margin},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Cell, Row, Table, Widget},
 };
 
 #[derive(Debug, Clone)]
@@ -112,5 +113,36 @@ impl Widget for PeersScreen {
             .title("Peers")
             .style(style)
             .render(area, buf);
+
+        let inner = area.inner(&Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+
+        let matrix = vec![
+            vec![1, 3, 4],
+            vec![346, 3, 1],
+            vec![0, 2, -1],
+            vec![1, 1, 1],
+        ];
+
+        let header = vec!["A", "b", "ccc"];
+        let table_header = Row::new(header.iter().map(|h| Cell::from(*h)))
+            .style(Style::default().add_modifier(Modifier::REVERSED));
+
+        let rows: Vec<Row> = matrix
+            .iter()
+            .map(|row| Row::new(row.iter().map(|c| Cell::from(c.to_string()))))
+            .collect();
+
+        let table = Table::new(rows)
+            .header(table_header)
+            // .block(Block::default().borders(Borders::ALL).title("Table"))
+            .widths(&[
+                Constraint::Percentage(50),
+                Constraint::Length(30),
+                Constraint::Min(10),
+            ]);
+        table.render(inner, buf);
     }
 }
