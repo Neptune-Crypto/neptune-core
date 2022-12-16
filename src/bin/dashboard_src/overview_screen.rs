@@ -99,6 +99,7 @@ pub struct OverviewScreen {
     active: bool,
     fg: Color,
     bg: Color,
+    in_focus: bool,
     data: Arc<std::sync::Mutex<OverviewData>>,
     server: Arc<RPCClient>,
     poll_thread: Option<Arc<RefCell<JoinHandle<()>>>>,
@@ -108,8 +109,9 @@ impl OverviewScreen {
     pub fn new(rpc_server: Arc<RPCClient>) -> Self {
         OverviewScreen {
             active: false,
-            fg: Color::White,
+            fg: Color::Gray,
             bg: Color::Black,
+            in_focus: false,
             // data: Arc::new(Mutex::new(OverviewData::test())),
             data: Arc::new(Mutex::new(OverviewData::default())),
             server: rpc_server,
@@ -295,11 +297,13 @@ impl Screen for OverviewScreen {
     }
 
     fn focus(&mut self) {
-        self.fg = Color::LightCyan;
+        self.fg = Color::White;
+        self.in_focus = true;
     }
 
     fn unfocus(&mut self) {
-        self.fg = Color::White;
+        self.fg = Color::Gray;
+        self.in_focus = false;
     }
 }
 
@@ -334,9 +338,21 @@ impl VerticalRectifier {
 
 impl Widget for OverviewScreen {
     fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
-        let style = Style::default().bg(self.bg).fg(self.fg);
-        buf.set_style(area, style);
+        // overview box
+        let style: Style = if self.in_focus {
+            Style::default().fg(Color::LightCyan).bg(self.bg)
+        } else {
+            Style::default().fg(Color::Gray).bg(self.bg)
+        };
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Overview")
+            .style(style)
+            .render(area, buf);
 
+        // divide the overview box vertically into subboxes,
+        // and render each separately
+        let style = Style::default().bg(self.bg).fg(self.fg);
         let inner = area.inner(&Margin {
             vertical: 1,
             horizontal: 1,
@@ -371,7 +387,9 @@ impl Widget for OverviewScreen {
                 None => "-".to_string(),
             }
         ));
-        Self::report(&lines, "Wallet").render(vrecter.next(2 + lines.len() as u16), buf);
+        Self::report(&lines, "Wallet")
+            .style(style)
+            .render(vrecter.next(2 + lines.len() as u16), buf);
 
         // blockchain
         lines = vec![];
@@ -390,7 +408,9 @@ impl Widget for OverviewScreen {
         lines.push(format!("difficulty: {}", dashifnotset!(data.difficulty),));
         lines.push(format!("pow line: {}", dashifnotset!(data.pow_line)));
         lines.push(format!("pow family: {}", dashifnotset!(data.pow_family)));
-        Self::report(&lines, "Blockchain").render(vrecter.next(2 + lines.len() as u16), buf);
+        Self::report(&lines, "Blockchain")
+            .style(style)
+            .render(vrecter.next(2 + lines.len() as u16), buf);
 
         // archive
         lines = vec![];
@@ -402,7 +422,9 @@ impl Widget for OverviewScreen {
                 None => "-".to_string(),
             }
         ));
-        Self::report(&lines, "Archive").render(vrecter.next(2 + lines.len() as u16), buf);
+        Self::report(&lines, "Archive")
+            .style(style)
+            .render(vrecter.next(2 + lines.len() as u16), buf);
 
         // mempool
         lines = vec![];
@@ -411,12 +433,9 @@ impl Widget for OverviewScreen {
             "tx count: {}",
             dashifnotset!(data.mempool_tx_count)
         ));
-        Self::report(&lines, "Mempool").render(vrecter.next(2 + lines.len() as u16), buf);
-
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Overview")
-            .render(area, buf);
+        Self::report(&lines, "Mempool")
+            .style(style)
+            .render(vrecter.next(2 + lines.len() as u16), buf);
 
         // peers
         lines = vec![];
@@ -429,7 +448,9 @@ impl Widget for OverviewScreen {
             "↪ authenticated: {}",
             dashifnotset!(data.authenticated_peer_count)
         ));
-        Self::report(&lines, "Peers").render(vrecter.next(2 + lines.len() as u16), buf);
+        Self::report(&lines, "Peers")
+            .style(style)
+            .render(vrecter.next(2 + lines.len() as u16), buf);
 
         // machine
         lines = vec![];
@@ -459,6 +480,8 @@ impl Widget for OverviewScreen {
             dashifnotset!(data.ram_available),
             dashifnotset!(data.ram_total)
         ));
-        Self::report(&lines, "Machine").render(vrecter.next(2 + lines.len() as u16), buf);
+        Self::report(&lines, "Machine")
+            .style(style)
+            .render(vrecter.next(2 + lines.len() as u16), buf);
     }
 }

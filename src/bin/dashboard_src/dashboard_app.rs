@@ -219,9 +219,9 @@ impl DashboardApp {
         f.render_widget(title_widget, header_chunk);
 
         // render menu
-        let default_style = Style::default().bg(Color::Black).fg(Color::White);
+        let default_style = Style::default().bg(Color::Black).fg(Color::Gray);
         let focus_style = default_style.fg(Color::LightCyan);
-        let selection_style = Style::default().fg(Color::Black).bg(Color::White);
+        let selection_style = Style::default().fg(Color::Black).bg(Color::Gray);
         let focus_selection_style = selection_style.bg(Color::LightCyan);
 
         let menu_styles: Vec<_> = MenuItem::iter()
