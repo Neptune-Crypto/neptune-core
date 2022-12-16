@@ -145,6 +145,11 @@ impl OverviewScreen {
         // setup_poller!(pow_family);
         // setup_poller!(archive_size);
         // setup_poller!(archive_coverage);
+        setup_poller!(mempool_size);
+        setup_poller!(mempool_tx_count);
+        setup_poller!(peer_count);
+        // setup_poller!(cpu_info);
+        // setup_poller!(ram_info);
 
         loop {
             select! {
@@ -206,6 +211,58 @@ impl OverviewScreen {
                 //     overview_data.lock().unwrap().archive_coverage = Some(cov);
                     // reset_poller!(archive_coverage, Duration::from_secs(10));
                 // },
+
+                _ = &mut mempool_size => {
+                    let ms = rpc_client.get_mempool_size(context::current()).await.unwrap();
+                    overview_data.lock().unwrap().mempool_size = Some(ByteSize::b(ms.try_into().unwrap()));
+                    reset_poller!(mempool_size, Duration::from_secs(10));
+                }
+
+                _ = &mut mempool_tx_count => {
+                    let txc = rpc_client.get_mempool_tx_count(context::current()).await.unwrap();
+                    overview_data.lock().unwrap().mempool_tx_count = Some(txc.try_into().unwrap());
+                    reset_poller!(mempool_tx_count, Duration::from_secs(10));
+                }
+
+                _ = &mut peer_count => {
+                    let peers = rpc_client.get_peer_info(context::current()).await.unwrap();
+                    // consider doing some filter and / or separation, e.g. based on
+                    //  - authentication
+                    //  - standing
+                    //  - latest activity
+                    let num_peers = peers.len();
+                    overview_data.lock().unwrap().peer_count = Some(num_peers);
+                    overview_data.lock().unwrap().authenticated_peer_count = Some(0);
+                    reset_poller!(peer_count, Duration::from_secs(5));
+                }
+
+                // _ = &mut max_peer_count => {
+                //     let mpc = rpc_client.get_max_peer_count(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().max_peer_count = Some(mpc);
+                //     reset_poller!(peer_count, Duration::from_secs(60*60*24));
+                // }
+
+                // _ = &mut up_since => {
+                //     let us = rpc_client.up_since(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().up_since = Some(us);
+                //     reset_poller!(up_since, Duration::from_secs(10));
+                // }
+
+                // _ = &mut cpu_info => {
+                //     let ci = rpc_client.get_cpu_info(context::current()).await.unwrap();
+                //     overview_data.lock().unwrap().cpu_load = Some(ci.load);
+                //     overview_data.lock().unwrap().cpu_capacity = Some(ci.capacity);
+                //     overview_data.lock().unwrap().cpu_temperature = Some(ci.temperature);
+                //     reset_poller!(cpu_info, Duration::from_secs(10));
+                // }
+
+                // _ = &mut ram_info => {
+                //     let ri = rpc_client.get_ram_info(context::current()).await.unwrap();
+
+                //     overview_data.lock().unwrap().ram_total = Some(ri.total);
+                //     overview_data.lock().unwrap().ram_available = Some(ri.available);
+                //     overview_data.lock().unwrap().ram_used = Some(ri.used);
+                // }
             }
         }
     }
