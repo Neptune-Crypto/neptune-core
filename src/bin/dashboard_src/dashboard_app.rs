@@ -16,7 +16,7 @@ use tui::{
     Frame, Terminal,
 };
 
-use super::{overview_screen::OverviewScreen, screen::Screen};
+use super::{overview_screen::OverviewScreen, peers_screen::PeersScreen, screen::Screen};
 
 #[derive(Debug, Clone, Copy, EnumIter, PartialEq, Eq, EnumCount, Hash)]
 enum MenuItem {
@@ -80,20 +80,28 @@ pub struct DashboardApp {
     current_menu_item: MenuItem,
     menu_in_focus: bool,
     overview_screen: Rc<RefCell<OverviewScreen>>,
+    peers_screen: Rc<RefCell<PeersScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
 }
 
 impl DashboardApp {
     pub fn new(rpc_server: Arc<RPCClient>) -> Self {
-        let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(rpc_server)));
-        let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
+
+        let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(rpc_server.clone())));
+        let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
+
+        let peers_screen = Rc::new(RefCell::new(PeersScreen::new(rpc_server)));
+        let peers_screen_dyn = Rc::clone(&peers_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::Peers, Rc::clone(&peers_screen_dyn));
+
         Self {
             running: false,
             current_menu_item: MenuItem::Overview,
             menu_in_focus: true,
             overview_screen,
+            peers_screen,
             screens,
         }
     }
@@ -257,7 +265,9 @@ impl DashboardApp {
                     screen_chunk,
                 );
             }
-            // MenuItem::Peers => todo!(),
+            MenuItem::Peers => {
+                f.render_widget::<PeersScreen>(self.peers_screen.borrow().to_owned(), screen_chunk);
+            }
             // MenuItem::History => todo!(),
             // MenuItem::Receive => todo!(),
             // MenuItem::Send => todo!(),
