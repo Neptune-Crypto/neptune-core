@@ -121,95 +121,90 @@ impl OverviewScreen {
         rpc_client: Arc<RPCClient>,
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
     ) {
-        let balance_poller = time::sleep(Duration::from_secs(0));
-        tokio::pin!(balance_poller);
+        // use macros to reduce boilerplate
+        macro_rules! setup_poller {
+            ($name: ident) => {
+                let $name = time::sleep(Duration::from_millis(1));
+                tokio::pin!($name);
+            };
+        }
 
-        // let confirmations_poller = time::sleep(confirmations_interval);
-        // tokio::pin!(confirmations_poller);
+        macro_rules! reset_poller {
+            ($name: ident, $period: expr) => {
+                $name.as_mut().reset(tokio::time::Instant::now() + $period);
+            };
+        }
 
-        // let synchronization_poller = time::sleep(synchronization_interval);
-        // tokio::pin!(synchronization_poller);
-
-        let block_height_poller = time::sleep(Duration::from_secs(0));
-        tokio::pin!(block_height_poller);
-
-        // let block_interval_poller = time::sleep(block_interval_interval);
-        // tokio::pin!(block_interval_poller);
-
-        // let difficulty_poller = time::sleep(difficulty_interval);
-        // tokio::pin!(difficulty_poller);
-
-        // let pow_line_poller = time::sleep(pow_line_interval);
-        // tokio::pin!(pow_line_poller);
-
-        // let pow_family_poller = time::sleep(pow_family_interval);
-        // tokio::pin!(pow_family_poller);
-
-        // let archive_size_poller = time::sleep(Duration::from_secs(0));
-        // tokio::pin!(archive_size_poller);
-
-        // let archive_coverage_poller = time::sleep(Duration::from_secs(0));
-        // tokio::pin!(archive_coverage_poller);
+        setup_poller!(balance);
+        // setup_poller!(confirmations);
+        // setup_poller!(synchronization);
+        setup_poller!(block_height);
+        // setup_poller!(block_interval);
+        // setup_poller!(difficulty);
+        // setup_poller!(pow_line);
+        // setup_poller!(pow_family);
+        // setup_poller!(archive_size);
+        // setup_poller!(archive_coverage);
 
         loop {
             select! {
-                _ = &mut balance_poller => {
+                _ = &mut balance => {
                     let b = rpc_client.get_balance(context::current()).await.unwrap();
                     overview_data.lock().unwrap().balance = Some(b);
-                    balance_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    reset_poller!(balance, Duration::from_secs(10));
                 },
 
-                // _ = &mut confirmations_poller => {
+                // _ = &mut confirmations => {
                 //     let cons = rpc_client.get_confirmations(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().confirmations = Some(cons);
-                //     confirmations_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(confirmations, Duration::from_secs(10));
                 // },
 
-                // _ = &mut synchronization_poller => {
+                // _ = &mut synchronization => {
                 //     let status = rpc_client.get_synchronization_status(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().synchronization = Some(status);
-                //     synchronization_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(synchronization, Duration::from_secs(10));
                 // },
 
-                _ = &mut block_height_poller => {
+                _ = &mut block_height => {
                     let bh = rpc_client.block_height(context::current()).await.unwrap();
                     overview_data.lock().unwrap().block_height = Some(bh);
-                    block_height_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    reset_poller!(block_height, Duration::from_secs(10));
                 },
 
-                // _ = &mut block_interval_poller => {
+                // _ = &mut block_interval => {
                 //     let bh = rpc_client.block_interval(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().block_interval = Some(bh);
-                //     block_interval_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(block_interval, Duration::from_secs(10));
                 // },
 
-                // _ = &mut difficulty_poller => {
+                // _ = &mut difficulty => {
                 //     let bh = rpc_client.difficulty(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().block_interval = Some(bh);
-                //     difficulty_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(difficulty, Duration::from_secs(10));
 
-                // _ = &mut pow_line_poller => {
+                // _ = &mut pow_line => {
                 //     let bh = rpc_client.pow_line(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().pow_line = Some(bh);
-                //     pow_line_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(pow_line, Duration::from_secs(10));
                 // },
 
-                // _ = &mut pow_family_poller => {
+                // _ = &mut pow_family => {
                 //     let bh = rpc_client.pow_line(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().pow_family = Some(bh);
-                //     pow_family_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(pow_family, Duration::from_secs(10));
                 // },
 
-                // _ = &mut archive_size_poller => {
+                // _ = &mut archive_size => {
                 //     let size = rpc_client.archive_size(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().archive_size = Some(size);
-                //     archive_size_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(archive_size, Duration::from_secs(10));
                 // },
 
-                // _ = &mut archive_coverage_poller => {
+                // _ = &mut archive_coverage => {
                 //     let cov = rpc_client.archive_coverage(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().archive_coverage = Some(cov);
-                //     archive_coverage_poller.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(10));
+                    // reset_poller!(archive_coverage, Duration::from_secs(10));
                 // },
             }
         }
