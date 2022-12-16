@@ -197,7 +197,7 @@ impl OverviewScreen {
                 // },
 
                 // _ = &mut pow_family => {
-                //     let bh = rpc_client.pow_line(context::current()).await.unwrap();
+                //     let bh = rpc_client.pow_family(context::current()).await.unwrap();
                 //     overview_data.lock().unwrap().pow_family = Some(bh);
                     // reset_poller!(pow_family, Duration::from_secs(10));
                 // },
