@@ -16,7 +16,10 @@ use tui::{
     Frame, Terminal,
 };
 
-use super::{overview_screen::OverviewScreen, peers_screen::PeersScreen, screen::Screen};
+use super::{
+    history_screen::HistoryScreen, overview_screen::OverviewScreen, peers_screen::PeersScreen,
+    screen::Screen,
+};
 
 #[derive(Debug, Clone, Copy, EnumIter, PartialEq, Eq, EnumCount, Hash)]
 enum MenuItem {
@@ -81,6 +84,7 @@ pub struct DashboardApp {
     menu_in_focus: bool,
     overview_screen: Rc<RefCell<OverviewScreen>>,
     peers_screen: Rc<RefCell<PeersScreen>>,
+    history_screen: Rc<RefCell<HistoryScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
 }
 
@@ -92,9 +96,13 @@ impl DashboardApp {
         let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
 
-        let peers_screen = Rc::new(RefCell::new(PeersScreen::new(rpc_server)));
+        let peers_screen = Rc::new(RefCell::new(PeersScreen::new(rpc_server.clone())));
         let peers_screen_dyn = Rc::clone(&peers_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Peers, Rc::clone(&peers_screen_dyn));
+
+        let history_screen = Rc::new(RefCell::new(HistoryScreen::new(rpc_server)));
+        let history_screen_dyn = Rc::clone(&history_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::History, Rc::clone(&history_screen_dyn));
 
         Self {
             running: false,
@@ -102,6 +110,7 @@ impl DashboardApp {
             menu_in_focus: true,
             overview_screen,
             peers_screen,
+            history_screen,
             screens,
         }
     }
@@ -268,7 +277,12 @@ impl DashboardApp {
             MenuItem::Peers => {
                 f.render_widget::<PeersScreen>(self.peers_screen.borrow().to_owned(), screen_chunk);
             }
-            // MenuItem::History => todo!(),
+            MenuItem::History => {
+                f.render_widget::<HistoryScreen>(
+                    self.history_screen.borrow().to_owned(),
+                    screen_chunk,
+                );
+            }
             // MenuItem::Receive => todo!(),
             // MenuItem::Send => todo!(),
             // MenuItem::Quit => todo!(),
