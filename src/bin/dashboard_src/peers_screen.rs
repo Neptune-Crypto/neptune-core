@@ -275,9 +275,7 @@ impl Widget for PeersScreen {
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
         let table = Table::new(rows).widths(&width_constraints).style(style);
-        inner.width = widths.iter().fold(0usize, |acc: usize, &e| acc + e) as u16
-            + 3 * widths.len() as u16
-            + 1;
+        inner.width = widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1;
         table.render(inner, buf);
     }
 }
