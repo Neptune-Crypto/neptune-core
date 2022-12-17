@@ -307,7 +307,7 @@ impl Screen for OverviewScreen {
     }
 }
 
-struct VerticalRectifier {
+pub struct VerticalRectifier {
     container: Rect,
     y: u16,
 }
