@@ -257,9 +257,9 @@ impl Widget for PeersScreen {
             })
             .map(|row| Row::new(row.iter().map(|c| Cell::from(c.to_string()))))
             .collect_vec();
-        for i in 0..body.len() {
+        for (i, item) in body.iter_mut().enumerate() {
             if i % 2 == 0 {
-                body[i] = body[i].clone().style(Style::default().bg(Color::DarkGray));
+                *item = item.clone().style(Style::default().bg(Color::DarkGray));
             }
         }
         let mut rows: Vec<Row> = vec![

@@ -205,6 +205,9 @@ impl DashboardApp {
                         }
                         _ => {}
                     }
+                } else {
+                    // non-key event ... mouse?
+                    // todo
                 }
             }
         }

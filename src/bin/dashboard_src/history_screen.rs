@@ -24,13 +24,15 @@ pub enum Sign {
     Out,
 }
 
+type BalanceUpdate = (SystemTime, Amount, Sign, Amount);
+
 #[derive(Debug, Clone)]
 pub struct HistoryScreen {
     active: bool,
     fg: Color,
     bg: Color,
     in_focus: bool,
-    data: Arc<std::sync::Mutex<Vec<(SystemTime, Amount, Sign, Amount)>>>,
+    data: Arc<std::sync::Mutex<Vec<BalanceUpdate>>>,
     server: Arc<RPCClient>,
     poll_thread: Option<Arc<RefCell<JoinHandle<()>>>>,
 }
@@ -50,7 +52,7 @@ impl HistoryScreen {
 
     async fn run_polling_loop(
         _rpc_client: Arc<RPCClient>,
-        balance_updates: Arc<std::sync::Mutex<Vec<(SystemTime, Amount, Sign, Amount)>>>,
+        balance_updates: Arc<std::sync::Mutex<Vec<BalanceUpdate>>>,
     ) -> ! {
         // use macros to reduce boilerplate
         macro_rules! setup_poller {
@@ -73,10 +75,10 @@ impl HistoryScreen {
                 _ = &mut balance_history => {
                     // let bh = rpc_client.get_balance_history(context::current()).await.unwrap();
                     // placeholder until the above RPC call is implemented
-                    let mut bh = vec![];
-                    bh.push((UNIX_EPOCH, Amount::from(2500), Sign::In, Amount::from(2500)));
-                    bh.push((UNIX_EPOCH+Duration::from_secs(60*60*24*365*20), Amount::from(1500), Sign::Out, Amount::from(1000)));
-                    bh.push((UNIX_EPOCH+Duration::from_secs(60*60*24*365*25), Amount::from(500), Sign::Out, Amount::from(500)));
+                    let bh = vec![
+                    (UNIX_EPOCH, Amount::from(2500), Sign::In, Amount::from(2500)),
+                    (UNIX_EPOCH+Duration::from_secs(60*60*24*365*20), Amount::from(1500), Sign::Out, Amount::from(1000)),
+                    (UNIX_EPOCH+Duration::from_secs(60*60*24*365*25), Amount::from(500), Sign::Out, Amount::from(500)),];
                     *balance_updates.lock().unwrap() = bh;
                     reset_poller!(balance_history, Duration::from_secs(10));
                 }
@@ -241,9 +243,9 @@ impl Widget for HistoryScreen {
             })
             .map(|row| Row::new(row.iter().map(|c| Cell::from(c.to_string()))))
             .collect_vec();
-        for i in 0..body.len() {
+        for (i, item) in body.iter_mut().enumerate() {
             if i % 2 == 0 {
-                body[i] = body[i].clone().style(Style::default().bg(Color::DarkGray));
+                *item = item.clone().style(Style::default().bg(Color::DarkGray));
             }
         }
         let mut rows: Vec<Row> = vec![
@@ -259,9 +261,7 @@ impl Widget for HistoryScreen {
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
         let table = Table::new(rows).widths(&width_constraints).style(style);
-        table_canvas.width = widths.iter().fold(0usize, |acc: usize, &e| acc + e) as u16
-            + 3 * widths.len() as u16
-            + 1;
+        table_canvas.width = widths.iter().sum::<usize>() as u16 + 3 * widths.len() as u16 + 1;
         table.render(table_canvas, buf);
     }
 }
