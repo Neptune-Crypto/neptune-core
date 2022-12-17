@@ -37,7 +37,6 @@ impl PeersScreen {
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            // data: Arc::new(Mutex::new(OverviewData::test())),
             data: Arc::new(Mutex::new(vec![])),
             server: rpc_server,
             poll_thread: None,
@@ -276,7 +275,6 @@ impl Widget for PeersScreen {
             .map(|w| Constraint::Length(*w as u16))
             .collect_vec();
         let table = Table::new(rows).widths(&width_constraints).style(style);
-        // .block(Block::default().borders(Borders::ALL).title("Table"));
         table.render(inner, buf);
     }
 }
