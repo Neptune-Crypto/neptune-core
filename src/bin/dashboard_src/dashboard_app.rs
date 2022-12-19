@@ -18,7 +18,7 @@ use tui::{
 
 use super::{
     history_screen::HistoryScreen, overview_screen::OverviewScreen, peers_screen::PeersScreen,
-    screen::Screen,
+    receive_screen::ReceiveScreen, screen::Screen,
 };
 
 #[derive(Debug, Clone, Copy, EnumIter, PartialEq, Eq, EnumCount, Hash)]
@@ -77,6 +77,13 @@ impl fmt::Display for MenuItem {
     }
 }
 
+/// Events that widgets can pass to/from each other
+#[derive(Debug, Clone)]
+pub enum DashboardEvent {
+    ConsoleEvent(Event),
+    Output(String),
+}
+
 /// App holds the state of the application
 pub struct DashboardApp {
     running: bool,
@@ -85,7 +92,9 @@ pub struct DashboardApp {
     overview_screen: Rc<RefCell<OverviewScreen>>,
     peers_screen: Rc<RefCell<PeersScreen>>,
     history_screen: Rc<RefCell<HistoryScreen>>,
+    receive_screen: Rc<RefCell<ReceiveScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
+    output: String,
 }
 
 impl DashboardApp {
@@ -100,9 +109,13 @@ impl DashboardApp {
         let peers_screen_dyn = Rc::clone(&peers_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Peers, Rc::clone(&peers_screen_dyn));
 
-        let history_screen = Rc::new(RefCell::new(HistoryScreen::new(rpc_server)));
+        let history_screen = Rc::new(RefCell::new(HistoryScreen::new(rpc_server.clone())));
         let history_screen_dyn = Rc::clone(&history_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::History, Rc::clone(&history_screen_dyn));
+
+        let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(rpc_server)));
+        let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
 
         Self {
             running: false,
@@ -111,14 +124,16 @@ impl DashboardApp {
             overview_screen,
             peers_screen,
             history_screen,
+            receive_screen,
             screens,
+            output: "".to_string(),
         }
     }
 
     pub fn run(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<String, Box<dyn Error>> {
         self.running = true;
         self.screens
             .get(&self.current_menu_item)
@@ -131,16 +146,16 @@ impl DashboardApp {
 
             if event::poll(Duration::from_millis(100))? {
                 if let Ok(event) = event::read() {
-                    self.handle(event)?;
+                    self.handle(DashboardEvent::ConsoleEvent(event))?;
                 }
             }
         }
-        Ok(())
+        Ok(self.output.to_string())
     }
 
-    fn handle(&mut self, event: Event) -> Result<Option<Event>, Box<dyn Error>> {
+    fn handle(&mut self, event: DashboardEvent) -> Result<Option<Event>, Box<dyn Error>> {
         if self.menu_in_focus {
-            if let Event::Key(key) = event {
+            if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => {
                         if self.current_menu_item != MenuItem::Quit {
@@ -184,30 +199,35 @@ impl DashboardApp {
         // menu not in focus
         else {
             // delegate
-            let escalated: Option<Event> = match self.current_menu_item {
+            let escalated: Option<DashboardEvent> = match self.current_menu_item {
                 // MenuItem::Overview => todo!(),
                 // MenuItem::Peers => todo!(),
                 // MenuItem::History => todo!(),
-                // MenuItem::Receive => todo!(),
+                MenuItem::Receive => self.receive_screen.borrow_mut().handle(event)?,
                 // MenuItem::Send => todo!(),
                 // MenuItem::Quit => todo!(),
                 _ => Some(event),
             };
             // handle if escalated
-            if let Some(event) = escalated {
-                if let Event::Key(key) = event {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            self.menu_in_focus = true;
-                            if let Some(screen) = self.screens.get(&self.current_menu_item) {
-                                screen.borrow_mut().unfocus();
+            match escalated {
+                Some(DashboardEvent::ConsoleEvent(event)) => {
+                    if let Event::Key(key) = event {
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => {
+                                if let Some(screen) = self.screens.get(&self.current_menu_item) {
+                                    screen.borrow_mut().unfocus();
+                                }
+                                self.menu_in_focus = true;
                             }
+                            _ => {}
                         }
-                        _ => {}
                     }
-                } else {
-                    // non-key event ... mouse?
-                    // todo
+                }
+                Some(DashboardEvent::Output(string)) => {
+                    self.output = format!("{}{}", self.output, string);
+                }
+                _ => {
+                    // unknown event
                 }
             }
         }
@@ -286,7 +306,12 @@ impl DashboardApp {
                     screen_chunk,
                 );
             }
-            // MenuItem::Receive => todo!(),
+            MenuItem::Receive => {
+                f.render_widget::<ReceiveScreen>(
+                    self.receive_screen.borrow().to_owned(),
+                    screen_chunk,
+                );
+            }
             // MenuItem::Send => todo!(),
             // MenuItem::Quit => todo!(),
             _ => {

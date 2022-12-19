@@ -309,29 +309,28 @@ impl Screen for OverviewScreen {
 
 pub struct VerticalRectifier {
     container: Rect,
-    y: u16,
+    inner_y: u16,
 }
 
 impl VerticalRectifier {
     pub fn new(container: Rect) -> Self {
-        VerticalRectifier { container, y: 0 }
+        VerticalRectifier {
+            container,
+            inner_y: 0,
+        }
     }
 
     pub fn next(&mut self, height: u16) -> Rect {
         // use clamp height instead of height to avoid writing to
         // an out of view (and hence out of buffer) region
-        let clamp_height = min(
-            self.container.y + self.container.height,
-            self.container.y + self.y + height,
-        ) - self.container.y
-            - self.y;
+        let clamp_height = min(self.container.height, self.inner_y + height) - self.inner_y;
         let rect = Rect {
             x: self.container.x,
-            y: self.container.y + self.y,
+            y: self.container.y + self.inner_y,
             width: self.container.width,
             height: clamp_height,
         };
-        self.y += clamp_height;
+        self.inner_y += clamp_height;
         rect
     }
 }

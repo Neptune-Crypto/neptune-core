@@ -85,8 +85,13 @@ async fn main() -> Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    if let Err(err) = res {
-        println!("{:?}", err)
+    match res {
+        Err(err) => {
+            println!("{:?}", err);
+        }
+        Ok(output) => {
+            print!("{}", output);
+        }
     }
 
     Ok(())
