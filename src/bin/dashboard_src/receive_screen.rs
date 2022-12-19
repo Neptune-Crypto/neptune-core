@@ -2,6 +2,7 @@ use std::{
     cmp::max,
     error::Error,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use super::{dashboard_app::DashboardEvent, overview_screen::VerticalRectifier, screen::Screen};
@@ -9,6 +10,7 @@ use crossterm::event::{Event, KeyCode};
 use neptune_core::rpc_server::RPCClient;
 use rand::{thread_rng, RngCore};
 use tarpc::context;
+use tokio::time::sleep;
 use tui::{
     layout::{Alignment, Margin},
     style::{Color, Style},
@@ -80,6 +82,14 @@ impl ReceiveScreen {
         }
     }
 
+    fn flash_copied(copied: Arc<Mutex<bool>>) {
+        tokio::spawn(async move {
+            *copied.lock().unwrap() = true;
+            sleep(Duration::from_millis(300)).await;
+            *copied.lock().unwrap() = false;
+        });
+    }
+
     fn generate_new_receiving_address_async(
         rpc_client: Arc<RPCClient>,
         data: Arc<Mutex<Option<String>>>,
@@ -119,6 +129,7 @@ impl ReceiveScreen {
                     }
                     KeyCode::Char('c') => {
                         if let Some(address) = self.data.lock().unwrap().as_ref() {
+                            Self::flash_copied(self.copied.clone());
                             return Ok(Some(DashboardEvent::Output(format!(
                                 "{}\n\n",
                                 address.to_string()
