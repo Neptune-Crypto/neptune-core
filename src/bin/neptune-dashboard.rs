@@ -12,21 +12,12 @@
 ///
 use anyhow::{bail, Result};
 use clap::Parser;
-use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+
 use dashboard_src::dashboard_app::DashboardApp;
 use neptune_core::rpc_server::RPCClient;
-use std::{
-    io::{self},
-    net::{Ipv4Addr, SocketAddr},
-    sync::Arc,
-};
+use std::net::{Ipv4Addr, SocketAddr};
 use tarpc::{client, context};
 use tokio_serde::formats::Json;
-use tui::{backend::CrosstermBackend, Terminal};
 
 pub mod dashboard_src;
 
@@ -63,27 +54,8 @@ async fn main() -> Result<()> {
         }
     }
 
-    // setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    // create app
-    let mut app = DashboardApp::new(Arc::new(client));
-
     // run app until quit
-    let res = app.run(&mut terminal);
-
-    // restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+    let res = DashboardApp::run(client).await;
 
     match res {
         Err(err) => {

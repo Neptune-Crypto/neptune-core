@@ -1,12 +1,22 @@
 use core::fmt;
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use neptune_core::rpc_server::RPCClient;
 use std::{
-    cell::RefCell, collections::HashMap, error::Error, io::Stdout, rc::Rc, sync::Arc,
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    error::Error,
+    io::{self, Stdout},
+    rc::Rc,
+    sync::Arc,
     time::Duration,
 };
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
+use tokio::sync::Mutex;
 use tui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
@@ -95,6 +105,7 @@ pub struct DashboardApp {
     receive_screen: Rc<RefCell<ReceiveScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
     output: String,
+    maybe_terminal_handle: Option<Arc<tokio::sync::Mutex<Terminal<CrosstermBackend<Stdout>>>>>,
 }
 
 impl DashboardApp {
@@ -127,30 +138,103 @@ impl DashboardApp {
             receive_screen,
             screens,
             output: "".to_string(),
+            maybe_terminal_handle: None,
         }
     }
 
-    pub fn run(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    ) -> Result<String, Box<dyn Error>> {
+    pub fn start(&mut self) {
         self.running = true;
+    }
+
+    pub fn stop(&mut self) {
+        self.running = false;
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    pub fn enable_raw_mode(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.maybe_terminal_handle.is_some() {
+            panic!("Cannot enable raw mode when already in raw mode.");
+        }
+        enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        let backend = CrosstermBackend::new(io::stdout());
+        let terminal = Terminal::new(backend)?;
+        self.maybe_terminal_handle = Some(Arc::new(Mutex::new(terminal)));
+        Ok(())
+    }
+
+    pub async fn disable_raw_mode(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.maybe_terminal_handle.is_none() {
+            panic!("Cannot disable raw mode because not in raw mode.")
+        }
+        let mut terminal = self.maybe_terminal_handle.as_mut().unwrap().lock().await;
+        // restore terminal
+        disable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
+        terminal.show_cursor()?;
+        Ok(())
+    }
+
+    pub fn current_screen(&mut self) -> RefMut<dyn Screen> {
         self.screens
             .get(&self.current_menu_item)
             .unwrap()
+            .as_ref()
             .borrow_mut()
-            .activate();
+    }
 
-        while self.running {
-            terminal.draw(|f| self.render(f))?;
+    pub fn have_current_screen(&mut self) -> bool {
+        self.screens.contains_key(&self.current_menu_item)
+    }
+
+    pub async fn run(client: RPCClient) -> Result<String, Box<dyn Error>> {
+        // create app
+        let mut app = DashboardApp::new(Arc::new(client));
+
+        // setup terminal
+        app.enable_raw_mode()?;
+
+        app.start();
+        if app.have_current_screen() {
+            app.current_screen().activate();
+        }
+
+        while app.is_running() {
+            // let terminal: &mut Terminal<CrosstermBackend<Stdout>> = app.get_terminal_mut();
+            // let terminal
+            // let terminal = app.get_terminal();
+            let terminal_arc = app
+                .maybe_terminal_handle
+                .clone()
+                .expect("Terminal should have been set up by now.");
+            let mut terminal = terminal_arc.lock().await;
+            terminal.draw(|f| app.render(f))?;
+            // app.maybe_terminal_handle
+            //     .as_mut()
+            //     .unwrap()
+            //     .blocking_lock()
+            //     .draw(|f| app.render(f))?;
+            // let clos = |f| app.render(f);
 
             if event::poll(Duration::from_millis(100))? {
                 if let Ok(event) = event::read() {
-                    self.handle(DashboardEvent::ConsoleEvent(event))?;
+                    app.handle(DashboardEvent::ConsoleEvent(event))?;
                 }
             }
         }
-        Ok(self.output.to_string())
+        app.stop();
+
+        // clean up terminal
+        app.disable_raw_mode().await?;
+
+        Ok(app.output.to_string())
     }
 
     fn handle(&mut self, event: DashboardEvent) -> Result<Option<Event>, Box<dyn Error>> {
@@ -169,27 +253,27 @@ impl DashboardApp {
                             self.running = false;
                         } else {
                             self.menu_in_focus = false;
-                            if let Some(screen) = self.screens.get(&self.current_menu_item) {
-                                screen.borrow_mut().focus();
+                            if self.have_current_screen() {
+                                self.current_screen().focus();
                             }
                         }
                     }
                     KeyCode::Up => {
-                        if let Some(screen) = self.screens.get(&self.current_menu_item) {
-                            screen.borrow_mut().deactivate();
+                        if self.have_current_screen() {
+                            self.current_screen().deactivate();
                         }
                         self.current_menu_item = self.current_menu_item.previous();
-                        if let Some(screen) = self.screens.get(&self.current_menu_item) {
-                            screen.borrow_mut().activate();
+                        if self.have_current_screen() {
+                            self.current_screen().activate();
                         }
                     }
                     KeyCode::Down => {
-                        if let Some(screen) = self.screens.get(&self.current_menu_item) {
-                            screen.borrow_mut().deactivate();
+                        if self.have_current_screen() {
+                            self.current_screen().deactivate();
                         }
                         self.current_menu_item = self.current_menu_item.next();
-                        if let Some(screen) = self.screens.get(&self.current_menu_item) {
-                            screen.borrow_mut().activate();
+                        if self.have_current_screen() {
+                            self.current_screen().activate();
                         }
                     }
                     _ => {}
@@ -203,26 +287,26 @@ impl DashboardApp {
                 // MenuItem::Overview => todo!(),
                 // MenuItem::Peers => todo!(),
                 // MenuItem::History => todo!(),
-                MenuItem::Receive => self.receive_screen.borrow_mut().handle(event)?,
+                MenuItem::Receive => {
+                    let mut receive_screen = self.receive_screen.as_ref().borrow_mut();
+                    receive_screen.handle(event)?
+                }
                 // MenuItem::Send => todo!(),
                 // MenuItem::Quit => todo!(),
                 _ => Some(event),
             };
-            // handle if escalated
+
             match escalated {
-                Some(DashboardEvent::ConsoleEvent(event)) => {
-                    if let Event::Key(key) = event {
-                        match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => {
-                                if let Some(screen) = self.screens.get(&self.current_menu_item) {
-                                    screen.borrow_mut().unfocus();
-                                }
-                                self.menu_in_focus = true;
-                            }
-                            _ => {}
+                Some(DashboardEvent::ConsoleEvent(Event::Key(key))) => match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        if self.have_current_screen() {
+                            self.current_screen().unfocus();
                         }
+                        self.menu_in_focus = true;
                     }
-                }
+                    _ => {}
+                },
+                Some(DashboardEvent::ConsoleEvent(_non_key_event)) => {}
                 Some(DashboardEvent::Output(string)) => {
                     self.output = format!("{}{}", self.output, string);
                 }

@@ -130,10 +130,7 @@ impl ReceiveScreen {
                     KeyCode::Char('c') => {
                         if let Some(address) = self.data.lock().unwrap().as_ref() {
                             Self::flash_copied(self.copied.clone());
-                            return Ok(Some(DashboardEvent::Output(format!(
-                                "{}\n\n",
-                                address.to_string()
-                            ))));
+                            return Ok(Some(DashboardEvent::Output(format!("{}\n\n", address))));
                         }
                     }
                     _ => {
@@ -200,12 +197,12 @@ impl Widget for ReceiveScreen {
         let width = max(0, inner.width as isize - 2) as usize;
         if width > 0 {
             let mut address_lines = vec![];
-            while address.len() > width.into() {
-                let (line, remainder) = address.split_at(width.into());
+            while address.len() > width {
+                let (line, remainder) = address.split_at(width);
                 address_lines.push(line.to_owned());
                 address = remainder.to_owned();
             }
-            address_lines.push(address.to_owned());
+            address_lines.push(address);
 
             let address_rect = vrecter.next((address_lines.len() + 2).try_into().unwrap());
             if address_rect.height > 0 {
@@ -244,25 +241,27 @@ impl Widget for ReceiveScreen {
             }
 
             // display copy instructions
-            if *self.copied.lock().unwrap() {
-                let copied_text = Paragraph::new(Span::from("Copied!"));
-                copied_text.render(vrecter.next(1), buf);
-            } else {
-                let style = Style::default().fg(self.fg);
-                let instructions = Spans::from(vec![
-                    Span::from("Press "),
-                    Span::styled(
-                        "C",
-                        if self.in_focus {
-                            Style::default().fg(Color::LightCyan)
-                        } else {
-                            style
-                        },
-                    ),
-                    Span::from(" to copy."),
-                ]);
-                let generate_instructions = Paragraph::new(instructions).style(style);
-                generate_instructions.render(vrecter.next(1), buf);
+            if self.in_focus {
+                if *self.copied.lock().unwrap() {
+                    let copied_text = Paragraph::new(Span::from("Copied!"));
+                    copied_text.render(vrecter.next(1), buf);
+                } else {
+                    let style = Style::default().fg(self.fg);
+                    let instructions = Spans::from(vec![
+                        Span::from("Press "),
+                        Span::styled(
+                            "C",
+                            if self.in_focus {
+                                Style::default().fg(Color::LightCyan)
+                            } else {
+                                style
+                            },
+                        ),
+                        Span::from(" to copy to standard output."),
+                    ]);
+                    let generate_instructions = Paragraph::new(instructions).style(style);
+                    generate_instructions.render(vrecter.next(1), buf);
+                }
             }
         }
     }
