@@ -4,3 +4,4 @@ pub mod overview_screen;
 pub mod peers_screen;
 pub mod receive_screen;
 pub mod screen;
+pub mod send_screen;

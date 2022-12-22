@@ -28,7 +28,7 @@ use tui::{
 
 use super::{
     history_screen::HistoryScreen, overview_screen::OverviewScreen, peers_screen::PeersScreen,
-    receive_screen::ReceiveScreen, screen::Screen,
+    receive_screen::ReceiveScreen, screen::Screen, send_screen::SendScreen,
 };
 
 #[derive(Debug, Clone, Copy, EnumIter, PartialEq, Eq, EnumCount, Hash)]
@@ -109,6 +109,7 @@ pub struct DashboardApp {
     peers_screen: Rc<RefCell<PeersScreen>>,
     history_screen: Rc<RefCell<HistoryScreen>>,
     receive_screen: Rc<RefCell<ReceiveScreen>>,
+    send_screen: Rc<RefCell<SendScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
     output: String,
     console_io: Arc<Mutex<Vec<ConsoleIO>>>,
@@ -130,9 +131,13 @@ impl DashboardApp {
         let history_screen_dyn = Rc::clone(&history_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::History, Rc::clone(&history_screen_dyn));
 
-        let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(rpc_server)));
+        let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(rpc_server.clone())));
         let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
+
+        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server)));
+        let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
+        screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
 
         Self {
             running: false,
@@ -142,6 +147,7 @@ impl DashboardApp {
             peers_screen,
             history_screen,
             receive_screen,
+            send_screen,
             screens,
             output: "".to_string(),
             console_io: Arc::new(Mutex::new(vec![])),
@@ -301,7 +307,10 @@ impl DashboardApp {
                     let mut receive_screen = self.receive_screen.as_ref().borrow_mut();
                     receive_screen.handle(event)?
                 }
-                // MenuItem::Send => todo!(),
+                MenuItem::Send => {
+                    let mut send_screen = self.send_screen.as_ref().borrow_mut();
+                    send_screen.handle(event)?
+                }
                 // MenuItem::Quit => todo!(),
                 _ => Some(event),
             };
@@ -420,7 +429,9 @@ impl DashboardApp {
                     screen_chunk,
                 );
             }
-            // MenuItem::Send => todo!(),
+            MenuItem::Send => {
+                f.render_widget::<SendScreen>(self.send_screen.borrow().to_owned(), screen_chunk);
+            }
             // MenuItem::Quit => todo!(),
             _ => {
                 let messages: Vec<ListItem> = [ListItem::new(Spans::from(Span::raw(
