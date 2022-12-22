@@ -4,7 +4,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::{dashboard_app::DashboardEvent, overview_screen::VerticalRectifier, screen::Screen};
+use super::{
+    dashboard_app::{ConsoleIO, DashboardEvent},
+    overview_screen::VerticalRectifier,
+    screen::Screen,
+};
 use crossterm::event::{Event, KeyCode};
 use neptune_core::rpc_server::RPCClient;
 use rand::{thread_rng, RngCore};
@@ -117,7 +121,9 @@ impl ReceiveScreen {
                     }
                     KeyCode::Char('c') => {
                         if let Some(address) = self.data.lock().unwrap().as_ref() {
-                            return Ok(Some(DashboardEvent::Output(format!("{}\n\n", address))));
+                            return Ok(Some(DashboardEvent::ConsoleMode(ConsoleIO::Input(
+                                format!("{}\n\n", address),
+                            ))));
                         }
                     }
                     _ => {

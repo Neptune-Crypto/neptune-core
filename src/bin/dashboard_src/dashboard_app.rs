@@ -97,7 +97,7 @@ pub enum ConsoleIO {
 #[derive(Debug, Clone)]
 pub enum DashboardEvent {
     ConsoleEvent(Event),
-    Output(String),
+    ConsoleMode(ConsoleIO),
 }
 
 /// App holds the state of the application
@@ -228,7 +228,17 @@ impl DashboardApp {
 
                             terminal = Self::enable_raw_mode()?;
                         }
-                        ConsoleIO::Input(_string) => {}
+                        ConsoleIO::Input(string) => {
+                            Self::disable_raw_mode(terminal)?;
+
+                            sleep(Duration::from_millis(200)).await;
+                            println!("{}", string);
+                            let mut str = "".to_string();
+                            io::stdin().read_line(&mut str)?;
+                            // do something intelligent with string
+
+                            terminal = Self::enable_raw_mode()?;
+                        }
                     }
                     console_queue.remove(0);
                 }
@@ -326,22 +336,9 @@ impl DashboardApp {
                     _ => {}
                 },
                 Some(DashboardEvent::ConsoleEvent(_non_key_event)) => {}
-                Some(DashboardEvent::Output(string)) => {
-                    // self.disable_raw_mode().await?;
-                    // println!("Receiving address:");
-                    // println!("{}", string);
-                    // println!();
-                    // println!("Press any key to return to dashboard . . .");
-                    // let mut stdin = io::stdin();
-                    // let _ = stdin.read(&mut [0u8]);
-                    // self.enable_raw_mode()?;
-                    self.output = format!(
-                        "Receiving address:\n{}\nPress ENTER ↲ to return to dashboard . . .\n",
-                        string
-                    );
+                Some(DashboardEvent::ConsoleMode(console_io)) => {
                     let mut console_io_mut = self.console_io.lock().await;
-                    console_io_mut.push(ConsoleIO::Output(self.output.clone()));
-                    //self.output = format!("{}{}", self.output, string);
+                    console_io_mut.push(console_io);
                 }
                 _ => {
                     // unknown event

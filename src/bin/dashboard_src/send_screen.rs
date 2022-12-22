@@ -1,25 +1,31 @@
 use std::{
+    borrow::{Borrow, BorrowMut},
     cmp::max,
     error::Error,
     sync::{Arc, Mutex},
 };
 
-use super::{dashboard_app::DashboardEvent, overview_screen::VerticalRectifier, screen::Screen};
+use super::{
+    dashboard_app::{ConsoleIO, DashboardEvent},
+    overview_screen::VerticalRectifier,
+    screen::Screen,
+};
 use crossterm::event::{Event, KeyCode};
 use neptune_core::rpc_server::RPCClient;
-use rand::{thread_rng, RngCore};
-use tarpc::context;
+
 use tui::{
     layout::{Alignment, Margin},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Span, Spans, Text},
     widgets::{Block, Borders, Paragraph, Widget},
 };
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Sign {
-    In,
-    Out,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendScreenWidget {
+    Address,
+    Amount,
+    Ok,
+    Notice,
 }
 
 #[derive(Debug, Clone)]
@@ -28,9 +34,10 @@ pub struct SendScreen {
     fg: Color,
     bg: Color,
     in_focus: bool,
-    data: Arc<std::sync::Mutex<Option<String>>>,
+    address: Arc<Mutex<Option<String>>>,
     server: Arc<RPCClient>,
-    generating: Arc<Mutex<bool>>,
+    focus: SendScreenWidget,
+    amount: Arc<Mutex<String>>,
 }
 
 impl SendScreen {
@@ -40,63 +47,11 @@ impl SendScreen {
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            data: Arc::new(Mutex::new(None)),
+            address: Arc::new(Mutex::new(None)),
             server: rpc_server,
-            generating: Arc::new(Mutex::new(false)),
+            focus: SendScreenWidget::Address,
+            amount: Arc::new(Mutex::new("".to_string())),
         }
-    }
-
-    fn random_address_for_testing() -> String {
-        let mut rng = thread_rng();
-        let address_length = 5 + (rng.next_u32() as usize % 9 + 1) * 100;
-        let mut address = "npt01".to_string();
-        let alphabet = "abcdefhjkmnpqrstuvwxyz2345678";
-        for _ in 5..address_length {
-            let index = rng.next_u32() as usize % alphabet.len();
-            address.push(alphabet.chars().collect::<Vec<char>>()[index]);
-        }
-        address
-    }
-
-    fn populate_receiving_address_async(
-        rpc_client: Arc<RPCClient>,
-        data: Arc<Mutex<Option<String>>>,
-    ) {
-        if data.lock().unwrap().is_none() {
-            tokio::spawn(async move {
-                // TODO:
-                //  - replace `block_height` with correct RPC call for requesting an already-generated but unused address
-                //  - rename `stand_in` to contain the address
-                //  - use the address instead of a randomly generated one
-                let _height = rpc_client
-                    .clone()
-                    .block_height(context::current())
-                    .await
-                    .unwrap();
-                *data.lock().unwrap() = Some(Self::random_address_for_testing());
-            });
-        }
-    }
-
-    fn generate_new_receiving_address_async(
-        rpc_client: Arc<RPCClient>,
-        data: Arc<Mutex<Option<String>>>,
-        generating: Arc<Mutex<bool>>,
-    ) {
-        tokio::spawn(async move {
-            // TODO:
-            //  - replace `block_height` with correct RPC call for requesting a new address
-            //  - rename `stand_in` to contain the address
-            //  - use the address instead of a randomly generated one
-            *generating.lock().unwrap() = true;
-            let _height = rpc_client
-                .clone()
-                .block_height(context::current())
-                .await
-                .unwrap();
-            *data.lock().unwrap() = Some(Self::random_address_for_testing());
-            *generating.lock().unwrap() = false;
-        });
     }
 
     pub fn handle(
@@ -108,16 +63,59 @@ impl SendScreen {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
                 match key.code {
                     KeyCode::Enter => {
-                        Self::generate_new_receiving_address_async(
-                            self.server.clone(),
-                            self.data.clone(),
-                            self.generating.clone(),
-                        );
+                        match self.focus {
+                            SendScreenWidget::Address => {
+                                return Ok(Some(DashboardEvent::ConsoleMode(ConsoleIO::Input(
+                                    "Please enter recipient address:\n".to_string(),
+                                ))));
+                            }
+                            SendScreenWidget::Amount => {
+                                self.focus = SendScreenWidget::Ok;
+                                escalate_event = None;
+                            }
+                            SendScreenWidget::Ok => {
+                                // send payment
+                                // switch screen
+                                self.focus = SendScreenWidget::Notice;
+                                escalate_event = None;
+                            }
+                            _ => {
+                                escalate_event = None;
+                            }
+                        }
+                    }
+                    KeyCode::Up => {
+                        self.focus = match self.focus {
+                            SendScreenWidget::Address => SendScreenWidget::Ok,
+                            SendScreenWidget::Amount => SendScreenWidget::Address,
+                            SendScreenWidget::Ok => SendScreenWidget::Amount,
+                            SendScreenWidget::Notice => SendScreenWidget::Ok,
+                        };
                         escalate_event = None;
                     }
-                    KeyCode::Char('c') => {
-                        if let Some(address) = self.data.lock().unwrap().as_ref() {
-                            return Ok(Some(DashboardEvent::Output(format!("{}\n\n", address))));
+                    KeyCode::Down => {
+                        self.focus = match self.focus {
+                            SendScreenWidget::Address => SendScreenWidget::Amount,
+                            SendScreenWidget::Amount => SendScreenWidget::Ok,
+                            SendScreenWidget::Ok => SendScreenWidget::Address,
+                            SendScreenWidget::Notice => SendScreenWidget::Address,
+                        };
+                        escalate_event = None;
+                    }
+                    KeyCode::Char(c) => {
+                        if self.focus == SendScreenWidget::Amount {
+                            let amount: String = self.amount.lock().unwrap().to_string();
+                            let mut amount_mut = self.amount.lock().unwrap();
+                            *amount_mut = format!("{}{}", amount, c);
+                            escalate_event = None;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if self.focus == SendScreenWidget::Amount {
+                            let amount: String = self.amount.lock().unwrap().to_string();
+                            let mut amount_mut = self.amount.lock().unwrap();
+                            amount_mut.drain(amount.len() - 1..);
+                            escalate_event = None;
                         }
                     }
                     _ => {
@@ -133,9 +131,6 @@ impl SendScreen {
 impl Screen for SendScreen {
     fn activate(&mut self) {
         self.active = true;
-        let server_arc = self.server.clone();
-        let data_arc = self.data.clone();
-        Self::populate_receiving_address_async(server_arc, data_arc);
     }
 
     fn deactivate(&mut self) {
@@ -163,26 +158,27 @@ impl Widget for SendScreen {
         };
         Block::default()
             .borders(Borders::ALL)
-            .title("Receive")
+            .title("Send")
             .style(style)
             .render(area, buf);
 
         // divide the overview box vertically into subboxes,
         // and render each separately
         let style = Style::default().bg(self.bg).fg(self.fg);
+        let focus_style = Style::default().bg(self.bg).fg(Color::LightCyan);
         let inner = area.inner(&Margin {
             vertical: 1,
             horizontal: 1,
         });
-        let mut vrecter = VerticalRectifier::new(inner);
-
-        // display address
-        let mut address = match self.data.lock().unwrap().to_owned() {
-            Some(str) => str,
-            None => "-".to_string(),
-        };
         let width = max(0, inner.width as isize - 2) as usize;
         if width > 0 {
+            let mut vrecter = VerticalRectifier::new(inner);
+
+            // display address widget
+            let mut address = match self.address.lock().unwrap().to_owned() {
+                Some(str) => str,
+                None => "-".to_string(),
+            };
             let mut address_lines = vec![];
             while address.len() > width {
                 let (line, remainder) = address.split_at(width);
@@ -194,57 +190,57 @@ impl Widget for SendScreen {
             let address_rect = vrecter.next((address_lines.len() + 2).try_into().unwrap());
             if address_rect.height > 0 {
                 let address_display = Paragraph::new(Text::from(address_lines.join("\n")))
-                    .style(style)
+                    .style(
+                        if self.focus == SendScreenWidget::Address && self.in_focus {
+                            focus_style
+                        } else {
+                            style
+                        },
+                    )
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .title(Span::styled("Receiving Address", Style::default())),
+                            .title(Span::styled("Recipient Address", Style::default())),
                     )
                     .alignment(Alignment::Left);
                 address_display.render(address_rect, buf);
             }
-
-            // display generation instructions
-            if *self.generating.lock().unwrap() {
-                let generating_text =
-                    Paragraph::new(Span::from("Generating ...")).alignment(Alignment::Left);
-                generating_text.render(vrecter.next(1), buf);
-            } else {
-                let action = if self.in_focus {
-                    "generate a new address"
+            let instruction_rect = vrecter.next(1);
+            if instruction_rect.height > 0 {
+                let instructions = if self.in_focus && self.focus == SendScreenWidget::Address {
+                    Spans::from(vec![
+                        Span::from("Press "),
+                        Span::styled("Enter ↵", Style::default().fg(Color::LightCyan)),
+                        Span::from(" to enter address via console mode."),
+                    ])
                 } else {
-                    "focus"
+                    Spans::from(vec![])
                 };
-                let instructions = Spans::from(vec![
-                    Span::from("Press "),
-                    Span::styled("Enter ↵", Style::default().fg(Color::LightCyan)),
-                    Span::from(" to "),
-                    Span::from(action),
-                    Span::from("."),
-                ]);
-                let style = Style::default().fg(self.fg);
-                let generate_instructions = Paragraph::new(instructions).style(style);
-                generate_instructions.render(vrecter.next(1), buf);
+                let instructions_widget = Paragraph::new(instructions).style(style);
+                instructions_widget.render(instruction_rect, buf);
             }
 
-            // display copy instructions
-            if self.in_focus {
-                let style = Style::default().fg(self.fg);
-                let instructions = Spans::from(vec![
-                    Span::from("Press "),
-                    Span::styled(
-                        "C",
-                        if self.in_focus {
-                            Style::default().fg(Color::LightCyan)
-                        } else {
-                            style
-                        },
-                    ),
-                    Span::from(" display in console mode."),
-                ]);
-                let generate_instructions = Paragraph::new(instructions).style(style);
-                generate_instructions.render(vrecter.next(1), buf);
-            }
+            // display amount widget
+            let amount = self.amount.lock().unwrap();
+            let amount_rect = vrecter.next(3);
+            let amount_widget = Paragraph::new(Spans::from(vec![
+                Span::from(amount.to_string()),
+                Span::styled(
+                    "|",
+                    if self.focus == SendScreenWidget::Amount {
+                        Style::default().add_modifier(Modifier::RAPID_BLINK)
+                    } else {
+                        style
+                    },
+                ),
+            ]))
+            .style(if self.focus == SendScreenWidget::Amount {
+                focus_style
+            } else {
+                style
+            })
+            .block(Block::default().borders(Borders::ALL).title("Amount"));
+            amount_widget.render(amount_rect, buf);
         }
     }
 }
