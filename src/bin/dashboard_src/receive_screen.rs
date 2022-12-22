@@ -2,7 +2,6 @@ use std::{
     cmp::max,
     error::Error,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use super::{dashboard_app::DashboardEvent, overview_screen::VerticalRectifier, screen::Screen};
@@ -10,7 +9,6 @@ use crossterm::event::{Event, KeyCode};
 use neptune_core::rpc_server::RPCClient;
 use rand::{thread_rng, RngCore};
 use tarpc::context;
-use tokio::time::sleep;
 use tui::{
     layout::{Alignment, Margin},
     style::{Color, Style},
@@ -33,7 +31,6 @@ pub struct ReceiveScreen {
     data: Arc<std::sync::Mutex<Option<String>>>,
     server: Arc<RPCClient>,
     generating: Arc<Mutex<bool>>,
-    copied: Arc<Mutex<bool>>,
 }
 
 impl ReceiveScreen {
@@ -46,7 +43,6 @@ impl ReceiveScreen {
             data: Arc::new(Mutex::new(None)),
             server: rpc_server,
             generating: Arc::new(Mutex::new(false)),
-            copied: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -80,14 +76,6 @@ impl ReceiveScreen {
                 *data.lock().unwrap() = Some(Self::random_address_for_testing());
             });
         }
-    }
-
-    fn flash_copied(copied: Arc<Mutex<bool>>) {
-        tokio::spawn(async move {
-            *copied.lock().unwrap() = true;
-            sleep(Duration::from_millis(300)).await;
-            *copied.lock().unwrap() = false;
-        });
     }
 
     fn generate_new_receiving_address_async(
@@ -129,7 +117,6 @@ impl ReceiveScreen {
                     }
                     KeyCode::Char('c') => {
                         if let Some(address) = self.data.lock().unwrap().as_ref() {
-                            Self::flash_copied(self.copied.clone());
                             return Ok(Some(DashboardEvent::Output(format!("{}\n\n", address))));
                         }
                     }
@@ -242,26 +229,21 @@ impl Widget for ReceiveScreen {
 
             // display copy instructions
             if self.in_focus {
-                if *self.copied.lock().unwrap() {
-                    let copied_text = Paragraph::new(Span::from("Copied!"));
-                    copied_text.render(vrecter.next(1), buf);
-                } else {
-                    let style = Style::default().fg(self.fg);
-                    let instructions = Spans::from(vec![
-                        Span::from("Press "),
-                        Span::styled(
-                            "C",
-                            if self.in_focus {
-                                Style::default().fg(Color::LightCyan)
-                            } else {
-                                style
-                            },
-                        ),
-                        Span::from(" to copy to standard output."),
-                    ]);
-                    let generate_instructions = Paragraph::new(instructions).style(style);
-                    generate_instructions.render(vrecter.next(1), buf);
-                }
+                let style = Style::default().fg(self.fg);
+                let instructions = Spans::from(vec![
+                    Span::from("Press "),
+                    Span::styled(
+                        "C",
+                        if self.in_focus {
+                            Style::default().fg(Color::LightCyan)
+                        } else {
+                            style
+                        },
+                    ),
+                    Span::from(" display in console mode."),
+                ]);
+                let generate_instructions = Paragraph::new(instructions).style(style);
+                generate_instructions.render(vrecter.next(1), buf);
             }
         }
     }

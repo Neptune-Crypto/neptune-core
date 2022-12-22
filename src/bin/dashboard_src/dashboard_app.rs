@@ -16,7 +16,7 @@ use std::{
 };
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::sleep};
 use tui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
@@ -87,6 +87,12 @@ impl fmt::Display for MenuItem {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ConsoleIO {
+    Output(String),
+    Input(String),
+}
+
 /// Events that widgets can pass to/from each other
 #[derive(Debug, Clone)]
 pub enum DashboardEvent {
@@ -105,7 +111,7 @@ pub struct DashboardApp {
     receive_screen: Rc<RefCell<ReceiveScreen>>,
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
     output: String,
-    maybe_terminal_handle: Option<Arc<tokio::sync::Mutex<Terminal<CrosstermBackend<Stdout>>>>>,
+    console_io: Arc<Mutex<Vec<ConsoleIO>>>,
 }
 
 impl DashboardApp {
@@ -138,7 +144,7 @@ impl DashboardApp {
             receive_screen,
             screens,
             output: "".to_string(),
-            maybe_terminal_handle: None,
+            console_io: Arc::new(Mutex::new(vec![])),
         }
     }
 
@@ -154,23 +160,17 @@ impl DashboardApp {
         self.running
     }
 
-    pub fn enable_raw_mode(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.maybe_terminal_handle.is_some() {
-            panic!("Cannot enable raw mode when already in raw mode.");
-        }
+    pub fn enable_raw_mode() -> Result<Terminal<CrosstermBackend<Stdout>>, Box<dyn Error>> {
         enable_raw_mode()?;
         execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(io::stdout());
         let terminal = Terminal::new(backend)?;
-        self.maybe_terminal_handle = Some(Arc::new(Mutex::new(terminal)));
-        Ok(())
+        Ok(terminal)
     }
 
-    pub async fn disable_raw_mode(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.maybe_terminal_handle.is_none() {
-            panic!("Cannot disable raw mode because not in raw mode.")
-        }
-        let mut terminal = self.maybe_terminal_handle.as_mut().unwrap().lock().await;
+    pub fn disable_raw_mode(
+        mut terminal: Terminal<CrosstermBackend<Stdout>>,
+    ) -> Result<(), Box<dyn Error>> {
         // restore terminal
         disable_raw_mode()?;
         execute!(
@@ -199,45 +199,55 @@ impl DashboardApp {
         let mut app = DashboardApp::new(Arc::new(client));
 
         // setup terminal
-        app.enable_raw_mode()?;
+        let mut terminal = Self::enable_raw_mode()?;
 
         app.start();
         if app.have_current_screen() {
             app.current_screen().activate();
         }
 
-        while app.is_running() {
-            // let terminal: &mut Terminal<CrosstermBackend<Stdout>> = app.get_terminal_mut();
-            // let terminal
-            // let terminal = app.get_terminal();
-            let terminal_arc = app
-                .maybe_terminal_handle
-                .clone()
-                .expect("Terminal should have been set up by now.");
-            let mut terminal = terminal_arc.lock().await;
+        let mut continue_running = true;
+        while continue_running {
+            {
+                let mut console_queue = app.console_io.lock().await;
+                if !console_queue.is_empty() {
+                    match console_queue.first().unwrap() {
+                        ConsoleIO::Output(string) => {
+                            Self::disable_raw_mode(terminal)?;
+
+                            sleep(Duration::from_millis(200)).await;
+                            println!("{}", string);
+                            let mut str = "".to_string();
+                            io::stdin().read_line(&mut str)?;
+
+                            terminal = Self::enable_raw_mode()?;
+                        }
+                        ConsoleIO::Input(_string) => {}
+                    }
+                    console_queue.remove(0);
+                }
+                drop(console_queue);
+            }
+
             terminal.draw(|f| app.render(f))?;
-            // app.maybe_terminal_handle
-            //     .as_mut()
-            //     .unwrap()
-            //     .blocking_lock()
-            //     .draw(|f| app.render(f))?;
-            // let clos = |f| app.render(f);
 
             if event::poll(Duration::from_millis(100))? {
                 if let Ok(event) = event::read() {
-                    app.handle(DashboardEvent::ConsoleEvent(event))?;
+                    app.handle(DashboardEvent::ConsoleEvent(event)).await?;
                 }
             }
+
+            continue_running = app.is_running();
         }
         app.stop();
 
         // clean up terminal
-        app.disable_raw_mode().await?;
+        Self::disable_raw_mode(terminal)?;
 
         Ok(app.output.to_string())
     }
 
-    fn handle(&mut self, event: DashboardEvent) -> Result<Option<Event>, Box<dyn Error>> {
+    async fn handle(&mut self, event: DashboardEvent) -> Result<Option<Event>, Box<dyn Error>> {
         if self.menu_in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
                 match key.code {
@@ -308,7 +318,21 @@ impl DashboardApp {
                 },
                 Some(DashboardEvent::ConsoleEvent(_non_key_event)) => {}
                 Some(DashboardEvent::Output(string)) => {
-                    self.output = format!("{}{}", self.output, string);
+                    // self.disable_raw_mode().await?;
+                    // println!("Receiving address:");
+                    // println!("{}", string);
+                    // println!();
+                    // println!("Press any key to return to dashboard . . .");
+                    // let mut stdin = io::stdin();
+                    // let _ = stdin.read(&mut [0u8]);
+                    // self.enable_raw_mode()?;
+                    self.output = format!(
+                        "Receiving address:\n{}\nPress ENTER ↲ to return to dashboard . . .\n",
+                        string
+                    );
+                    let mut console_io_mut = self.console_io.lock().await;
+                    console_io_mut.push(ConsoleIO::Output(self.output.clone()));
+                    //self.output = format!("{}{}", self.output, string);
                 }
                 _ => {
                     // unknown event
