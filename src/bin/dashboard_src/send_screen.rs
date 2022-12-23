@@ -1,9 +1,4 @@
-use std::{
-    borrow::{Borrow, BorrowMut},
-    cmp::max,
-    error::Error,
-    sync::{Arc, Mutex},
-};
+use std::{cmp::max, error::Error, sync::Arc, time::Duration};
 
 use super::{
     dashboard_app::{ConsoleIO, DashboardEvent},
@@ -13,6 +8,8 @@ use super::{
 use crossterm::event::{Event, KeyCode};
 use neptune_core::rpc_server::RPCClient;
 
+use tarpc::context;
+use tokio::{sync::Mutex, time::sleep};
 use tui::{
     layout::{Alignment, Margin},
     style::{Color, Modifier, Style},
@@ -34,10 +31,12 @@ pub struct SendScreen {
     fg: Color,
     bg: Color,
     in_focus: bool,
-    address: Arc<Mutex<Option<String>>>,
-    server: Arc<RPCClient>,
-    focus: SendScreenWidget,
-    amount: Arc<Mutex<String>>,
+    address: String,
+    rpc_client: Arc<RPCClient>,
+    focus: Arc<Mutex<SendScreenWidget>>,
+    amount: String,
+    notice: Arc<Mutex<String>>,
+    reset_me: Arc<Mutex<bool>>,
 }
 
 impl SendScreen {
@@ -47,80 +46,179 @@ impl SendScreen {
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            address: Arc::new(Mutex::new(None)),
-            server: rpc_server,
-            focus: SendScreenWidget::Address,
-            amount: Arc::new(Mutex::new("".to_string())),
+            address: "".to_string(),
+            rpc_client: rpc_server,
+            focus: Arc::new(Mutex::new(SendScreenWidget::Address)),
+            amount: "".to_string(),
+            notice: Arc::new(Mutex::new("".to_string())),
+            reset_me: Arc::new(Mutex::new(false)),
         }
+    }
+
+    async fn check_and_pay_sequence(
+        rpc_client: Arc<RPCClient>,
+        _address: String,
+        _amount: String,
+        notice_arc: Arc<Mutex<String>>,
+        focus_arc: Arc<Mutex<SendScreenWidget>>,
+        reset_me: Arc<Mutex<bool>>,
+    ) {
+        // let mut notice = notice_arc.lock().await;
+        // *notice = "Validating input ...".to_string();
+        *focus_arc.lock().await = SendScreenWidget::Notice;
+        *notice_arc.lock().await = "Validating input ...".to_string();
+        let valid_address = rpc_client.block_height(context::current()).await.unwrap();
+        sleep(Duration::from_millis(200)).await;
+        if valid_address.to_string().is_empty() {
+            *notice_arc.lock().await = "Invalid address.".to_string();
+            *focus_arc.lock().await = SendScreenWidget::Address;
+            return;
+        }
+
+        *notice_arc.lock().await = "Validated address; validating amount ...".to_string();
+
+        let valid_amount = rpc_client.block_height(context::current()).await.unwrap();
+        sleep(Duration::from_millis(200)).await;
+        if valid_amount.to_string().is_empty() {
+            *notice_arc.lock().await = "Invalid amount.".to_string();
+            *focus_arc.lock().await = SendScreenWidget::Amount;
+            return;
+        }
+
+        *notice_arc.lock().await = "Validated inputs; sending ...".to_string();
+
+        let send_result = rpc_client.block_height(context::current()).await.unwrap();
+        sleep(Duration::from_millis(200)).await;
+        if send_result.to_string().is_empty() {
+            *notice_arc.lock().await = "Could not send due to error.".to_string();
+            *focus_arc.lock().await = SendScreenWidget::Address;
+            return;
+        }
+
+        *notice_arc.lock().await = "Payment broadcast!".to_string();
+        sleep(Duration::from_secs(3)).await;
+        *notice_arc.lock().await = "".to_string();
+        *focus_arc.lock().await = SendScreenWidget::Address;
+        *reset_me.lock().await = true;
     }
 
     pub fn handle(
         &mut self,
         event: DashboardEvent,
     ) -> Result<Option<DashboardEvent>, Box<dyn Error>> {
+        if let Ok(mut reset_me_mutex_guard) = self.reset_me.try_lock() {
+            if reset_me_mutex_guard.to_owned() {
+                self.amount = "".to_string();
+                self.address = "".to_string();
+                *reset_me_mutex_guard = false;
+            }
+        }
         let mut escalate_event = None;
         if self.in_focus {
-            if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
-                match key.code {
+            match event {
+                DashboardEvent::ConsoleEvent(Event::Key(key)) => match key.code {
                     KeyCode::Enter => {
-                        match self.focus {
-                            SendScreenWidget::Address => {
-                                return Ok(Some(DashboardEvent::ConsoleMode(ConsoleIO::Input(
-                                    "Please enter recipient address:\n".to_string(),
-                                ))));
-                            }
-                            SendScreenWidget::Amount => {
-                                self.focus = SendScreenWidget::Ok;
-                                escalate_event = None;
-                            }
-                            SendScreenWidget::Ok => {
-                                // send payment
-                                // switch screen
-                                self.focus = SendScreenWidget::Notice;
-                                escalate_event = None;
-                            }
-                            _ => {
-                                escalate_event = None;
+                        if let Ok(mut own_focus) = self.focus.try_lock() {
+                            match own_focus.to_owned() {
+                                SendScreenWidget::Address => {
+                                    return Ok(Some(DashboardEvent::ConsoleMode(
+                                        ConsoleIO::InputRequested(
+                                            "Please enter recipient address:\n".to_string(),
+                                        ),
+                                    )));
+                                }
+                                SendScreenWidget::Amount => {
+                                    *own_focus = SendScreenWidget::Ok;
+                                    escalate_event = None;
+                                }
+                                SendScreenWidget::Ok => {
+                                    // clone outside of async section
+                                    let rpc_client = self.rpc_client.clone();
+                                    let address = self.address.clone();
+                                    let amount = self.amount.clone();
+                                    let notice = self.notice.clone();
+                                    let focus = self.focus.clone();
+                                    let reset_me = self.reset_me.clone();
+
+                                    tokio::spawn(async move {
+                                        Self::check_and_pay_sequence(
+                                            rpc_client, address, amount, notice, focus, reset_me,
+                                        )
+                                        .await;
+                                    });
+                                    escalate_event = None;
+                                }
+                                _ => {
+                                    escalate_event = None;
+                                }
                             }
                         }
                     }
                     KeyCode::Up => {
-                        self.focus = match self.focus {
-                            SendScreenWidget::Address => SendScreenWidget::Ok,
-                            SendScreenWidget::Amount => SendScreenWidget::Address,
-                            SendScreenWidget::Ok => SendScreenWidget::Amount,
-                            SendScreenWidget::Notice => SendScreenWidget::Ok,
-                        };
-                        escalate_event = None;
+                        if let Ok(own_focus) = self.focus.try_lock() {
+                            match own_focus.to_owned() {
+                                SendScreenWidget::Address => SendScreenWidget::Ok,
+                                SendScreenWidget::Amount => SendScreenWidget::Address,
+                                SendScreenWidget::Ok => SendScreenWidget::Amount,
+                                SendScreenWidget::Notice => SendScreenWidget::Notice,
+                            };
+                            escalate_event = None;
+                        } else {
+                            escalate_event = Some(event);
+                        }
                     }
                     KeyCode::Down => {
-                        self.focus = match self.focus {
-                            SendScreenWidget::Address => SendScreenWidget::Amount,
-                            SendScreenWidget::Amount => SendScreenWidget::Ok,
-                            SendScreenWidget::Ok => SendScreenWidget::Address,
-                            SendScreenWidget::Notice => SendScreenWidget::Address,
-                        };
-                        escalate_event = None;
+                        if let Ok(own_focus) = self.focus.try_lock() {
+                            match own_focus.to_owned() {
+                                SendScreenWidget::Address => SendScreenWidget::Amount,
+                                SendScreenWidget::Amount => SendScreenWidget::Ok,
+                                SendScreenWidget::Ok => SendScreenWidget::Address,
+                                SendScreenWidget::Notice => SendScreenWidget::Notice,
+                            };
+                            escalate_event = None;
+                        } else {
+                            escalate_event = Some(event);
+                        }
                     }
                     KeyCode::Char(c) => {
-                        if self.focus == SendScreenWidget::Amount {
-                            let amount: String = self.amount.lock().unwrap().to_string();
-                            let mut amount_mut = self.amount.lock().unwrap();
-                            *amount_mut = format!("{}{}", amount, c);
-                            escalate_event = None;
+                        if let Ok(own_focus) = self.focus.try_lock() {
+                            if own_focus.to_owned() == SendScreenWidget::Amount {
+                                self.amount = format!("{}{}", self.amount, c);
+                                escalate_event = None;
+                            } else {
+                                escalate_event = Some(event);
+                            }
+                        } else {
+                            escalate_event = Some(event);
                         }
                     }
                     KeyCode::Backspace => {
-                        if self.focus == SendScreenWidget::Amount {
-                            let amount: String = self.amount.lock().unwrap().to_string();
-                            let mut amount_mut = self.amount.lock().unwrap();
-                            amount_mut.drain(amount.len() - 1..);
-                            escalate_event = None;
+                        if let Ok(own_focus) = self.focus.try_lock() {
+                            if own_focus.to_owned() == SendScreenWidget::Amount {
+                                self.amount.drain(self.amount.len() - 1..);
+                                escalate_event = None;
+                            }
+                        } else {
+                            escalate_event = Some(event);
                         }
                     }
                     _ => {
                         escalate_event = Some(event);
                     }
+                },
+                DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(string)) => {
+                    if let Ok(mut own_focus) = self.focus.try_lock() {
+                        self.address = string;
+                        *own_focus = SendScreenWidget::Amount;
+                        escalate_event = None;
+                    } else {
+                        escalate_event = Some(DashboardEvent::ConsoleMode(
+                            ConsoleIO::InputSupplied(string),
+                        ));
+                    }
+                }
+                _ => {
+                    escalate_event = None;
                 }
             }
         }
@@ -150,6 +248,11 @@ impl Screen for SendScreen {
 
 impl Widget for SendScreen {
     fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
+        let own_focus = if let Ok(of) = self.focus.try_lock() {
+            of.to_owned()
+        } else {
+            SendScreenWidget::Notice
+        };
         // receive box
         let style: Style = if self.in_focus {
             Style::default().fg(Color::LightCyan).bg(self.bg)
@@ -175,9 +278,14 @@ impl Widget for SendScreen {
             let mut vrecter = VerticalRectifier::new(inner);
 
             // display address widget
-            let mut address = match self.address.lock().unwrap().to_owned() {
-                Some(str) => str,
-                None => "-".to_string(),
+            let mut address = if let Ok(mg) = self.reset_me.try_lock() {
+                if mg.to_owned() {
+                    "".to_string()
+                } else {
+                    self.address.clone()
+                }
+            } else {
+                self.address.clone()
             };
             let mut address_lines = vec![];
             while address.len() > width {
@@ -190,13 +298,11 @@ impl Widget for SendScreen {
             let address_rect = vrecter.next((address_lines.len() + 2).try_into().unwrap());
             if address_rect.height > 0 {
                 let address_display = Paragraph::new(Text::from(address_lines.join("\n")))
-                    .style(
-                        if self.focus == SendScreenWidget::Address && self.in_focus {
-                            focus_style
-                        } else {
-                            style
-                        },
-                    )
+                    .style(if own_focus == SendScreenWidget::Address && self.in_focus {
+                        focus_style
+                    } else {
+                        style
+                    })
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
@@ -207,7 +313,7 @@ impl Widget for SendScreen {
             }
             let instruction_rect = vrecter.next(1);
             if instruction_rect.height > 0 {
-                let instructions = if self.in_focus && self.focus == SendScreenWidget::Address {
+                let instructions = if self.in_focus && own_focus == SendScreenWidget::Address {
                     Spans::from(vec![
                         Span::from("Press "),
                         Span::styled("Enter ↵", Style::default().fg(Color::LightCyan)),
@@ -221,26 +327,82 @@ impl Widget for SendScreen {
             }
 
             // display amount widget
-            let amount = self.amount.lock().unwrap();
+            let amount = if let Ok(mg) = self.reset_me.try_lock() {
+                if mg.to_owned() {
+                    "".to_string()
+                } else {
+                    self.amount
+                }
+            } else {
+                self.amount
+            };
             let amount_rect = vrecter.next(3);
             let amount_widget = Paragraph::new(Spans::from(vec![
-                Span::from(amount.to_string()),
-                Span::styled(
-                    "|",
-                    if self.focus == SendScreenWidget::Amount {
-                        Style::default().add_modifier(Modifier::RAPID_BLINK)
-                    } else {
-                        style
-                    },
-                ),
+                Span::from(amount),
+                if own_focus == SendScreenWidget::Amount {
+                    Span::styled(
+                        "|",
+                        if self.in_focus {
+                            Style::default().add_modifier(Modifier::RAPID_BLINK)
+                        } else {
+                            style
+                        },
+                    )
+                } else {
+                    Span::from(" ")
+                },
             ]))
-            .style(if self.focus == SendScreenWidget::Amount {
+            .style(if own_focus == SendScreenWidget::Amount && self.in_focus {
                 focus_style
             } else {
                 style
             })
-            .block(Block::default().borders(Borders::ALL).title("Amount"));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Amount")
+                    .style(if own_focus == SendScreenWidget::Amount && self.in_focus {
+                        focus_style
+                    } else {
+                        style
+                    }),
+            );
             amount_widget.render(amount_rect, buf);
+
+            // send button
+            let mut button_rect = vrecter.next(3);
+            button_rect.width = 8;
+            let button_widget = Paragraph::new(Span::styled(
+                " SEND ",
+                if own_focus == SendScreenWidget::Ok && self.in_focus {
+                    focus_style
+                } else {
+                    style
+                },
+            ))
+            .block(Block::default().borders(Borders::ALL).style(
+                if own_focus == SendScreenWidget::Ok && self.in_focus {
+                    focus_style
+                } else {
+                    style
+                },
+            ));
+            button_widget.render(button_rect, buf);
+
+            // notice
+            if let Ok(notice_text) = self.notice.try_lock() {
+                vrecter.next(1);
+                let notice_rect = vrecter.next(1);
+                let notice_widget = Paragraph::new(Span::styled(
+                    notice_text.to_string(),
+                    if own_focus == SendScreenWidget::Notice && self.in_focus {
+                        focus_style
+                    } else {
+                        style
+                    },
+                ));
+                notice_widget.render(notice_rect, buf);
+            }
         }
     }
 }

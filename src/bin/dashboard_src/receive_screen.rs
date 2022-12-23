@@ -121,9 +121,9 @@ impl ReceiveScreen {
                     }
                     KeyCode::Char('c') => {
                         if let Some(address) = self.data.lock().unwrap().as_ref() {
-                            return Ok(Some(DashboardEvent::ConsoleMode(ConsoleIO::Input(
-                                format!("{}\n\n", address),
-                            ))));
+                            return Ok(Some(DashboardEvent::ConsoleMode(
+                                ConsoleIO::InputRequested(format!("{}\n\n", address)),
+                            )));
                         }
                     }
                     _ => {

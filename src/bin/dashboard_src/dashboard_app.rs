@@ -90,7 +90,8 @@ impl fmt::Display for MenuItem {
 #[derive(Debug, Clone)]
 pub enum ConsoleIO {
     Output(String),
-    Input(String),
+    InputRequested(String),
+    InputSupplied(String),
 }
 
 /// Events that widgets can pass to/from each other
@@ -214,6 +215,7 @@ impl DashboardApp {
 
         let mut continue_running = true;
         while continue_running {
+            let mut console_input = None;
             {
                 let mut console_queue = app.console_io.lock().await;
                 if !console_queue.is_empty() {
@@ -228,21 +230,31 @@ impl DashboardApp {
 
                             terminal = Self::enable_raw_mode()?;
                         }
-                        ConsoleIO::Input(string) => {
+                        ConsoleIO::InputRequested(string) => {
                             Self::disable_raw_mode(terminal)?;
 
                             sleep(Duration::from_millis(200)).await;
                             println!("{}", string);
                             let mut str = "".to_string();
                             io::stdin().read_line(&mut str)?;
-                            // do something intelligent with string
+                            console_input = Some(str);
 
                             terminal = Self::enable_raw_mode()?;
+                        }
+                        _ => {
+                            panic!("Should not get here.");
                         }
                     }
                     console_queue.remove(0);
                 }
                 drop(console_queue);
+            }
+
+            if let Some(string) = console_input {
+                app.handle(DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(
+                    string,
+                )))
+                .await?;
             }
 
             terminal.draw(|f| app.render(f))?;
