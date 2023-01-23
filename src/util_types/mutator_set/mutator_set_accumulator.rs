@@ -15,8 +15,8 @@ pub struct MutatorSetAccumulator<H: AlgebraicHasher> {
     pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
 }
 
-impl<H: AlgebraicHasher> MutatorSetAccumulator<H> {
-    pub fn default() -> Self {
+impl<H: AlgebraicHasher> Default for MutatorSetAccumulator<H> {
+    fn default() -> Self {
         let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
             swbf_inactive: MmrAccumulator::<H>::new(vec![]),

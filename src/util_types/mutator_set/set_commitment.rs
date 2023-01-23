@@ -71,8 +71,7 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
             ]
             .concat(),
         );
-        let sample_index =
-            H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE as usize);
+        let sample_index = H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
         let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
         indices.push(sample_swbf_index);
     }
@@ -92,8 +91,7 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
             ]
             .concat(),
         );
-        let sample_index =
-            H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE as usize);
+        let sample_index = H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
         let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
         indices.push(sample_swbf_index);
         indices.sort_unstable();

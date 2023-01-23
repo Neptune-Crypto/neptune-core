@@ -25,8 +25,10 @@ impl<H: AlgebraicHasher> ChunkDictionary<H> {
     pub fn new(dictionary: HashMap<u128, (MmrMembershipProof<H>, Chunk)>) -> Self {
         Self { dictionary }
     }
+}
 
-    pub fn default() -> ChunkDictionary<H> {
+impl<H: AlgebraicHasher> Default for ChunkDictionary<H> {
+    fn default() -> Self {
         Self {
             dictionary: HashMap::new(),
         }

@@ -344,8 +344,7 @@ mod removal_record_tests {
         let mut bit_indices_sorted = bit_indices.clone();
         bit_indices_sorted.sort_unstable();
         assert_eq!(
-            bit_indices.clone(),
-            bit_indices_sorted,
+            bit_indices, bit_indices_sorted,
             "bit indices must sorted in the removal record"
         );
 
@@ -501,7 +500,7 @@ mod removal_record_tests {
                 }
 
                 let rr = accumulator.drop(&item, &mp);
-                removal_records.push((i as usize, rr));
+                removal_records.push((i, rr));
             }
 
             // pick a random removal record from the list of all removal records and check that it still
@@ -570,7 +569,7 @@ mod removal_record_tests {
             }
 
             let rr = accumulator.drop(&item, &mp);
-            removal_records.push((i as usize, rr));
+            removal_records.push((i, rr));
         }
 
         // Now apply all removal records one at a time and batch update the remaining removal records

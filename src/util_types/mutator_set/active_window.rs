@@ -60,13 +60,13 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
         }
         let indices = chunk.to_indices();
         for index in indices {
-            self.sbf.increment(index as u128);
+            self.sbf.increment(index);
         }
     }
 
     pub fn set_bit(&mut self, index: usize) {
         assert!(
-            index < WINDOW_SIZE as usize,
+            index < WINDOW_SIZE,
             "index cannot exceed window size in `set_bit`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
@@ -76,7 +76,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
 
     pub fn unset_bit(&mut self, index: usize) {
         assert!(
-            index < WINDOW_SIZE as usize,
+            index < WINDOW_SIZE,
             "index cannot exceed window size in `unset_bit`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
@@ -86,7 +86,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
 
     pub fn get_bit(&self, index: usize) -> bool {
         assert!(
-            index < WINDOW_SIZE as usize,
+            index < WINDOW_SIZE,
             "index cannot exceed window size in `get_bit`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
@@ -157,7 +157,7 @@ mod active_window_tests {
 
         let mut prng = thread_rng();
         for _ in 0..100 {
-            let index = prng.next_u32() as usize % WINDOW_SIZE as usize;
+            let index = prng.next_u32() as usize % WINDOW_SIZE;
             aw.set_bit(index);
 
             assert!(aw.get_bit(index));

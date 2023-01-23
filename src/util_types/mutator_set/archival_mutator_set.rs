@@ -569,7 +569,7 @@ mod archival_mutator_set_tests {
             assert_eq!(commitment_before_add, commitment_after_revert);
         }
 
-        let n_iterations = 10 * BATCH_SIZE as usize;
+        let n_iterations = 10 * BATCH_SIZE;
         let mut records = Vec::with_capacity(n_iterations);
         let mut commitments_before = Vec::with_capacity(n_iterations);
 
@@ -643,7 +643,7 @@ mod archival_mutator_set_tests {
 
         let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
-        let n_iterations = 11 * BATCH_SIZE as usize;
+        let n_iterations = 11 * BATCH_SIZE;
         let mut records = Vec::with_capacity(n_iterations);
 
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
