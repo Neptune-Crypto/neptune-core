@@ -663,7 +663,7 @@ mod archival_mutator_set_tests {
                 .restore_membership_proof(
                     &item,
                     &expired_membership_proof.randomness,
-                    expired_membership_proof.auth_path_aocl.data_index,
+                    expired_membership_proof.auth_path_aocl.leaf_index,
                 )
                 .unwrap();
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));

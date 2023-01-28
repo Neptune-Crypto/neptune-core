@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use twenty_first::{
-    shared_math::rescue_prime_digest::Digest,
-    util_types::{
-        algebraic_hasher::AlgebraicHasher, mmr::mmr_membership_proof::MmrMembershipProof,
-    },
-};
+use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
+use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use super::{chunk_dictionary::ChunkDictionary, removal_record::RemovalRecord};
+use super::chunk_dictionary::ChunkDictionary;
+use super::removal_record::RemovalRecord;
 
 pub const BITS_PER_U32: usize = 32;
 pub const WINDOW_SIZE: usize = 1 << 20;
@@ -28,6 +27,16 @@ pub fn bit_indices_to_hash_map(all_bit_indices: &[u128; NUM_TRIALS]) -> HashMap<
         });
 
     chunk_index_to_bit_indices
+}
+
+pub fn sponge_from_item_randomness<H: AlgebraicHasher>(
+    item: &Digest,
+    randomness: &Digest,
+) -> H::SpongeState {
+    let mut seed = [BFIELD_ZERO; 10];
+    seed[..DIGEST_LENGTH].copy_from_slice(&item.values());
+    seed[DIGEST_LENGTH..].copy_from_slice(&randomness.values());
+    H::absorb_init(&seed)
 }
 
 /// and mutate the chunk dictionary chunk values.

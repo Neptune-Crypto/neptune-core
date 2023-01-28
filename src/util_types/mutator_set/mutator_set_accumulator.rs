@@ -244,7 +244,7 @@ mod ms_accumulator_tests {
                                 !accumulator.verify(&items[j], &previous_mps[j]),
                                 "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
-                                previous_mps[j].auth_path_aocl.data_index,
+                                previous_mps[j].auth_path_aocl.leaf_index,
                                 previous_mps[j],
                                 membership_proofs_batch[j]
                             );
@@ -253,7 +253,7 @@ mod ms_accumulator_tests {
                                 accumulator.verify(&items[j], &previous_mps[j]),
                                 "Verify must succeed for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
-                                previous_mps[j].auth_path_aocl.data_index,
+                                previous_mps[j].auth_path_aocl.leaf_index,
                                 previous_mps[j],
                                 membership_proofs_batch[j]
                             );
@@ -376,7 +376,7 @@ mod ms_accumulator_tests {
 
                     // Verify that the membership proof can be restored from an archival instance
                     let arch_mp = archival_after_remove
-                        .restore_membership_proof(item, rand, mp_batch.auth_path_aocl.data_index)
+                        .restore_membership_proof(item, rand, mp_batch.auth_path_aocl.leaf_index)
                         .unwrap();
                     assert_eq!(arch_mp, *mp_batch);
 

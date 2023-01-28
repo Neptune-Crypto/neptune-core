@@ -3,24 +3,20 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
+
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+use super::addition_record::AdditionRecord;
+use super::chunk_dictionary::ChunkDictionary;
 use super::removal_record::BitSet;
-use super::{
-    addition_record::AdditionRecord,
-    chunk_dictionary::ChunkDictionary,
-    removal_record::RemovalRecord,
-    set_commitment::get_swbf_indices,
-    set_commitment::SetCommitment,
-    shared::BATCH_SIZE,
-    shared::{get_batch_mutation_argument_for_removal_record, CHUNK_SIZE},
-    transfer_ms_membership_proof::TransferMsMembershipProof,
-};
+use super::removal_record::RemovalRecord;
+use super::set_commitment::{get_swbf_indices, SetCommitment};
+use super::shared::{get_batch_mutation_argument_for_removal_record, BATCH_SIZE, CHUNK_SIZE};
+use super::transfer_ms_membership_proof::TransferMsMembershipProof;
 
 impl Error for MembershipProofError {}
 
@@ -91,8 +87,8 @@ impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
 impl<H: AlgebraicHasher> MsMembershipProof<H> {
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
     pub fn cache_indices(&mut self, item: &Digest) {
-        let bits = get_swbf_indices::<H>(item, &self.randomness, self.auth_path_aocl.data_index);
-        self.cached_bits = Some(BitSet::new(&bits));
+        let indices = get_swbf_indices::<H>(item, &self.randomness, self.auth_path_aocl.leaf_index);
+        self.cached_bits = Some(BitSet::new(&indices));
     }
 
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
@@ -104,7 +100,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         assert!(
             membership_proofs
                 .iter()
-                .all(|mp| mp.auth_path_aocl.data_index < mutator_set.aocl.count_leaves()),
+                .all(|mp| mp.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves()),
             "No AOCL data index can point outside of provided mutator set"
         );
         assert_eq!(
@@ -159,11 +155,11 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             .for_each(|(i, (mp, item))| {
                 let bits = match &mp.cached_bits {
                     Some(bs) => bs.to_owned(),
-                    None => BitSet::new(&get_swbf_indices::<H>(
-                        item,
-                        &mp.randomness,
-                        mp.auth_path_aocl.data_index,
-                    )),
+                    None => {
+                        let leaf_index = mp.auth_path_aocl.leaf_index;
+                        let indices = get_swbf_indices::<H>(item, &mp.randomness, leaf_index);
+                        BitSet::new(&indices)
+                    }
                 };
                 let chunks_set: HashSet<u128> = bits
                     .to_array()
@@ -276,7 +272,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         mutator_set: &mut SetCommitment<H, MMR>,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
-        assert!(self.auth_path_aocl.data_index < mutator_set.aocl.count_leaves());
+        assert!(self.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves());
         let new_item_index = mutator_set.aocl.count_leaves();
 
         // Update AOCL MMR membership proof
@@ -300,7 +296,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         let all_bit_indices = match &self.cached_bits {
             Some(bits) => bits.to_array(),
             None => {
-                get_swbf_indices::<H>(own_item, &self.randomness, self.auth_path_aocl.data_index)
+                get_swbf_indices::<H>(own_item, &self.randomness, self.auth_path_aocl.leaf_index)
             }
         };
         let chunk_indices_set: HashSet<u128> = all_bit_indices
@@ -460,6 +456,7 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
@@ -530,7 +527,7 @@ mod ms_proof_tests {
         // For this test to be performed, we first need an MMR membership proof and a chunk.
 
         // Construct an MMR with 7 leafs
-        let mmr_digests = H::get_n_hash_rounds(&randomness, 7);
+        let mmr_digests = random_elements::<Digest>(7);
         let mut mmra: MmrAccumulator<H> = MmrAccumulator::new(mmr_digests);
 
         // Get an MMR membership proof by adding the 8th leaf

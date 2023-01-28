@@ -1,26 +1,24 @@
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    fmt,
-};
+use std::collections::{HashMap, HashSet};
+use std::{error::Error, fmt};
 
+use itertools::Itertools;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::algebraic_hasher::Hashable;
 use twenty_first::util_types::mmr;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement,
-    util_types::mmr::mmr_membership_proof::MmrMembershipProof,
-};
 
+use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
+use super::removal_record::BitSet;
 use super::removal_record::RemovalRecord;
-use super::shared::{bit_indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE};
-use super::{active_window::ActiveWindow, removal_record::BitSet};
+use super::shared::{
+    bit_indices_to_hash_map, sponge_from_item_randomness, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS,
+    WINDOW_SIZE,
+};
 
 impl Error for SetCommitmentError {}
 
@@ -45,61 +43,21 @@ pub struct SetCommitment<H: AlgebraicHasher, MMR: Mmr<H>> {
     pub swbf_active: ActiveWindow<H>,
 }
 
-/// Helper function. Computes the bloom filter bit indices of the
-/// item, randomness, index triple.
+// FIXME: Apply over-sampling to circumvent risk of duplicates.
 pub fn get_swbf_indices<H: AlgebraicHasher>(
     item: &Digest,
     randomness: &Digest,
     aocl_leaf_index: u128,
 ) -> [u128; NUM_TRIALS] {
-    let batch_index = aocl_leaf_index / BATCH_SIZE as u128;
-    let item_seq: Vec<BFieldElement> = item.to_sequence();
-    let timestamp_seq: Vec<BFieldElement> = aocl_leaf_index.to_sequence();
-    let randomness_seq: Vec<BFieldElement> = randomness.to_sequence();
-
-    let mut indices: Vec<u128> = Vec::with_capacity(NUM_TRIALS);
-
-    // Collect all indices, using counter-mode
-    for i in 0_usize..NUM_TRIALS {
-        let counter_seq: Vec<BFieldElement> = (i as u128).to_sequence();
-        let randomness_with_counter: Digest = H::hash_slice(
-            &vec![
-                item_seq.clone(),
-                timestamp_seq.clone(),
-                randomness_seq.clone(),
-                counter_seq,
-            ]
-            .concat(),
-        );
-        let sample_index = H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
-        let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
-        indices.push(sample_swbf_index);
-    }
-
-    // We disallow duplicates, so we have to find N more
-    indices.sort_unstable();
-    indices.dedup();
-    let mut j = NUM_TRIALS;
-    while indices.len() < NUM_TRIALS {
-        let counter_seq: Vec<BFieldElement> = (j as u128).to_sequence();
-        let randomness_with_counter: Digest = H::hash_slice(
-            &vec![
-                item_seq.clone(),
-                timestamp_seq.clone(),
-                randomness_seq.clone(),
-                counter_seq,
-            ]
-            .concat(),
-        );
-        let sample_index = H::sample_index_not_power_of_two(&randomness_with_counter, WINDOW_SIZE);
-        let sample_swbf_index: u128 = sample_index as u128 + batch_index * CHUNK_SIZE as u128;
-        indices.push(sample_swbf_index);
-        indices.sort_unstable();
-        indices.dedup();
-        j += 1;
-    }
-
-    indices.try_into().unwrap()
+    let batch_index: u128 = aocl_leaf_index / BATCH_SIZE as u128;
+    let batch_offset: u128 = batch_index * CHUNK_SIZE as u128;
+    let mut sponge = sponge_from_item_randomness::<H>(item, randomness);
+    H::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS)
+        .into_iter()
+        .map(|sample_index: usize| sample_index as u128 + batch_offset)
+        .collect_vec()
+        .try_into()
+        .unwrap()
 }
 
 impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
@@ -120,11 +78,9 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
         let bit_indices: BitSet = membership_proof.cached_bits.clone().unwrap_or_else(|| {
-            BitSet::new(&get_swbf_indices::<H>(
-                item,
-                &membership_proof.randomness,
-                membership_proof.auth_path_aocl.data_index,
-            ))
+            let leaf_index = membership_proof.auth_path_aocl.leaf_index;
+            let indices = get_swbf_indices::<H>(item, &membership_proof.randomness, leaf_index);
+            BitSet::new(&indices)
         });
 
         RemovalRecord {
@@ -291,11 +247,9 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
         // Store the bit indices for later use, as they are expensive to calculate
         let cached_bits: Option<_> = if store_bits {
-            Some(BitSet::new(&get_swbf_indices::<H>(
-                item,
-                randomness,
-                self.aocl.count_leaves(),
-            )))
+            let leaf_index = self.aocl.count_leaves();
+            let indices = get_swbf_indices::<H>(item, randomness, leaf_index);
+            Some(BitSet::new(&indices))
         } else {
             None
         };
@@ -314,7 +268,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         // This also ensures that no "future" bit indices will be
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
-        if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.data_index {
+        if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.leaf_index {
             return false;
         }
 
@@ -341,11 +295,11 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         // We use the cached bits if we have them, otherwise they are recalculated
         let all_bit_indices = match &membership_proof.cached_bits {
             Some(bits) => bits.clone(),
-            None => BitSet::new(&get_swbf_indices::<H>(
-                item,
-                &membership_proof.randomness,
-                membership_proof.auth_path_aocl.data_index,
-            )),
+            None => {
+                let leaf_index = membership_proof.auth_path_aocl.leaf_index;
+                let indices = get_swbf_indices::<H>(item, &membership_proof.randomness, leaf_index);
+                BitSet::new(&indices)
+            }
         };
 
         let chunk_index_to_bit_indices = bit_indices_to_hash_map(&all_bit_indices.to_array());
@@ -634,9 +588,10 @@ mod accumulation_scheme_tests {
     fn ms_get_indices_test() {
         // Test that `get_indices` behaves as expected. I.e. that it does not return any
         // duplicates, and always returns something of length `NUM_TRIALS`.
-        type Hasher = RescuePrimeRegular;
+        type H = RescuePrimeRegular;
+
         let (item, randomness) = make_item_and_randomness();
-        let ret: [u128; NUM_TRIALS] = get_swbf_indices::<Hasher>(&item, &randomness, 0);
+        let ret: [u128; NUM_TRIALS] = get_swbf_indices::<H>(&item, &randomness, 0);
         assert_eq!(NUM_TRIALS, ret.len());
         assert!(has_unique_elements(ret));
         assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
@@ -646,10 +601,10 @@ mod accumulation_scheme_tests {
     fn ms_get_indices_test_big() {
         // Test that `get_indices` behaves as expected. I.e. that it does not return any
         // duplicates, and always returns something of length `NUM_TRIALS`.
-        type Hasher = blake3::Hasher;
+        type H = blake3::Hasher;
         for _ in 0..1000 {
             let (item, randomness) = make_item_and_randomness();
-            let ret: [u128; NUM_TRIALS] = get_swbf_indices::<Hasher>(&item, &randomness, 0);
+            let ret: [u128; NUM_TRIALS] = get_swbf_indices::<H>(&item, &randomness, 0);
             assert_eq!(NUM_TRIALS, ret.len());
             assert!(has_unique_elements(ret));
             assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
