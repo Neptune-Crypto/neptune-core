@@ -151,13 +151,8 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
     }
 
     /// Remove a record and return the chunks that have been updated in this process,
-    /// after applying the update. Also returns the indices at which bits were flipped
-    /// from 0 to 1 in either the active or the inactive window. Does not mutate the
-    /// removal record.
-    pub fn remove_helper(
-        &mut self,
-        removal_record: &RemovalRecord<H>,
-    ) -> (HashMap<u128, Chunk>, Vec<u128>) {
+    /// after applying the update. Does not mutate the removal record.
+    pub fn remove_helper(&mut self, removal_record: &RemovalRecord<H>) -> HashMap<u128, Chunk> {
         let batch_index = self.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
@@ -166,19 +161,11 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let chunk_indices_to_bit_indices: HashMap<u128, Vec<u128>> =
             removal_record.get_chunk_index_to_bit_indices();
 
-        // The indices changed by this `RemovalRecord` are gathered to allow for the
-        // reversal of the application of this `RemovalRecord`.
-        let mut diff_indices = vec![];
-
         for (chunk_index, bit_indices) in chunk_indices_to_bit_indices {
             if chunk_index >= batch_index {
                 // bit index is in the active part, flip bits in the active part of the Bloom filter
                 for bit_index in bit_indices {
                     let relative_index = (bit_index - active_window_start) as usize;
-                    let was_set = self.swbf_active.get_bit(relative_index);
-                    if !was_set {
-                        diff_indices.push(bit_index)
-                    }
                     self.swbf_active.set_bit(relative_index);
                 }
 
@@ -189,10 +176,6 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             let relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
             for bit_index in bit_indices {
                 let relative_bit_index = (bit_index % CHUNK_SIZE as u128) as u32;
-                let was_set = relevant_chunk.1.get_bit(relative_bit_index);
-                if !was_set {
-                    diff_indices.push(bit_index)
-                }
                 relevant_chunk.1.set_bit(relative_bit_index);
             }
         }
@@ -215,16 +198,11 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         self.swbf_inactive
             .batch_mutate_leaf_and_update_mps(&mut [], mutation_data);
 
-        diff_indices.sort_unstable();
-
-        (
-            new_target_chunks
-                .dictionary
-                .into_iter()
-                .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
-                .collect(),
-            diff_indices,
-        )
+        new_target_chunks
+            .dictionary
+            .into_iter()
+            .map(|(chunk_index, (_mp, chunk))| (chunk_index, chunk))
+            .collect()
     }
 
     /**
@@ -356,36 +334,24 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         &mut self,
         mut removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
-    ) -> (HashMap<u128, Chunk>, Vec<u128>) {
+    ) -> HashMap<u128, Chunk> {
         let batch_index = self.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         // Collect all bits that that are set by the removal records
-        let all_removal_records_bits: HashSet<u128> = removal_records
+        let all_removal_records_bits: Vec<u128> = removal_records
             .iter()
-            .flat_map(|x| x.bit_indices.to_vec())
-            .collect();
-
-        // Keep track of which bits are flipped in the Bloom filter. This value
-        // is returned to allow rollback of blocks.
-        // TODO: It would be cool if we get these through xor-operations
-        // instead.
-        let mut changed_indices: Vec<u128> = Vec::with_capacity(all_removal_records_bits.len());
+            .map(|x| x.bit_indices.to_vec())
+            .concat();
 
         // Loop over all bits from removal records in order to create a mapping
         // {chunk index => chunk mutation } where "chunk mutation" has the type of
         // `Chunk` but only represents the values which are set by the removal records
-        // being handled. We do this since we can then apply bit-wise OR with the
-        // "chunk mutations" and the existing chunk values in the sliding window
-        // Bloom filter.
+        // being handled.
         let mut chunk_index_to_chunk_mutation: HashMap<u128, Chunk> = HashMap::new();
         all_removal_records_bits.iter().for_each(|bit_index| {
             if *bit_index >= active_window_start {
                 let relative_index = (bit_index - active_window_start) as usize;
-                if !self.swbf_active.get_bit(relative_index) {
-                    changed_indices.push(*bit_index);
-                }
-
                 self.swbf_active.set_bit(relative_index);
             } else {
                 chunk_index_to_chunk_mutation
@@ -417,23 +383,14 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         // Apply the bit-flipping operation that calculates Bloom filter values after
         // applying the removal records
         for (chunk_index, (chunk, _)) in mutation_data_preimage.iter_mut() {
-            let mut flipped_bits = chunk.clone();
             **chunk = chunk
                 .clone()
-                .or(chunk_index_to_chunk_mutation[chunk_index].clone())
+                .combine(chunk_index_to_chunk_mutation[chunk_index].clone())
                 .clone();
-
-            flipped_bits.xor_assign(chunk.clone());
-
-            for j in 0..CHUNK_SIZE as u128 {
-                if flipped_bits.get_bit(j as u32) {
-                    changed_indices.push(j + chunk_index * CHUNK_SIZE as u128);
-                }
-            }
         }
 
         // Set the chunk values in the membership proofs that we want to preserve to the
-        // newly calculated chunk values where the bit-wise OR has been applied.
+        // newly calculated chunk values.
         // This is done by looping over all membership proofs and checking if they contain
         // any of the chunks that are affected by the removal records.
         for mp in preserved_membership_proofs.iter_mut() {
@@ -475,7 +432,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             swbf_inactive_mutation_data,
         );
 
-        (chunk_index_to_chunk_mutation, changed_indices)
+        chunk_index_to_chunk_mutation
     }
 }
 

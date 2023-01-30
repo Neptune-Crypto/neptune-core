@@ -62,14 +62,11 @@ impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
         }
     }
 
-    fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>> {
-        let (new_chunks, diff_indices): (HashMap<u128, Chunk>, Vec<u128>) =
-            self.set_commitment.remove_helper(removal_record);
+    fn remove(&mut self, removal_record: &RemovalRecord<H>) {
+        let new_chunks: HashMap<u128, Chunk> = self.set_commitment.remove_helper(removal_record);
         for (chunk_index, chunk) in new_chunks {
             self.chunks.set(chunk_index, chunk);
         }
-
-        Some(diff_indices)
     }
 
     fn get_commitment(&mut self) -> Digest {
@@ -89,16 +86,14 @@ impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
         &mut self,
         removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
-    ) -> Option<Vec<u128>> {
-        let (chunk_index_to_chunk_mutation, changed_indices) = self
+    ) {
+        let chunk_index_to_chunk_mutation = self
             .set_commitment
             .batch_remove(removal_records, preserved_membership_proofs);
 
         for (chnk_idx, new_chunk_value) in chunk_index_to_chunk_mutation {
             self.chunks.set(chnk_idx, new_chunk_value);
         }
-
-        Some(changed_indices)
     }
 }
 
@@ -259,29 +254,27 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         })
     }
 
-    /// Revert the `RemovalRecord`s in a block by unsetting the bits that
-    /// were actually flipped. These live in either the active window, or
+    /// Revert the `RemovalRecord`s in a block by removing the bits that
+    /// were actually set by the removal record. These live in either the active window, or
     /// in a relevant chunk.
     ///
-    /// Fails if attempting to unset a bit that wasn't set.
-    pub fn revert_remove(&mut self, diff_indices: Vec<u128>) {
+    /// Fails if attempting to remove an index that wasn't set.
+    pub fn revert_remove(&mut self, removal_record_indices: Vec<u128>) {
         let batch_index = self.set_commitment.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
-        let mut unset_bit_encountered = false;
         let mut chunk_index_to_revert_chunk: HashMap<u128, Chunk> = HashMap::new();
 
-        for diff_index in diff_indices {
-            if diff_index >= active_window_start {
-                let relative_index = (diff_index - active_window_start) as usize;
-                unset_bit_encountered |= !self.set_commitment.swbf_active.get_bit(relative_index);
+        for bit_index in removal_record_indices {
+            if bit_index >= active_window_start {
+                let relative_index = (bit_index - active_window_start) as usize;
                 self.set_commitment.swbf_active.unset_bit(relative_index);
             } else {
-                let chunk_index = diff_index / CHUNK_SIZE as u128;
-                let index_in_chunk = (diff_index % CHUNK_SIZE as u128) as u32;
+                let chunk_index = bit_index / CHUNK_SIZE as u128;
+                let relative_index = (bit_index % CHUNK_SIZE as u128) as u32;
                 chunk_index_to_revert_chunk
                     .entry(chunk_index)
                     .or_insert_with(Chunk::empty_chunk)
-                    .set_bit(index_in_chunk);
+                    .set_bit(relative_index);
             }
         }
 
@@ -291,24 +284,12 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             // in both the `revert_chunk` and in the `previous_chunk`.
             let previous_chunk = self.chunks.get(chunk_index);
             let mut new_chunk = previous_chunk;
-            new_chunk.xor_assign(revert_chunk.clone());
+            new_chunk.subtract(revert_chunk.clone());
             self.set_commitment
                 .swbf_inactive
                 .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
             self.chunks.set(chunk_index, new_chunk.clone());
-
-            // To check if a bit was set in `revert_chunk` that was not set in previous_chunk, we can
-            // do a bit-wise AND on the `revert_chunk` and the updated `new_chunk`. If this is
-            // non-zero it means that a bit was set in `revert_chunk` but not in `previous_chunk`.
-            // If this is the case, then we have attempted to revert an unset bit, and that is an
-            // error.
-            unset_bit_encountered |= !revert_chunk.and(new_chunk).is_unset();
         }
-
-        assert!(
-            !unset_bit_encountered,
-            "Caller may not attempt to unset a bit that was not set"
-        );
     }
 
     /// Revert the `AdditionRecord`s in a block by
@@ -435,6 +416,32 @@ mod archival_mutator_set_tests {
 
     use super::*;
 
+    fn get_all_set_bits_with_duplicates<H: AlgebraicHasher>(
+        archival_mutator_set: &mut ArchivalMutatorSet<H>,
+    ) -> Vec<u128> {
+        let mut ret: Vec<u128> = vec![];
+
+        for set_bit_index in archival_mutator_set
+            .set_commitment
+            .swbf_active
+            .sbf
+            .indices
+            .iter()
+        {
+            ret.push(*set_bit_index);
+        }
+
+        let chunk_count = archival_mutator_set.chunks.len();
+        for chunk_index in 0..chunk_count {
+            let chunk = archival_mutator_set.chunks.get(chunk_index);
+            for set_bit_index in chunk.bits.iter() {
+                ret.push((*set_bit_index + CHUNK_SIZE as u32 * chunk_index as u32) as u128);
+            }
+        }
+
+        ret
+    }
+
     #[test]
     fn new_or_restore_test() {
         type H = RescuePrimeRegular;
@@ -459,12 +466,15 @@ mod archival_mutator_set_tests {
         assert!(archival_mutator_set.verify(&item, &membership_proof));
 
         let removal_record: RemovalRecord<H> = archival_mutator_set.drop(&item, &membership_proof);
-        let diff_bits: Vec<u128> = archival_mutator_set.remove(&removal_record).unwrap();
-        assert_eq!(
-            removal_record.bit_indices.to_vec(),
-            diff_bits,
-            "diff bits must be equal to bit indices when Bloom filter is empty"
-        );
+        archival_mutator_set.remove(&removal_record);
+
+        let mut removal_record_bits = removal_record.bit_indices.to_vec();
+        let mut set_indices_in_archival_ms =
+            get_all_set_bits_with_duplicates(&mut archival_mutator_set);
+        removal_record_bits.sort_unstable();
+        set_indices_in_archival_ms.sort_unstable();
+
+        assert_eq!(removal_record_bits, set_indices_in_archival_ms, "Set indices in MS must match removal record indices when Bloom filter was empty prior to removal.");
 
         // Let's store the active window back to the database and create
         // a new archival object from the databases it contains and then check
@@ -475,10 +485,6 @@ mod archival_mutator_set_tests {
             &mut active_window_db,
         );
 
-        // let active_window_db = archival_mutator_set
-        //     .set_commitment
-        //     .swbf_active
-        //     .store_to_database(active_window_db);
         drop(archival_mutator_set);
         let chunks_db = DB::open("chunks", opt.clone()).unwrap();
         let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
@@ -619,7 +625,7 @@ mod archival_mutator_set_tests {
         archival_mutator_set.revert_remove(removal_record.bit_indices.to_vec());
     }
 
-    #[should_panic(expected = "Caller may not attempt to unset a bit that was not set")]
+    #[should_panic(expected = "Attempted to remove bit index that was not set in chunk")]
     #[test]
     fn revert_remove_from_inactive_bloom_filter_panic() {
         type H = blake3::Hasher;
@@ -670,11 +676,10 @@ mod archival_mutator_set_tests {
 
             let removal_record = archival_mutator_set.drop(&item, &restored_membership_proof);
             let commitment_before_remove = archival_mutator_set.get_commitment();
-            let diff_indices = archival_mutator_set.remove(&removal_record).unwrap();
-            println!("diff_indices = {:?}", diff_indices);
+            archival_mutator_set.remove(&removal_record);
             assert!(!archival_mutator_set.verify(&item, &restored_membership_proof));
 
-            archival_mutator_set.revert_remove(diff_indices);
+            archival_mutator_set.revert_remove(removal_record.bit_indices.to_vec());
             let commitment_after_revert = archival_mutator_set.get_commitment();
             assert_eq!(commitment_before_remove, commitment_after_revert);
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
@@ -771,12 +776,10 @@ mod archival_mutator_set_tests {
             }
 
             let commitment_prior_to_removal = archival_mutator_set.get_commitment();
-            let changed_indices: Vec<u128> = archival_mutator_set
-                .batch_remove(
-                    removal_records,
-                    &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
-                )
-                .unwrap();
+            archival_mutator_set.batch_remove(
+                removal_records.clone(),
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+            );
 
             for ((mp, item), skipped) in membership_proofs
                 .iter()
@@ -789,7 +792,11 @@ mod archival_mutator_set_tests {
 
             // Check the return value: That all reported bits were actually flipped.
             // This function call should panic if that was not the case.
-            archival_mutator_set.revert_remove(changed_indices);
+            let all_removal_record_indices = removal_records
+                .iter()
+                .map(|x| x.bit_indices.to_vec())
+                .concat();
+            archival_mutator_set.revert_remove(all_removal_record_indices);
 
             // Verify that mutator set before and after removal are the same
             assert_eq!(commitment_prior_to_removal, archival_mutator_set.get_commitment(), "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");
