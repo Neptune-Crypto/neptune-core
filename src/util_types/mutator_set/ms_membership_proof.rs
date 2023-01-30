@@ -387,7 +387,9 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // Collect all the MMR membership proofs from the chunk dictionaries.
         // Also keep track of which MS membership proof they came from, so the
         // function can report back which MS membership proofs that have been
-        // mutated
+        // mutated.
+        // The chunk values contained in the MS membership proof's chunk dictionary has already
+        // been updated by the `get_batch_mutation_argument_for_removal_record` function.
         let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<H>> = vec![];
         let mut mmr_mp_index_to_input_index: Vec<usize> = vec![];
         for (i, chunk_dict) in chunk_dictionaries.iter_mut().enumerate() {
@@ -404,7 +406,8 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 mutation_argument,
             );
 
-        // Keep track of which MS membership proofs that were mutated
+        // Keep track of which MS membership proofs that were mutated. This is all those membership
+        // proofs which have a mutated chunk
         let mut ret: Vec<usize> = mutated_chunks_by_mp_indices.into_iter().collect();
         for index in mutated_mmr_mps {
             ret.push(mmr_mp_index_to_input_index[index]);

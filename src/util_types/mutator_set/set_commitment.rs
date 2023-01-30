@@ -556,15 +556,25 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn ms_get_indices_test_big() {
-        // Test that `get_indices` behaves as expected. I.e. that it does not return any
-        // duplicates, and always returns something of length `NUM_TRIALS`.
+        // Test that `get_indices` behaves as expected. I.e. that it returns indices in the correct range,
+        // and always returns something of length `NUM_TRIALS`.
         type H = blake3::Hasher;
         for _ in 0..1000 {
             let (item, randomness) = make_item_and_randomness();
             let ret: [u128; NUM_TRIALS] = get_swbf_indices::<H>(&item, &randomness, 0);
             assert_eq!(NUM_TRIALS, ret.len());
-            assert!(has_unique_elements(ret));
             assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
+        }
+
+        for _ in 0..1000 {
+            let (item, randomness) = make_item_and_randomness();
+            let ret: [u128; NUM_TRIALS] =
+                get_swbf_indices::<H>(&item, &randomness, (17 * BATCH_SIZE) as u128);
+            assert_eq!(NUM_TRIALS, ret.len());
+            assert!(ret
+                .iter()
+                .all(|&x| (x as usize) < WINDOW_SIZE + 17 * CHUNK_SIZE
+                    && (x as usize) >= 17 * CHUNK_SIZE));
         }
     }
 
