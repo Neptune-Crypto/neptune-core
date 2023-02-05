@@ -337,21 +337,17 @@ mod removal_record_tests {
     }
 
     #[test]
-    fn verify_that_bit_indices_are_sorted_test() {
-        let (_mp, removal_record) = get_mp_and_removal_record();
+    fn verify_that_removal_records_and_mp_indices_agree() {
+        let (mp, removal_record) = get_mp_and_removal_record();
 
-        let bit_indices = removal_record.bit_indices;
-        let mut bit_indices_sorted = bit_indices.clone();
-        bit_indices_sorted.sort_unstable();
+        let mut mp_indices = mp.cached_bits.unwrap().0;
+        mp_indices.sort_unstable();
+        let mut removal_rec_indices = removal_record.bit_indices.0;
+        removal_rec_indices.sort_unstable();
+
         assert_eq!(
-            bit_indices, bit_indices_sorted,
-            "bit indices must sorted in the removal record"
-        );
-
-        // Alternative way of checking that the indices are sorted (thanks, IRC)
-        assert!(
-            bit_indices.to_array().windows(2).all(|s| s[0] < s[1]),
-            "bit-indices must be sorted"
+            mp_indices, removal_rec_indices,
+            "Removal record indices must agree with membership proof indices."
         );
     }
 

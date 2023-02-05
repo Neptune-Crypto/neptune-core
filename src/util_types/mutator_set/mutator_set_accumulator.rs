@@ -53,11 +53,8 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         self.set_commitment.add_helper(addition_record);
     }
 
-    fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>> {
+    fn remove(&mut self, removal_record: &RemovalRecord<H>) {
         self.set_commitment.remove_helper(removal_record);
-
-        // Only an ArchivalMutatorSet can calculate the diff indices
-        None
     }
 
     fn get_commitment(&mut self) -> Digest {
@@ -75,12 +72,9 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         &mut self,
         removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
-    ) -> Option<Vec<u128>> {
-        let (_chunk_index_to_chunk_mutation, _changed_indices) = self
-            .set_commitment
+    ) {
+        self.set_commitment
             .batch_remove(removal_records, preserved_membership_proofs);
-
-        None
     }
 }
 
@@ -244,7 +238,7 @@ mod ms_accumulator_tests {
                                 !accumulator.verify(&items[j], &previous_mps[j]),
                                 "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
-                                previous_mps[j].auth_path_aocl.data_index,
+                                previous_mps[j].auth_path_aocl.leaf_index,
                                 previous_mps[j],
                                 membership_proofs_batch[j]
                             );
@@ -253,7 +247,7 @@ mod ms_accumulator_tests {
                                 accumulator.verify(&items[j], &previous_mps[j]),
                                 "Verify must succeed for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
-                                previous_mps[j].auth_path_aocl.data_index,
+                                previous_mps[j].auth_path_aocl.leaf_index,
                                 previous_mps[j],
                                 membership_proofs_batch[j]
                             );
@@ -308,13 +302,13 @@ mod ms_accumulator_tests {
                     assert!(accumulator.verify(&removal_item, &removal_mp));
                     let removal_record_copy = removal_record.clone();
                     accumulator.remove(&removal_record);
-                    let diff_indices: Vec<u128> =
-                        archival_after_remove.remove(&removal_record).unwrap();
-                    for diff_index in diff_indices {
-                        println!("diff_index = {}", diff_index);
-                        assert!(archival_after_remove.get_bloom_filter_bit(diff_index));
-                        assert!(!archival_before_remove.get_bloom_filter_bit(diff_index));
+                    archival_after_remove.remove(&removal_record);
+
+                    // Verify that removal record's bits are all set
+                    for removed_index in removal_record.bit_indices.to_vec() {
+                        assert!(archival_after_remove.get_bloom_filter_bit(removed_index));
                     }
+
                     archival_before_remove.remove(&removal_record_copy);
                     assert!(!accumulator.verify(&removal_item, &removal_mp));
 
@@ -330,7 +324,7 @@ mod ms_accumulator_tests {
                         if updated {
                             assert!(
                                 !accumulator.verify(item, original_mp),
-                                "i = {}, \n\nOriginal mp:\n{:?}\n\nNew mp:\n{:?}",
+                                "i = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
                                 i,
                                 original_mp,
                                 membership_proofs_sequential[i]
@@ -338,7 +332,7 @@ mod ms_accumulator_tests {
                         } else {
                             assert!(
                                 accumulator.verify(item, original_mp),
-                                "i = {}, \n\nOriginal mp:\n{:?}\n\nNew mp:\n{:?}",
+                                "i = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
                                 i,
                                 original_mp,
                                 membership_proofs_sequential[i]
@@ -376,7 +370,7 @@ mod ms_accumulator_tests {
 
                     // Verify that the membership proof can be restored from an archival instance
                     let arch_mp = archival_after_remove
-                        .restore_membership_proof(item, rand, mp_batch.auth_path_aocl.data_index)
+                        .restore_membership_proof(item, rand, mp_batch.auth_path_aocl.leaf_index)
                         .unwrap();
                     assert_eq!(arch_mp, *mp_batch);
 

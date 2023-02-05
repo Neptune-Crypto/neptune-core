@@ -43,9 +43,7 @@ pub trait MutatorSet<H: AlgebraicHasher> {
     /// remove
     /// Updates the mutator set so as to remove the item determined by
     /// its removal record.
-    /// Optionally returns a list of indices into the Bloom filter that
-    /// were flipped from 0 to 1 by the `RemovalRecord`.
-    fn remove(&mut self, removal_record: &RemovalRecord<H>) -> Option<Vec<u128>>;
+    fn remove(&mut self, removal_record: &RemovalRecord<H>);
 
     /// batch_remove
     /// Apply multiple removal records, and update a list of membership proofs to
@@ -54,7 +52,7 @@ pub trait MutatorSet<H: AlgebraicHasher> {
         &mut self,
         removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
-    ) -> Option<Vec<u128>>;
+    );
 
     /// get_commitment
     /// Return a commitment to the entire mutator set

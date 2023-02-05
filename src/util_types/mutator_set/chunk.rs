@@ -1,4 +1,4 @@
-use num_traits::Zero;
+use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::Hashable;
@@ -15,6 +15,10 @@ impl Chunk {
     pub fn empty_chunk() -> Self {
         let bits = vec![];
         Chunk { bits }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bits.is_empty()
     }
 
     pub fn set_bit(&mut self, index: u32) {
@@ -58,7 +62,8 @@ impl Chunk {
         self.bits.contains(&index)
     }
 
-    pub fn or(self, other: Self) -> Self {
+    /// Return a chunk with indices which are the concatenation and sorting of indices in two input chunks
+    pub fn combine(self, other: Self) -> Self {
         let mut ret = Self::empty_chunk();
         for idx in self.bits {
             ret.bits.push(idx);
@@ -70,37 +75,13 @@ impl Chunk {
         ret
     }
 
-    pub fn xor_assign(&mut self, other: Self) {
-        let mut drops = vec![];
-        for (i, idx) in self.bits.iter().enumerate() {
-            if other.bits.contains(idx) {
-                drops.push(i);
-            }
+    pub fn subtract(&mut self, other: Self) {
+        for remove_index in other.bits {
+            match self.bits.iter().find_position(|x| **x == remove_index) {
+                Some((i, _)) => self.bits.remove(i),
+                None => panic!("Attempted to remove bit index that was not set in chunk"),
+            };
         }
-        for idx in other.bits {
-            if !self.bits.contains(&idx) {
-                self.bits.push(idx);
-            }
-        }
-        for d in drops.iter().rev() {
-            self.bits.remove(*d);
-        }
-        self.bits.sort();
-    }
-
-    pub fn and(self, other: Self) -> Self {
-        let mut ret = Self::empty_chunk();
-        for idx in self.bits {
-            if other.bits.contains(&idx) {
-                ret.bits.push(idx);
-            }
-        }
-
-        ret
-    }
-
-    pub fn is_unset(&self) -> bool {
-        self.bits.iter().all(|x| x.is_zero())
     }
 
     pub fn to_indices(&self) -> Vec<u128> {
@@ -230,41 +211,45 @@ mod chunk_tests {
     }
 
     #[test]
-    fn xor_and_and_and_is_unset_test() {
+    fn subtract_and_combine_and_is_empty_test() {
         let mut chunk_a = Chunk::empty_chunk();
         chunk_a.set_bit(12);
         chunk_a.set_bit(13);
+        chunk_a.set_bit(48);
 
         let mut chunk_b = Chunk::empty_chunk();
         chunk_b.set_bit(48);
         chunk_b.set_bit(13);
 
-        let mut expected_xor = Chunk::empty_chunk();
-        expected_xor.set_bit(12);
-        expected_xor.set_bit(48);
+        let mut expected_sub = Chunk::empty_chunk();
+        expected_sub.set_bit(12);
 
         let mut chunk_c = chunk_a.clone();
-        chunk_c.xor_assign(chunk_b.clone());
+        chunk_c.subtract(chunk_b.clone());
 
         assert_eq!(
-            expected_xor, chunk_c,
-            "XOR on chunks must behave as expected"
+            expected_sub, chunk_c,
+            "subtract on chunks must behave as expected"
         );
 
-        let mut expected_and = Chunk::empty_chunk();
-        expected_and.set_bit(13);
+        let mut expected_combine = Chunk::empty_chunk();
+        expected_combine.set_bit(12);
+        expected_combine.set_bit(13);
+        expected_combine.set_bit(13);
+        expected_combine.set_bit(48);
+        expected_combine.set_bit(48);
 
-        chunk_c = chunk_a.clone().and(chunk_b.clone());
+        chunk_c = chunk_a.clone().combine(chunk_b.clone());
         assert_eq!(
-            expected_and, chunk_c,
-            "AND on chunks must behave as expected"
+            expected_combine, chunk_c,
+            "combine on chunks must behave as expected"
         );
 
-        // Verify that `is_unset` behaves as expected
-        assert!(!chunk_a.is_unset());
-        assert!(!chunk_b.is_unset());
-        assert!(!chunk_c.is_unset());
-        assert!(Chunk::empty_chunk().is_unset());
+        // Verify that `is_empty` behaves as expected
+        assert!(!chunk_a.is_empty());
+        assert!(!chunk_b.is_empty());
+        assert!(!chunk_c.is_empty());
+        assert!(Chunk::empty_chunk().is_empty());
     }
 
     #[test]
