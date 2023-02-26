@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
 use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, SpongeHasher};
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use super::chunk_dictionary::ChunkDictionary;
@@ -29,14 +29,16 @@ pub fn bit_indices_to_hash_map(all_bit_indices: &[u128; NUM_TRIALS]) -> HashMap<
     chunk_index_to_bit_indices
 }
 
-pub fn sponge_from_item_randomness<H: AlgebraicHasher>(
+pub fn sponge_from_item_randomness<H: SpongeHasher + AlgebraicHasher>(
     item: &Digest,
     randomness: &Digest,
-) -> H::SpongeState {
+) -> <H as SpongeHasher>::SpongeState {
     let mut seed = [BFIELD_ZERO; 10];
     seed[..DIGEST_LENGTH].copy_from_slice(&item.values());
     seed[DIGEST_LENGTH..].copy_from_slice(&randomness.values());
-    H::absorb_init(&seed)
+    let mut sponge_state = <H as SpongeHasher>::init();
+    H::absorb(&mut sponge_state, &seed);
+    sponge_state
 }
 
 /// This function is factored out because it is shared by `update_from_remove`

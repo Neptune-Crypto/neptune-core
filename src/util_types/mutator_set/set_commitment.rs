@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::{error::Error, fmt};
 
 use itertools::Itertools;
@@ -51,10 +51,10 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
 ) -> [u128; NUM_TRIALS] {
     let batch_index: u128 = aocl_leaf_index / BATCH_SIZE as u128;
     let batch_offset: u128 = batch_index * CHUNK_SIZE as u128;
-    let mut sponge = sponge_from_item_randomness::<H>(item, randomness);
-    H::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS)
+    let mut prng_state = sponge_from_item_randomness::<H>(item, randomness);
+    H::sample_indices(&mut prng_state, WINDOW_SIZE.try_into().unwrap(), NUM_TRIALS)
         .into_iter()
-        .map(|sample_index: usize| sample_index as u128 + batch_offset)
+        .map(|sample_index| sample_index as u128 + batch_offset)
         .collect_vec()
         .try_into()
         .unwrap()
