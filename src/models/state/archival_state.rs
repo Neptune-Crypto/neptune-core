@@ -1109,9 +1109,9 @@ mod archival_state_tests {
                 .await
                 .set_commitment
                 .swbf_active
-                .bits
-                .iter()
-                .all(|x| x.is_zero()),
+                .sbf
+                .indices
+                .is_empty(),
             "All bits in active window must be unset when no UTXOs have been spent"
         );
 
@@ -1247,9 +1247,9 @@ mod archival_state_tests {
                 .await
                 .set_commitment
                 .swbf_active
-                .bits
-                .iter()
-                .all(|x| x.is_zero()),
+                .sbf
+                .indices
+                .is_empty(),
             "All bits in active window must be unset when no UTXOs have been spent"
         );
 
@@ -1310,12 +1310,7 @@ mod archival_state_tests {
             // Before updating, the active window must be all zeros
             let mut db_bc_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
-            assert!(ams_lock
-                .set_commitment
-                .swbf_active
-                .bits
-                .iter()
-                .all(|x| x.is_zero()));
+            assert!(ams_lock.set_commitment.swbf_active.sbf.indices.is_empty());
 
             // Write the block to disk
             archival_state.write_block(
@@ -1335,12 +1330,7 @@ mod archival_state_tests {
 
             // Verify that the active window is not all zeros as a removal record has flipped
             // bits in the Bloom filter
-            assert!(!ams_lock
-                .set_commitment
-                .swbf_active
-                .bits
-                .iter()
-                .all(|x| x.is_zero()));
+            assert!(!ams_lock.set_commitment.swbf_active.sbf.indices.is_empty());
 
             // Verify that a block containing a removal record `block_1_a` can be reverted
             let block_1_b = make_mock_block(
@@ -1361,12 +1351,7 @@ mod archival_state_tests {
             )?;
 
             // Verify that the active window is all zeros after reverting the removal record
-            assert!(ams_lock
-                .set_commitment
-                .swbf_active
-                .bits
-                .iter()
-                .all(|x| x.is_zero()));
+            assert!(ams_lock.set_commitment.swbf_active.sbf.indices.is_empty());
         }
 
         Ok(())

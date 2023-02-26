@@ -196,7 +196,7 @@ impl PotentialPeersState {
 
         // If this data structure is full, remove a random entry. Then add this.
         if self.potential_peers.len()
-            > max_peers as usize * POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS
+            > max_peers * POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS
         {
             let mut rng = rand::thread_rng();
             let random_potential_peer = self

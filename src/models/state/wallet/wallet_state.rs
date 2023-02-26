@@ -9,11 +9,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
 
 use super::wallet_block_utxos::WalletBlockIOSums;
 use super::wallet_status::{WalletStatus, WalletStatusElement};
@@ -300,12 +299,12 @@ impl WalletState {
                                     .get_membership_proof_for_block(&block.header.prev_block_digest)
                                     .unwrap()
                                     .auth_path_aocl
-                                    .data_index;
+                                    .leaf_index;
                                 let ms_membership_proof_data_index = block.body.transaction.inputs
                                     [i]
                                     .membership_proof
                                     .auth_path_aocl
-                                    .data_index;
+                                    .leaf_index;
 
                                 monitored_utxo_data_index == ms_membership_proof_data_index
                             })
@@ -420,7 +419,7 @@ impl WalletState {
             .map(|x| {
                 let ms_mp = x.get_latest_membership_proof();
                 (
-                    WalletStatusElement(ms_mp.auth_path_aocl.data_index, x.utxo),
+                    WalletStatusElement(ms_mp.auth_path_aocl.leaf_index, x.utxo),
                     ms_mp,
                 )
             })
@@ -430,7 +429,7 @@ impl WalletState {
             .filter(|x| x.spent_in_block.is_none() && !x.has_synced_membership_proof)
             .map(|x| {
                 WalletStatusElement(
-                    x.get_latest_membership_proof().auth_path_aocl.data_index,
+                    x.get_latest_membership_proof().auth_path_aocl.leaf_index,
                     x.utxo,
                 )
             })
@@ -440,7 +439,7 @@ impl WalletState {
             .filter(|x| x.spent_in_block.is_some() && x.has_synced_membership_proof)
             .map(|x| {
                 WalletStatusElement(
-                    x.get_latest_membership_proof().auth_path_aocl.data_index,
+                    x.get_latest_membership_proof().auth_path_aocl.leaf_index,
                     x.utxo,
                 )
             })
@@ -450,7 +449,7 @@ impl WalletState {
             .filter(|x| x.spent_in_block.is_some() && !x.has_synced_membership_proof)
             .map(|x| {
                 WalletStatusElement(
-                    x.get_latest_membership_proof().auth_path_aocl.data_index,
+                    x.get_latest_membership_proof().auth_path_aocl.leaf_index,
                     x.utxo,
                 )
             })

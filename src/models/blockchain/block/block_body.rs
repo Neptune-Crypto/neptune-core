@@ -1,7 +1,6 @@
-use serde::{Deserialize, Serialize};
-
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
@@ -10,7 +9,7 @@ use crate::models::blockchain::transaction::Transaction;
 
 use super::mutator_set_update::MutatorSetUpdate;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockBody {
     pub transaction: Transaction,
     pub next_mutator_set_accumulator: MutatorSetAccumulator<Hash>,

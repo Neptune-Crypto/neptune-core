@@ -26,7 +26,7 @@ use super::transaction::utxo::Utxo;
 use super::transaction::{Amount, Transaction};
 use crate::models::blockchain::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     pub hash: Digest,
     pub header: BlockHeader,

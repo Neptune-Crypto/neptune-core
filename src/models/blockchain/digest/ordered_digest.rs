@@ -5,7 +5,7 @@ use serde::Serialize;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
+use twenty_first::shared_math::rescue_prime_digest::DIGEST_LENGTH;
 
 // The data structure `RescuePrimeDigest` is primarily needed, so we can make
 // database keys out of rescue prime digests.
@@ -28,13 +28,15 @@ impl PartialOrd for OrderedDigest {
     }
 }
 
+impl Default for OrderedDigest {
+    fn default() -> Self {
+        Self([BFieldElement::zero(); DIGEST_LENGTH])
+    }
+}
+
 impl OrderedDigest {
     pub fn max() -> Self {
         Self([BFieldElement::new(BFieldElement::MAX); DIGEST_LENGTH])
-    }
-
-    pub fn default() -> Self {
-        Self([BFieldElement::zero(); DIGEST_LENGTH])
     }
 
     pub fn new(digest: [BFieldElement; DIGEST_LENGTH]) -> Self {
@@ -61,7 +63,7 @@ impl TryFrom<BigUint> for OrderedDigest {
     fn try_from(value: BigUint) -> Result<Self, Self::Error> {
         let mut remaining = value;
         let mut ret = OrderedDigest::default();
-        let modulus: BigUint = BFieldElement::QUOTIENT.into();
+        let modulus: BigUint = BFieldElement::P.into();
         for i in 0..DIGEST_LENGTH {
             let resulting_u64: u64 = (remaining.clone() % modulus.clone()).try_into().map_err(
                 |err: TryFromBigIntError<BigUint>| {
@@ -83,7 +85,7 @@ impl TryFrom<BigUint> for OrderedDigest {
 impl From<OrderedDigest> for BigUint {
     fn from(digest: OrderedDigest) -> Self {
         let mut ret = BigUint::zero();
-        let modulus: BigUint = BFieldElement::QUOTIENT.into();
+        let modulus: BigUint = BFieldElement::P.into();
         for i in (0..DIGEST_LENGTH).rev() {
             ret *= modulus.clone();
             let digest_element: BigUint = digest.0[i].value().into();
@@ -174,7 +176,7 @@ mod ordered_digest_tests {
             BFieldElement::zero(),
         ]);
 
-        let bfe_max_plus_one: BigUint = BFieldElement::QUOTIENT.into();
+        let bfe_max_plus_one: BigUint = BFieldElement::P.into();
         let bfe_max_plus_one_converted_expected = OrderedDigest([
             BFieldElement::zero(),
             BFieldElement::one(),
