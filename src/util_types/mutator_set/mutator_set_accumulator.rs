@@ -306,7 +306,7 @@ mod ms_accumulator_tests {
                     archival_after_remove.remove(&removal_record);
 
                     // Verify that removal record's bits are all set
-                    for removed_index in removal_record.bit_indices.to_vec() {
+                    for removed_index in removal_record.absolute_indices.to_vec() {
                         assert!(archival_after_remove.get_bloom_filter_bit(removed_index));
                     }
 

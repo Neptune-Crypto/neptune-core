@@ -14,8 +14,8 @@ use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use super::chunk_dictionary::ChunkDictionary;
 use super::set_commitment::SetCommitment;
 use super::shared::{
-    bit_indices_to_hash_map, get_batch_mutation_argument_for_removal_record, BATCH_SIZE,
-    CHUNK_SIZE, NUM_TRIALS,
+    get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
+    NUM_TRIALS,
 };
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -123,7 +123,7 @@ pub enum RemovalRecordError {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RemovalRecord<H: AlgebraicHasher> {
-    pub bit_indices: AbsoluteIndexSet,
+    pub absolute_indices: AbsoluteIndexSet,
     pub target_chunks: ChunkDictionary<H>,
 }
 
@@ -156,7 +156,7 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
         // Collect all bit indices for all removal records that are being updated
         let mut chunk_index_to_mp_index: HashMap<u128, Vec<usize>> = HashMap::new();
         removal_records.iter().enumerate().for_each(|(i, rr)| {
-            let bits = &rr.bit_indices;
+            let bits = &rr.absolute_indices;
             let chunks_set: HashSet<u128> = bits
                 .to_array()
                 .iter()
@@ -290,14 +290,14 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
     }
 
     /// Returns a hashmap from chunk index to chunk.
-    pub fn get_chunk_index_to_bit_indices(&self) -> HashMap<u128, Vec<u128>> {
-        bit_indices_to_hash_map(&self.bit_indices.to_array())
+    pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u128, Vec<u128>> {
+        indices_to_hash_map(&self.absolute_indices.to_array())
     }
 }
 
 impl<H: AlgebraicHasher> Hashable for RemovalRecord<H> {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.bit_indices
+        self.absolute_indices
             .to_array()
             .iter()
             .flat_map(|bi| bi.to_sequence())
@@ -342,7 +342,7 @@ mod removal_record_tests {
 
         let mut mp_indices = mp.cached_indices.unwrap().0;
         mp_indices.sort_unstable();
-        let mut removal_rec_indices = removal_record.bit_indices.0;
+        let mut removal_rec_indices = removal_record.absolute_indices.0;
         removal_rec_indices.sort_unstable();
 
         assert_eq!(
@@ -363,11 +363,11 @@ mod removal_record_tests {
             H::hash(&removal_record_alt),
             "Same removal record must hash to same value"
         );
-        removal_record_alt.bit_indices.to_array_mut()[NUM_TRIALS / 4] += 1;
+        removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS / 4] += 1;
 
         // Sanity check (theoretically, a collision in the bit indices could have happened)
         assert!(
-            utils::has_unique_elements(removal_record_alt.bit_indices.to_array()),
+            utils::has_unique_elements(removal_record_alt.absolute_indices.to_array()),
             "Sanity check to ensure that bit indices are still all unique"
         );
         assert_ne!(
@@ -378,10 +378,10 @@ mod removal_record_tests {
     }
 
     #[test]
-    fn get_chunk_index_to_bit_indices_test() {
+    fn get_chunkidx_to_indices_test() {
         let (mp, removal_record) = get_mp_and_removal_record();
 
-        let chunks2bits = removal_record.get_chunk_index_to_bit_indices();
+        let chunks2bits = removal_record.get_chunkidx_to_indices_dict();
 
         // Verify that no indices are repeated in the hash map
         let mut all_bits: Vec<u128> = chunks2bits.clone().into_values().concat();
@@ -412,7 +412,7 @@ mod removal_record_tests {
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
-        assert_eq!(s_back.bit_indices, removal_record.bit_indices);
+        assert_eq!(s_back.absolute_indices, removal_record.absolute_indices);
         assert_eq!(s_back.target_chunks, removal_record.target_chunks);
     }
 

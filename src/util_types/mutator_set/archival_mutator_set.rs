@@ -274,7 +274,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
                 chunk_index_to_revert_chunk
                     .entry(chunk_index)
                     .or_insert_with(Chunk::empty_chunk)
-                    .set_bit(relative_index);
+                    .insert(relative_index);
             }
         }
 
@@ -335,7 +335,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             let chunk_index = bit_index / CHUNK_SIZE as u128;
             let relative_index = bit_index % CHUNK_SIZE as u128;
             let relevant_chunk = self.chunks.get(chunk_index);
-            relevant_chunk.get_bit(relative_index as u32)
+            relevant_chunk.contains(relative_index as u32)
         }
     }
 
@@ -468,7 +468,7 @@ mod archival_mutator_set_tests {
         let removal_record: RemovalRecord<H> = archival_mutator_set.drop(&item, &membership_proof);
         archival_mutator_set.remove(&removal_record);
 
-        let mut removal_record_bits = removal_record.bit_indices.to_vec();
+        let mut removal_record_bits = removal_record.absolute_indices.to_vec();
         let mut set_indices_in_archival_ms =
             get_all_set_bits_with_duplicates(&mut archival_mutator_set);
         removal_record_bits.sort_unstable();
@@ -622,7 +622,7 @@ mod archival_mutator_set_tests {
 
         // This next line should panic, as we're attempting to unflip an unset bit
         // in the active window
-        archival_mutator_set.revert_remove(removal_record.bit_indices.to_vec());
+        archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
     }
 
     #[should_panic(expected = "Attempted to remove bit index that was not set in chunk")]
@@ -679,7 +679,7 @@ mod archival_mutator_set_tests {
             archival_mutator_set.remove(&removal_record);
             assert!(!archival_mutator_set.verify(&item, &restored_membership_proof));
 
-            archival_mutator_set.revert_remove(removal_record.bit_indices.to_vec());
+            archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
             let commitment_after_revert = archival_mutator_set.get_commitment();
             assert_eq!(commitment_before_remove, commitment_after_revert);
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
@@ -794,7 +794,7 @@ mod archival_mutator_set_tests {
             // This function call should panic if that was not the case.
             let all_removal_record_indices = removal_records
                 .iter()
-                .map(|x| x.bit_indices.to_vec())
+                .map(|x| x.absolute_indices.to_vec())
                 .concat();
             archival_mutator_set.revert_remove(all_removal_record_indices);
 

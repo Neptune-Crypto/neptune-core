@@ -21,7 +21,7 @@ impl Chunk {
         self.bits.is_empty()
     }
 
-    pub fn set_bit(&mut self, index: u32) {
+    pub fn insert(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE as u32,
             "index cannot exceed chunk size in `set_bit`. CHUNK_SIZE = {}, got index = {}",
@@ -32,7 +32,7 @@ impl Chunk {
         self.bits.sort();
     }
 
-    pub fn unset_bit(&mut self, index: u32) {
+    pub fn remove(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE as u32,
             "index cannot exceed chunk size in `unset_bit`. CHUNK_SIZE = {}, got index = {}",
@@ -51,7 +51,7 @@ impl Chunk {
         }
     }
 
-    pub fn get_bit(&self, index: u32) -> bool {
+    pub fn contains(&self, index: u32) -> bool {
         assert!(
             index < CHUNK_SIZE as u32,
             "index cannot exceed chunk size in `get_bit`. CHUNK_SIZE = {}, got index = {}",
@@ -155,7 +155,7 @@ mod chunk_tests {
     fn get_set_unset_bits_pbt() {
         let mut aw = Chunk::empty_chunk();
         for i in 0..CHUNK_SIZE {
-            assert!(!aw.get_bit(i as u32));
+            assert!(!aw.contains(i as u32));
         }
 
         let mut prng = thread_rng();
@@ -163,21 +163,21 @@ mod chunk_tests {
             let index = prng.next_u32() % CHUNK_SIZE as u32;
             let set = prng.next_u32() % 2 == 0;
             if set {
-                aw.set_bit(index);
+                aw.insert(index);
             } else {
-                aw.unset_bit(index);
+                aw.remove(index);
             }
 
-            assert_eq!(set, aw.get_bit(index));
+            assert_eq!(set, aw.contains(index));
         }
 
         // Set all bits, then check that they are set
         for i in 0..CHUNK_SIZE {
-            aw.set_bit(i as u32);
+            aw.insert(i as u32);
         }
 
         for i in 0..CHUNK_SIZE {
-            assert!(aw.get_bit(i as u32));
+            assert!(aw.contains(i as u32));
         }
     }
 
@@ -188,14 +188,14 @@ mod chunk_tests {
         assert!(zero_chunk_preimage.iter().all(|elem| elem.is_zero()));
 
         let mut one_chunk = Chunk::empty_chunk();
-        one_chunk.set_bit(32);
+        one_chunk.insert(32);
         let one_chunk_preimage = one_chunk.to_sequence();
 
         assert_ne!(zero_chunk_preimage, one_chunk_preimage);
 
         let mut two_ones_chunk = Chunk::empty_chunk();
-        two_ones_chunk.set_bit(32);
-        two_ones_chunk.set_bit(33);
+        two_ones_chunk.insert(32);
+        two_ones_chunk.insert(33);
         let two_ones_preimage = two_ones_chunk.to_sequence();
 
         assert_ne!(two_ones_preimage, one_chunk_preimage);
@@ -205,7 +205,7 @@ mod chunk_tests {
         let mut previous_values: HashSet<Vec<BFieldElement>> = HashSet::new();
         for i in 0..CHUNK_SIZE {
             let mut chunk = Chunk::empty_chunk();
-            chunk.set_bit(i as u32);
+            chunk.insert(i as u32);
             assert!(previous_values.insert(chunk.to_sequence()));
         }
     }
@@ -213,16 +213,16 @@ mod chunk_tests {
     #[test]
     fn subtract_and_combine_and_is_empty_test() {
         let mut chunk_a = Chunk::empty_chunk();
-        chunk_a.set_bit(12);
-        chunk_a.set_bit(13);
-        chunk_a.set_bit(48);
+        chunk_a.insert(12);
+        chunk_a.insert(13);
+        chunk_a.insert(48);
 
         let mut chunk_b = Chunk::empty_chunk();
-        chunk_b.set_bit(48);
-        chunk_b.set_bit(13);
+        chunk_b.insert(48);
+        chunk_b.insert(13);
 
         let mut expected_sub = Chunk::empty_chunk();
-        expected_sub.set_bit(12);
+        expected_sub.insert(12);
 
         let mut chunk_c = chunk_a.clone();
         chunk_c.subtract(chunk_b.clone());
@@ -233,11 +233,11 @@ mod chunk_tests {
         );
 
         let mut expected_combine = Chunk::empty_chunk();
-        expected_combine.set_bit(12);
-        expected_combine.set_bit(13);
-        expected_combine.set_bit(13);
-        expected_combine.set_bit(48);
-        expected_combine.set_bit(48);
+        expected_combine.insert(12);
+        expected_combine.insert(13);
+        expected_combine.insert(13);
+        expected_combine.insert(48);
+        expected_combine.insert(48);
 
         chunk_c = chunk_a.clone().combine(chunk_b.clone());
         assert_eq!(
@@ -270,7 +270,7 @@ mod chunk_tests {
         let num_insertions = 100;
         for _ in 0..num_insertions {
             let index = rng.next_u32() % (CHUNK_SIZE as u32);
-            chunk.set_bit(index);
+            chunk.insert(index);
         }
 
         let indices = chunk.to_indices();

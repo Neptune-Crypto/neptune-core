@@ -294,13 +294,13 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
         // Get bit indices from either the cached bits, or by recalculating them. Notice
         // that the latter is an expensive operation.
-        let all_bit_indices = match &self.cached_indices {
+        let all_indices = match &self.cached_indices {
             Some(bits) => bits.to_array(),
             None => {
                 get_swbf_indices::<H>(own_item, &self.randomness, self.auth_path_aocl.leaf_index)
             }
         };
-        let chunk_indices_set: HashSet<u128> = all_bit_indices
+        let chunk_indices_set: HashSet<u128> = all_indices
             .into_iter()
             .map(|bi| bi / CHUNK_SIZE as u128)
             .collect::<HashSet<u128>>();

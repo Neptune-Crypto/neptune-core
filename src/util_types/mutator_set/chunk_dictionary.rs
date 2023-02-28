@@ -93,7 +93,7 @@ mod chunk_dict_tests {
         let key2: u128 = 8989;
         let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership(2).0;
         let mut chunk2 = Chunk::empty_chunk();
-        chunk2.set_bit(CHUNK_SIZE as u32 / 2 + 1);
+        chunk2.insert(CHUNK_SIZE as u32 / 2 + 1);
         let value2 = (mp2, chunk2);
         let chunkdict2 = ChunkDictionary::<H>::new(HashMap::from([
             (key1, value1.clone()),

@@ -17,7 +17,7 @@ use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
 use super::shared::{
-    bit_indices_to_hash_map, sponge_from_item_randomness, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS,
+    indices_to_hash_map, sponge_from_item_randomness, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS,
     WINDOW_SIZE,
 };
 
@@ -78,7 +78,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         item: &Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
-        let bit_indices: AbsoluteIndexSet =
+        let indices: AbsoluteIndexSet =
             membership_proof.cached_indices.clone().unwrap_or_else(|| {
                 let leaf_index = membership_proof.auth_path_aocl.leaf_index;
                 let indices = get_swbf_indices::<H>(item, &membership_proof.randomness, leaf_index);
@@ -86,7 +86,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             });
 
         RemovalRecord {
-            bit_indices,
+            absolute_indices: indices,
             target_chunks: membership_proof.target_chunks.clone(),
         }
     }
@@ -160,13 +160,13 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
         // set all bits
         let mut new_target_chunks: ChunkDictionary<H> = removal_record.target_chunks.clone();
-        let chunk_indices_to_bit_indices: HashMap<u128, Vec<u128>> =
-            removal_record.get_chunk_index_to_bit_indices();
+        let chunkindices_to_indices_dict: HashMap<u128, Vec<u128>> =
+            removal_record.get_chunkidx_to_indices_dict();
 
-        for (chunk_index, bit_indices) in chunk_indices_to_bit_indices {
+        for (chunk_index, indices) in chunkindices_to_indices_dict {
             if chunk_index >= batch_index {
                 // bit index is in the active part, flip bits in the active part of the Bloom filter
-                for bit_index in bit_indices {
+                for bit_index in indices {
                     let relative_index = (bit_index - active_window_start) as usize;
                     self.swbf_active.set_bit(relative_index);
                 }
@@ -176,9 +176,9 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
             // If chunk index is not in the active part, set the bits in the relevant chunk
             let relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
-            for bit_index in bit_indices {
-                let relative_bit_index = (bit_index % CHUNK_SIZE as u128) as u32;
-                relevant_chunk.1.set_bit(relative_bit_index);
+            for index in indices {
+                let relative_index = (index % CHUNK_SIZE as u128) as u32;
+                relevant_chunk.1.insert(relative_index);
             }
         }
 
@@ -273,7 +273,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let window_start = current_batch_index * CHUNK_SIZE as u128;
 
         // We use the cached bits if we have them, otherwise they are recalculated
-        let all_bit_indices = match &membership_proof.cached_indices {
+        let all_indices = match &membership_proof.cached_indices {
             Some(bits) => bits.clone(),
             None => {
                 let leaf_index = membership_proof.auth_path_aocl.leaf_index;
@@ -282,8 +282,8 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             }
         };
 
-        let chunk_index_to_bit_indices = bit_indices_to_hash_map(&all_bit_indices.to_array());
-        'outer: for (chunk_index, bit_indices) in chunk_index_to_bit_indices.into_iter() {
+        let chunkidx_to_indices_dict = indices_to_hash_map(&all_indices.to_array());
+        'outer: for (chunk_index, indices) in chunkidx_to_indices_dict.into_iter() {
             if chunk_index < current_batch_index {
                 // verify mmr auth path
                 if !membership_proof
@@ -309,16 +309,16 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
                 all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
-                'inner_inactive: for bit_index in bit_indices {
+                'inner_inactive: for bit_index in indices {
                     let index_within_chunk = bit_index % CHUNK_SIZE as u128;
-                    if !mp_and_chunk.1.get_bit(index_within_chunk as u32) {
+                    if !mp_and_chunk.1.contains(index_within_chunk as u32) {
                         has_unset_bits = true;
                         break 'inner_inactive;
                     }
                 }
             } else {
                 // bits are in active window
-                'inner_active: for bit_index in bit_indices {
+                'inner_active: for bit_index in indices {
                     let relative_index = bit_index - window_start;
                     if !self.swbf_active.get_bit(relative_index as usize) {
                         has_unset_bits = true;
@@ -343,7 +343,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         // Collect all bits that that are set by the removal records
         let all_removal_records_bits: Vec<u128> = removal_records
             .iter()
-            .map(|x| x.bit_indices.to_vec())
+            .map(|x| x.absolute_indices.to_vec())
             .concat();
 
         // Loop over all bits from removal records in order to create a mapping
@@ -359,7 +359,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
                 chunk_index_to_chunk_mutation
                     .entry(bit_index / CHUNK_SIZE as u128)
                     .or_insert_with(Chunk::empty_chunk)
-                    .set_bit((*bit_index % CHUNK_SIZE as u128) as u32);
+                    .insert((*bit_index % CHUNK_SIZE as u128) as u32);
             }
         });
 
