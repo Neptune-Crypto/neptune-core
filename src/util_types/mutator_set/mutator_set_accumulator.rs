@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::{
@@ -10,7 +11,7 @@ use super::{
     removal_record::RemovalRecord, set_commitment::SetCommitment,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutatorSetAccumulator<H: AlgebraicHasher> {
     pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
 }
@@ -375,8 +376,8 @@ mod ms_accumulator_tests {
                     assert_eq!(arch_mp, *mp_batch);
 
                     // Also verify that cached bits are set for both proofs and that they agree
-                    assert!(arch_mp.cached_bits.is_some());
-                    assert_eq!(arch_mp.cached_bits, mp_batch.cached_bits);
+                    assert!(arch_mp.cached_indices.is_some());
+                    assert_eq!(arch_mp.cached_indices, mp_batch.cached_indices);
 
                     // Verify that sequential and batch update produces the same membership proofs
                     assert_eq!(mp_batch, mp_seq);

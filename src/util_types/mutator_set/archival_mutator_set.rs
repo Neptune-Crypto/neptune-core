@@ -15,7 +15,7 @@ use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_trait::MutatorSet;
-use super::removal_record::{BitSet, RemovalRecord};
+use super::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use super::set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError};
 use super::shared::CHUNK_SIZE;
 
@@ -250,7 +250,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             auth_path_aocl,
             randomness: randomness.to_owned(),
             target_chunks,
-            cached_bits: Some(BitSet::new(&bits)),
+            cached_indices: Some(AbsoluteIndexSet::new(&bits)),
         })
     }
 

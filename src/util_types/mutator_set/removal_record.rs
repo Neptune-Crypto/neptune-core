@@ -22,9 +22,9 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BitSet([u128; NUM_TRIALS]);
+pub struct AbsoluteIndexSet([u128; NUM_TRIALS]);
 
-impl BitSet {
+impl AbsoluteIndexSet {
     pub fn new(bits: &[u128; NUM_TRIALS]) -> Self {
         Self(*bits)
     }
@@ -46,7 +46,7 @@ impl BitSet {
     }
 }
 
-impl serde::Serialize for BitSet {
+impl serde::Serialize for AbsoluteIndexSet {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -94,12 +94,12 @@ where
     }
 }
 
-impl<'de> Deserialize<'de> for BitSet {
+impl<'de> Deserialize<'de> for AbsoluteIndexSet {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(BitSet::new(&deserializer.deserialize_tuple(
+        Ok(AbsoluteIndexSet::new(&deserializer.deserialize_tuple(
             NUM_TRIALS,
             ArrayVisitor::<u128, NUM_TRIALS>(PhantomData),
         )?))
@@ -123,7 +123,7 @@ pub enum RemovalRecordError {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RemovalRecord<H: AlgebraicHasher> {
-    pub bit_indices: BitSet,
+    pub bit_indices: AbsoluteIndexSet,
     pub target_chunks: ChunkDictionary<H>,
 }
 
@@ -340,7 +340,7 @@ mod removal_record_tests {
     fn verify_that_removal_records_and_mp_indices_agree() {
         let (mp, removal_record) = get_mp_and_removal_record();
 
-        let mut mp_indices = mp.cached_bits.unwrap().0;
+        let mut mp_indices = mp.cached_indices.unwrap().0;
         mp_indices.sort_unstable();
         let mut removal_rec_indices = removal_record.bit_indices.0;
         removal_rec_indices.sort_unstable();
@@ -386,7 +386,7 @@ mod removal_record_tests {
         // Verify that no indices are repeated in the hash map
         let mut all_bits: Vec<u128> = chunks2bits.clone().into_values().concat();
         all_bits.sort_unstable();
-        let mut cached_bits = mp.cached_bits.unwrap();
+        let mut cached_bits = mp.cached_indices.unwrap();
         cached_bits.sort_unstable();
         assert_eq!(cached_bits.to_vec(), all_bits);
         assert!(has_unique_elements(all_bits.clone()));
@@ -602,7 +602,7 @@ mod removal_record_tests {
     #[test]
     fn test_bit_set_serialization() {
         let mut rng = thread_rng();
-        let original_bitset = BitSet::new(
+        let original_bitset = AbsoluteIndexSet::new(
             &(0..NUM_TRIALS)
                 .map(|_| ((rng.next_u64() as u128) << 64) | (rng.next_u64() as u128))
                 .collect_vec()
@@ -610,7 +610,8 @@ mod removal_record_tests {
                 .unwrap(),
         );
         let serialized_bitset = serde_json::to_string(&original_bitset).unwrap();
-        let reconstructed_bitset: BitSet = serde_json::from_str(&serialized_bitset).unwrap();
+        let reconstructed_bitset: AbsoluteIndexSet =
+            serde_json::from_str(&serialized_bitset).unwrap();
 
         assert_eq!(original_bitset, reconstructed_bitset);
     }

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
@@ -12,7 +12,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
 use super::chunk_dictionary::ChunkDictionary;
-use super::removal_record::BitSet;
+use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
 use super::set_commitment::{get_swbf_indices, SetCommitment};
 use super::shared::{get_batch_mutation_argument_for_removal_record, BATCH_SIZE, CHUNK_SIZE};
@@ -35,7 +35,7 @@ pub enum MembershipProofError {
 
 // In order to store this structure in the database, it needs to be serializable. But it should not be
 // transferred between peers as the `cached_bits` fields cannot be trusted and must be calculated by each peer
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub randomness: Digest,
     pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
@@ -44,9 +44,10 @@ pub struct MsMembershipProof<H: AlgebraicHasher> {
     // Cached bits are optional to store, but will prevent a lot of hashing in
     // later bookkeeping, such as updating the membership proof.
     // Warning: These bits should not be trusted and should only be calculated
-    // locally. If they are trusted the soundness of the mutator set is compromised.
+    // locally. If they are trusted the soundness of the mutator set is compromised,
+    // and if they are leaked the privacy is compromised.
     // #[serde(with = "CompositeBigArray")]
-    pub cached_bits: Option<BitSet>,
+    pub cached_indices: Option<AbsoluteIndexSet>,
 }
 
 /// Convert a transfer version of the membership proof to one for internal use.
@@ -57,7 +58,7 @@ impl<H: AlgebraicHasher> From<TransferMsMembershipProof<H>> for MsMembershipProo
             randomness: transfer.randomness,
             auth_path_aocl: transfer.auth_path_aocl,
             target_chunks: transfer.target_chunks,
-            cached_bits: None,
+            cached_indices: None,
         }
     }
 }
@@ -88,7 +89,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     /// Helper function to cache the bits so they don't have to be recalculated multiple times
     pub fn cache_indices(&mut self, item: &Digest) {
         let indices = get_swbf_indices::<H>(item, &self.randomness, self.auth_path_aocl.leaf_index);
-        self.cached_bits = Some(BitSet::new(&indices));
+        self.cached_indices = Some(AbsoluteIndexSet::new(&indices));
     }
 
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
@@ -153,12 +154,12 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             .zip(own_items.iter())
             .enumerate()
             .for_each(|(i, (mp, item))| {
-                let bits = match &mp.cached_bits {
+                let bits = match &mp.cached_indices {
                     Some(bs) => bs.to_owned(),
                     None => {
                         let leaf_index = mp.auth_path_aocl.leaf_index;
                         let indices = get_swbf_indices::<H>(item, &mp.randomness, leaf_index);
-                        BitSet::new(&indices)
+                        AbsoluteIndexSet::new(&indices)
                     }
                 };
                 let chunks_set: HashSet<u128> = bits
@@ -293,7 +294,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
         // Get bit indices from either the cached bits, or by recalculating them. Notice
         // that the latter is an expensive operation.
-        let all_bit_indices = match &self.cached_bits {
+        let all_bit_indices = match &self.cached_indices {
             Some(bits) => bits.to_array(),
             None => {
                 get_swbf_indices::<H>(own_item, &self.randomness, self.auth_path_aocl.leaf_index)
@@ -459,6 +460,7 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use num_traits::Zero;
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -472,15 +474,18 @@ mod ms_proof_tests {
         let mut mp = accumulator.set_commitment.prove(&item, &randomness, false);
 
         // Verify that bits are not cached, then cache them with the helper function
-        assert!(mp.cached_bits.is_none());
+        assert!(mp.cached_indices.is_none());
         mp.cache_indices(&item);
-        assert!(mp.cached_bits.is_some());
+        assert!(mp.cached_indices.is_some());
 
         // Verify that cached bits are the same as those generated from a new membership proof
         // made with the `cache_bits` argument set to true.
         let mp_generated_with_cached_bits =
             accumulator.set_commitment.prove(&item, &randomness, true);
-        assert_eq!(mp_generated_with_cached_bits.cached_bits, mp.cached_bits);
+        assert_eq!(
+            mp_generated_with_cached_bits.cached_indices,
+            mp.cached_indices
+        );
     }
 
     #[test]
@@ -493,28 +498,28 @@ mod ms_proof_tests {
             randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_bits: Some(BitSet::new(&[1u128; NUM_TRIALS])),
+            cached_indices: Some(AbsoluteIndexSet::new(&[1u128; NUM_TRIALS])),
         };
 
         let mp_without_cached_bits = MsMembershipProof::<H> {
             randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_bits: None,
+            cached_indices: None,
         };
 
         let mp_with_different_data_index = MsMembershipProof::<H> {
             randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(100073, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_bits: None,
+            cached_indices: None,
         };
 
         let mp_with_different_randomness = MsMembershipProof::<H> {
             randomness: other_randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_bits: None,
+            cached_indices: None,
         };
 
         // Verify that the caching of bits does not change the equality value of a membership proof
@@ -551,44 +556,52 @@ mod ms_proof_tests {
         assert_ne!(mp_mutated, mp_without_cached_bits);
     }
 
-    // #[test]
-    // fn serialization_test() {
-    //     // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
-    //     // in this code base as a macro. So this is basically a test of that macro.
-    //     type H = RescuePrimeRegular;
-    //     let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-    //     for _ in 0..10 {
-    //         let (item, randomness) = make_item_and_randomness();
+    #[test]
+    fn serialization_test() {
+        // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
+        // in this code base as a macro. So this is basically a test of that macro.
+        type H = RescuePrimeRegular;
+        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        for _ in 0..10 {
+            let (item, randomness) = make_item_and_randomness();
 
-    //         let mp_with_cached_bits = accumulator.set_commitment.prove(&item, &randomness, true);
-    //         assert!(mp_with_cached_bits.cached_bits.is_some());
+            let mp_with_cached_indices = accumulator.set_commitment.prove(&item, &randomness, true);
+            assert!(mp_with_cached_indices.cached_indices.is_some());
 
-    //         let json_cached: String = serde_json::to_string(&mp_with_cached_bits).unwrap();
-    //         let s_back_cached = serde_json::from_str::<MsMembershipProof<H>>(&json_cached).unwrap();
-    //         assert!(s_back_cached.cached_bits.is_some());
-    //         assert!(!s_back_cached
-    //             .cached_bits
-    //             .unwrap()
-    //             .iter()
-    //             .all(|x| x.is_zero()));
-    //         assert_eq!(s_back_cached.cached_bits, mp_with_cached_bits.cached_bits);
-    //         assert_eq!(
-    //             s_back_cached.target_chunks,
-    //             mp_with_cached_bits.target_chunks
-    //         );
+            let json_cached: String = serde_json::to_string(&mp_with_cached_indices).unwrap();
+            let s_back_cached = serde_json::from_str::<MsMembershipProof<H>>(&json_cached).unwrap();
+            assert!(s_back_cached.cached_indices.is_some());
+            assert!(!s_back_cached
+                .cached_indices
+                .as_ref()
+                .unwrap()
+                .to_array()
+                .iter()
+                .all(|x| x.is_zero()));
+            assert_eq!(
+                s_back_cached.cached_indices,
+                mp_with_cached_indices.cached_indices
+            );
+            assert_eq!(
+                s_back_cached.target_chunks,
+                mp_with_cached_indices.target_chunks
+            );
 
-    //         let mp_no_cached_bits = accumulator.set_commitment.prove(&item, &randomness, false);
-    //         assert!(mp_no_cached_bits.cached_bits.is_none());
+            let mp_no_cached_bits = accumulator.set_commitment.prove(&item, &randomness, false);
+            assert!(mp_no_cached_bits.cached_indices.is_none());
 
-    //         let json_no_cached: String = serde_json::to_string(&mp_no_cached_bits).unwrap();
-    //         let s_back_no_cached =
-    //             serde_json::from_str::<MsMembershipProof<H>>(&json_no_cached).unwrap();
-    //         assert!(s_back_no_cached.cached_bits.is_none());
-    //         assert_eq!(s_back_no_cached.cached_bits, mp_no_cached_bits.cached_bits);
-    //         assert_eq!(
-    //             s_back_no_cached.target_chunks,
-    //             mp_no_cached_bits.target_chunks
-    //         );
-    //     }
-    // }
+            let json_no_cached: String = serde_json::to_string(&mp_no_cached_bits).unwrap();
+            let s_back_no_cached =
+                serde_json::from_str::<MsMembershipProof<H>>(&json_no_cached).unwrap();
+            assert!(s_back_no_cached.cached_indices.is_none());
+            assert_eq!(
+                s_back_no_cached.cached_indices,
+                mp_no_cached_bits.cached_indices
+            );
+            assert_eq!(
+                s_back_no_cached.target_chunks,
+                mp_no_cached_bits.target_chunks
+            );
+        }
+    }
 }

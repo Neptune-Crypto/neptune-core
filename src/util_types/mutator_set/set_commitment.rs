@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::{error::Error, fmt};
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
@@ -13,7 +14,7 @@ use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
-use super::removal_record::BitSet;
+use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
 use super::shared::{
     bit_indices_to_hash_map, sponge_from_item_randomness, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS,
@@ -36,7 +37,7 @@ pub enum SetCommitmentError {
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetCommitment<H: AlgebraicHasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
@@ -77,11 +78,12 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         item: &Digest,
         membership_proof: &MsMembershipProof<H>,
     ) -> RemovalRecord<H> {
-        let bit_indices: BitSet = membership_proof.cached_bits.clone().unwrap_or_else(|| {
-            let leaf_index = membership_proof.auth_path_aocl.leaf_index;
-            let indices = get_swbf_indices::<H>(item, &membership_proof.randomness, leaf_index);
-            BitSet::new(&indices)
-        });
+        let bit_indices: AbsoluteIndexSet =
+            membership_proof.cached_indices.clone().unwrap_or_else(|| {
+                let leaf_index = membership_proof.auth_path_aocl.leaf_index;
+                let indices = get_swbf_indices::<H>(item, &membership_proof.randomness, leaf_index);
+                AbsoluteIndexSet::new(&indices)
+            });
 
         RemovalRecord {
             bit_indices,
@@ -214,7 +216,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         &mut self,
         item: &Digest,
         randomness: &Digest,
-        store_bits: bool,
+        cache_indices: bool,
     ) -> MsMembershipProof<H> {
         // compute commitment
         let item_commitment = H::hash_pair(item, randomness);
@@ -224,10 +226,10 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
 
         // Store the bit indices for later use, as they are expensive to calculate
-        let cached_bits: Option<_> = if store_bits {
+        let cached_bits: Option<_> = if cache_indices {
             let leaf_index = self.aocl.count_leaves();
             let indices = get_swbf_indices::<H>(item, randomness, leaf_index);
-            Some(BitSet::new(&indices))
+            Some(AbsoluteIndexSet::new(&indices))
         } else {
             None
         };
@@ -237,7 +239,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             randomness: randomness.to_owned(),
             auth_path_aocl,
             target_chunks,
-            cached_bits,
+            cached_indices: cached_bits,
         }
     }
 
@@ -271,12 +273,12 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let window_start = current_batch_index * CHUNK_SIZE as u128;
 
         // We use the cached bits if we have them, otherwise they are recalculated
-        let all_bit_indices = match &membership_proof.cached_bits {
+        let all_bit_indices = match &membership_proof.cached_indices {
             Some(bits) => bits.clone(),
             None => {
                 let leaf_index = membership_proof.auth_path_aocl.leaf_index;
                 let indices = get_swbf_indices::<H>(item, &membership_proof.randomness, leaf_index);
-                BitSet::new(&indices)
+                AbsoluteIndexSet::new(&indices)
             }
         };
 
@@ -442,8 +444,11 @@ mod accumulation_scheme_tests {
     use rand::Rng;
 
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::utils::has_unique_elements;
 
+    use crate::test_shared::mutator_set::insert_item;
+    use crate::test_shared::mutator_set::remove_item;
     use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -940,62 +945,58 @@ mod accumulation_scheme_tests {
         });
     }
 
-    // #[test]
-    // fn ms_serialization_test() {
-    //     // This test verifies that the mutator set structure can be serialized and deserialized.
-    //     // When Rust spawns threads (as it does when it runs tests, and in the Neptune Core client),
-    //     // the new threads only get 2MB stack memory initially. This can result in stack overflows
-    //     // in the runtime. This test is to verify that that does not happen.
-    //     // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
-    //     // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
-    //     type H = RescuePrimeRegular;
-    //     type Mmr = MmrAccumulator<H>;
-    //     type Ms = SetCommitment<H, Mmr>;
-    //     let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
+    #[test]
+    fn ms_serialization_test() {
+        // This test verifies that the mutator set structure can be serialized and deserialized.
+        // When Rust spawns threads (as it does when it runs tests, and in the Neptune Core client),
+        // the new threads only get 2MB stack memory initially. This can result in stack overflows
+        // in the runtime. This test is to verify that that does not happen.
+        // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
+        // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
+        type H = RescuePrimeRegular;
+        type Mmr = MmrAccumulator<H>;
+        type Ms = SetCommitment<H, Mmr>;
+        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
 
-    //     let json_empty = serde_json::to_string(&mutator_set).unwrap();
-    //     println!("json = \n{}", json_empty);
-    //     let mut s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
-    //     assert!(s_back.aocl.is_empty());
-    //     assert!(s_back.swbf_inactive.is_empty());
-    //     assert!(s_back.swbf_active.bits.iter().all(|&b| b == 0u32));
+        let json_empty = serde_json::to_string(&mutator_set).unwrap();
+        println!("json = \n{}", json_empty);
+        let mut s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
+        assert!(s_back.aocl.is_empty());
+        assert!(s_back.swbf_inactive.is_empty());
+        assert!(s_back.swbf_active.sbf.indices.is_empty());
 
-    //     // Add an item, verify correct serialization
-    //     let (mp, item) = insert_item(&mut mutator_set);
-    //     let json_one_add = serde_json::to_string(&mutator_set).unwrap();
-    //     println!("json_one_add = \n{}", json_one_add);
-    //     let mut s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
-    //     assert_eq!(1, s_back_one_add.aocl.count_leaves());
-    //     assert!(s_back_one_add.swbf_inactive.is_empty());
-    //     assert!(s_back_one_add.swbf_active.bits.iter().all(|&b| b == 0u32));
-    //     assert!(s_back_one_add.verify(&item, &mp));
+        // Add an item, verify correct serialization
+        let (mp, item) = insert_item(&mut mutator_set);
+        let json_one_add = serde_json::to_string(&mutator_set).unwrap();
+        println!("json_one_add = \n{}", json_one_add);
+        let mut s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
+        assert_eq!(1, s_back_one_add.aocl.count_leaves());
+        assert!(s_back_one_add.swbf_inactive.is_empty());
+        assert!(s_back_one_add.swbf_active.sbf.indices.is_empty());
+        assert!(s_back_one_add.verify(&item, &mp));
 
-    //     // Remove an item, verify correct serialization
-    //     remove_item(&mut mutator_set, &item, &mp);
-    //     let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
-    //     println!("json_one_add = \n{}", json_one_add_one_remove);
-    //     let mut s_back_one_add_one_remove =
-    //         serde_json::from_str::<Ms>(&json_one_add_one_remove).unwrap();
-    //     assert_eq!(
-    //         1,
-    //         s_back_one_add_one_remove.aocl.count_leaves(),
-    //         "AOCL must still have exactly one leaf"
-    //     );
-    //     assert!(
-    //         s_back_one_add_one_remove.swbf_inactive.is_empty(),
-    //         "Window should not have moved"
-    //     );
-    //     assert!(
-    //         !s_back_one_add_one_remove
-    //             .swbf_active
-    //             .bits
-    //             .iter()
-    //             .all(|&b| b == 0u32),
-    //         "Some of the bits in the active window must now be set"
-    //     );
-    //     assert!(
-    //         !s_back_one_add_one_remove.verify(&item, &mp),
-    //         "Membership proof must fail after removal"
-    //     );
-    // }
+        // Remove an item, verify correct serialization
+        remove_item(&mut mutator_set, &item, &mp);
+        let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
+        println!("json_one_add = \n{}", json_one_add_one_remove);
+        let mut s_back_one_add_one_remove =
+            serde_json::from_str::<Ms>(&json_one_add_one_remove).unwrap();
+        assert_eq!(
+            1,
+            s_back_one_add_one_remove.aocl.count_leaves(),
+            "AOCL must still have exactly one leaf"
+        );
+        assert!(
+            s_back_one_add_one_remove.swbf_inactive.is_empty(),
+            "Window should not have moved"
+        );
+        assert!(
+            !s_back_one_add_one_remove.swbf_active.sbf.indices.is_empty(),
+            "Some of the bits in the active window must now be set"
+        );
+        assert!(
+            !s_back_one_add_one_remove.verify(&item, &mp),
+            "Membership proof must fail after removal"
+        );
+    }
 }
