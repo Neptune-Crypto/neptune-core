@@ -64,30 +64,30 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
         }
     }
 
-    pub fn set_bit(&mut self, index: usize) {
+    pub fn insert(&mut self, index: usize) {
         assert!(
             index < WINDOW_SIZE,
-            "index cannot exceed window size in `set_bit`. WINDOW_SIZE = {}, got index = {}",
+            "index cannot exceed window size in `insert`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
         );
         self.sbf.increment(index as u128);
     }
 
-    pub fn unset_bit(&mut self, index: usize) {
+    pub fn remove(&mut self, index: usize) {
         assert!(
             index < WINDOW_SIZE,
-            "index cannot exceed window size in `unset_bit`. WINDOW_SIZE = {}, got index = {}",
+            "index cannot exceed window size in `remove`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
         );
         self.sbf.decrement(index as u128);
     }
 
-    pub fn get_bit(&self, index: usize) -> bool {
+    pub fn contains(&self, index: usize) -> bool {
         assert!(
             index < WINDOW_SIZE,
-            "index cannot exceed window size in `get_bit`. WINDOW_SIZE = {}, got index = {}",
+            "index cannot exceed window size in `contains`. WINDOW_SIZE = {}, got index = {}",
             WINDOW_SIZE,
             index
         );
@@ -148,28 +148,28 @@ mod active_window_tests {
     }
 
     #[test]
-    fn get_set_unset_bits_pbt() {
+    fn insert_remove_probe_indices_pbt() {
         let sbf = SparseBloomFilter::<{ WINDOW_SIZE as u128 }>::new();
         let mut aw = ActiveWindow::<blake3::Hasher>::new_from(sbf);
         for i in 0..100 {
-            assert!(!aw.get_bit(i as usize));
+            assert!(!aw.contains(i as usize));
         }
 
         let mut prng = thread_rng();
         for _ in 0..100 {
             let index = prng.next_u32() as usize % WINDOW_SIZE;
-            aw.set_bit(index);
+            aw.insert(index);
 
-            assert!(aw.get_bit(index));
+            assert!(aw.contains(index));
         }
 
-        // Set all bits, then check that they are set
+        // Set all indices, then check that they are set
         for i in 0..100 {
-            aw.set_bit(i);
+            aw.insert(i);
         }
 
         for i in 0..100 {
-            assert!(aw.get_bit(i as usize));
+            assert!(aw.contains(i as usize));
         }
     }
 
@@ -208,7 +208,7 @@ mod active_window_tests {
             .hasset((WINDOW_SIZE - CHUNK_SIZE) as u128, WINDOW_SIZE as u128));
 
         active_window.slide_window_back(&dummy_chunk);
-        for index in dummy_chunk.bits {
+        for index in dummy_chunk.relative_indices {
             assert!(active_window.isset(index as u128));
         }
     }
@@ -252,7 +252,7 @@ mod active_window_tests {
     fn test_hash_unequal_nocrash() {
         // This is just a test to ensure that the hashing of the active part of the SWBF
         // works in the runtime, for relevant hash functions. It also tests that different
-        // bits being set results in different digests.
+        // indices being inserted results in different digests.
         hash_unequal::<blake3::Hasher>();
         hash_unequal::<RescuePrimeRegular>();
     }

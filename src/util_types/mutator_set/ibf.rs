@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 /// SparseBloomFilter
 ///
-/// A sparse Bloom filter of static length N (number of bits) is a
-/// list of indices of set bits, counting duplicates. The indices
+/// A sparse Bloom filter of static length N (number of possible
+/// distinct indices) is a
+/// list of indices, counting duplicates. The indices
 /// live in the range [0; N) and are stored sorted.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SparseBloomFilter<const N: u128> {
@@ -31,7 +32,7 @@ impl<const N: u128> SparseBloomFilter<N> {
 
     /// Grab a slice from the sparse Bloom filter by supplying an
     /// interval. Given how the
-    /// sparse Bloom filter is represented (i.e., as a list of bit
+    /// sparse Bloom filter is represented (i.e., as a list of
     /// indices), this operation boils down to copying all indices
     /// that live in the range and subtracting the lower bound from
     /// them.

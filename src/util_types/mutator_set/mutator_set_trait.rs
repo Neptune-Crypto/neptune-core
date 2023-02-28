@@ -15,7 +15,7 @@ pub trait MutatorSet<H: AlgebraicHasher> {
         &mut self,
         item: &Digest,
         randomness: &Digest,
-        store_bits: bool,
+        cache_indices: bool,
     ) -> MsMembershipProof<H>;
 
     fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool;

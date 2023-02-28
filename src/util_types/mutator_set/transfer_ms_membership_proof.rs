@@ -5,7 +5,7 @@ use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-/// Type to transfer membership proof without risking that `cached_bits` are shared between
+/// Type to transfer membership proof without risking that `cached_indices` are shared between
 /// peers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransferMsMembershipProof<H: AlgebraicHasher> {

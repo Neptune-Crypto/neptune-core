@@ -34,16 +34,16 @@ pub enum MembershipProofError {
 }
 
 // In order to store this structure in the database, it needs to be serializable. But it should not be
-// transferred between peers as the `cached_bits` fields cannot be trusted and must be calculated by each peer
+// transferred between peers as the `cached_indices` fields cannot be trusted and must be calculated by each peer
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub randomness: Digest,
     pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
 
-    // Cached bits are optional to store, but will prevent a lot of hashing in
+    // Cached indices are optional to store, but will prevent a lot of hashing in
     // later bookkeeping, such as updating the membership proof.
-    // Warning: These bits should not be trusted and should only be calculated
+    // Warning: These indices should not be trusted and should only be calculated
     // locally. If they are trusted the soundness of the mutator set is compromised,
     // and if they are leaked the privacy is compromised.
     // #[serde(with = "CompositeBigArray")]
@@ -51,7 +51,7 @@ pub struct MsMembershipProof<H: AlgebraicHasher> {
 }
 
 /// Convert a transfer version of the membership proof to one for internal use.
-/// The important thing here is that `cached_bits` is not shared between peers.
+/// The important thing here is that `cached_indices` is not shared between peers.
 impl<H: AlgebraicHasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
     fn from(transfer: TransferMsMembershipProof<H>) -> Self {
         Self {
@@ -76,7 +76,7 @@ impl<H: AlgebraicHasher> From<MsMembershipProof<H>> for TransferMsMembershipProo
 }
 
 impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
-    // Equality for a membership proof does not look at cached bits, as they are just cached data
+    // Equality for a membership proof does not look at cached indices, as they are just cached data
     // Whether they are set or not, does not change the membership proof.
     fn eq(&self, other: &Self) -> bool {
         self.randomness == other.randomness
@@ -86,7 +86,7 @@ impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
 }
 
 impl<H: AlgebraicHasher> MsMembershipProof<H> {
-    /// Helper function to cache the bits so they don't have to be recalculated multiple times
+    /// Helper function to cache the indices so they don't have to be recalculated multiple times
     pub fn cache_indices(&mut self, item: &Digest) {
         let indices = get_swbf_indices::<H>(item, &self.randomness, self.auth_path_aocl.leaf_index);
         self.cached_indices = Some(AbsoluteIndexSet::new(&indices));
@@ -145,8 +145,8 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
             mmra.append(new_chunk_digest);
 
-        // Collect all bit indices for all membership proofs that are being updated
-        // Notice that this is a *very* expensive operation if the bit indices are
+        // Collect all indices for all membership proofs that are being updated
+        // Notice that this is a *very* expensive operation if the indices are
         // not already known. I.e., the `None` case below is very expensive.
         let mut chunk_index_to_mp_index: HashMap<u128, Vec<usize>> = HashMap::new();
         membership_proofs
@@ -154,7 +154,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             .zip(own_items.iter())
             .enumerate()
             .for_each(|(i, (mp, item))| {
-                let bits = match &mp.cached_indices {
+                let indices = match &mp.cached_indices {
                     Some(bs) => bs.to_owned(),
                     None => {
                         let leaf_index = mp.auth_path_aocl.leaf_index;
@@ -162,7 +162,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                         AbsoluteIndexSet::new(&indices)
                     }
                 };
-                let chunks_set: HashSet<u128> = bits
+                let chunks_set: HashSet<u128> = indices
                     .to_array()
                     .iter()
                     .map(|x| x / CHUNK_SIZE as u128)
@@ -292,10 +292,10 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
 
-        // Get bit indices from either the cached bits, or by recalculating them. Notice
+        // Get indices from either the cached indices, or by recalculating them. Notice
         // that the latter is an expensive operation.
         let all_indices = match &self.cached_indices {
-            Some(bits) => bits.to_array(),
+            Some(indices) => indices.to_array(),
             None => {
                 get_swbf_indices::<H>(own_item, &self.randomness, self.auth_path_aocl.leaf_index)
             }
@@ -321,7 +321,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         let old_window_start_batch_index = batch_index - 1;
         let new_window_start_batch_index = batch_index;
         'outer: for chunk_index in chunk_indices_set.into_iter() {
-            // Update for bit values that are in the inactive part of the SWBF.
+            // Update for indices that are in the inactive part of the SWBF.
             // Here the MMR membership proofs of the chunks must be updated.
             if chunk_index < old_window_start_batch_index {
                 let mp = match self.target_chunks.dictionary.get_mut(&chunk_index) {
@@ -345,7 +345,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 continue 'outer;
             }
 
-            // if bit is in the part that is becoming inactive, add a dictionary entry
+            // if index is in the part that is becoming inactive, add a dictionary entry
             if old_window_start_batch_index <= chunk_index
                 && chunk_index < new_window_start_batch_index
             {
@@ -364,7 +364,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 continue 'outer;
             }
 
-            // If `chunk_index` refers to bits that are still in the active window, do nothing.
+            // If `chunk_index` refers to indices that are still in the active window, do nothing.
         }
 
         Ok(swbf_chunk_dictionary_updated || aocl_mp_updated)
@@ -466,24 +466,24 @@ mod ms_proof_tests {
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     #[test]
-    fn mp_cache_bits_test() {
+    fn mp_cache_indices_test() {
         type H = RescuePrimeRegular;
 
         let mut accumulator = MutatorSetAccumulator::<H>::default();
         let (item, randomness) = make_item_and_randomness();
         let mut mp = accumulator.set_commitment.prove(&item, &randomness, false);
 
-        // Verify that bits are not cached, then cache them with the helper function
+        // Verify that indices are not cached, then cache them with the helper function
         assert!(mp.cached_indices.is_none());
         mp.cache_indices(&item);
         assert!(mp.cached_indices.is_some());
 
-        // Verify that cached bits are the same as those generated from a new membership proof
-        // made with the `cache_bits` argument set to true.
-        let mp_generated_with_cached_bits =
+        // Verify that cached indices are the same as those generated from a new membership proof
+        // made with the `cache_indices` argument set to true.
+        let mp_generated_with_cached_indices =
             accumulator.set_commitment.prove(&item, &randomness, true);
         assert_eq!(
-            mp_generated_with_cached_bits.cached_indices,
+            mp_generated_with_cached_indices.cached_indices,
             mp.cached_indices
         );
     }
@@ -494,14 +494,14 @@ mod ms_proof_tests {
 
         let (randomness, other_randomness) = make_item_and_randomness();
 
-        let mp_with_cached_bits = MsMembershipProof::<H> {
+        let mp_with_cached_indices = MsMembershipProof::<H> {
             randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
             cached_indices: Some(AbsoluteIndexSet::new(&[1u128; NUM_TRIALS])),
         };
 
-        let mp_without_cached_bits = MsMembershipProof::<H> {
+        let mp_without_cached_indices = MsMembershipProof::<H> {
             randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
@@ -522,14 +522,14 @@ mod ms_proof_tests {
             cached_indices: None,
         };
 
-        // Verify that the caching of bits does not change the equality value of a membership proof
-        assert_eq!(mp_with_cached_bits, mp_without_cached_bits);
+        // Verify that the caching of indices does not change the equality value of a membership proof
+        assert_eq!(mp_with_cached_indices, mp_without_cached_indices);
 
         // Verify that a different data index (a different auth path) is a different MP
-        assert_ne!(mp_with_different_data_index, mp_with_cached_bits);
+        assert_ne!(mp_with_different_data_index, mp_with_cached_indices);
 
         // Verify that different randomness is a different MP
-        assert_ne!(mp_with_different_randomness, mp_with_cached_bits);
+        assert_ne!(mp_with_different_randomness, mp_with_cached_indices);
 
         // Test that a different chunk dictionary results in a different MP
         // For this test to be performed, we first need an MMR membership proof and a chunk.
@@ -547,13 +547,13 @@ mod ms_proof_tests {
 
         // Create a new mutator set membership proof with a non-empty chunk dictionary
         // and verify that it is considered a different membership proof
-        let mut mp_mutated: MsMembershipProof<H> = mp_with_cached_bits.clone();
+        let mut mp_mutated: MsMembershipProof<H> = mp_with_cached_indices.clone();
         mp_mutated
             .target_chunks
             .dictionary
             .insert(0, (mmr_mp, zero_chunk));
-        assert_ne!(mp_mutated, mp_with_cached_bits);
-        assert_ne!(mp_mutated, mp_without_cached_bits);
+        assert_ne!(mp_mutated, mp_with_cached_indices);
+        assert_ne!(mp_mutated, mp_without_cached_indices);
     }
 
     #[test]
@@ -587,20 +587,20 @@ mod ms_proof_tests {
                 mp_with_cached_indices.target_chunks
             );
 
-            let mp_no_cached_bits = accumulator.set_commitment.prove(&item, &randomness, false);
-            assert!(mp_no_cached_bits.cached_indices.is_none());
+            let mp_no_cached_indices = accumulator.set_commitment.prove(&item, &randomness, false);
+            assert!(mp_no_cached_indices.cached_indices.is_none());
 
-            let json_no_cached: String = serde_json::to_string(&mp_no_cached_bits).unwrap();
+            let json_no_cached: String = serde_json::to_string(&mp_no_cached_indices).unwrap();
             let s_back_no_cached =
                 serde_json::from_str::<MsMembershipProof<H>>(&json_no_cached).unwrap();
             assert!(s_back_no_cached.cached_indices.is_none());
             assert_eq!(
                 s_back_no_cached.cached_indices,
-                mp_no_cached_bits.cached_indices
+                mp_no_cached_indices.cached_indices
             );
             assert_eq!(
                 s_back_no_cached.target_chunks,
-                mp_no_cached_bits.target_chunks
+                mp_no_cached_indices.target_chunks
             );
         }
     }

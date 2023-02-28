@@ -8,99 +8,106 @@ use super::shared::CHUNK_SIZE;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Chunk {
-    pub bits: Vec<u32>,
+    pub relative_indices: Vec<u32>,
 }
 
 impl Chunk {
     pub fn empty_chunk() -> Self {
-        let bits = vec![];
-        Chunk { bits }
+        Chunk {
+            relative_indices: vec![],
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.bits.is_empty()
+        self.relative_indices.is_empty()
     }
 
     pub fn insert(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE as u32,
-            "index cannot exceed chunk size in `set_bit`. CHUNK_SIZE = {}, got index = {}",
+            "index cannot exceed chunk size in `insert`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
         );
-        self.bits.push(index);
-        self.bits.sort();
+        self.relative_indices.push(index);
+        self.relative_indices.sort();
     }
 
     pub fn remove(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE as u32,
-            "index cannot exceed chunk size in `unset_bit`. CHUNK_SIZE = {}, got index = {}",
+            "index cannot exceed chunk size in `remove`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
         );
         let mut drops = vec![];
-        for i in 0..self.bits.len() {
-            if self.bits[i] == index {
+        for i in 0..self.relative_indices.len() {
+            if self.relative_indices[i] == index {
                 drops.push(i);
             }
         }
 
         for d in drops.iter().rev() {
-            self.bits.remove(*d);
+            self.relative_indices.remove(*d);
         }
     }
 
     pub fn contains(&self, index: u32) -> bool {
         assert!(
             index < CHUNK_SIZE as u32,
-            "index cannot exceed chunk size in `get_bit`. CHUNK_SIZE = {}, got index = {}",
+            "index cannot exceed chunk size in `contains`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
         );
 
-        self.bits.contains(&index)
+        self.relative_indices.contains(&index)
     }
 
     /// Return a chunk with indices which are the concatenation and sorting of indices in two input chunks
     pub fn combine(self, other: Self) -> Self {
         let mut ret = Self::empty_chunk();
-        for idx in self.bits {
-            ret.bits.push(idx);
+        for idx in self.relative_indices {
+            ret.relative_indices.push(idx);
         }
-        for idx in other.bits {
-            ret.bits.push(idx);
+        for idx in other.relative_indices {
+            ret.relative_indices.push(idx);
         }
-        ret.bits.sort();
+        ret.relative_indices.sort();
         ret
     }
 
     pub fn subtract(&mut self, other: Self) {
-        for remove_index in other.bits {
-            match self.bits.iter().find_position(|x| **x == remove_index) {
-                Some((i, _)) => self.bits.remove(i),
-                None => panic!("Attempted to remove bit index that was not set in chunk"),
+        for remove_index in other.relative_indices {
+            match self
+                .relative_indices
+                .iter()
+                .find_position(|x| **x == remove_index)
+            {
+                Some((i, _)) => self.relative_indices.remove(i),
+                None => panic!("Attempted to remove index that was not present in chunk."),
             };
         }
     }
 
     pub fn to_indices(&self) -> Vec<u128> {
-        self.bits.iter().map(|i| *i as u128).collect()
+        self.relative_indices.iter().map(|i| *i as u128).collect()
     }
 
     pub fn from_indices(indices: &[u128]) -> Self {
-        let bits = indices.iter().map(|i| *i as u32).collect();
-        Chunk { bits }
+        let relative_indices = indices.iter().map(|i| *i as u32).collect();
+        Chunk { relative_indices }
     }
 
     pub fn from_slice(sl: &[u32]) -> Chunk {
-        Chunk { bits: sl.to_vec() }
+        Chunk {
+            relative_indices: sl.to_vec(),
+        }
     }
 }
 
 impl Hashable for Chunk {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.bits
+        self.relative_indices
             .iter()
             .flat_map(|&val| val.to_sequence())
             .collect()
@@ -109,28 +116,28 @@ impl Hashable for Chunk {
 
 impl InvertibleBloomFilter for Chunk {
     fn increment(&mut self, location: u128) {
-        self.bits.push(location as u32);
-        self.bits.sort();
+        self.relative_indices.push(location as u32);
+        self.relative_indices.sort();
     }
 
     fn decrement(&mut self, location: u128) {
         let mut drop_index = 0;
         let mut found = false;
-        for (i, b) in self.bits.iter().enumerate() {
+        for (i, b) in self.relative_indices.iter().enumerate() {
             if *b == location as u32 {
                 drop_index = i;
                 found = true;
             }
         }
         if found {
-            self.bits.remove(drop_index);
+            self.relative_indices.remove(drop_index);
         } else {
             panic!("Cannot decrement integer that is already zero.");
         }
     }
 
     fn isset(&self, location: u128) -> bool {
-        self.bits.contains(&(location as u32))
+        self.relative_indices.contains(&(location as u32))
     }
 }
 
@@ -145,14 +152,7 @@ mod chunk_tests {
     use super::*;
 
     #[test]
-    fn constant_sanity_check_test() {
-        // This test assumes that the bits in the chunks window are represented as `u32`s. If they are,
-        // then the chunk size should be a multiple of 32.
-        assert_eq!(0, CHUNK_SIZE % 32);
-    }
-
-    #[test]
-    fn get_set_unset_bits_pbt() {
+    fn insert_remove_contains_pbt() {
         let mut aw = Chunk::empty_chunk();
         for i in 0..CHUNK_SIZE {
             assert!(!aw.contains(i as u32));
@@ -171,7 +171,7 @@ mod chunk_tests {
             assert_eq!(set, aw.contains(index));
         }
 
-        // Set all bits, then check that they are set
+        // Set all indices, then check that they are present
         for i in 0..CHUNK_SIZE {
             aw.insert(i as u32);
         }
@@ -201,7 +201,7 @@ mod chunk_tests {
         assert_ne!(two_ones_preimage, one_chunk_preimage);
         assert_ne!(two_ones_preimage, zero_chunk_preimage);
 
-        // Verify that setting any bit produces a unique hash-preimage value
+        // Verify that inserting any index produces a unique hash-preimage value
         let mut previous_values: HashSet<Vec<BFieldElement>> = HashSet::new();
         for i in 0..CHUNK_SIZE {
             let mut chunk = Chunk::empty_chunk();
@@ -260,7 +260,7 @@ mod chunk_tests {
         let chunk = Chunk::empty_chunk();
         let json = serde_json::to_string(&chunk).unwrap();
         let s_back = serde_json::from_str::<Chunk>(&json).unwrap();
-        assert!(s_back.bits.iter().all(|&x| x == 0u32));
+        assert!(s_back.relative_indices.is_empty());
     }
 
     #[test]

@@ -8,7 +8,6 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use super::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 
-pub const BITS_PER_U32: usize = 32;
 pub const WINDOW_SIZE: usize = 1 << 20;
 pub const CHUNK_SIZE: usize = 1 << 12;
 pub const BATCH_SIZE: usize = 1 << 3;
@@ -19,11 +18,11 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS]) -> HashMap<u128, Ve
     all_indices
         .iter()
         .map(|bi| (bi / CHUNK_SIZE as u128, bi))
-        .for_each(|(chunk_index, bit_index)| {
+        .for_each(|(chunk_index, index)| {
             chunkidx_to_indices_dict
                 .entry(chunk_index)
                 .or_insert_with(Vec::new)
-                .push(*bit_index);
+                .push(*index);
         });
 
     chunkidx_to_indices_dict
@@ -71,8 +70,8 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
             match chunk_dictionary.dictionary.get_mut(chunk_index) {
                 // Leaf and its membership proof exists in own membership proof (in `chunk_dictionaries`)
                 Some((mp, chunk)) => {
-                    for bit_index in indices.iter() {
-                        let index = (bit_index % CHUNK_SIZE as u128) as u32;
+                    for index in indices.iter() {
+                        let index = (index % CHUNK_SIZE as u128) as u32;
                         mutated_chunks_by_input_indices.insert(i);
                         chunk.insert(index);
                     }
@@ -80,7 +79,7 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
                     // If this leaf/membership proof pair has not already been collected,
                     // then store it as a mutation argument. This assumes that all membership
                     // proofs in all chunk dictionaries are valid.
-                    // We can calculate the hash value of the updated chunk since all bit indices
+                    // We can calculate the hash value of the updated chunk since all indices
                     // have been applied to the chunk in the above loop.
                     // Inserted into the mutation_argument_hash_map is the updated chunk and its
                     // *old* (non-updated) MMR membership proof.
@@ -94,7 +93,7 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
                 None => {
                     match removal_record.target_chunks.dictionary.get(chunk_index) {
                         None => {
-                            // This should mean that bit index is in the active part of the
+                            // This should mean that the index is in the active part of the
                             // SWBF. But we have no way of checking that AFAIK. So we just continue.
                             continue;
                         }
@@ -105,11 +104,11 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
                             // calculate it once.
                             if !mutation_argument_hash_map.contains_key(chunk_index) {
                                 let mut target_chunk = chunk.to_owned();
-                                for bit_index in indices.iter() {
-                                    target_chunk.insert((bit_index % CHUNK_SIZE as u128) as u32);
+                                for index in indices.iter() {
+                                    target_chunk.insert((index % CHUNK_SIZE as u128) as u32);
                                 }
 
-                                // Since all bit indices have been applied to the chunk in the above
+                                // Since all indices have been applied to the chunk in the above
                                 // for-loop, we can calculate the hash of the updated chunk now.
                                 mutation_argument_hash_map
                                     .insert(*chunk_index, (mp.to_owned(), H::hash(&target_chunk)));

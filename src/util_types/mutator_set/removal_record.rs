@@ -25,8 +25,8 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS]);
 
 impl AbsoluteIndexSet {
-    pub fn new(bits: &[u128; NUM_TRIALS]) -> Self {
-        Self(*bits)
+    pub fn new(indices: &[u128; NUM_TRIALS]) -> Self {
+        Self(*indices)
     }
 
     pub fn sort_unstable(&mut self) {
@@ -153,11 +153,11 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
         let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
             mmra.append(new_chunk_digest);
 
-        // Collect all bit indices for all removal records that are being updated
+        // Collect all indices for all removal records that are being updated
         let mut chunk_index_to_mp_index: HashMap<u128, Vec<usize>> = HashMap::new();
         removal_records.iter().enumerate().for_each(|(i, rr)| {
-            let bits = &rr.absolute_indices;
-            let chunks_set: HashSet<u128> = bits
+            let indices = &rr.absolute_indices;
+            let chunks_set: HashSet<u128> = indices
                 .to_array()
                 .iter()
                 .map(|x| x / CHUNK_SIZE as u128)
@@ -365,15 +365,15 @@ mod removal_record_tests {
         );
         removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS / 4] += 1;
 
-        // Sanity check (theoretically, a collision in the bit indices could have happened)
+        // Sanity check (theoretically, a collision in the indices could have happened)
         assert!(
             utils::has_unique_elements(removal_record_alt.absolute_indices.to_array()),
-            "Sanity check to ensure that bit indices are still all unique"
+            "Sanity check to ensure that indices are still all unique"
         );
         assert_ne!(
             H::hash(&removal_record),
             H::hash(&removal_record_alt),
-            "Changing a bit index must produce a new hash"
+            "Changing an index must produce a new hash"
         );
     }
 
@@ -381,20 +381,20 @@ mod removal_record_tests {
     fn get_chunkidx_to_indices_test() {
         let (mp, removal_record) = get_mp_and_removal_record();
 
-        let chunks2bits = removal_record.get_chunkidx_to_indices_dict();
+        let chunks2indices = removal_record.get_chunkidx_to_indices_dict();
 
         // Verify that no indices are repeated in the hash map
-        let mut all_bits: Vec<u128> = chunks2bits.clone().into_values().concat();
-        all_bits.sort_unstable();
-        let mut cached_bits = mp.cached_indices.unwrap();
-        cached_bits.sort_unstable();
-        assert_eq!(cached_bits.to_vec(), all_bits);
-        assert!(has_unique_elements(all_bits.clone()));
-        all_bits.dedup();
-        assert_eq!(NUM_TRIALS, all_bits.len());
+        let mut all_indices: Vec<u128> = chunks2indices.clone().into_values().concat();
+        all_indices.sort_unstable();
+        let mut cached_indices = mp.cached_indices.unwrap();
+        cached_indices.sort_unstable();
+        assert_eq!(cached_indices.to_vec(), all_indices);
+        assert!(has_unique_elements(all_indices.clone()));
+        all_indices.dedup();
+        assert_eq!(NUM_TRIALS, all_indices.len());
 
         // Verify that the hash map has put the indices into the correct buckets
-        for (key, values) in chunks2bits {
+        for (key, values) in chunks2indices {
             for value in values {
                 assert!((value - key * CHUNK_SIZE as u128) < CHUNK_SIZE as u128);
             }
@@ -600,19 +600,19 @@ mod removal_record_tests {
     }
 
     #[test]
-    fn test_bit_set_serialization() {
+    fn test_index_set_serialization() {
         let mut rng = thread_rng();
-        let original_bitset = AbsoluteIndexSet::new(
+        let original_indexset = AbsoluteIndexSet::new(
             &(0..NUM_TRIALS)
                 .map(|_| ((rng.next_u64() as u128) << 64) | (rng.next_u64() as u128))
                 .collect_vec()
                 .try_into()
                 .unwrap(),
         );
-        let serialized_bitset = serde_json::to_string(&original_bitset).unwrap();
-        let reconstructed_bitset: AbsoluteIndexSet =
-            serde_json::from_str(&serialized_bitset).unwrap();
+        let serialized_indexset = serde_json::to_string(&original_indexset).unwrap();
+        let reconstructed_indexset: AbsoluteIndexSet =
+            serde_json::from_str(&serialized_indexset).unwrap();
 
-        assert_eq!(original_bitset, reconstructed_bitset);
+        assert_eq!(original_indexset, reconstructed_indexset);
     }
 }

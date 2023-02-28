@@ -9,7 +9,7 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkDictionary<H: AlgebraicHasher> {
-    // {chunk index => (MMR membership proof for the whole chunk to which bit belongs, chunk value)}
+    // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
     pub dictionary: HashMap<u128, (MmrMembershipProof<H>, Chunk)>,
 }
 
@@ -82,7 +82,7 @@ mod chunk_dict_tests {
         let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk1: Chunk = {
             Chunk {
-                bits: (0..CHUNK_SIZE as u32).collect(),
+                relative_indices: (0..CHUNK_SIZE as u32).collect(),
             }
         };
         let value1 = (mp1, chunk1);
@@ -155,7 +155,7 @@ mod chunk_dict_tests {
         let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
-            bits: (0..CHUNK_SIZE as u32).collect(),
+            relative_indices: (0..CHUNK_SIZE as u32).collect(),
         };
 
         let s_non_empty =

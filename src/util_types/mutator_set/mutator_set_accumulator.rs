@@ -33,9 +33,9 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         &mut self,
         item: &Digest,
         randomness: &Digest,
-        store_bits: bool,
+        store_indices: bool,
     ) -> MsMembershipProof<H> {
-        self.set_commitment.prove(item, randomness, store_bits)
+        self.set_commitment.prove(item, randomness, store_indices)
     }
 
     fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -305,9 +305,9 @@ mod ms_accumulator_tests {
                     accumulator.remove(&removal_record);
                     archival_after_remove.remove(&removal_record);
 
-                    // Verify that removal record's bits are all set
+                    // Verify that removal record's indices are all set
                     for removed_index in removal_record.absolute_indices.to_vec() {
-                        assert!(archival_after_remove.get_bloom_filter_bit(removed_index));
+                        assert!(archival_after_remove.bloom_filter_contains(removed_index));
                     }
 
                     archival_before_remove.remove(&removal_record_copy);
@@ -375,7 +375,7 @@ mod ms_accumulator_tests {
                         .unwrap();
                     assert_eq!(arch_mp, *mp_batch);
 
-                    // Also verify that cached bits are set for both proofs and that they agree
+                    // Also verify that cached indices are set for both proofs and that they agree
                     assert!(arch_mp.cached_indices.is_some());
                     assert_eq!(arch_mp.cached_indices, mp_batch.cached_indices);
 

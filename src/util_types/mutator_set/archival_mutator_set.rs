@@ -29,9 +29,9 @@ impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
         &mut self,
         item: &Digest,
         randomness: &Digest,
-        store_bits: bool,
+        cache_indices: bool,
     ) -> MsMembershipProof<H> {
-        self.set_commitment.prove(item, randomness, store_bits)
+        self.set_commitment.prove(item, randomness, cache_indices)
     }
 
     fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -219,12 +219,12 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         }
 
         let auth_path_aocl = self.get_aocl_authentication_path(index)?;
-        let bits = get_swbf_indices::<H>(item, randomness, index);
+        let swbf_indices = get_swbf_indices::<H>(item, randomness, index);
 
         let batch_index = self.set_commitment.get_batch_index();
         let window_start = batch_index * CHUNK_SIZE as u128;
 
-        let chunk_indices: HashSet<u128> = bits
+        let chunk_indices: HashSet<u128> = swbf_indices
             .iter()
             .filter(|bi| **bi < window_start)
             .map(|bi| *bi / CHUNK_SIZE as u128)
@@ -250,45 +250,49 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             auth_path_aocl,
             randomness: randomness.to_owned(),
             target_chunks,
-            cached_indices: Some(AbsoluteIndexSet::new(&bits)),
+            cached_indices: Some(AbsoluteIndexSet::new(&swbf_indices)),
         })
     }
 
-    /// Revert the `RemovalRecord`s in a block by removing the bits that
-    /// were actually set by the removal record. These live in either the active window, or
+    /// Revert the `RemovalRecord`s in a block by removing the indices that
+    /// were inserted by the removal record. These live in either the active window, or
     /// in a relevant chunk.
     ///
     /// Fails if attempting to remove an index that wasn't set.
     pub fn revert_remove(&mut self, removal_record_indices: Vec<u128>) {
         let batch_index = self.set_commitment.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
-        let mut chunk_index_to_revert_chunk: HashMap<u128, Chunk> = HashMap::new();
+        let mut chunkidx_to_difference_dict: HashMap<u128, Chunk> = HashMap::new();
 
-        for bit_index in removal_record_indices {
-            if bit_index >= active_window_start {
-                let relative_index = (bit_index - active_window_start) as usize;
-                self.set_commitment.swbf_active.unset_bit(relative_index);
+        // Populate the dictionary by iterating over all the removal
+        // record's indices and inserting them into the correct
+        // chunk in the dictionary, if the index is in the inactive
+        // part. Otherwise, remove the index from the active window.
+        for rr_index in removal_record_indices {
+            if rr_index >= active_window_start {
+                let relative_index = (rr_index - active_window_start) as usize;
+                self.set_commitment.swbf_active.remove(relative_index);
             } else {
-                let chunk_index = bit_index / CHUNK_SIZE as u128;
-                let relative_index = (bit_index % CHUNK_SIZE as u128) as u32;
-                chunk_index_to_revert_chunk
-                    .entry(chunk_index)
+                let chunkidx = rr_index / CHUNK_SIZE as u128;
+                let relative_index = (rr_index % CHUNK_SIZE as u128) as u32;
+                chunkidx_to_difference_dict
+                    .entry(chunkidx)
                     .or_insert_with(Chunk::empty_chunk)
                     .insert(relative_index);
             }
         }
 
-        for (chunk_index, revert_chunk) in chunk_index_to_revert_chunk {
-            // The bits in the chunk are flipped using xor as they must be set before this
-            // function call. So bits at the indices that we wish to flip must be set (1 or true)
-            // in both the `revert_chunk` and in the `previous_chunk`.
+        for (chunk_index, revert_chunk) in chunkidx_to_difference_dict {
+            // For each chunk, subtract the difference from the chunk.
             let previous_chunk = self.chunks.get(chunk_index);
             let mut new_chunk = previous_chunk;
             new_chunk.subtract(revert_chunk.clone());
+            self.chunks.set(chunk_index, new_chunk.clone());
+
+            // update archival mmr
             self.set_commitment
                 .swbf_inactive
                 .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
-            self.chunks.set(chunk_index, new_chunk.clone());
         }
     }
 
@@ -322,18 +326,18 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             .slide_window_back(&last_inactive_chunk);
     }
 
-    /// Retrieves the Bloom filter bit with a given `bit_index` in
-    /// either the active window, or in the relevant chunk.
-    pub fn get_bloom_filter_bit(&mut self, bit_index: u128) -> bool {
+    /// Determine whether the index `index` is set in the Bloom
+    /// filter, whether in the active window, or in some chunk.
+    pub fn bloom_filter_contains(&mut self, index: u128) -> bool {
         let batch_index = self.set_commitment.get_batch_index();
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
-        if bit_index >= active_window_start {
-            let relative_index = (bit_index - active_window_start) as usize;
-            self.set_commitment.swbf_active.get_bit(relative_index)
+        if index >= active_window_start {
+            let relative_index = (index - active_window_start) as usize;
+            self.set_commitment.swbf_active.contains(relative_index)
         } else {
-            let chunk_index = bit_index / CHUNK_SIZE as u128;
-            let relative_index = bit_index % CHUNK_SIZE as u128;
+            let chunk_index = index / CHUNK_SIZE as u128;
+            let relative_index = index % CHUNK_SIZE as u128;
             let relevant_chunk = self.chunks.get(chunk_index);
             relevant_chunk.contains(relative_index as u32)
         }
@@ -416,26 +420,26 @@ mod archival_mutator_set_tests {
 
     use super::*;
 
-    fn get_all_set_bits_with_duplicates<H: AlgebraicHasher>(
+    fn get_all_indices_with_duplicates<H: AlgebraicHasher>(
         archival_mutator_set: &mut ArchivalMutatorSet<H>,
     ) -> Vec<u128> {
         let mut ret: Vec<u128> = vec![];
 
-        for set_bit_index in archival_mutator_set
+        for index in archival_mutator_set
             .set_commitment
             .swbf_active
             .sbf
             .indices
             .iter()
         {
-            ret.push(*set_bit_index);
+            ret.push(*index);
         }
 
         let chunk_count = archival_mutator_set.chunks.len();
         for chunk_index in 0..chunk_count {
             let chunk = archival_mutator_set.chunks.get(chunk_index);
-            for set_bit_index in chunk.bits.iter() {
-                ret.push((*set_bit_index + CHUNK_SIZE as u32 * chunk_index as u32) as u128);
+            for index in chunk.relative_indices.iter() {
+                ret.push((*index + CHUNK_SIZE as u32 * chunk_index as u32) as u128);
             }
         }
 
@@ -468,13 +472,13 @@ mod archival_mutator_set_tests {
         let removal_record: RemovalRecord<H> = archival_mutator_set.drop(&item, &membership_proof);
         archival_mutator_set.remove(&removal_record);
 
-        let mut removal_record_bits = removal_record.absolute_indices.to_vec();
+        let mut removal_record_indices = removal_record.absolute_indices.to_vec();
         let mut set_indices_in_archival_ms =
-            get_all_set_bits_with_duplicates(&mut archival_mutator_set);
-        removal_record_bits.sort_unstable();
+            get_all_indices_with_duplicates(&mut archival_mutator_set);
+        removal_record_indices.sort_unstable();
         set_indices_in_archival_ms.sort_unstable();
 
-        assert_eq!(removal_record_bits, set_indices_in_archival_ms, "Set indices in MS must match removal record indices when Bloom filter was empty prior to removal.");
+        assert_eq!(removal_record_indices, set_indices_in_archival_ms, "Set indices in MS must match removal record indices when Bloom filter was empty prior to removal.");
 
         // Let's store the active window back to the database and create
         // a new archival object from the databases it contains and then check
@@ -620,12 +624,12 @@ mod archival_mutator_set_tests {
 
         let removal_record = archival_mutator_set.drop(&item, &membership_proof);
 
-        // This next line should panic, as we're attempting to unflip an unset bit
+        // This next line should panic, as we're attempting to remove an index that is not present
         // in the active window
         archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
     }
 
-    #[should_panic(expected = "Attempted to remove bit index that was not set in chunk")]
+    #[should_panic(expected = "Attempted to remove index that was not present in chunk.")]
     #[test]
     fn revert_remove_from_inactive_bloom_filter_panic() {
         type H = blake3::Hasher;
@@ -638,7 +642,7 @@ mod archival_mutator_set_tests {
             archival_mutator_set.add(&mut addition_record);
         }
 
-        // This next line should panic, as we're attempting to unflip an unset bit
+        // This next line should panic, as we're attempting to remove an index that is not present
         // in the inactive part of the Bloom filter
         archival_mutator_set.revert_remove(vec![0, 2]);
     }
@@ -790,8 +794,7 @@ mod archival_mutator_set_tests {
                 assert!(skipped == archival_mutator_set.verify(item, mp));
             }
 
-            // Check the return value: That all reported bits were actually flipped.
-            // This function call should panic if that was not the case.
+            // Verify that removal record indices were applied. If not, below function call will crash.
             let all_removal_record_indices = removal_records
                 .iter()
                 .map(|x| x.absolute_indices.to_vec())
