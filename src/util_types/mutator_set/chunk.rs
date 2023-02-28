@@ -24,7 +24,7 @@ impl Chunk {
 
     pub fn insert(&mut self, index: u32) {
         assert!(
-            index < CHUNK_SIZE as u32,
+            index < CHUNK_SIZE,
             "index cannot exceed chunk size in `insert`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
@@ -35,7 +35,7 @@ impl Chunk {
 
     pub fn remove(&mut self, index: u32) {
         assert!(
-            index < CHUNK_SIZE as u32,
+            index < CHUNK_SIZE,
             "index cannot exceed chunk size in `remove`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
@@ -54,7 +54,7 @@ impl Chunk {
 
     pub fn contains(&self, index: u32) -> bool {
         assert!(
-            index < CHUNK_SIZE as u32,
+            index < CHUNK_SIZE,
             "index cannot exceed chunk size in `contains`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
@@ -155,12 +155,12 @@ mod chunk_tests {
     fn insert_remove_contains_pbt() {
         let mut aw = Chunk::empty_chunk();
         for i in 0..CHUNK_SIZE {
-            assert!(!aw.contains(i as u32));
+            assert!(!aw.contains(i));
         }
 
         let mut prng = thread_rng();
         for _ in 0..CHUNK_SIZE {
-            let index = prng.next_u32() % CHUNK_SIZE as u32;
+            let index = prng.next_u32() % CHUNK_SIZE;
             let set = prng.next_u32() % 2 == 0;
             if set {
                 aw.insert(index);
@@ -173,11 +173,11 @@ mod chunk_tests {
 
         // Set all indices, then check that they are present
         for i in 0..CHUNK_SIZE {
-            aw.insert(i as u32);
+            aw.insert(i);
         }
 
         for i in 0..CHUNK_SIZE {
-            assert!(aw.contains(i as u32));
+            assert!(aw.contains(i));
         }
     }
 
@@ -205,7 +205,7 @@ mod chunk_tests {
         let mut previous_values: HashSet<Vec<BFieldElement>> = HashSet::new();
         for i in 0..CHUNK_SIZE {
             let mut chunk = Chunk::empty_chunk();
-            chunk.insert(i as u32);
+            chunk.insert(i);
             assert!(previous_values.insert(chunk.to_sequence()));
         }
     }
@@ -269,7 +269,7 @@ mod chunk_tests {
         let mut rng = thread_rng();
         let num_insertions = 100;
         for _ in 0..num_insertions {
-            let index = rng.next_u32() % (CHUNK_SIZE as u32);
+            let index = rng.next_u32() % (CHUNK_SIZE);
             chunk.insert(index);
         }
 

@@ -22,10 +22,10 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AbsoluteIndexSet([u128; NUM_TRIALS]);
+pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 
 impl AbsoluteIndexSet {
-    pub fn new(indices: &[u128; NUM_TRIALS]) -> Self {
+    pub fn new(indices: &[u128; NUM_TRIALS as usize]) -> Self {
         Self(*indices)
     }
 
@@ -37,11 +37,11 @@ impl AbsoluteIndexSet {
         self.0.to_vec()
     }
 
-    pub fn to_array(&self) -> [u128; NUM_TRIALS] {
+    pub fn to_array(&self) -> [u128; NUM_TRIALS as usize] {
         self.0
     }
 
-    pub fn to_array_mut(&mut self) -> &mut [u128; NUM_TRIALS] {
+    pub fn to_array_mut(&mut self) -> &mut [u128; NUM_TRIALS as usize] {
         &mut self.0
     }
 }
@@ -51,7 +51,7 @@ impl serde::Serialize for AbsoluteIndexSet {
     where
         S: serde::Serializer,
     {
-        let mut seq = serializer.serialize_tuple(NUM_TRIALS)?;
+        let mut seq = serializer.serialize_tuple(NUM_TRIALS as usize)?;
         for b in self.0 {
             seq.serialize_element(&b)?;
         }
@@ -100,8 +100,8 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
         D: serde::Deserializer<'de>,
     {
         Ok(AbsoluteIndexSet::new(&deserializer.deserialize_tuple(
-            NUM_TRIALS,
-            ArrayVisitor::<u128, NUM_TRIALS>(PhantomData),
+            NUM_TRIALS as usize,
+            ArrayVisitor::<u128, { NUM_TRIALS as usize }>(PhantomData),
         )?))
     }
 }
@@ -363,7 +363,7 @@ mod removal_record_tests {
             H::hash(&removal_record_alt),
             "Same removal record must hash to same value"
         );
-        removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS / 4] += 1;
+        removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS as usize / 4] += 1;
 
         // Sanity check (theoretically, a collision in the indices could have happened)
         assert!(
@@ -391,7 +391,7 @@ mod removal_record_tests {
         assert_eq!(cached_indices.to_vec(), all_indices);
         assert!(has_unique_elements(all_indices.clone()));
         all_indices.dedup();
-        assert_eq!(NUM_TRIALS, all_indices.len());
+        assert_eq!(NUM_TRIALS as usize, all_indices.len());
 
         // Verify that the hash map has put the indices into the correct buckets
         for (key, values) in chunks2indices {
@@ -496,7 +496,7 @@ mod removal_record_tests {
                 }
 
                 let rr = accumulator.drop(&item, &mp);
-                removal_records.push((i, rr));
+                removal_records.push((i as usize, rr));
             }
 
             // pick a random removal record from the list of all removal records and check that it still
@@ -565,7 +565,7 @@ mod removal_record_tests {
             }
 
             let rr = accumulator.drop(&item, &mp);
-            removal_records.push((i, rr));
+            removal_records.push((i as usize, rr));
         }
 
         // Now apply all removal records one at a time and batch update the remaining removal records

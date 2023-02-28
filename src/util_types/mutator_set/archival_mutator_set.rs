@@ -270,7 +270,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         // part. Otherwise, remove the index from the active window.
         for rr_index in removal_record_indices {
             if rr_index >= active_window_start {
-                let relative_index = (rr_index - active_window_start) as usize;
+                let relative_index = (rr_index - active_window_start) as u32;
                 self.set_commitment.swbf_active.remove(relative_index);
             } else {
                 let chunkidx = rr_index / CHUNK_SIZE as u128;
@@ -333,7 +333,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         let active_window_start = batch_index * CHUNK_SIZE as u128;
 
         if index >= active_window_start {
-            let relative_index = (index - active_window_start) as usize;
+            let relative_index = (index - active_window_start) as u32;
             self.set_commitment.swbf_active.contains(relative_index)
         } else {
             let chunk_index = index / CHUNK_SIZE as u128;
@@ -439,7 +439,7 @@ mod archival_mutator_set_tests {
         for chunk_index in 0..chunk_count {
             let chunk = archival_mutator_set.chunks.get(chunk_index);
             for index in chunk.relative_indices.iter() {
-                ret.push((*index + CHUNK_SIZE as u32 * chunk_index as u32) as u128);
+                ret.push((*index + CHUNK_SIZE * chunk_index as u32) as u128);
             }
         }
 
@@ -579,7 +579,7 @@ mod archival_mutator_set_tests {
             assert_eq!(commitment_before_add, commitment_after_revert);
         }
 
-        let n_iterations = 10 * BATCH_SIZE;
+        let n_iterations = 10 * BATCH_SIZE as usize;
         let mut records = Vec::with_capacity(n_iterations);
         let mut commitments_before = Vec::with_capacity(n_iterations);
 
@@ -653,7 +653,7 @@ mod archival_mutator_set_tests {
 
         let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
 
-        let n_iterations = 11 * BATCH_SIZE;
+        let n_iterations = 11 * BATCH_SIZE as usize;
         let mut records = Vec::with_capacity(n_iterations);
 
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.

@@ -8,12 +8,12 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use super::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;
 
-pub const WINDOW_SIZE: usize = 1 << 20;
-pub const CHUNK_SIZE: usize = 1 << 12;
-pub const BATCH_SIZE: usize = 1 << 3;
-pub const NUM_TRIALS: usize = 45;
+pub const WINDOW_SIZE: u32 = 1 << 20;
+pub const CHUNK_SIZE: u32 = 1 << 12;
+pub const BATCH_SIZE: u32 = 1 << 3;
+pub const NUM_TRIALS: u32 = 45;
 
-pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS]) -> HashMap<u128, Vec<u128>> {
+pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap<u128, Vec<u128>> {
     let mut chunkidx_to_indices_dict: HashMap<u128, Vec<u128>> = HashMap::new();
     all_indices
         .iter()

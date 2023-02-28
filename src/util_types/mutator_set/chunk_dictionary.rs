@@ -82,7 +82,7 @@ mod chunk_dict_tests {
         let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk1: Chunk = {
             Chunk {
-                relative_indices: (0..CHUNK_SIZE as u32).collect(),
+                relative_indices: (0..CHUNK_SIZE).collect(),
             }
         };
         let value1 = (mp1, chunk1);
@@ -93,7 +93,7 @@ mod chunk_dict_tests {
         let key2: u128 = 8989;
         let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership(2).0;
         let mut chunk2 = Chunk::empty_chunk();
-        chunk2.insert(CHUNK_SIZE as u32 / 2 + 1);
+        chunk2.insert(CHUNK_SIZE / 2 + 1);
         let value2 = (mp2, chunk2);
         let chunkdict2 = ChunkDictionary::<H>::new(HashMap::from([
             (key1, value1.clone()),
@@ -155,7 +155,7 @@ mod chunk_dict_tests {
         let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
-            relative_indices: (0..CHUNK_SIZE as u32).collect(),
+            relative_indices: (0..CHUNK_SIZE).collect(),
         };
 
         let s_non_empty =

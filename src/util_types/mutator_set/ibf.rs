@@ -9,12 +9,11 @@ use serde::{Deserialize, Serialize};
 /// distinct indices) is a
 /// list of indices, counting duplicates. The indices
 /// live in the range [0; N) and are stored sorted.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SparseBloomFilter<const N: u128> {
     pub indices: Vec<u128>,
 }
 
-#[allow(clippy::new_without_default)]
 impl<const N: u128> SparseBloomFilter<N> {
     pub fn new() -> Self {
         SparseBloomFilter {

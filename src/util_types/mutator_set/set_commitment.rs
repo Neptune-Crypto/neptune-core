@@ -49,11 +49,11 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
     item: &Digest,
     randomness: &Digest,
     aocl_leaf_index: u128,
-) -> [u128; NUM_TRIALS] {
+) -> [u128; NUM_TRIALS as usize] {
     let batch_index: u128 = aocl_leaf_index / BATCH_SIZE as u128;
     let batch_offset: u128 = batch_index * CHUNK_SIZE as u128;
     let mut prng_state = sponge_from_item_randomness::<H>(item, randomness);
-    H::sample_indices(&mut prng_state, WINDOW_SIZE.try_into().unwrap(), NUM_TRIALS)
+    H::sample_indices(&mut prng_state, WINDOW_SIZE, NUM_TRIALS as usize)
         .into_iter()
         .map(|sample_index| sample_index as u128 + batch_offset)
         .collect_vec()
@@ -167,7 +167,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
             if chunk_index >= batch_index {
                 // index is in the active part, so insert it in the active part of the Bloom filter
                 for index in indices {
-                    let relative_index = (index - active_window_start) as usize;
+                    let relative_index = (index - active_window_start) as u32;
                     self.swbf_active.insert(relative_index);
                 }
 
@@ -320,7 +320,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
                 // indices are in active window
                 'inner_active: for index in indices {
                     let relative_index = index - window_start;
-                    if !self.swbf_active.contains(relative_index as usize) {
+                    if !self.swbf_active.contains(relative_index as u32) {
                         has_absent_index = true;
                         break 'inner_active;
                     }
@@ -353,7 +353,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let mut chunkidx_to_chunk_difference_dict: HashMap<u128, Chunk> = HashMap::new();
         all_removal_records_indices.iter().for_each(|index| {
             if *index >= active_window_start {
-                let relative_index = (index - active_window_start) as usize;
+                let relative_index = (index - active_window_start) as u32;
                 self.swbf_active.insert(relative_index);
             } else {
                 chunkidx_to_chunk_difference_dict
@@ -549,8 +549,8 @@ mod accumulation_scheme_tests {
         type H = RescuePrimeRegular;
 
         let (item, randomness) = make_item_and_randomness();
-        let ret: [u128; NUM_TRIALS] = get_swbf_indices::<H>(&item, &randomness, 0);
-        assert_eq!(NUM_TRIALS, ret.len());
+        let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices::<H>(&item, &randomness, 0);
+        assert_eq!(NUM_TRIALS as usize, ret.len());
         assert!(has_unique_elements(ret));
         assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
     }
@@ -562,20 +562,20 @@ mod accumulation_scheme_tests {
         type H = blake3::Hasher;
         for _ in 0..1000 {
             let (item, randomness) = make_item_and_randomness();
-            let ret: [u128; NUM_TRIALS] = get_swbf_indices::<H>(&item, &randomness, 0);
-            assert_eq!(NUM_TRIALS, ret.len());
+            let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices::<H>(&item, &randomness, 0);
+            assert_eq!(NUM_TRIALS as usize, ret.len());
             assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
         }
 
         for _ in 0..1000 {
             let (item, randomness) = make_item_and_randomness();
-            let ret: [u128; NUM_TRIALS] =
+            let ret: [u128; NUM_TRIALS as usize] =
                 get_swbf_indices::<H>(&item, &randomness, (17 * BATCH_SIZE) as u128);
-            assert_eq!(NUM_TRIALS, ret.len());
+            assert_eq!(NUM_TRIALS as usize, ret.len());
             assert!(ret
                 .iter()
-                .all(|&x| (x as usize) < WINDOW_SIZE + 17 * CHUNK_SIZE
-                    && (x as usize) >= 17 * CHUNK_SIZE));
+                .all(|&x| (x as u32) < WINDOW_SIZE + 17 * CHUNK_SIZE
+                    && (x as u32) >= 17 * CHUNK_SIZE));
         }
     }
 

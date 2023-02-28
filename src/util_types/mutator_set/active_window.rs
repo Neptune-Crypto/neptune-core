@@ -1,6 +1,9 @@
+use itertools::Itertools;
+use rusty_leveldb::DB;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::database_vector::DatabaseVector;
 
 use super::chunk::Chunk;
 use super::ibf::{InvertibleBloomFilter, SparseBloomFilter};
@@ -21,13 +24,52 @@ impl<H: AlgebraicHasher> PartialEq for ActiveWindow<H> {
     }
 }
 
-#[allow(clippy::new_without_default)]
+impl<H: AlgebraicHasher> Default for ActiveWindow<H> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<H: AlgebraicHasher> ActiveWindow<H> {
     pub fn new() -> Self {
         Self {
             sbf: SparseBloomFilter::<{ WINDOW_SIZE as u128 }>::new(),
             _hasher: PhantomData,
         }
+    }
+    /// Populate an database with the values in this active window.
+    /// This is used to persist the state of an archival mutator set.
+    pub fn store_to_database(&self, db: DB) -> DB {
+        let mut database_vector: DatabaseVector<u128> = DatabaseVector::restore(db);
+        database_vector.batch_set(
+            &self
+                .sbf
+                .indices
+                .iter()
+                .enumerate()
+                .map(|(ii, i)| (ii as u128, *i))
+                .collect_vec(),
+        );
+        database_vector.extract_db()
+    }
+
+    /// Given a database object that has been stored on disk, return an ActiveWindow object
+    pub fn restore_from_database(db: DB) -> Self {
+        let mut database_vector: DatabaseVector<u32> = DatabaseVector::restore(db);
+        let db_entry_count: u128 = database_vector.len();
+        let mut active_window = ActiveWindow::default();
+
+        for i in 0..db_entry_count {
+            let index = database_vector.get(i);
+            active_window.insert(index)
+        }
+
+        active_window
+        // database_vector
+        // let mut ret = Self::default();
+        // for i in 0..({ WINDOW_SIZE / BITS_PER_U32 }) {
+        //     ret.bits[i] = database_vector.get(i as u128);
+        // }
     }
 
     /// Get the chunk of the active window that, upon sliding, becomes
@@ -64,7 +106,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
         }
     }
 
-    pub fn insert(&mut self, index: usize) {
+    pub fn insert(&mut self, index: u32) {
         assert!(
             index < WINDOW_SIZE,
             "index cannot exceed window size in `insert`. WINDOW_SIZE = {}, got index = {}",
@@ -74,7 +116,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
         self.sbf.increment(index as u128);
     }
 
-    pub fn remove(&mut self, index: usize) {
+    pub fn remove(&mut self, index: u32) {
         assert!(
             index < WINDOW_SIZE,
             "index cannot exceed window size in `remove`. WINDOW_SIZE = {}, got index = {}",
@@ -84,7 +126,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
         self.sbf.decrement(index as u128);
     }
 
-    pub fn contains(&self, index: usize) -> bool {
+    pub fn contains(&self, index: u32) -> bool {
         assert!(
             index < WINDOW_SIZE,
             "index cannot exceed window size in `contains`. WINDOW_SIZE = {}, got index = {}",
@@ -152,12 +194,12 @@ mod active_window_tests {
         let sbf = SparseBloomFilter::<{ WINDOW_SIZE as u128 }>::new();
         let mut aw = ActiveWindow::<blake3::Hasher>::new_from(sbf);
         for i in 0..100 {
-            assert!(!aw.contains(i as usize));
+            assert!(!aw.contains(i as u32));
         }
 
         let mut prng = thread_rng();
         for _ in 0..100 {
-            let index = prng.next_u32() as usize % WINDOW_SIZE;
+            let index = prng.next_u32() % WINDOW_SIZE;
             aw.insert(index);
 
             assert!(aw.contains(index));
@@ -169,7 +211,7 @@ mod active_window_tests {
         }
 
         for i in 0..100 {
-            assert!(aw.contains(i as usize));
+            assert!(aw.contains(i as u32));
         }
     }
 
