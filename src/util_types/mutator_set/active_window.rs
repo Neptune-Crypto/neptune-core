@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use rusty_leveldb::DB;
+use rusty_leveldb::{LdbIterator, DB};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -37,16 +37,18 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
     }
     /// Populate an database with the values in this active window.
     /// This is used to persist the state of an archival mutator set.
-    pub fn store_to_database(&self, db: DB) -> DB {
-        let mut database_vector: DatabaseVector<u32> = DatabaseVector::restore(db);
-        database_vector.batch_set(
-            &self
-                .sbf
-                .iter()
-                .enumerate()
-                .map(|(ii, i)| (ii as u128, *i))
-                .collect_vec(),
-        );
+    pub fn store_to_database(&self, mut db: DB) -> DB {
+        let db_is_empty = db
+            .new_iter()
+            .expect("Must be able to create DB iterator")
+            .next()
+            .is_none();
+        let mut database_vector = if db_is_empty {
+            DatabaseVector::new(db)
+        } else {
+            DatabaseVector::restore(db)
+        };
+        database_vector.overwrite_with_vec(self.sbf.clone());
         database_vector.extract_db()
     }
 
@@ -346,7 +348,6 @@ mod active_window_tests {
     }
 
     #[test]
-    #[ignore = "depends on new database version"]
     fn test_store_load_database() {
         // populate active window
         type Hasher = blake3::Hasher;
@@ -375,6 +376,24 @@ mod active_window_tests {
         // populate with more indices
         for _ in 0..num_insertions {
             active_window.insert(rng.next_u32() % WINDOW_SIZE);
+        }
+
+        // store active window to database
+        active_window_db = DB::open("active_window", opt.clone()).unwrap();
+        active_window_db = active_window.store_to_database(active_window_db);
+        active_window_db.flush().expect("Flush failure");
+
+        // load active window from database
+        let restored_active_window = ActiveWindow::restore_from_database(active_window_db);
+
+        // assert equality
+        assert_eq!(active_window, restored_active_window);
+
+        // remove items
+        for _ in 0..num_insertions {
+            active_window
+                .sbf
+                .remove(rng.next_u32() as usize % active_window.sbf.len());
         }
 
         // store active window to database
