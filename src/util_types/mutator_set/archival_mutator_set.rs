@@ -143,7 +143,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         let active_window: ActiveWindow<H> = if active_window_is_empty {
             ActiveWindow::new()
         } else {
-            Self::load_active_window(&mut active_window_db)
+            ActiveWindow::restore_from_database(active_window_db)
         };
 
         Self {
@@ -350,61 +350,6 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         self.set_commitment.aocl.flush();
         self.set_commitment.swbf_inactive.flush();
     }
-
-    #[allow(dead_code)]
-    fn store_active_window(active_window: &ActiveWindow<H>, active_window_db: &mut DB) {
-        let length_key = [0u8; 1];
-        let aw_as_vec = active_window.to_vec_u32();
-        let length = aw_as_vec.len() as u32;
-        let length_bytes = [
-            ((length >> 24) & 0xff) as u8,
-            ((length >> 16) & 0xff) as u8,
-            ((length >> 8) & 0xff) as u8,
-            (length & 0xff) as u8,
-        ];
-        active_window_db
-            .put(&length_key, &length_bytes)
-            .expect("Cannot put length");
-        for (i, location) in aw_as_vec.iter().enumerate() {
-            let key = [
-                ((i >> 24) & 0xff) as u8,
-                ((i >> 16) & 0xff) as u8,
-                ((i >> 8) & 0xff) as u8,
-                (i & 0xff) as u8,
-            ];
-            let value = [
-                ((location >> 24) & 0xff) as u8,
-                ((location >> 16) & 0xff) as u8,
-                ((location >> 8) & 0xff) as u8,
-                ((location) & 0xff) as u8,
-            ];
-            active_window_db
-                .put(&key, &value)
-                .expect("Cannot put item.");
-        }
-    }
-
-    fn load_active_window(active_window_db: &mut DB) -> ActiveWindow<H> {
-        let length_key = [0u8; 1];
-        let length_bytes = active_window_db
-            .get(&length_key)
-            .expect("Cannot get length.");
-        let length = ((length_bytes[0] as u32) << 24)
-            | ((length_bytes[1] as u32) << 16)
-            | ((length_bytes[2] as u32) << 8)
-            | (length_bytes[3] as u32);
-        let mut aw_vector = Vec::<u32>::with_capacity(length as usize);
-        for i in 0..length {
-            let key = [(i >> 24) as u8, (i >> 16) as u8, (i >> 8) as u8, i as u8];
-            let value_bytes = active_window_db.get(&key).expect("Cannot get item.");
-            let value = ((value_bytes[0] as u32) << 24)
-                | ((value_bytes[1] as u32) << 16)
-                | ((value_bytes[2] as u32) << 8)
-                | (value_bytes[3] as u32);
-            aw_vector.push(value);
-        }
-        ActiveWindow::<H>::from_vec_u32(&aw_vector)
-    }
 }
 
 #[cfg(test)]
@@ -477,10 +422,10 @@ mod archival_mutator_set_tests {
         // a new archival object from the databases it contains and then check
         // that this archival MS contains the same values
         let mut active_window_db = DB::open("active_window", opt.clone()).unwrap();
-        ArchivalMutatorSet::store_active_window(
-            &archival_mutator_set.set_commitment.swbf_active,
-            &mut active_window_db,
-        );
+        active_window_db = archival_mutator_set
+            .set_commitment
+            .swbf_active
+            .store_to_database(active_window_db);
 
         drop(archival_mutator_set);
         let chunks_db = DB::open("chunks", opt.clone()).unwrap();
@@ -827,12 +772,9 @@ mod archival_mutator_set_tests {
 
         active_window_db.flush().expect("Cannot flush database.");
 
-        ArchivalMutatorSet::store_active_window(&active_window, &mut active_window_db);
+        active_window_db = active_window.store_to_database(active_window_db);
 
-        let active_window_reconstructed =
-            ArchivalMutatorSet::load_active_window(&mut active_window_db);
-
-        active_window_db.close().expect("Cannot close database.");
+        let active_window_reconstructed = ActiveWindow::restore_from_database(active_window_db);
 
         assert_eq!(active_window, active_window_reconstructed);
     }
