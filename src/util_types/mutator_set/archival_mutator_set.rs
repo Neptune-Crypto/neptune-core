@@ -415,7 +415,6 @@ mod archival_mutator_set_tests {
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
     use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
-    use crate::util_types::mutator_set::ibf::InvertibleBloomFilter;
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, WINDOW_SIZE};
 
     use super::*;
@@ -425,21 +424,15 @@ mod archival_mutator_set_tests {
     ) -> Vec<u128> {
         let mut ret: Vec<u128> = vec![];
 
-        for index in archival_mutator_set
-            .set_commitment
-            .swbf_active
-            .sbf
-            .indices
-            .iter()
-        {
-            ret.push(*index);
+        for index in archival_mutator_set.set_commitment.swbf_active.sbf.iter() {
+            ret.push(*index as u128);
         }
 
         let chunk_count = archival_mutator_set.chunks.len();
         for chunk_index in 0..chunk_count {
             let chunk = archival_mutator_set.chunks.get(chunk_index);
             for index in chunk.relative_indices.iter() {
-                ret.push((*index + CHUNK_SIZE * chunk_index as u32) as u128);
+                ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index);
             }
         }
 
@@ -827,7 +820,7 @@ mod archival_mutator_set_tests {
         let num_insertions = 1000;
         let mut rng = thread_rng();
         for _ in 0..num_insertions {
-            active_window.increment((rng.next_u32() as u128) % WINDOW_SIZE as u128);
+            active_window.insert(rng.next_u32() % WINDOW_SIZE);
         }
 
         let mut active_window_db = DB::open("active_window", opt).unwrap();

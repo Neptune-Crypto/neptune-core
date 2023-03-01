@@ -959,7 +959,7 @@ mod accumulation_scheme_tests {
         let mut s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
         assert!(s_back.aocl.is_empty());
         assert!(s_back.swbf_inactive.is_empty());
-        assert!(s_back.swbf_active.sbf.indices.is_empty());
+        assert!(s_back.swbf_active.sbf.is_empty());
 
         // Add an item, verify correct serialization
         let (mp, item) = insert_item(&mut mutator_set);
@@ -968,7 +968,7 @@ mod accumulation_scheme_tests {
         let mut s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
         assert_eq!(1, s_back_one_add.aocl.count_leaves());
         assert!(s_back_one_add.swbf_inactive.is_empty());
-        assert!(s_back_one_add.swbf_active.sbf.indices.is_empty());
+        assert!(s_back_one_add.swbf_active.sbf.is_empty());
         assert!(s_back_one_add.verify(&item, &mp));
 
         // Remove an item, verify correct serialization
@@ -987,7 +987,7 @@ mod accumulation_scheme_tests {
             "Window should not have moved"
         );
         assert!(
-            !s_back_one_add_one_remove.swbf_active.sbf.indices.is_empty(),
+            !s_back_one_add_one_remove.swbf_active.sbf.is_empty(),
             "Some of the indices in the active window must now be set"
         );
         assert!(
