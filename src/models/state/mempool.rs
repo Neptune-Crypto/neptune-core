@@ -217,7 +217,7 @@ impl Mempool {
 pub struct MempoolInternal {
     max_size: usize,
     // Maintain for constant lookup
-    table: HashMap<Digest, Transaction>,
+    tx_dictionary: HashMap<Digest, Transaction>,
     // Maintain for fast min and max
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
     queue: DoublePriorityQueue<Digest, FeeDensity>,
@@ -230,17 +230,17 @@ impl MempoolInternal {
         let queue = Default::default();
         Self {
             max_size,
-            table,
+            tx_dictionary: table,
             queue,
         }
     }
 
     fn contains(&self, transaction_id: &Digest) -> bool {
-        self.table.contains_key(transaction_id)
+        self.tx_dictionary.contains_key(transaction_id)
     }
 
     fn get(&self, transaction_id: &Digest) -> Option<&Transaction> {
-        self.table.get(transaction_id)
+        self.tx_dictionary.get(transaction_id)
     }
 
     /// Returns `Some(txid, transaction)` iff a transcation conflicts with a block that's already in
@@ -250,16 +250,18 @@ impl MempoolInternal {
         transaction: &Transaction,
     ) -> Option<(Digest, Transaction)> {
         // This check could be made a lot more efficient, for example with an invertible Bloom filter
-        let flipped_bloom_filter_indices: HashSet<_> = transaction
+        let tx_sbf_indices: HashSet<_> = transaction
             .inputs
             .iter()
-            .map(|x| x.removal_record.bit_indices)
+            .map(|x| x.removal_record.absolute_indices.to_array())
             .collect();
 
-        for tx in self.table.iter() {
-            for input in tx.1.inputs.iter() {
-                if flipped_bloom_filter_indices.contains(&input.removal_record.bit_indices) {
-                    return Some((*tx.0, tx.1.to_owned()));
+        for mempool_tx in self.tx_dictionary.iter() {
+            for mempool_tx_input in mempool_tx.1.inputs.iter() {
+                if tx_sbf_indices
+                    .contains(&mempool_tx_input.removal_record.absolute_indices.to_array())
+                {
+                    return Some((*mempool_tx.0, mempool_tx.1.to_owned()));
                 }
             }
         }
@@ -295,15 +297,16 @@ impl MempoolInternal {
         let transaction_id: Digest = Hash::hash(transaction);
 
         self.queue.push(transaction_id, transaction.fee_density());
-        self.table.insert(transaction_id, transaction.to_owned());
+        self.tx_dictionary
+            .insert(transaction_id, transaction.to_owned());
         assert_eq!(
-            self.table.len(),
+            self.tx_dictionary.len(),
             self.queue.len(),
             "mempool's table and queue length must agree prior to shrink"
         );
         self.shrink_to_max_size();
         assert_eq!(
-            self.table.len(),
+            self.tx_dictionary.len(),
             self.queue.len(),
             "mempool's table and queue length must agree after shrink"
         );
@@ -311,9 +314,9 @@ impl MempoolInternal {
     }
 
     fn remove(&mut self, transaction_id: &Digest) -> Option<Transaction> {
-        if let rv @ Some(_) = self.table.remove(transaction_id) {
+        if let rv @ Some(_) = self.tx_dictionary.remove(transaction_id) {
             self.queue.remove(transaction_id);
-            debug_assert_eq!(self.table.len(), self.queue.len());
+            debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
             return rv;
         }
 
@@ -321,11 +324,11 @@ impl MempoolInternal {
     }
 
     fn len(&self) -> usize {
-        self.table.len()
+        self.tx_dictionary.len()
     }
 
     fn is_empty(&self) -> bool {
-        self.table.is_empty()
+        self.tx_dictionary.is_empty()
     }
 
     fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
@@ -361,8 +364,8 @@ impl MempoolInternal {
     #[allow(dead_code)]
     fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
-            let transaction = self.table.remove(&transaction_digest).unwrap();
-            debug_assert_eq!(self.table.len(), self.queue.len());
+            let transaction = self.tx_dictionary.remove(&transaction_digest).unwrap();
+            debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
             Some((transaction, fee_density))
         } else {
             None
@@ -372,8 +375,8 @@ impl MempoolInternal {
     /// Computes in θ(lg N)
     fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
-            let transaction = self.table.remove(&transaction_digest).unwrap();
-            debug_assert_eq!(self.table.len(), self.queue.len());
+            let transaction = self.tx_dictionary.remove(&transaction_digest).unwrap();
+            debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
             Some((transaction, fee_density))
         } else {
             None
@@ -400,7 +403,7 @@ impl MempoolInternal {
             self.remove(&t);
         }
 
-        debug_assert_eq!(self.table.len(), self.queue.len());
+        debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
         self.shrink_to_fit()
     }
 
@@ -418,15 +421,16 @@ impl MempoolInternal {
     /// of this newly mined block. It also updates all mutator set data for the monitored
     /// transactions that were not removed due to being included in the block.
     fn update_with_block(&mut self, block: &Block) {
-        //! Checks if the of sets of flipped bits in the block transaction
-        //! and any `transaction` in the mempool are disjoint.
-        //! Removes the transaction from the mempool if they are not.
-        let flipped_bloom_filter_indices: HashSet<_> = block
+        // Check if the sets of inserted indices in the block transaction
+        // and transactions in the mempool are disjoint.
+        // Removes the transaction from the mempool if they are not as this would
+        // mean that at least on of the mempool transaction's inputs are spent in this block.
+        let sbf_indices_set_by_block: HashSet<_> = block
             .body
             .transaction
             .inputs
             .iter()
-            .map(|x| x.removal_record.bit_indices)
+            .map(|x| x.removal_record.absolute_indices.to_array())
             .collect();
 
         // The indices that the input UTXOs would flip are used to determine
@@ -437,17 +441,17 @@ impl MempoolInternal {
             let bloom_filter_indices: HashSet<_> = tx
                 .inputs
                 .iter()
-                .map(|x| x.removal_record.bit_indices)
+                .map(|x| x.removal_record.absolute_indices.to_array())
                 .collect();
 
-            bloom_filter_indices.is_disjoint(&flipped_bloom_filter_indices)
+            bloom_filter_indices.is_disjoint(&sbf_indices_set_by_block)
         };
 
         // Remove the transactions that become invalid with this block
         self.retain(keep);
 
         // Update the remaining transactions so their mutator set data is still valid
-        for tx in self.table.values_mut() {
+        for tx in self.tx_dictionary.values_mut() {
             tx.update_ms_data(block)
                 .expect("Updating mempool transaction must succeed");
         }
@@ -469,7 +473,7 @@ impl MempoolInternal {
 
     fn shrink_to_fit(&mut self) {
         self.queue.shrink_to_fit();
-        self.table.shrink_to_fit()
+        self.tx_dictionary.shrink_to_fit()
     }
 
     fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
@@ -796,7 +800,7 @@ mod tests {
         let mempool_small = setup(10).await;
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small =
-            bincode::serialize(&mempool_small.internal.read().unwrap().table)
+            bincode::serialize(&mempool_small.internal.read().unwrap().tx_dictionary)
                 .unwrap()
                 .len();
         println!("size_gs_small = {}", size_gs_small);
@@ -804,9 +808,10 @@ mod tests {
 
         let mempool_big = setup(100).await;
         let size_gs_big = mempool_big.get_size();
-        let size_serialized_big = bincode::serialize(&mempool_big.internal.read().unwrap().table)
-            .unwrap()
-            .len();
+        let size_serialized_big =
+            bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
+                .unwrap()
+                .len();
         println!("size_gs_big = {}", size_gs_big);
         assert!(size_gs_big >= size_serialized_big);
         assert!(size_gs_big >= 5 * size_gs_small);

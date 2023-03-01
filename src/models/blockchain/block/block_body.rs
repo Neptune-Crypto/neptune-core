@@ -37,7 +37,7 @@ impl Hashable for BlockBody {
             .get_commitment();
 
         // Append digest of STARK proof
-        let stark_proof_digest = Hash::hash_slice(&self.stark_proof);
+        let stark_proof_digest = Hash::hash_varlen(&self.stark_proof);
 
         [
             transaction_digest.to_sequence(),

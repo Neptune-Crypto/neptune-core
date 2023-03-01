@@ -628,28 +628,27 @@ impl ArchivalState {
         >,
         new_block: &Block,
     ) -> Result<()> {
-        // Get the block digest that MS was most recently synced to
-        let ms_block_sync_digest = match ms_block_sync_lock.get(MsBlockSyncKey::SyncDigest(())) {
-            Some(value) => {
-                debug!("ms_block_sync was present in database.");
-                value.as_sync_digest()
-            }
-            None => {
-                debug!("ms_block_sync was missing in database; using genesis.");
-                assert_eq!(
-                    new_block.header.prev_block_digest, self.genesis_block.hash,
-                    "Empty ms_block_sync_db only allowed for block after genesis block"
-                );
-                self.genesis_block.hash
-            }
+        // Get the block digest that the mutator set was most recently synced to
+        let ms_block_sync_digest = if let Some(value) = ms_block_sync_lock.get(MsBlockSyncKey) {
+            debug!("ms_block_sync was present in database.");
+            value.0
+        } else {
+            // first (non-genesis) block
+            debug!("ms_block_sync was missing in database; using genesis.");
+            assert_eq!(
+                new_block.header.prev_block_digest, self.genesis_block.hash,
+                "Empty ms_block_sync_db only allowed for block after genesis block"
+            );
+            self.genesis_block.hash
         };
 
-        // As long as mutator set isn't synced with previous block, roll back, unless we've
-        // reached the genesis block in which case, we cannot roll further back.
+        // Process roll back, if necessary.
+        // Until the mutator set isn't synced with the previous block, roll back, unless we've
+        // reached the genesis block in which case, we cannot roll back further.
         let mut ms_block_rollback_digest = ms_block_sync_digest;
         while ms_block_rollback_digest != new_block.header.prev_block_digest {
             // This should be impossible, but this function has crashed a lot, so we add this
-            // sanity check. This would indicate an invalid block ,and previous validation
+            // sanity check. This would indicate an invalid block, and previous validation
             // should have caught that.
             if ms_block_rollback_digest == self.genesis_block.hash {
                 panic!("Attempted to roll back genesis block in archival mutator set");
@@ -673,12 +672,14 @@ impl ArchivalState {
             }
 
             // Roll back all removal records contained in block
-            // This is done by fetching from the database the indices
-            // flipped in the Bloom filter by that block.
-            let block_diff_indices = ms_block_sync_lock
-                .get(MsBlockSyncKey::Diff(roll_back_block.hash))
-                .unwrap()
-                .as_diff();
+            // This is done by reading out the indices from the block.
+            let block_diff_indices = roll_back_block
+                .body
+                .mutator_set_update
+                .removals
+                .iter()
+                .flat_map(|rr| rr.absolute_indices.to_array())
+                .collect();
             debug!(
                 "block_diff_indices being rolled back = {:?}",
                 block_diff_indices
@@ -696,7 +697,7 @@ impl ArchivalState {
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
-        // Add elements, thus adding the output UTXOs to the mutator set
+        // Add items, thus adding the output UTXOs to the mutator set
         while let Some(mut addition_record) = addition_records.pop() {
             // Batch-update all removal records to keep them valid after next addition
             RemovalRecord::batch_update_from_addition(
@@ -708,8 +709,7 @@ impl ArchivalState {
             ams_lock.add(&mut addition_record);
         }
 
-        // Remove elements, thus removing the input UTXOs from the mutator set
-        let mut changed_indices: Vec<u128> = vec![];
+        // Remove items, thus removing the input UTXOs from the mutator set
         while let Some(removal_record) = removal_records.pop() {
             // Batch-update all removal records to keep them valid after next removal
             RemovalRecord::batch_update_from_remove(
@@ -718,17 +718,11 @@ impl ArchivalState {
             ).expect("MS removal record update from remove must succeed in update_mutator_set as block should already be verified");
 
             // Remove the element from the mutator set
-            let mut indices_of_flipped_bits_in_bf = ams_lock.remove(removal_record).unwrap();
-            changed_indices.append(&mut indices_of_flipped_bits_in_bf);
+            ams_lock.remove(removal_record);
         }
-
-        // Remove duplicates from changed indices
-        changed_indices.sort_unstable();
-        changed_indices.dedup();
 
         // Store active window onto disk for persistence
         let active_window_db = Self::active_window_db(&self.data_dir)?;
-
         let _active_window_db = ams_lock
             .set_commitment
             .swbf_active
@@ -745,17 +739,8 @@ impl ArchivalState {
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block_copy.hash
         );
 
-        // Write block digest onto disk
-        ms_block_sync_lock.batch_write(&[
-            (
-                MsBlockSyncKey::SyncDigest(()),
-                MsBlockSyncValue::SyncDigest(new_block.hash),
-            ),
-            (
-                MsBlockSyncKey::Diff(new_block.hash),
-                MsBlockSyncValue::Diff(changed_indices),
-            ),
-        ]);
+        // Write synced block digest onto disk
+        ms_block_sync_lock.batch_write(&[(MsBlockSyncKey, MsBlockSyncValue(new_block.hash))]);
 
         Ok(())
     }
@@ -765,13 +750,12 @@ impl ArchivalState {
 mod archival_state_tests {
     use super::*;
 
+    use mutator_set_tf::util_types::mutator_set::active_window::ActiveWindow;
     use num_traits::One;
     use rand::{thread_rng, RngCore};
     use rusty_leveldb::LdbIterator;
     use secp256k1::Secp256k1;
     use tracing_test::traced_test;
-
-    use mutator_set_tf::util_types::mutator_set::shared::{BITS_PER_U32, WINDOW_SIZE};
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::{utxo::Utxo, Amount};
@@ -895,29 +879,17 @@ mod archival_state_tests {
         // but all the values in the active window must be zero since no removal record
         // has been added yet.
         {
-            let mut active_window_db_after_add: DB = ArchivalState::active_window_db(data_dir)?;
-            assert!(active_window_db_after_add
-                .new_iter()
-                .unwrap()
-                .next()
-                .is_some());
-
-            let mut db_iter = active_window_db_after_add.new_iter().unwrap();
-            let mut i = 0;
-            while let Some((_key_bytes, value_bytes)) = db_iter.next() {
-                assert!(
-                    value_bytes.iter().all(|byte| byte.is_zero()),
-                    "The {}th key-value pair is zero",
-                    i
-                );
-                i += 1;
-            }
-
-            assert_eq!(WINDOW_SIZE / BITS_PER_U32, i);
+            let active_window_db_after_add: DB = ArchivalState::active_window_db(data_dir)?;
+            let active_window =
+                ActiveWindow::<Hash>::restore_from_database(active_window_db_after_add);
+            assert!(
+                active_window.sbf.is_empty(),
+                "Active window must be empty before consuming UTXOs"
+            );
         }
 
         // Add an input to the next block's transaction. This will add a removal record
-        // to the block, and this removal record will flip bits in the Bloom filter.
+        // to the block, and this removal record will insert indices in the Bloom filter.
         {
             let mut mock_block_2 = make_mock_block(&mock_block_1, None, wallet.get_public_key());
             let consumed_utxo = mock_block_1.body.transaction.outputs[0].0;
@@ -945,28 +917,11 @@ mod archival_state_tests {
         }
 
         // After running the MS updater with a removal record, the active window
-        // that is stored on disk must contain non-zero values, i.e. some of the
-        // Bloom filter bits must be flipped.
-        let mut active_window_db_after_remove: DB = ArchivalState::active_window_db(data_dir)?;
-        assert!(active_window_db_after_remove
-            .new_iter()
-            .unwrap()
-            .next()
-            .is_some());
-        let mut db_iter = active_window_db_after_remove.new_iter().unwrap();
-        let mut index = 0;
-        let mut non_zero_value_found = false;
-        while let Some((_key_bytes, value_bytes)) = db_iter.next() {
-            non_zero_value_found |= value_bytes.iter().any(|byte| !byte.is_zero());
-            index += 1;
-        }
-
-        assert!(non_zero_value_found, "Non-zero value found");
-        assert_eq!(
-            WINDOW_SIZE / BITS_PER_U32,
-            index,
-            "The active window's size ..."
-        );
+        // that is stored on disk must contain non-zero values, i.e. the Bloom filter must not be empty.
+        let active_window_db_after_remove: DB = ArchivalState::active_window_db(data_dir)?;
+        let active_window =
+            ActiveWindow::<Hash>::restore_from_database(active_window_db_after_remove);
+        assert!(!active_window.sbf.is_empty());
 
         Ok(())
     }
@@ -1110,9 +1065,8 @@ mod archival_state_tests {
                 .set_commitment
                 .swbf_active
                 .sbf
-                .indices
                 .is_empty(),
-            "All bits in active window must be unset when no UTXOs have been spent"
+            "Active window must be empty when no UTXOs have been spent"
         );
 
         assert_eq!(
@@ -1248,9 +1202,8 @@ mod archival_state_tests {
                 .set_commitment
                 .swbf_active
                 .sbf
-                .indices
                 .is_empty(),
-            "All bits in active window must be unset when no UTXOs have been spent"
+            "Active window must be empty when no UTXOs have been spent"
         );
 
         assert_eq!(
@@ -1307,10 +1260,10 @@ mod archival_state_tests {
 
         // Verify that we store this block and that we can update the mutator set with it
         {
-            // Before updating, the active window must be all zeros
+            // Before updating, the active window must be empty
             let mut db_bc_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
-            assert!(ams_lock.set_commitment.swbf_active.sbf.indices.is_empty());
+            assert!(ams_lock.set_commitment.swbf_active.sbf.is_empty());
 
             // Write the block to disk
             archival_state.write_block(
@@ -1328,9 +1281,8 @@ mod archival_state_tests {
                 &block_1_a,
             )?;
 
-            // Verify that the active window is not all zeros as a removal record has flipped
-            // bits in the Bloom filter
-            assert!(!ams_lock.set_commitment.swbf_active.sbf.indices.is_empty());
+            // Verify that the active window is not empty as a removal record has inserted indices into the Bloom filter
+            assert!(!ams_lock.set_commitment.swbf_active.sbf.is_empty());
 
             // Verify that a block containing a removal record `block_1_a` can be reverted
             let block_1_b = make_mock_block(
@@ -1350,8 +1302,8 @@ mod archival_state_tests {
                 &block_1_b,
             )?;
 
-            // Verify that the active window is all zeros after reverting the removal record
-            assert!(ams_lock.set_commitment.swbf_active.sbf.indices.is_empty());
+            // Verify that the active window is empty after reverting the removal record
+            assert!(ams_lock.set_commitment.swbf_active.sbf.is_empty());
         }
 
         Ok(())

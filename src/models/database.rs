@@ -138,34 +138,10 @@ impl BlockIndexValue {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum MsBlockSyncKey {
-    SyncDigest(()),
-    Diff(Digest),
-}
+pub struct MsBlockSyncKey;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum MsBlockSyncValue {
-    SyncDigest(Digest),
-    Diff(Vec<u128>),
-}
-
-impl MsBlockSyncValue {
-    pub fn as_sync_digest(&self) -> Digest {
-        match self {
-            MsBlockSyncValue::SyncDigest(digest) => *digest,
-            MsBlockSyncValue::Diff(_) => panic!("Requested sync digest, found {:?}", self),
-        }
-    }
-
-    pub fn as_diff(&self) -> Vec<u128> {
-        match self {
-            MsBlockSyncValue::SyncDigest(_digest) => {
-                panic!("Requested sync digest, found {:?}", self)
-            }
-            MsBlockSyncValue::Diff(diff) => diff.clone(),
-        }
-    }
-}
+pub struct MsBlockSyncValue(pub Digest);
 
 pub struct PeerDatabases {
     pub peer_standings: RustyLevelDB<IpAddr, PeerStanding>,

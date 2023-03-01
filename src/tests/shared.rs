@@ -533,7 +533,7 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNe
         randomness,
         auth_path_aocl: mock_mmr_membership_proof,
         target_chunks: ChunkDictionary::default(),
-        cached_bits: None,
+        cached_indices: None,
     };
     let mut mock_ms_acc = MutatorSetAccumulator::default();
     let mock_removal_record = mock_ms_acc.drop(&randomness, &mock_ms_membership_proof);
