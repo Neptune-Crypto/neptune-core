@@ -74,7 +74,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
     /// them.
     /// The word "slice" is used in the denotation of submatrices not
     /// rust's contiguous memory structures.
-    fn sbf_slice(&self, interval: Range<u32>) -> Vec<u32> {
+    fn slice(&self, interval: Range<u32>) -> Vec<u32> {
         let indices = self
             .sbf
             .iter()
@@ -87,11 +87,11 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
     /// Get the chunk of the active window that, upon sliding, becomes
     /// inactive.
     pub fn slid_chunk(&self) -> Chunk {
-        Chunk::from_indices(&self.sbf_slice(0..CHUNK_SIZE))
+        Chunk::from_indices(&self.slice(0..CHUNK_SIZE))
     }
 
     /// Set range to zero.
-    fn sbf_zerofy(&mut self, lower: u32, upper: u32) {
+    fn zerofy(&mut self, lower: u32, upper: u32) {
         // locate
         let mut drops = Vec::new();
         for (location_index, location) in self.sbf.iter().enumerate() {
@@ -109,14 +109,14 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
     /// Slide the window: drop all integers indexing into the first
     /// chunk, and subtract CHUNK_SIZE from all others.
     pub fn slide_window(&mut self) {
-        self.sbf_zerofy(0, CHUNK_SIZE);
+        self.zerofy(0, CHUNK_SIZE);
         for location in self.sbf.iter_mut() {
             *location -= CHUNK_SIZE;
         }
     }
 
     /// Return true iff there is a set integer in the given range.
-    fn sbf_hasset(&self, lower: u32, upper: u32) -> bool {
+    fn hasset(&self, lower: u32, upper: u32) -> bool {
         for location in self.sbf.iter() {
             if lower <= *location && *location < upper {
                 return true;
@@ -127,7 +127,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
 
     /// Undo a window slide.
     pub fn slide_window_back(&mut self, chunk: &Chunk) {
-        assert!(!self.sbf_hasset(WINDOW_SIZE - CHUNK_SIZE, WINDOW_SIZE));
+        assert!(!self.hasset(WINDOW_SIZE - CHUNK_SIZE, WINDOW_SIZE));
         for location in self.sbf.iter_mut() {
             *location += CHUNK_SIZE;
         }
@@ -270,7 +270,7 @@ mod active_window_tests {
         aw.slide_window();
 
         // Verify that last N elements are zero after window slide
-        assert!(!aw.sbf_hasset(WINDOW_SIZE - CHUNK_SIZE, CHUNK_SIZE));
+        assert!(!aw.hasset(WINDOW_SIZE - CHUNK_SIZE, CHUNK_SIZE));
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod active_window_tests {
         }
         let dummy_chunk = active_window.slid_chunk();
         active_window.slide_window();
-        assert!(!active_window.sbf_hasset(WINDOW_SIZE - CHUNK_SIZE, WINDOW_SIZE));
+        assert!(!active_window.hasset(WINDOW_SIZE - CHUNK_SIZE, WINDOW_SIZE));
 
         active_window.slide_window_back(&dummy_chunk);
         for index in dummy_chunk.relative_indices {
