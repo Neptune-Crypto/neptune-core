@@ -498,7 +498,7 @@ mod ms_proof_tests {
             randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_indices: Some(AbsoluteIndexSet::new(&[1u128; NUM_TRIALS])),
+            cached_indices: Some(AbsoluteIndexSet::new(&[1u128; NUM_TRIALS as usize])),
         };
 
         let mp_without_cached_indices = MsMembershipProof::<H> {

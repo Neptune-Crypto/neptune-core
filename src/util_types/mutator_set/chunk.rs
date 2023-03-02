@@ -3,7 +3,6 @@ use serde_derive::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
-use super::ibf::InvertibleBloomFilter;
 use super::shared::CHUNK_SIZE;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +23,7 @@ impl Chunk {
 
     pub fn insert(&mut self, index: u32) {
         assert!(
-            index < CHUNK_SIZE as u32,
+            index < CHUNK_SIZE,
             "index cannot exceed chunk size in `insert`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
@@ -35,7 +34,7 @@ impl Chunk {
 
     pub fn remove(&mut self, index: u32) {
         assert!(
-            index < CHUNK_SIZE as u32,
+            index < CHUNK_SIZE,
             "index cannot exceed chunk size in `remove`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
@@ -54,7 +53,7 @@ impl Chunk {
 
     pub fn contains(&self, index: u32) -> bool {
         assert!(
-            index < CHUNK_SIZE as u32,
+            index < CHUNK_SIZE,
             "index cannot exceed chunk size in `contains`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
@@ -89,13 +88,14 @@ impl Chunk {
         }
     }
 
-    pub fn to_indices(&self) -> Vec<u128> {
-        self.relative_indices.iter().map(|i| *i as u128).collect()
+    pub fn to_indices(&self) -> Vec<u32> {
+        self.relative_indices.clone()
     }
 
-    pub fn from_indices(indices: &[u128]) -> Self {
-        let relative_indices = indices.iter().map(|i| *i as u32).collect();
-        Chunk { relative_indices }
+    pub fn from_indices(relative_indices: &[u32]) -> Self {
+        Chunk {
+            relative_indices: relative_indices.to_vec(),
+        }
     }
 
     pub fn from_slice(sl: &[u32]) -> Chunk {
@@ -114,32 +114,32 @@ impl Hashable for Chunk {
     }
 }
 
-impl InvertibleBloomFilter for Chunk {
-    fn increment(&mut self, location: u128) {
-        self.relative_indices.push(location as u32);
-        self.relative_indices.sort();
-    }
+// impl InvertibleBloomFilter for Chunk {
+//     fn increment(&mut self, location: u128) {
+//         self.relative_indices.push(location as u32);
+//         self.relative_indices.sort();
+//     }
 
-    fn decrement(&mut self, location: u128) {
-        let mut drop_index = 0;
-        let mut found = false;
-        for (i, b) in self.relative_indices.iter().enumerate() {
-            if *b == location as u32 {
-                drop_index = i;
-                found = true;
-            }
-        }
-        if found {
-            self.relative_indices.remove(drop_index);
-        } else {
-            panic!("Cannot decrement integer that is already zero.");
-        }
-    }
+//     fn decrement(&mut self, location: u128) {
+//         let mut drop_index = 0;
+//         let mut found = false;
+//         for (i, b) in self.relative_indices.iter().enumerate() {
+//             if *b == location as u32 {
+//                 drop_index = i;
+//                 found = true;
+//             }
+//         }
+//         if found {
+//             self.relative_indices.remove(drop_index);
+//         } else {
+//             panic!("Cannot decrement integer that is already zero.");
+//         }
+//     }
 
-    fn isset(&self, location: u128) -> bool {
-        self.relative_indices.contains(&(location as u32))
-    }
-}
+//     fn isset(&self, location: u128) -> bool {
+//         self.relative_indices.contains(&(location as u32))
+//     }
+// }
 
 #[cfg(test)]
 mod chunk_tests {
@@ -155,12 +155,12 @@ mod chunk_tests {
     fn insert_remove_contains_pbt() {
         let mut aw = Chunk::empty_chunk();
         for i in 0..CHUNK_SIZE {
-            assert!(!aw.contains(i as u32));
+            assert!(!aw.contains(i));
         }
 
         let mut prng = thread_rng();
         for _ in 0..CHUNK_SIZE {
-            let index = prng.next_u32() % CHUNK_SIZE as u32;
+            let index = prng.next_u32() % CHUNK_SIZE;
             let set = prng.next_u32() % 2 == 0;
             if set {
                 aw.insert(index);
@@ -173,11 +173,11 @@ mod chunk_tests {
 
         // Set all indices, then check that they are present
         for i in 0..CHUNK_SIZE {
-            aw.insert(i as u32);
+            aw.insert(i);
         }
 
         for i in 0..CHUNK_SIZE {
-            assert!(aw.contains(i as u32));
+            assert!(aw.contains(i));
         }
     }
 
@@ -205,7 +205,7 @@ mod chunk_tests {
         let mut previous_values: HashSet<Vec<BFieldElement>> = HashSet::new();
         for i in 0..CHUNK_SIZE {
             let mut chunk = Chunk::empty_chunk();
-            chunk.insert(i as u32);
+            chunk.insert(i);
             assert!(previous_values.insert(chunk.to_sequence()));
         }
     }
@@ -269,7 +269,7 @@ mod chunk_tests {
         let mut rng = thread_rng();
         let num_insertions = 100;
         for _ in 0..num_insertions {
-            let index = rng.next_u32() % (CHUNK_SIZE as u32);
+            let index = rng.next_u32() % (CHUNK_SIZE);
             chunk.insert(index);
         }
 
