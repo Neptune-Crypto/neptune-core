@@ -355,6 +355,17 @@ impl MainLoopHandler {
                         .write()
                         .expect("Locking mempool for write must succeed");
 
+                    // If we received a new block from a peer and updated the global state before this message from the miner was handled,
+                    // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
+                    // node considered the most canonical block.
+                    let block_is_new = light_state_locked.header.proof_of_work_family
+                        < new_block.header.proof_of_work_family
+                        && new_block.header.prev_block_digest == light_state_locked.hash;
+                    if !block_is_new {
+                        warn!("Got new block from miner thread that was not child of tip. Discarding.");
+                        return Ok(());
+                    }
+
                     // Apply the updates
                     self.global_state
                         .chain
