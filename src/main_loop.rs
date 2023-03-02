@@ -25,6 +25,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use crate::models::channel::{
     MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
@@ -493,7 +494,11 @@ impl MainLoopHandler {
                     }
 
                     for new_block in blocks {
-                        debug!("Storing block {:?} in database", new_block.hash);
+                        debug!(
+                            "Storing block {} in database. Height: {}",
+                            new_block.hash.emojihash(),
+                            new_block.header.height
+                        );
                         self.global_state
                             .chain
                             .archival_state

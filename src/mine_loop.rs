@@ -25,6 +25,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 const MOCK_DIFFICULTY: u32 = 10_000;
@@ -280,7 +281,7 @@ pub async fn mock_regtest_mine(
                 // Sanity check, remove for more efficient mining.
                 assert!(new_fake_block.archival_is_valid(&latest_block), "Own mined block must be valid");
 
-                info!("Found new regtest block with block height {}. Hash: {:?}", new_fake_block.header.height, new_fake_block.hash);
+                info!("Found new regtest block with block height {}. Hash: {}", new_fake_block.header.height, new_fake_block.hash.emojihash());
 
                 latest_block = new_fake_block.clone();
                 to_main.send(MinerToMain::NewBlock(Box::new(new_fake_block))).await?;

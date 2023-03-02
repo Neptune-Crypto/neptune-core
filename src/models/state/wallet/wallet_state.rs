@@ -10,6 +10,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
@@ -186,7 +187,9 @@ impl WalletState {
                 // TODO: Change this logging to use `Display` for `Amount` once functionality is merged from t-f
                 info!(
                     "Received UTXO in block {}, height {}: value = {:?}",
-                    block.hash, block.header.height, utxo.amount
+                    block.hash.emojihash(),
+                    block.header.height,
+                    utxo.amount
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =

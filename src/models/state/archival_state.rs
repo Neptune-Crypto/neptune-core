@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
@@ -630,7 +631,10 @@ impl ArchivalState {
     ) -> Result<()> {
         // Get the block digest that the mutator set was most recently synced to
         let ms_block_sync_digest = if let Some(value) = ms_block_sync_lock.get(MsBlockSyncKey) {
-            debug!("ms_block_sync was present in database.");
+            debug!(
+                "ms_block_sync was present in database: {}",
+                value.0.emojihash()
+            );
             value.0
         } else {
             // first (non-genesis) block
