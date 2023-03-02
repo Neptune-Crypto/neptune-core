@@ -8,6 +8,7 @@ pub async fn main() -> Result<()> {
     // Fetch the CLI arguments
     let args: cli_args::Args = cli_args::Args::parse();
 
+    // Set up logger.
     // Configure logger to use ISO-8601, of which rfc3339 is a subset.
     // install global collector configured based on RUST_LOG env var.
     // Accepted `RUST_LOG` values are `trace`, `debug`, `info`, `warn`,
@@ -20,7 +21,6 @@ pub async fn main() -> Result<()> {
         .with_env_filter(info_env_filter)
         .with_thread_ids(display_thread_ids)
         .finish();
-
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|_err| eprintln!("Unable to set global default subscriber"))
         .expect("Failed to set trace subscriber");

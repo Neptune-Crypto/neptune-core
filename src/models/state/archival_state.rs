@@ -78,8 +78,8 @@ impl ArchivalState {
 
     /// Return the database for active window. This should not be public.
     /// This should be fetched when constructing the mutator set, and when persisting the state
-    /// of the active window.
-    ///
+    /// of the active window. This is factored out to a separate function because it's used
+    /// multiple places.
     /// FIXME: Share `rusty_leveldb::Options` between `DB`s.
     fn active_window_db(data_dir: &DataDirectory) -> Result<DB> {
         let active_window_dir_path = data_dir.active_window_database_dir_path();
