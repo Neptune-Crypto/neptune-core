@@ -30,7 +30,7 @@ use crate::models::channel::{
     MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
 };
 
-const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 30;
+const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
 const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
