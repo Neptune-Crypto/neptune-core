@@ -46,7 +46,6 @@ fn make_devnet_block_template(
     }
 
     for devnet_input in transaction.inputs.iter() {
-        let _diff_indices = next_mutator_set_accumulator.remove(&devnet_input.removal_record);
         removals.push(devnet_input.removal_record.clone());
     }
 

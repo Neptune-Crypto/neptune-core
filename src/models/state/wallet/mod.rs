@@ -9,11 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_regular::DIGEST_LENGTH;
 
 use crate::models::blockchain::digest::{
     DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
@@ -921,7 +920,7 @@ mod wallet_tests {
         let wallet_state = get_mock_wallet_state(Some(random_wallet)).await;
         let pk = wallet_state.wallet.get_public_key();
         let msg_vec: Vec<BFieldElement> = wallet_state.wallet.secret_seed.values().to_vec();
-        let digest: Digest = Hash::hash_slice(&msg_vec);
+        let digest: Digest = Hash::hash_varlen(&msg_vec);
         let signature = wallet_state.wallet.sign_digest(digest);
         let msg_bytes: [u8; Digest::BYTES] = digest.into();
         let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])

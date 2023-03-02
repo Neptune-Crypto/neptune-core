@@ -26,7 +26,7 @@ use super::transaction::utxo::Utxo;
 use super::transaction::{Amount, Transaction};
 use crate::models::blockchain::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     pub hash: Digest,
     pub header: BlockHeader,
@@ -159,7 +159,6 @@ impl Block {
         }
 
         for devnet_input in new_transaction.inputs.iter() {
-            next_mutator_set_accumulator.remove(&devnet_input.removal_record);
             removals.push(devnet_input.removal_record.clone());
         }
 
@@ -336,7 +335,7 @@ impl Block {
         {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
-                "Read: {:?}. \nCalculated: {:?}",
+                "From Block\n{:?}. \n\n\nCalculated\n{:?}",
                 block_copy.body.next_mutator_set_accumulator, ms
             );
             return false;

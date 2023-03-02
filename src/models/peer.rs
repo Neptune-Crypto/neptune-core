@@ -101,7 +101,7 @@ impl PeerSanctionReason {
 
 /// This is object that gets stored in the database to record how well a peer
 /// at a certain IP behaves. A lower number is better.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
 pub struct PeerStanding {
     pub standing: u16,
     pub latest_sanction: Option<PeerSanctionReason>,
@@ -109,14 +109,6 @@ pub struct PeerStanding {
 }
 
 impl PeerStanding {
-    pub fn default() -> Self {
-        Self {
-            standing: 0,
-            latest_sanction: None,
-            timestamp_of_latest_sanction: None,
-        }
-    }
-
     /// Sanction peer and return latest standing score
     pub fn sanction(&mut self, reason: PeerSanctionReason) -> u16 {
         let (mut new_standing, overflow) = self.standing.overflowing_add(reason.to_severity());

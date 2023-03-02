@@ -961,7 +961,7 @@ impl PeerLoopHandler {
             .await
             .peer_standings
             .get(self.peer_address.ip())
-            .unwrap_or_else(PeerStanding::default);
+            .unwrap_or_default();
 
         // Add peer to peer map
         let new_peer = PeerInfo {
