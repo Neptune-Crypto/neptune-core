@@ -11,7 +11,6 @@ use super::{
 };
 use crossterm::event::{Event, KeyCode};
 use neptune_core::rpc_server::RPCClient;
-use rand::{thread_rng, RngCore};
 use tarpc::context;
 use tui::{
     layout::{Alignment, Margin},
@@ -50,34 +49,16 @@ impl ReceiveScreen {
         }
     }
 
-    fn random_address_for_testing() -> String {
-        let mut rng = thread_rng();
-        let address_length = 5 + (rng.next_u32() as usize % 9 + 1) * 100;
-        let mut address = "npt01".to_string();
-        let alphabet = "abcdefhjkmnpqrstuvwxyz2345678";
-        for _ in 5..address_length {
-            let index = rng.next_u32() as usize % alphabet.len();
-            address.push(alphabet.chars().collect::<Vec<char>>()[index]);
-        }
-        address
-    }
-
     fn populate_receiving_address_async(
         rpc_client: Arc<RPCClient>,
         data: Arc<Mutex<Option<String>>>,
     ) {
         if data.lock().unwrap().is_none() {
             tokio::spawn(async move {
-                // TODO:
-                //  - replace `block_height` with correct RPC call for requesting an already-generated but unused address
-                //  - rename `stand_in` to contain the address
-                //  - use the address instead of a randomly generated one
-                let _height = rpc_client
-                    .clone()
-                    .block_height(context::current())
-                    .await
-                    .unwrap();
-                *data.lock().unwrap() = Some(Self::random_address_for_testing());
+                // TODO: change to receive most recent wallet
+                let receiving_address =
+                    rpc_client.get_public_key(context::current()).await.unwrap();
+                *data.lock().unwrap() = Some(receiving_address.to_string());
             });
         }
     }
@@ -88,17 +69,9 @@ impl ReceiveScreen {
         generating: Arc<Mutex<bool>>,
     ) {
         tokio::spawn(async move {
-            // TODO:
-            //  - replace `block_height` with correct RPC call for requesting a new address
-            //  - rename `stand_in` to contain the address
-            //  - use the address instead of a randomly generated one
             *generating.lock().unwrap() = true;
-            let _height = rpc_client
-                .clone()
-                .block_height(context::current())
-                .await
-                .unwrap();
-            *data.lock().unwrap() = Some(Self::random_address_for_testing());
+            let receiving_address = rpc_client.get_public_key(context::current()).await.unwrap();
+            *data.lock().unwrap() = Some(receiving_address.to_string());
             *generating.lock().unwrap() = false;
         });
     }

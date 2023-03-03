@@ -156,8 +156,9 @@ impl OverviewScreen {
         loop {
             select! {
                 _ = &mut balance => {
-                    let b = rpc_client.get_balance(context::current()).await.unwrap();
-                    overview_data.lock().unwrap().balance = Some(b);
+                    if let Ok(b) = rpc_client.get_balance(context::current()).await {
+                        overview_data.lock().unwrap().balance = Some(b);
+                    }
                     reset_poller!(balance, Duration::from_secs(10));
                 },
 
