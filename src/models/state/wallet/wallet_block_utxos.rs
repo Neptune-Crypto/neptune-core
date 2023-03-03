@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 
-use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::Amount;
+use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
 
 /// The parts of a block that this wallet wants to keep track of,
 /// ie. the input and output UTXOs that share this wallet's public key.

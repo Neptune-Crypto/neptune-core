@@ -23,7 +23,7 @@ use self::mutator_set_update::MutatorSetUpdate;
 use self::transfer_block::TransferBlock;
 use super::digest::ordered_digest::OrderedDigest;
 use super::transaction::utxo::Utxo;
-use super::transaction::{Amount, Transaction};
+use super::transaction::{amount::Amount, Transaction};
 use crate::models::blockchain::shared::Hash;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,7 +54,7 @@ impl From<Block> for TransferBlock {
 
 impl Block {
     pub fn get_mining_reward(block_height: BlockHeight) -> Amount {
-        let mut reward: Amount = U32s::new([100, 0, 0, 0]);
+        let mut reward: Amount = Amount(U32s::new([100, 0, 0, 0]));
         let generation = block_height.get_generation();
         for _ in 0..generation {
             reward.div_two()

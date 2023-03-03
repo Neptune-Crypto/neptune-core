@@ -204,7 +204,6 @@ impl Wallet {
 #[cfg(test)]
 mod wallet_tests {
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-    use num_traits::One;
     use tracing_test::traced_test;
 
     use crate::config_models::network::Network;
@@ -212,8 +211,8 @@ mod wallet_tests {
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
     use crate::models::blockchain::shared::Hash;
+    use crate::models::blockchain::transaction::amount::Amount;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::blockchain::transaction::Amount;
     use crate::models::database::MonitoredUtxo;
     use crate::tests::shared::{
         add_output_to_block, add_unsigned_input_to_block, add_unsigned_input_to_block_ams,

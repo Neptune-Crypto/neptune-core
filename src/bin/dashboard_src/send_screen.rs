@@ -57,8 +57,8 @@ impl SendScreen {
 
     async fn check_and_pay_sequence(
         rpc_client: Arc<RPCClient>,
-        _address: String,
-        _amount: String,
+        address: String,
+        amount: String,
         notice_arc: Arc<Mutex<String>>,
         focus_arc: Arc<Mutex<SendScreenWidget>>,
         reset_me: Arc<Mutex<bool>>,
@@ -67,20 +67,42 @@ impl SendScreen {
         // *notice = "Validating input ...".to_string();
         *focus_arc.lock().await = SendScreenWidget::Notice;
         *notice_arc.lock().await = "Validating input ...".to_string();
-        let valid_address = rpc_client.block_height(context::current()).await.unwrap();
-        sleep(Duration::from_millis(200)).await;
-        if valid_address.to_string().is_empty() {
-            *notice_arc.lock().await = "Invalid address.".to_string();
-            *focus_arc.lock().await = SendScreenWidget::Address;
-            return;
-        }
+        let maybe_valid_address = rpc_client
+            .validate_address(context::current(), address)
+            .await
+            .unwrap();
+        let _valid_address = match maybe_valid_address {
+            Some(add) => add,
+            None => {
+                *notice_arc.lock().await = "Invalid address.".to_string();
+                *focus_arc.lock().await = SendScreenWidget::Address;
+                return;
+            }
+        };
 
         *notice_arc.lock().await = "Validated address; validating amount ...".to_string();
 
-        let valid_amount = rpc_client.block_height(context::current()).await.unwrap();
-        sleep(Duration::from_millis(200)).await;
-        if valid_amount.to_string().is_empty() {
-            *notice_arc.lock().await = "Invalid amount.".to_string();
+        let maybe_valid_amount = rpc_client
+            .validate_amount(context::current(), amount)
+            .await
+            .unwrap();
+        let valid_amount = match maybe_valid_amount {
+            Some(amt) => amt,
+            None => {
+                *notice_arc.lock().await = "Invalid amount.".to_string();
+                *focus_arc.lock().await = SendScreenWidget::Amount;
+                return;
+            }
+        };
+
+        *notice_arc.lock().await = "Validated amount; checking against balance ...".to_string();
+
+        let enough_balance = rpc_client
+            .amount_leq_balance(context::current(), valid_amount)
+            .await
+            .unwrap();
+        if !enough_balance {
+            *notice_arc.lock().await = "Insufficient balance.".to_string();
             *focus_arc.lock().await = SendScreenWidget::Amount;
             return;
         }
@@ -208,7 +230,7 @@ impl SendScreen {
                 },
                 DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(string)) => {
                     if let Ok(mut own_focus) = self.focus.try_lock() {
-                        self.address = string;
+                        self.address = string.trim().to_owned();
                         *own_focus = SendScreenWidget::Amount;
                         escalate_event = None;
                     } else {

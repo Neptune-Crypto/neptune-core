@@ -9,8 +9,11 @@ use std::{
 use bytesize::ByteSize;
 use chrono::DateTime;
 use itertools::Itertools;
-use neptune_core::models::blockchain::{block::block_height::BlockHeight, transaction::Amount};
+use neptune_core::models::blockchain::{
+    block::block_height::BlockHeight, transaction::amount::Amount,
+};
 use neptune_core::rpc_server::RPCClient;
+use num_traits::Zero;
 use tarpc::context;
 use tokio::{select, task::JoinHandle, time};
 use tui::{
@@ -57,7 +60,7 @@ pub struct OverviewData {
 impl OverviewData {
     pub fn test() -> Self {
         OverviewData {
-            balance: Some(Amount::new([1337, 0, 0, 0])),
+            balance: Some(Amount::zero()),
             confirmations: Some(17),
             synchronization: Some(99.5),
 

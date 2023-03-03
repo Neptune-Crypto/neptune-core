@@ -4,7 +4,7 @@ use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 
-use crate::models::blockchain::transaction::{utxo::Utxo, Amount};
+use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
 use crate::Hash;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

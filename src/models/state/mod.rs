@@ -1,6 +1,6 @@
 use anyhow::Result;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use num_traits::Zero;
+use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,7 +14,7 @@ use self::networking_state::NetworkingState;
 use self::wallet::wallet_state::WalletState;
 use super::blockchain::transaction::devnet_input::DevNetInput;
 use super::blockchain::transaction::utxo::Utxo;
-use super::blockchain::transaction::{Amount, Transaction};
+use super::blockchain::transaction::{amount::Amount, Transaction};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDBIterator;
@@ -95,9 +95,16 @@ impl GlobalState {
         }
 
         // Send remaining amount back to self
+        let change_amount = match input_amount.checked_sub(&total_spend) {
+            Some(amt) => amt,
+            None => {
+                tracing::error!("Cannot create change UTXO with negative amount.");
+                Amount::zero()
+            }
+        };
         if input_amount > total_spend {
             let change_utxo = Utxo {
-                amount: input_amount - total_spend,
+                amount: change_amount,
                 public_key: self.wallet_state.wallet.get_public_key(),
             };
             outputs.push((

@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
         }
 
         Command::Balance => {
-            let balance: BigUint = client.get_balance(context::current()).await?.into();
+            let balance: BigUint = client.get_balance(context::current()).await?.0.into();
             println!("{}", balance);
         }
 

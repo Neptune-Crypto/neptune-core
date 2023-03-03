@@ -36,13 +36,7 @@ impl Utxo {
 
 impl Hashable for Utxo {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        let amount_bfes: Vec<BFieldElement> = self
-            .amount
-            .as_ref()
-            .iter()
-            .copied()
-            .map(BFieldElement::from)
-            .collect();
+        let amount_bfes: Vec<BFieldElement> = self.amount.to_sequence();
 
         let mut pk_bfes = Vec::with_capacity(PUBLIC_KEY_LENGTH_IN_BFES);
         let pk_bfe_bytes: [u8; PUBLIC_KEY_LENGTH_IN_BYTES] = self.public_key.serialize();

@@ -8,7 +8,7 @@ use std::{
 use super::screen::Screen;
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
-use neptune_core::{models::blockchain::transaction::Amount, rpc_server::RPCClient};
+use neptune_core::{models::blockchain::transaction::amount::Amount, rpc_server::RPCClient};
 use tokio::time::sleep;
 use tokio::{select, task::JoinHandle};
 use tui::{

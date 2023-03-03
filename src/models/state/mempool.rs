@@ -13,7 +13,7 @@
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::{Amount, Transaction};
+use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 
 use bytesize::ByteSize;
 use get_size::GetSize;
@@ -490,7 +490,7 @@ mod tests {
         models::{
             blockchain::{
                 block::block_height::BlockHeight,
-                transaction::{utxo::Utxo, Amount, Transaction},
+                transaction::{amount::Amount, utxo::Utxo, Transaction},
             },
             shared::SIZE_1MB_IN_BYTES,
             state::wallet::{generate_secret_key, Wallet},

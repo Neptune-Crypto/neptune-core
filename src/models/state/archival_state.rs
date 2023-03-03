@@ -755,14 +755,13 @@ mod archival_state_tests {
     use super::*;
 
     use mutator_set_tf::util_types::mutator_set::active_window::ActiveWindow;
-    use num_traits::One;
     use rand::{thread_rng, RngCore};
     use rusty_leveldb::LdbIterator;
     use secp256k1::Secp256k1;
     use tracing_test::traced_test;
 
     use crate::config_models::network::Network;
-    use crate::models::blockchain::transaction::{utxo::Utxo, Amount};
+    use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::blockchain_state::BlockchainState;
     use crate::models::state::light_state::LightState;

@@ -3,6 +3,7 @@ use futures::executor;
 use futures::future::{self, Ready};
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
@@ -10,7 +11,7 @@ use twenty_first::shared_math::rescue_prime_digest::Digest;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::{Amount, Transaction};
+use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::wallet_status::WalletStatus;
@@ -40,6 +41,15 @@ pub trait RPC {
 
     /// Send coins
     async fn send(utxos: Vec<Utxo>) -> bool;
+
+    /// Determine whether the user-supplied string is a valid address
+    async fn validate_address(address: String) -> Option<secp256k1::PublicKey>;
+
+    /// Determine whether the user-supplied string is a valid amount
+    async fn validate_amount(amount: String) -> Option<Amount>;
+
+    /// Determine whether the given amount is less than (or equal to) the balance
+    async fn amount_leq_balance(amount: Amount) -> bool;
 
     // Gracious shutdown.
     async fn shutdown() -> bool;
@@ -72,6 +82,9 @@ impl RPC for NeptuneRPCServer {
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
     type SendFut = Ready<bool>;
+    type ValidateAddressFut = Ready<Option<secp256k1::PublicKey>>;
+    type ValidateAmountFut = Ready<Option<Amount>>;
+    type AmountLeqBalanceFut = Ready<bool>;
     type ShutdownFut = Ready<bool>;
     type GetBalanceFut = Ready<Amount>;
     type GetWalletStatusFut = Ready<WalletStatus>;
@@ -183,6 +196,49 @@ impl RPC for NeptuneRPCServer {
 
         // 3. Send acknowledgement to client.
         future::ready(response.is_ok())
+    }
+
+    fn validate_address(
+        self,
+        _ctx: context::Context,
+        address_string: String,
+    ) -> Self::ValidateAddressFut {
+        let ret = if let Ok(address) = secp256k1::PublicKey::from_str(&address_string) {
+            Some(address)
+        } else {
+            None
+        };
+        tracing::debug!(
+            "Responding to address validation request of {address_string}: {}",
+            ret.is_some()
+        );
+        future::ready(ret)
+    }
+
+    fn validate_amount(
+        self,
+        _ctx: context::Context,
+        amount_string: String,
+    ) -> Self::ValidateAmountFut {
+        // parse string
+        let amount = if let Ok(amt) = Amount::from_str(&amount_string) {
+            amt
+        } else {
+            return future::ready(None);
+        };
+
+        // return amount
+        future::ready(Some(amount))
+    }
+
+    fn amount_leq_balance(
+        self,
+        _ctx: context::Context,
+        amount: Amount,
+    ) -> Self::AmountLeqBalanceFut {
+        // test inequality
+        let balance = executor::block_on(self.state.wallet_state.get_balance());
+        future::ready(amount <= balance)
     }
 
     fn shutdown(self, _: context::Context) -> Self::ShutdownFut {

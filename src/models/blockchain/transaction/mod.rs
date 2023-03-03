@@ -1,3 +1,4 @@
+pub mod amount;
 pub mod devnet_input;
 pub mod transaction_kernel;
 pub mod utxo;
@@ -20,10 +21,10 @@ use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipPr
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
-use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 
+use self::amount::Amount;
 use self::devnet_input::DevNetInput;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
@@ -31,9 +32,6 @@ use super::block::Block;
 use super::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
 use super::shared::Hash;
 use crate::models::state::wallet::Wallet;
-
-pub const AMOUNT_SIZE_FOR_U32: usize = 4;
-pub type Amount = U32s<AMOUNT_SIZE_FOR_U32>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Transaction {
@@ -368,7 +366,7 @@ impl Transaction {
     pub fn fee_density(&self) -> BigRational {
         let transaction_as_bytes = bincode::serialize(&self).unwrap();
         let transaction_size = BigInt::from(transaction_as_bytes.get_size());
-        let transaction_fee = BigInt::from(BigUint::from(self.fee));
+        let transaction_fee = BigInt::from(BigUint::from(self.fee.0));
         BigRational::new_raw(transaction_fee, transaction_size)
     }
 }
@@ -403,7 +401,7 @@ mod transaction_tests {
 
         assert!(coinbase_transaction.is_valid_for_devnet(coinbase_amount));
 
-        let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
+        let input_1 = make_mock_unsigned_devnet_input(<i32 as Into<Amount>>::into(42), &wallet_1);
         let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
 
         assert!(!transaction_1.is_valid_for_devnet(None));

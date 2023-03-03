@@ -5,6 +5,7 @@ use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::digest::ordered_digest::*;
 use crate::models::blockchain::shared::*;
+use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
@@ -176,7 +177,7 @@ fn make_coinbase_transaction(
         inputs: vec![],
         outputs: vec![(coinbase_utxo, output_randomness)],
         public_scripts: vec![],
-        fee: U32s::zero(),
+        fee: Amount::zero(),
         timestamp,
         authority_proof: None,
     }

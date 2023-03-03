@@ -48,8 +48,8 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
+use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::devnet_input::DevNetInput;
-use crate::models::blockchain::transaction::Amount;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
@@ -586,7 +586,7 @@ pub fn make_mock_transaction(
         inputs,
         outputs,
         public_scripts: vec![],
-        fee: U32s::zero(),
+        fee: Amount::zero(),
         timestamp,
         authority_proof: None,
     }

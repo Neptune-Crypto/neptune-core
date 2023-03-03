@@ -3,7 +3,7 @@ use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
-use num_traits::Zero;
+use num_traits::{CheckedSub, Zero};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
@@ -22,7 +22,7 @@ use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::{Amount, Transaction};
+use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
 use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::Hash;
@@ -406,7 +406,13 @@ impl WalletState {
             .map(|wallet_block| wallet_block.get_io_sums())
             .reduce(|a, b| a + b)
             .unwrap_or_default();
-        sums.output_sum - sums.input_sum
+        match sums.output_sum.checked_sub(&sums.input_sum) {
+            Some(amount) => amount,
+            None => {
+                tracing::error!("Sum of outputs seems greater than sum of inputs, but cannot be.");
+                Amount::zero()
+            }
+        }
     }
 
     fn get_wallet_status_with_lock(
