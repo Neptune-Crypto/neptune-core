@@ -177,8 +177,8 @@ impl SendScreen {
                         }
                     }
                     KeyCode::Up => {
-                        if let Ok(own_focus) = self.focus.try_lock() {
-                            match own_focus.to_owned() {
+                        if let Ok(mut own_focus) = self.focus.try_lock() {
+                            *own_focus = match own_focus.to_owned() {
                                 SendScreenWidget::Address => SendScreenWidget::Ok,
                                 SendScreenWidget::Amount => SendScreenWidget::Address,
                                 SendScreenWidget::Ok => SendScreenWidget::Amount,
@@ -190,8 +190,8 @@ impl SendScreen {
                         }
                     }
                     KeyCode::Down => {
-                        if let Ok(own_focus) = self.focus.try_lock() {
-                            match own_focus.to_owned() {
+                        if let Ok(mut own_focus) = self.focus.try_lock() {
+                            *own_focus = match own_focus.to_owned() {
                                 SendScreenWidget::Address => SendScreenWidget::Amount,
                                 SendScreenWidget::Amount => SendScreenWidget::Ok,
                                 SendScreenWidget::Ok => SendScreenWidget::Address,
@@ -217,7 +217,9 @@ impl SendScreen {
                     KeyCode::Backspace => {
                         if let Ok(own_focus) = self.focus.try_lock() {
                             if own_focus.to_owned() == SendScreenWidget::Amount {
-                                self.amount.drain(self.amount.len() - 1..);
+                                if !self.amount.is_empty() {
+                                    self.amount.drain(self.amount.len() - 1..);
+                                }
                                 escalate_event = None;
                             }
                         } else {
