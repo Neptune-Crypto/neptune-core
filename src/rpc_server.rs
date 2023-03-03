@@ -195,8 +195,8 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_balance(self, _context: tarpc::context::Context) -> Self::GetBalanceFut {
-        let res = executor::block_on(self.state.wallet_state.get_balance());
-        future::ready(res)
+        let amount = executor::block_on(self.state.wallet_state.get_balance());
+        future::ready(amount)
     }
 
     fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {

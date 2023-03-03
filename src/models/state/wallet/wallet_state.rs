@@ -15,7 +15,6 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
 
-use super::wallet_block_utxos::WalletBlockIOSums;
 use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::Wallet;
 use crate::config_models::data_directory::DataDirectory;
@@ -398,10 +397,9 @@ impl WalletState {
     }
 
     pub async fn get_balance(&self) -> Amount {
-        let sums: WalletBlockIOSums = self
-            .wallet_db
-            .lock()
-            .await
+        let mut wallet_db_lock = self.wallet_db.lock().await;
+        debug!("Acquired lock on wallet db.");
+        let sums = wallet_db_lock
             .new_iter()
             .filter(|(_key, value)| value.is_wallet_block_utxos())
             .map(|(_key, value)| value.as_wallet_block_utxos())
