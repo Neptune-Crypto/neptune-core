@@ -43,8 +43,9 @@ where
 {
     /// Open or create a new or existing database
     fn new(db_path: &Path, options: rusty_leveldb::Options) -> Result<Self> {
+        let database = DB::open(db_path, options)?;
         let database = Self {
-            database: DB::open(db_path, options)?,
+            database,
             _key: PhantomData,
             _value: PhantomData,
         };

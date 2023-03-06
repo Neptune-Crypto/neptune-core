@@ -6,8 +6,9 @@ use super::{
     screen::Screen,
 };
 use crossterm::event::{Event, KeyCode};
-use neptune_core::rpc_server::RPCClient;
+use neptune_core::{models::blockchain::transaction::amount::Amount, rpc_server::RPCClient};
 
+use num_traits::Zero;
 use tarpc::context;
 use tokio::{sync::Mutex, time::sleep};
 use tui::{
@@ -63,15 +64,13 @@ impl SendScreen {
         focus_arc: Arc<Mutex<SendScreenWidget>>,
         reset_me: Arc<Mutex<bool>>,
     ) {
-        // let mut notice = notice_arc.lock().await;
-        // *notice = "Validating input ...".to_string();
         *focus_arc.lock().await = SendScreenWidget::Notice;
         *notice_arc.lock().await = "Validating input ...".to_string();
         let maybe_valid_address = rpc_client
             .validate_address(context::current(), address)
             .await
             .unwrap();
-        let _valid_address = match maybe_valid_address {
+        let valid_address = match maybe_valid_address {
             Some(add) => add,
             None => {
                 *notice_arc.lock().await = "Invalid address.".to_string();
@@ -109,16 +108,23 @@ impl SendScreen {
 
         *notice_arc.lock().await = "Validated inputs; sending ...".to_string();
 
-        let send_result = rpc_client.block_height(context::current()).await.unwrap();
-        sleep(Duration::from_millis(200)).await;
-        if send_result.to_string().is_empty() {
+        // TODO: Let user specify this number
+        let fee = Amount::zero();
+        let send_result = rpc_client
+            .send(context::current(), valid_amount, valid_address, fee)
+            .await
+            .unwrap();
+
+        if send_result.is_none() {
             *notice_arc.lock().await = "Could not send due to error.".to_string();
             *focus_arc.lock().await = SendScreenWidget::Address;
             return;
         }
 
         *notice_arc.lock().await = "Payment broadcast!".to_string();
+
         sleep(Duration::from_secs(3)).await;
+
         *notice_arc.lock().await = "".to_string();
         *focus_arc.lock().await = SendScreenWidget::Address;
         *reset_me.lock().await = true;

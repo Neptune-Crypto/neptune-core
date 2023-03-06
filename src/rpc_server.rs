@@ -7,9 +7,11 @@ use std::str::FromStr;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
@@ -40,7 +42,7 @@ pub trait RPC {
     async fn clear_ip_standing(ip: IpAddr);
 
     /// Send coins
-    async fn send(utxos: Vec<Utxo>) -> bool;
+    async fn send(amount: Amount, address: secp256k1::PublicKey, fee: Amount) -> Option<Digest>;
 
     /// Determine whether the user-supplied string is a valid address
     async fn validate_address(address: String) -> Option<secp256k1::PublicKey>;
@@ -81,7 +83,7 @@ impl RPC for NeptuneRPCServer {
     type HeadsFut = Ready<Vec<Digest>>;
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
-    type SendFut = Ready<bool>;
+    type SendFut = Ready<Option<Digest>>;
     type ValidateAddressFut = Ready<Option<secp256k1::PublicKey>>;
     type ValidateAmountFut = Ready<Option<Amount>>;
     type AmountLeqBalanceFut = Ready<bool>;
@@ -168,7 +170,13 @@ impl RPC for NeptuneRPCServer {
         future::ready(())
     }
 
-    fn send(self, _ctx: context::Context, recipient_utxos: Vec<Utxo>) -> Self::SendFut {
+    fn send(
+        self,
+        _ctx: context::Context,
+        amount: Amount,
+        address: secp256k1::PublicKey,
+        fee: Amount,
+    ) -> Self::SendFut {
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
@@ -177,12 +185,14 @@ impl RPC for NeptuneRPCServer {
             self.state.wallet_state.wallet.get_public_key()
         );
 
+        let recipient_utxos: Vec<Utxo> = [Utxo::new(amount, address)].to_vec();
+
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
         // to be in control of this. But we could add an endpoint to get recommended fee
         // density.
         let transaction_res: Result<Transaction> =
-            executor::block_on(self.state.create_transaction(recipient_utxos, 1.into()));
+            executor::block_on(self.state.create_transaction(recipient_utxos, fee));
         let transaction = match transaction_res {
             Ok(tx) => tx,
             Err(err) => panic!("Could not create transaction: {}", err),
@@ -191,11 +201,14 @@ impl RPC for NeptuneRPCServer {
         // 2. Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
             self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(transaction)),
+                .send(RPCServerToMain::Send(transaction.clone())),
         );
 
-        // 3. Send acknowledgement to client.
-        future::ready(response.is_ok())
+        future::ready(if response.is_ok() {
+            Some(Hash::hash(&transaction))
+        } else {
+            None
+        })
     }
 
     fn validate_address(

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
@@ -51,12 +51,15 @@ pub struct GlobalState {
 }
 
 impl GlobalState {
-    /// Create a transaction from own UTXOs. A change UTXO will be added if needed, the caller
-    /// does not need to supply this. The caller must however supply the fee that they are willing
-    /// to spend to have this transaction mined.
+    /// Create a transaction that sends coins to the given
+    /// `recipient_utxos` from some selection of owned UTXOs.
+    /// A change UTXO will be added if needed; the caller
+    /// does not need to supply this. The caller must supply
+    /// the fee that they are willing to spend to have this
+    /// transaction mined.
     pub async fn create_transaction(
         &self,
-        output_utxos: Vec<Utxo>,
+        recipient_utxos: Vec<Utxo>,
         fee: Amount,
     ) -> Result<Transaction> {
         // acquire a lock on `WalletState` to prevent it from being updated
@@ -66,7 +69,7 @@ impl GlobalState {
         let light_state_lock = self.chain.light_state.latest_block.lock().await;
 
         // Get the UTXOs required for this transaction
-        let total_spend: Amount = output_utxos.iter().map(|x| x.amount).sum::<Amount>() + fee;
+        let total_spend: Amount = recipient_utxos.iter().map(|x| x.amount).sum::<Amount>() + fee;
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
             .wallet_state
             .allocate_sufficient_input_funds_with_lock(&mut wallet_db_lock, total_spend)?;
@@ -89,7 +92,7 @@ impl GlobalState {
         }
 
         let mut outputs: Vec<(Utxo, Digest)> = vec![];
-        for output_utxo in output_utxos {
+        for output_utxo in recipient_utxos {
             let output_randomness = self.wallet_state.next_output_randomness().await;
             outputs.push((output_utxo, output_randomness));
         }
@@ -98,8 +101,7 @@ impl GlobalState {
         let change_amount = match input_amount.checked_sub(&total_spend) {
             Some(amt) => amt,
             None => {
-                tracing::error!("Cannot create change UTXO with negative amount.");
-                Amount::zero()
+                bail!("Cannot create change UTXO with negative amount.");
             }
         };
         if input_amount > total_spend {

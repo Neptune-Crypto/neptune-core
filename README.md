@@ -29,14 +29,14 @@ Reference implementation for the Neptune protocol.
 During development you can use `cargo` instead of `make` for the above commands. Using `make` makes the compiler treat all warnings as errors, which we want for higher code quality. To send arguments to the Neptune Core program in a development setting use `cargo run -- [<flag> [<value>] [<flag> [<value>]]...]`, e.g: `cargo run -- --peers 8.8.101.69:9798 --peers 8.8.2.123:9798 --mine --listen-addr 10.64.111.55`.
 
 ## RPC
-This software includes an RPC client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available RPC commands, execute 
+This software includes an RPC CLI client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available RPC commands, execute 
 ```
-cargo run --bin rpc_client -- --help
+cargo run --bin rpc_cli -- --help
 ```
 
 To get e.g. the block height of a running daemon, execute
 ```
-cargo run --bin rpc_client -- --server-addr 127.0.0.1:<rpc_port> block-height
+cargo run --bin rpc_cli -- --server-addr 127.0.0.1:<rpc_port> block-height
 ```
 
 ## Logging

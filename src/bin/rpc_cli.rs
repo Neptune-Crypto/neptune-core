@@ -1,12 +1,13 @@
 use anyhow::Result;
 use clap::Parser;
 
+use neptune_core::models::blockchain::transaction::amount::Amount;
 use num_bigint::BigUint;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
-use neptune_core::models::blockchain::transaction::utxo::Utxo;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::rpc_server::RPCClient;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
@@ -16,11 +17,21 @@ enum Command {
     BlockHeight,
     GetPeerInfo,
     Head,
-    Heads { n: usize },
-    GetHeader { hash: Digest },
+    Heads {
+        n: usize,
+    },
+    GetHeader {
+        hash: Digest,
+    },
     ClearAllStandings,
-    ClearIpStanding { ip: IpAddr },
-    Send { unparsed_send_argument: String },
+    ClearIpStanding {
+        ip: IpAddr,
+    },
+    Send {
+        amount: Amount,
+        address: String,
+        fee: Amount,
+    },
     Shutdown,
     Balance,
     WalletStatus,
@@ -86,15 +97,17 @@ async fn main() -> Result<()> {
             println!("Cleared standing of {}", ip);
         }
         Command::Send {
-            unparsed_send_argument,
+            amount,
+            address,
+            fee,
         } => {
             // Parse on client
-            let utxos = tracing::debug_span!("Parsing TxSpec")
-                .in_scope(|| serde_json::from_str::<Vec<Utxo>>(&unparsed_send_argument))
-                .unwrap();
+            let address = secp256k1::PublicKey::from_str(&address)?;
 
-            client.send(context::current(), utxos.clone()).await?;
-            println!("Send-command issued with argument: {:?}.", utxos);
+            client
+                .send(context::current(), amount, address, fee)
+                .await?;
+            println!("Send-command issues. Recipient: {address}; amount: {amount}");
         }
         Command::Shutdown => {
             println!("Sending shutdown-command.");
