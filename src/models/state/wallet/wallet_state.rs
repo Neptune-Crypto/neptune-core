@@ -7,7 +7,7 @@ use num_traits::{CheckedSub, Zero};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
@@ -24,7 +24,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
-use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
+use crate::models::state::wallet::wallet_block_utxos::{WalletBlockIOSums, WalletBlockUtxos};
 use crate::Hash;
 
 /// A wallet indexes its input and output UTXOs after blockhashes
@@ -49,8 +49,15 @@ impl WalletState {
         let wallet_db = RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
             &data_dir.wallet_database_dir_path(),
             rusty_leveldb::Options::default(),
-        )
-        .unwrap();
+        );
+
+        let wallet_db = match wallet_db {
+            Ok(wdb) => wdb,
+            Err(err) => {
+                error!("Could not open wallet database: {err:?}");
+                panic!();
+            }
+        };
         let wallet_db = Arc::new(TokioMutex::new(wallet_db));
 
         // Create or connect to DB for output count
@@ -397,15 +404,22 @@ impl WalletState {
     }
 
     pub async fn get_balance(&self) -> Amount {
-        let mut wallet_db_lock = self.wallet_db.lock().await;
-        debug!("Acquired lock on wallet db.");
-        let sums = wallet_db_lock
-            .new_iter()
-            .filter(|(_key, value)| value.is_wallet_block_utxos())
-            .map(|(_key, value)| value.as_wallet_block_utxos())
-            .map(|wallet_block| wallet_block.get_io_sums())
-            .reduce(|a, b| a + b)
-            .unwrap_or_default();
+        debug!("get_balance: Attempting to acquire lock on wallet DB.");
+
+        // Limit scope of wallet DB lock to release it ASAP
+        let sums: WalletBlockIOSums = {
+            let mut wallet_db_lock = self.wallet_db.lock().await;
+            debug!("get_balance: Acquired lock on wallet DB.");
+            wallet_db_lock
+                .new_iter()
+                .filter(|(_key, value)| value.is_wallet_block_utxos())
+                .map(|(_key, value)| value.as_wallet_block_utxos())
+                .map(|wallet_block| wallet_block.get_io_sums())
+                .reduce(|a, b| a + b)
+                .unwrap_or_default()
+        };
+
+        debug!("get_balance: Released wallet DB lock");
         match sums.output_sum.checked_sub(&sums.input_sum) {
             Some(amount) => amount,
             None => {
