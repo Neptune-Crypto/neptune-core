@@ -1069,14 +1069,14 @@ impl MainLoopHandler {
         // Stop mining
         let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
-        // Flush all databases
-        self.flush_databases().await?;
-
         // Send 'bye' message to alle peers.
         let _result = self
             .main_to_peer_broadcast_tx
             .send(MainToPeerThread::DisconnectAll());
         debug!("sent bye");
+
+        // Flush all databases
+        self.flush_databases().await?;
 
         //TODO: wait for child processes to finish - using stored tokio JoinHandles.
 

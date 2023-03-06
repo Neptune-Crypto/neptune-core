@@ -219,7 +219,13 @@ mod wallet_tests {
         get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
     };
 
+    use super::wallet_state::WalletState;
     use super::*;
+
+    async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
+        let mut lock = wallet_state.wallet_db.lock().await;
+        wallet_state.get_monitored_utxos_with_lock(&mut lock)
+    }
 
     #[tokio::test]
     async fn output_digest_changes_test() {
@@ -242,7 +248,7 @@ mod wallet_tests {
         // to the wallet state at initialization.
         let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
         let monitored_utxos_premine_wallet =
-            wallet_state_premine_recipient.get_monitored_utxos().await;
+            get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
             1,
             monitored_utxos_premine_wallet.len(),
@@ -256,7 +262,7 @@ mod wallet_tests {
 
         let random_wallet = Wallet::new(generate_secret_key());
         let wallet_state_other = get_mock_wallet_state(Some(random_wallet)).await;
-        let monitored_utxos_other = wallet_state_other.get_monitored_utxos().await;
+        let monitored_utxos_other = get_monitored_utxos(&wallet_state_other).await;
         assert!(
             monitored_utxos_other.is_empty(),
             "Monitored UTXO list must be empty at init if wallet is not premine-wallet"
@@ -278,7 +284,7 @@ mod wallet_tests {
             )?;
         }
 
-        let monitored_utxos = wallet_state_premine_recipient.get_monitored_utxos().await;
+        let monitored_utxos = get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
             1,
             monitored_utxos.len(),
@@ -306,7 +312,7 @@ mod wallet_tests {
         let wallet_state = get_mock_wallet_state(Some(wallet.clone())).await;
         let other_wallet = Wallet::new(generate_secret_key());
 
-        let mut monitored_utxos = wallet_state.get_monitored_utxos().await;
+        let mut monitored_utxos = get_monitored_utxos(&wallet_state).await;
         assert!(
             monitored_utxos.is_empty(),
             "Monitored UTXO list must be empty at init"
@@ -318,7 +324,7 @@ mod wallet_tests {
             &block_1,
             &mut wallet_state.wallet_db.lock().await,
         )?;
-        monitored_utxos = wallet_state.get_monitored_utxos().await;
+        monitored_utxos = get_monitored_utxos(&wallet_state).await;
         assert_eq!(
             1,
             monitored_utxos.len(),
@@ -343,7 +349,7 @@ mod wallet_tests {
         // under this block as tip
         let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
         let mut block_3 = make_mock_block(&block_2, None, other_wallet.get_public_key());
-        monitored_utxos = wallet_state.get_monitored_utxos().await;
+        monitored_utxos = get_monitored_utxos(&wallet_state).await;
         {
             let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
             let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
@@ -368,7 +374,7 @@ mod wallet_tests {
             &block_3,
             &mut wallet_state.wallet_db.lock().await,
         )?;
-        monitored_utxos = wallet_state.get_monitored_utxos().await;
+        monitored_utxos = get_monitored_utxos(&wallet_state).await;
 
         {
             let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
@@ -617,7 +623,7 @@ mod wallet_tests {
         assert!(block_1.is_valid_for_devnet(&genesis_block));
 
         // Update wallet state with block_1
-        let mut monitored_utxos = own_wallet_state.get_monitored_utxos().await;
+        let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert!(
             monitored_utxos.is_empty(),
             "List of monitored UTXOs must be empty prior to updating wallet state"
@@ -629,7 +635,7 @@ mod wallet_tests {
 
         // Verify that update added 4 UTXOs to list of monitored transactions:
         // three as regular outputs, and one as coinbase UTXO
-        monitored_utxos = own_wallet_state.get_monitored_utxos().await;
+        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert_eq!(
             4,
             monitored_utxos.len(),
@@ -666,7 +672,7 @@ mod wallet_tests {
         }
 
         let mut block_18 = next_block;
-        monitored_utxos = own_wallet_state.get_monitored_utxos().await;
+        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert_eq!(
             4 + 17,
             monitored_utxos.len(),
@@ -692,7 +698,10 @@ mod wallet_tests {
         );
 
         // Check that `WalletStatus` is returned correctly
-        let wallet_status = own_wallet_state.get_wallet_status().await;
+        let wallet_status = {
+            let mut lock = own_wallet_state.wallet_db.lock().await;
+            own_wallet_state.get_wallet_status_with_lock(&mut lock)
+        };
         assert_eq!(
             21,
             wallet_status.synced_unspent.len(),
@@ -718,8 +727,7 @@ mod wallet_tests {
             &block_2_b,
             &mut own_wallet_state.wallet_db.lock().await,
         )?;
-        let monitored_utxos_at_2b: Vec<_> = own_wallet_state
-            .get_monitored_utxos()
+        let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.has_synced_membership_proof)
@@ -751,8 +759,7 @@ mod wallet_tests {
             &block_19,
             &mut own_wallet_state.wallet_db.lock().await,
         )?;
-        let monitored_utxos_block_19: Vec<_> = own_wallet_state
-            .get_monitored_utxos()
+        let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|monitored_utxo| monitored_utxo.has_synced_membership_proof)
@@ -799,8 +806,7 @@ mod wallet_tests {
             &mut own_wallet_state.wallet_db.lock().await,
         )?;
 
-        let monitored_utxos_3b: Vec<_> = own_wallet_state
-            .get_monitored_utxos()
+        let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.has_synced_membership_proof)
@@ -852,8 +858,7 @@ mod wallet_tests {
         )?;
 
         // Verify that we have two membership proofs of `forked_utxo`: one matching block20 and one matching block_3b
-        let monitored_utxos_20: Vec<_> = own_wallet_state
-            .get_monitored_utxos()
+        let monitored_utxos_20: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.has_synced_membership_proof)

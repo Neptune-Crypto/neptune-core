@@ -269,8 +269,12 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {
-        let res = executor::block_on(self.state.wallet_state.get_wallet_status());
-        future::ready(res)
+        let mut lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
+        let wallet_status = self
+            .state
+            .wallet_state
+            .get_wallet_status_with_lock(&mut lock);
+        future::ready(wallet_status)
     }
 
     fn get_header(

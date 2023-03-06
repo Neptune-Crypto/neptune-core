@@ -3,9 +3,10 @@ use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
-use num_traits::{CheckedSub, Zero};
+use num_traits::Zero;
 use std::error::Error;
 use std::sync::Arc;
+use std::time::SystemTime;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -24,7 +25,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::database::{MonitoredUtxo, WalletDbKey, WalletDbValue};
-use crate::models::state::wallet::wallet_block_utxos::{WalletBlockIOSums, WalletBlockUtxos};
+use crate::models::state::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::Hash;
 
 /// A wallet indexes its input and output UTXOs after blockhashes
@@ -76,10 +77,15 @@ impl WalletState {
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
         // from it would be unspendable. This should only be done *once* though
-        let mut wallet_db_lock = wallet_db.lock().await;
-        if wallet_db_lock.get(WalletDbKey::SyncDigest).is_none() {
-            ret.update_wallet_state_with_new_block(&Block::genesis_block(), &mut wallet_db_lock)
+        {
+            let mut wallet_db_lock = wallet_db.lock().await;
+            if wallet_db_lock.get(WalletDbKey::SyncDigest).is_none() {
+                ret.update_wallet_state_with_new_block(
+                    &Block::genesis_block(),
+                    &mut wallet_db_lock,
+                )
                 .expect("Updating wallet state with genesis block must succeed");
+            }
         }
 
         ret
@@ -189,7 +195,7 @@ impl WalletState {
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
-            if utxo.matches_pubkey(self.wallet.get_public_key()) {
+            if utxo.matches_pubkey(my_pub_key) {
                 // TODO: Change this logging to use `Display` for `Amount` once functionality is merged from t-f
                 info!(
                     "Received UTXO in block {}, height {}: value = {:?}",
@@ -388,7 +394,7 @@ impl WalletState {
         Ok(())
     }
 
-    fn get_monitored_utxos_with_lock(
+    pub fn get_monitored_utxos_with_lock(
         &self,
         lock: &mut RustyLevelDB<WalletDbKey, WalletDbValue>,
     ) -> Vec<MonitoredUtxo> {
@@ -397,39 +403,34 @@ impl WalletState {
             .unwrap_or_default()
     }
 
-    // Blocking call to get the monitored UTXOs.
-    pub async fn get_monitored_utxos(&self) -> Vec<MonitoredUtxo> {
-        let mut lock = self.wallet_db.lock().await;
-        self.get_monitored_utxos_with_lock(&mut lock)
-    }
-
     pub async fn get_balance(&self) -> Amount {
         debug!("get_balance: Attempting to acquire lock on wallet DB.");
 
         // Limit scope of wallet DB lock to release it ASAP
-        let sums: WalletBlockIOSums = {
+        let sum: Amount = {
+            // TODO: Consider using `try_lock` here to not hog the wallet_db lock
+            // let mut wallet_db_l = self.wallet_db.try_lock();
             let mut wallet_db_lock = self.wallet_db.lock().await;
-            debug!("get_balance: Acquired lock on wallet DB.");
-            wallet_db_lock
-                .new_iter()
-                .filter(|(_key, value)| value.is_wallet_block_utxos())
-                .map(|(_key, value)| value.as_wallet_block_utxos())
-                .map(|wallet_block| wallet_block.get_io_sums())
-                .reduce(|a, b| a + b)
-                .unwrap_or_default()
+
+            let tick = SystemTime::now();
+            let wallet_status = self.get_wallet_status_with_lock(&mut wallet_db_lock);
+            let ret = wallet_status.synced_unspent_amount + wallet_status.unsynced_unspent_amount;
+            debug!(
+                "Computed balance of {} UTXOs in {:?}",
+                wallet_status.synced_unspent.len()
+                    + wallet_status.synced_spent.len()
+                    + wallet_status.unsynced_spent.len()
+                    + wallet_status.unsynced_unspent.len(),
+                tick.elapsed(),
+            );
+            ret
         };
 
         debug!("get_balance: Released wallet DB lock");
-        match sums.output_sum.checked_sub(&sums.input_sum) {
-            Some(amount) => amount,
-            None => {
-                tracing::error!("Sum of outputs seems greater than sum of inputs, but cannot be.");
-                Amount::zero()
-            }
-        }
+        sum
     }
 
-    fn get_wallet_status_with_lock(
+    pub fn get_wallet_status_with_lock(
         &self,
         lock: &mut RustyLevelDB<WalletDbKey, WalletDbValue>,
     ) -> WalletStatus {
@@ -485,19 +486,6 @@ impl WalletState {
             unsynced_spent_amount: unsynced_spent.iter().map(|x| x.1.amount).sum(),
             unsynced_spent,
         }
-    }
-
-    pub async fn get_wallet_status(&self) -> WalletStatus {
-        let mut lock = self.wallet_db.lock().await;
-        self.get_wallet_status_with_lock(&mut lock)
-    }
-
-    #[allow(dead_code)]
-    async fn forget_block(&self, block_hash: Digest) {
-        self.wallet_db
-            .lock()
-            .await
-            .delete(WalletDbKey::WalletBlockUtxos(block_hash));
     }
 
     /// Fetch the output counter from the database and increase the counter by one
