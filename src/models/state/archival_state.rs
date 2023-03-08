@@ -664,6 +664,11 @@ impl ArchivalState {
                 .get_block_with_lock(block_db_lock, ms_block_rollback_digest)
                 .expect("Fetching block must succeed");
 
+            debug!(
+                "Updating mutator set: rolling back block with height {}",
+                roll_back_block.header.height
+            );
+
             // Roll back all addition records contained in block
             for addition_record in roll_back_block
                 .body
@@ -672,6 +677,10 @@ impl ArchivalState {
                 .iter()
                 .rev()
             {
+                assert!(
+                    ams_lock.add_is_reversible(addition_record),
+                    "Addition record must be in sync with block being rolled back."
+                );
                 ams_lock.revert_add(addition_record);
             }
 
@@ -732,7 +741,8 @@ impl ArchivalState {
             .swbf_active
             .store_to_database(active_window_db);
 
-        // Sanity check that archival mutator set has been updated consitently with the new block
+        // Sanity check that archival mutator set has been updated consistently with the new block
+        debug!("sanity check: was AMS updated consistently with new block?");
         let mut new_block_copy = new_block.clone();
         assert_eq!(
             new_block_copy
