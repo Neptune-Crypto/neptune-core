@@ -296,6 +296,14 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         }
     }
 
+    /// Determine whether the given `AdditionRecord` can be reversed.
+    /// Equivalently, determine if it was added last.
+    pub fn add_is_reversible(&mut self, addition_record: &AdditionRecord) -> bool {
+        let leaf_index = self.set_commitment.aocl.count_leaves() - 1;
+        let digest = self.set_commitment.aocl.get_leaf(leaf_index);
+        addition_record.canonical_commitment == digest
+    }
+
     /// Revert the `AdditionRecord`s in a block by
     ///
     /// - Removing the last leaf in the append-only commitment list
