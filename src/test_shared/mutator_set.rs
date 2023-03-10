@@ -8,16 +8,40 @@ use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::util_types::storage_vec::RustyLevelDbVec;
+use twenty_first::util_types::storage_vec::{RustyLevelDbVec, StorageVec};
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
-use crate::util_types::mutator_set::archival_mutator_set::{
-    ArchivalMutatorSet, AOCL_KEY, CHUNK_KEY, SWBFI_KEY,
-};
+use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::rustyleveldb_mutator_set::{AOCL_KEY, CHUNK_KEY, SWBFI_KEY};
+use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+
+pub fn get_all_indices_with_duplicates<
+    H: AlgebraicHasher,
+    MmrStorage: StorageVec<Digest>,
+    ChunkStorage: StorageVec<Chunk>,
+>(
+    archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
+) -> Vec<u128> {
+    let mut ret: Vec<u128> = vec![];
+
+    for index in archival_mutator_set.kernel.swbf_active.sbf.iter() {
+        ret.push(*index as u128);
+    }
+
+    let chunk_count = archival_mutator_set.chunks.len();
+    for chunk_index in 0..chunk_count {
+        let chunk = archival_mutator_set.chunks.get(chunk_index);
+        for index in chunk.relative_indices.iter() {
+            ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index as u128);
+        }
+    }
+
+    ret
+}
 
 pub fn make_item_and_randomness() -> (Digest, Digest) {
     let mut rng = rand::thread_rng();

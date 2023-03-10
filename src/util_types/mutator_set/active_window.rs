@@ -1,10 +1,8 @@
 use itertools::Itertools;
-use rusty_leveldb::{LdbIterator, DB};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::ops::Range;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
-use twenty_first::util_types::database_vector::DatabaseVector;
 
 use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
@@ -34,36 +32,6 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
             sbf: Vec::new(),
             _hasher: PhantomData,
         }
-    }
-    /// Populate an database with the values in this active window.
-    /// This is used to persist the state of an archival mutator set.
-    pub fn store_to_database(&self, mut db: DB) -> DB {
-        let db_is_empty = db
-            .new_iter()
-            .expect("Must be able to create DB iterator")
-            .next()
-            .is_none();
-        let mut database_vector = if db_is_empty {
-            DatabaseVector::new(db)
-        } else {
-            DatabaseVector::restore(db)
-        };
-        database_vector.overwrite_with_vec(self.sbf.clone());
-        database_vector.extract_db()
-    }
-
-    /// Given a database object that has been stored on disk, return an ActiveWindow object
-    pub fn restore_from_database(db: DB) -> Self {
-        let mut database_vector: DatabaseVector<u32> = DatabaseVector::restore(db);
-        let db_entry_count = database_vector.len();
-        let mut active_window = ActiveWindow::default();
-
-        for i in 0..db_entry_count {
-            let index = database_vector.get(i);
-            active_window.insert(index)
-        }
-
-        active_window
     }
 
     /// Grab a slice from the sparse Bloom filter by supplying an
@@ -345,66 +313,5 @@ mod active_window_tests {
         let json_aw0 = serde_json::to_string(&aw0).unwrap();
         let aw0_back = serde_json::from_str::<ActiveWindow<H>>(&json_aw0).unwrap();
         assert_eq!(aw0.sbf, aw0_back.sbf);
-    }
-
-    #[test]
-    fn test_store_load_database() {
-        // populate active window
-        type Hasher = blake3::Hasher;
-
-        let mut active_window = ActiveWindow::<Hasher>::new();
-        let num_insertions = 1000;
-        let mut rng = thread_rng();
-        for _ in 0..num_insertions {
-            active_window.insert(rng.next_u32() % WINDOW_SIZE);
-        }
-
-        // prepare database for storing / loading
-        let opt = rusty_leveldb::in_memory();
-        let mut active_window_db = DB::open("active_window", opt.clone()).unwrap();
-
-        // store active window to database
-        active_window_db = active_window.store_to_database(active_window_db);
-        active_window_db.flush().expect("Flush failure");
-
-        // load active window from database
-        let restored_active_window = ActiveWindow::restore_from_database(active_window_db);
-
-        // assert equality
-        assert_eq!(active_window, restored_active_window);
-
-        // populate with more indices
-        for _ in 0..num_insertions {
-            active_window.insert(rng.next_u32() % WINDOW_SIZE);
-        }
-
-        // store active window to database
-        active_window_db = DB::open("active_window", opt.clone()).unwrap();
-        active_window_db = active_window.store_to_database(active_window_db);
-        active_window_db.flush().expect("Flush failure");
-
-        // load active window from database
-        let restored_active_window = ActiveWindow::restore_from_database(active_window_db);
-
-        // assert equality
-        assert_eq!(active_window, restored_active_window);
-
-        // remove items
-        for _ in 0..num_insertions {
-            active_window
-                .sbf
-                .remove(rng.next_u32() as usize % active_window.sbf.len());
-        }
-
-        // store active window to database
-        active_window_db = DB::open("active_window", opt).unwrap();
-        active_window_db = active_window.store_to_database(active_window_db);
-        active_window_db.flush().expect("Flush failure");
-
-        // load active window from database
-        let restored_active_window = ActiveWindow::restore_from_database(active_window_db);
-
-        // assert equality
-        assert_eq!(active_window, restored_active_window);
     }
 }

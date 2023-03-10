@@ -9,5 +9,6 @@ pub mod mutator_set_accumulator;
 pub mod mutator_set_kernel;
 pub mod mutator_set_trait;
 pub mod removal_record;
+pub mod rustyleveldb_mutator_set;
 pub mod shared;
 pub mod transfer_ms_membership_proof;

@@ -1,10 +1,7 @@
-use rusty_leveldb::{WriteBatch, DB};
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::rc::Rc;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
-use twenty_first::util_types::storage_vec::{RustyLevelDbVec, StorageVec};
+use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
@@ -350,153 +347,17 @@ where
     // }
 }
 
-pub const AOCL_KEY: u8 = 0u8;
-pub const SWBFI_KEY: u8 = 1u8;
-pub const CHUNK_KEY: u8 = 2u8;
-pub const ACTIVE_WINDOW_KEY: u8 = 3u8;
-
-type RustyLevelDbArchivalMutatorSet<H> =
-    ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>;
-
-impl<H: AlgebraicHasher> RustyLevelDbArchivalMutatorSet<H> {
-    pub fn restore_from_rusty_leveldb(db: Rc<RefCell<DB>>) -> Self {
-        let aw_bytes = db.borrow_mut().get(&[ACTIVE_WINDOW_KEY]);
-        let aw = match aw_bytes {
-            Some(bytes) => bincode::deserialize(&bytes).unwrap(),
-            None => ActiveWindow::default(),
-        };
-
-        let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
-        let swbfi_storage = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");
-        let chunk_storage = RustyLevelDbVec::new(db, CHUNK_KEY, "chunks");
-
-        Self::new_or_restore(aocl_storage, swbfi_storage, chunk_storage, aw)
-    }
-
-    pub fn persist(&mut self, write_batch: &mut WriteBatch) {
-        self.kernel.aocl.persist(write_batch);
-        self.kernel.swbf_inactive.persist(write_batch);
-        self.chunks.pull_queue(write_batch);
-        // self.kernel.swbf_active.sbf.pull_queue(write_batch);
-
-        write_batch.put(
-            &[ACTIVE_WINDOW_KEY],
-            &bincode::serialize(&self.kernel.swbf_active).unwrap(),
-        );
-    }
-}
-
 #[cfg(test)]
 mod archival_mutator_set_tests {
     use itertools::Itertools;
-    use rand::{thread_rng, Rng, RngCore};
-
+    use rand::Rng;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
     use crate::test_shared::mutator_set::{empty_rustyleveldb_ams, make_item_and_randomness};
-    use crate::util_types::mutator_set::shared::{BATCH_SIZE, WINDOW_SIZE};
+    use crate::util_types::mutator_set::rustyleveldb_mutator_set::RustyLevelDbArchivalMutatorSet;
+    use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
     use super::*;
-
-    fn get_all_indices_with_duplicates<
-        H: AlgebraicHasher,
-        MmrStorage: StorageVec<Digest>,
-        ChunkStorage: StorageVec<Chunk>,
-    >(
-        archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
-    ) -> Vec<u128> {
-        let mut ret: Vec<u128> = vec![];
-
-        for index in archival_mutator_set.kernel.swbf_active.sbf.iter() {
-            ret.push(*index as u128);
-        }
-
-        let chunk_count = archival_mutator_set.chunks.len();
-        for chunk_index in 0..chunk_count {
-            let chunk = archival_mutator_set.chunks.get(chunk_index);
-            for index in chunk.relative_indices.iter() {
-                ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index as u128);
-            }
-        }
-
-        ret
-    }
-
-    #[test]
-    fn persist_test() {
-        type H = RescuePrimeRegular;
-        // let opt = rusty_leveldb::in_memory();
-        // let chunks_db = DB::open("chunks", opt.clone()).unwrap();
-        // let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
-        // let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
-        // let active_window_db = DB::open("active_window", opt.clone()).unwrap();
-
-        // let mut archival_mutator_set = ArchivalMutatorSet::<H>::new_or_restore(
-        //     aocl_mmr_db,
-        //     swbf_inactive_mmr_db,
-        //     chunks_db,
-        //     active_window_db,
-        // );
-        let (mut archival_mutator_set, db) = empty_rustyleveldb_ams();
-
-        let (item0, randomness0) = make_item_and_randomness();
-        let (item1, randomness1) = make_item_and_randomness();
-
-        // Add both items
-        let mut addition_record0 = archival_mutator_set.commit(&item0, &randomness0);
-        let mut membership_proof0 = archival_mutator_set.prove(&item0, &randomness0, false);
-        archival_mutator_set.add(&mut addition_record0);
-        let mut addition_record1 = archival_mutator_set.commit(&item1, &randomness1);
-        let mut membership_proof1 = archival_mutator_set.prove(&item1, &randomness1, false);
-
-        membership_proof0
-            .update_from_addition(&item0, &mut archival_mutator_set.kernel, &addition_record1)
-            .unwrap();
-
-        archival_mutator_set.add(&mut addition_record1);
-
-        // Verify membership
-        assert!(archival_mutator_set.verify(&item0, &membership_proof0));
-        assert!(archival_mutator_set.verify(&item1, &membership_proof1));
-
-        // Remove item 0
-        let removal_record0: RemovalRecord<H> =
-            archival_mutator_set.drop(&item0, &membership_proof0);
-        archival_mutator_set.remove(&removal_record0);
-        membership_proof1
-            .update_from_remove(&removal_record0)
-            .unwrap();
-
-        let mut removal_record_indices0 = removal_record0.absolute_indices.to_vec();
-        let mut set_indices_in_archival_ms =
-            get_all_indices_with_duplicates(&mut archival_mutator_set);
-        removal_record_indices0.sort_unstable();
-        set_indices_in_archival_ms.sort_unstable();
-
-        assert_eq!(removal_record_indices0, set_indices_in_archival_ms, "Set indices in MS must match removal record indices when Bloom filter was empty prior to removal.");
-
-        // Let's store the active window back to the database and create
-        // a new archival object from the databases it contains and then check
-        // that this archival MS contains the same values
-        let mut write_batch = WriteBatch::new();
-        archival_mutator_set.persist(&mut write_batch);
-        db.borrow_mut().write(write_batch, true).unwrap();
-
-        drop(archival_mutator_set);
-        // let chunks_db = DB::open("chunks", opt.clone()).unwrap();
-        // let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
-        // let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt).unwrap();
-        // let mut archival_mutator_set = ArchivalMutatorSet::new_or_restore(
-        //     aocl_mmr_db,
-        //     swbf_inactive_mmr_db,
-        //     chunks_db,
-        //     active_window_db,
-        // );
-        let mut new_archival_mutator_set =
-            RustyLevelDbArchivalMutatorSet::<H>::restore_from_rusty_leveldb(db);
-        assert!(!new_archival_mutator_set.verify(&item0, &membership_proof0));
-        assert!(new_archival_mutator_set.verify(&item1, &membership_proof1));
-    }
 
     #[test]
     fn archival_set_commitment_test() {
@@ -821,28 +682,5 @@ mod archival_mutator_set_tests {
         let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
 
         (item, addition_record, membership_proof)
-    }
-
-    #[test]
-    fn test_store_load_database() {
-        type Hasher = RescuePrimeRegular;
-
-        let opt = rusty_leveldb::in_memory();
-        let mut active_window = ActiveWindow::<Hasher>::new();
-        let num_insertions = 1000;
-        let mut rng = thread_rng();
-        for _ in 0..num_insertions {
-            active_window.insert(rng.next_u32() % WINDOW_SIZE);
-        }
-
-        let mut active_window_db = DB::open("active_window", opt).unwrap();
-
-        active_window_db.flush().expect("Cannot flush database.");
-
-        active_window_db = active_window.store_to_database(active_window_db);
-
-        let active_window_reconstructed = ActiveWindow::restore_from_database(active_window_db);
-
-        assert_eq!(active_window, active_window_reconstructed);
     }
 }
