@@ -12,9 +12,9 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
 use super::chunk_dictionary::ChunkDictionary;
+use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel};
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
-use super::set_commitment::{get_swbf_indices, SetCommitment};
 use super::shared::{get_batch_mutation_argument_for_removal_record, BATCH_SIZE, CHUNK_SIZE};
 use super::transfer_ms_membership_proof::TransferMsMembershipProof;
 
@@ -28,9 +28,9 @@ impl fmt::Display for MembershipProofError {
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum MembershipProofError {
-    AlreadyExistingChunk(u128),
-    MissingChunkOnUpdateFromAdd(u128),
-    MissingChunkOnUpdateFromRemove(u128),
+    AlreadyExistingChunk(u64),
+    MissingChunkOnUpdateFromAdd(u64),
+    MissingChunkOnUpdateFromRemove(u64),
 }
 
 // In order to store this structure in the database, it needs to be serializable. But it should not be
@@ -95,7 +95,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
         own_items: &[Digest],
-        mutator_set: &mut SetCommitment<H, MMR>,
+        mutator_set: &mut MutatorSetKernel<H, MMR>,
         addition_record: &AdditionRecord,
     ) -> Result<Vec<usize>, Box<dyn Error>> {
         assert!(
@@ -125,12 +125,12 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             );
 
         // if window does not slide, we are done
-        if !SetCommitment::<H, MMR>::window_slides(new_item_index) {
+        if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
             return Ok(indices_for_updated_mps);
         }
 
         // window does slide
-        let batch_index = new_item_index / BATCH_SIZE as u128;
+        let batch_index = new_item_index / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
         let new_chunk = mutator_set.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
@@ -148,7 +148,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // Collect all indices for all membership proofs that are being updated
         // Notice that this is a *very* expensive operation if the indices are
         // not already known. I.e., the `None` case below is very expensive.
-        let mut chunk_index_to_mp_index: HashMap<u128, Vec<usize>> = HashMap::new();
+        let mut chunk_index_to_mp_index: HashMap<u64, Vec<usize>> = HashMap::new();
         membership_proofs
             .iter()
             .zip(own_items.iter())
@@ -162,10 +162,10 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                         AbsoluteIndexSet::new(&indices)
                     }
                 };
-                let chunks_set: HashSet<u128> = indices
+                let chunks_set: HashSet<u64> = indices
                     .to_array()
                     .iter()
-                    .map(|x| x / CHUNK_SIZE as u128)
+                    .map(|x| (x / CHUNK_SIZE as u128) as u64)
                     .collect();
                 chunks_set.iter().for_each(|chnkidx| {
                     chunk_index_to_mp_index
@@ -270,7 +270,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     pub fn update_from_addition<MMR: Mmr<H>>(
         &mut self,
         own_item: &Digest,
-        mutator_set: &mut SetCommitment<H, MMR>,
+        mutator_set: &mut MutatorSetKernel<H, MMR>,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
         assert!(self.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves());
@@ -284,7 +284,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         );
 
         // if window does not slide, we are done
-        if !SetCommitment::<H, MMR>::window_slides(new_item_index) {
+        if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
             return Ok(aocl_mp_updated);
         }
 
@@ -300,10 +300,10 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 get_swbf_indices::<H>(own_item, &self.randomness, self.auth_path_aocl.leaf_index)
             }
         };
-        let chunk_indices_set: HashSet<u128> = all_indices
+        let chunk_indices_set: HashSet<u64> = all_indices
             .into_iter()
-            .map(|bi| bi / CHUNK_SIZE as u128)
-            .collect::<HashSet<u128>>();
+            .map(|bi| (bi / CHUNK_SIZE as u128) as u64)
+            .collect::<HashSet<u64>>();
 
         // Get an accumulator-version of the MMR and insert the new SWBF leaf to get its
         // authentication path.
@@ -317,7 +317,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             mmra.append(new_chunk_digest);
 
         let mut swbf_chunk_dictionary_updated = false;
-        let batch_index = new_item_index / BATCH_SIZE as u128;
+        let batch_index = new_item_index / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
         let new_window_start_batch_index = batch_index;
         'outer: for chunk_index in chunk_indices_set.into_iter() {

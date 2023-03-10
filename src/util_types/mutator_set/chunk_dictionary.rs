@@ -10,7 +10,7 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkDictionary<H: AlgebraicHasher> {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
-    pub dictionary: HashMap<u128, (MmrMembershipProof<H>, Chunk)>,
+    pub dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>,
 }
 
 impl<H: AlgebraicHasher> PartialEq for ChunkDictionary<H> {
@@ -22,7 +22,7 @@ impl<H: AlgebraicHasher> PartialEq for ChunkDictionary<H> {
 impl<H: AlgebraicHasher> Eq for ChunkDictionary<H> {}
 
 impl<H: AlgebraicHasher> ChunkDictionary<H> {
-    pub fn new(dictionary: HashMap<u128, (MmrMembershipProof<H>, Chunk)>) -> Self {
+    pub fn new(dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>) -> Self {
         Self { dictionary }
     }
 }
@@ -59,8 +59,7 @@ mod chunk_dict_tests {
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::rescue_prime_digest::Digest;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
-    use twenty_first::test_shared::mmr::get_archival_mmr_from_digests;
-    use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
+    use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
@@ -76,9 +75,9 @@ mod chunk_dict_tests {
         // Insert elements
         let num_leaves = 3;
         let leaf_hashes: Vec<Digest> = random_elements(num_leaves);
-        let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
+        let mut archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
 
-        let key1: u128 = 898989;
+        let key1: u64 = 898989;
         let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk1: Chunk = {
             Chunk {
@@ -90,7 +89,7 @@ mod chunk_dict_tests {
 
         // Insert two more element and verify that the hash is deterministic which implies that the
         // elements in the preimage are sorted deterministically.
-        let key2: u128 = 8989;
+        let key2: u64 = 8989;
         let mp2: MmrMembershipProof<H> = archival_mmr.prove_membership(2).0;
         let mut chunk2 = Chunk::empty_chunk();
         chunk2.insert(CHUNK_SIZE / 2 + 1);
@@ -100,7 +99,7 @@ mod chunk_dict_tests {
             (key2, value2.clone()),
         ]));
 
-        let key3: u128 = 89;
+        let key3: u64 = 89;
         let chunkdict3 = ChunkDictionary::<H>::new(HashMap::from([
             (key1, value1.clone()),
             (key2, value2.clone()),
@@ -150,9 +149,9 @@ mod chunk_dict_tests {
         assert!(s_back.dictionary.is_empty());
 
         // Build a non-empty chunk dict and verify that it still works
-        let key: u128 = 898989;
+        let key: u64 = 898989;
         let leaf_hashes: Vec<Digest> = random_elements(3);
-        let mut archival_mmr: ArchivalMmr<H> = get_archival_mmr_from_digests(leaf_hashes);
+        let mut archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
             relative_indices: (0..CHUNK_SIZE).collect(),

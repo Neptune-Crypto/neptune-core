@@ -7,18 +7,18 @@ use twenty_first::util_types::{
 
 use super::{
     active_window::ActiveWindow, addition_record::AdditionRecord,
-    ms_membership_proof::MsMembershipProof, mutator_set_trait::MutatorSet,
-    removal_record::RemovalRecord, set_commitment::SetCommitment,
+    ms_membership_proof::MsMembershipProof, mutator_set_kernel::MutatorSetKernel,
+    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutatorSetAccumulator<H: AlgebraicHasher> {
-    pub set_commitment: SetCommitment<H, MmrAccumulator<H>>,
+    pub set_commitment: MutatorSetKernel<H, MmrAccumulator<H>>,
 }
 
 impl<H: AlgebraicHasher> Default for MutatorSetAccumulator<H> {
     fn default() -> Self {
-        let set_commitment = SetCommitment::<H, MmrAccumulator<H>> {
+        let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
             swbf_inactive: MmrAccumulator::<H>::new(vec![]),
             swbf_active: ActiveWindow::new(),
@@ -84,8 +84,7 @@ mod ms_accumulator_tests {
     use itertools::Itertools;
     use proptest::prelude::Rng;
 
-    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
-    use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+    use crate::test_shared::mutator_set::{empty_rustyleveldb_ams, make_item_and_randomness};
 
     use super::*;
 
@@ -165,8 +164,8 @@ mod ms_accumulator_tests {
         type H = blake3::Hasher;
 
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let mut archival_after_remove: ArchivalMutatorSet<H> = empty_archival_ms();
-        let mut archival_before_remove: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_after_remove, _) = empty_rustyleveldb_ams();
+        let (mut archival_before_remove, _) = empty_rustyleveldb_ams();
         let number_of_interactions = 100;
         let mut rng = rand::thread_rng();
 

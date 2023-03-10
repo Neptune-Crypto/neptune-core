@@ -21,24 +21,24 @@ use super::shared::{
     WINDOW_SIZE,
 };
 
-impl Error for SetCommitmentError {}
+impl Error for MutatorSetKernelError {}
 
-impl fmt::Display for SetCommitmentError {
+impl fmt::Display for MutatorSetKernelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum SetCommitmentError {
-    RequestedAoclAuthPathOutOfBounds((u128, u128)),
-    RequestedSwbfAuthPathOutOfBounds((u128, u128)),
+pub enum MutatorSetKernelError {
+    RequestedAoclAuthPathOutOfBounds((u64, u64)),
+    RequestedSwbfAuthPathOutOfBounds((u64, u64)),
     MutatorSetIsEmpty,
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SetCommitment<H: AlgebraicHasher, MMR: Mmr<H>> {
+pub struct MutatorSetKernel<H: AlgebraicHasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
     pub swbf_active: ActiveWindow<H>,
@@ -48,9 +48,9 @@ pub struct SetCommitment<H: AlgebraicHasher, MMR: Mmr<H>> {
 pub fn get_swbf_indices<H: AlgebraicHasher>(
     item: &Digest,
     randomness: &Digest,
-    aocl_leaf_index: u128,
+    aocl_leaf_index: u64,
 ) -> [u128; NUM_TRIALS as usize] {
-    let batch_index: u128 = aocl_leaf_index / BATCH_SIZE as u128;
+    let batch_index: u128 = aocl_leaf_index as u128 / BATCH_SIZE as u128;
     let batch_offset: u128 = batch_index * CHUNK_SIZE as u128;
     let mut prng_state = sponge_from_item_randomness::<H>(item, randomness);
     H::sample_indices(&mut prng_state, WINDOW_SIZE, NUM_TRIALS as usize)
@@ -61,7 +61,7 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
         .unwrap()
 }
 
-impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
+impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
     /// Generates an addition record from an item and explicit random-
     /// ness. The addition record is itself a commitment to the item,
     /// but tailored to adding the item to the mutator set in its
@@ -91,13 +91,10 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         }
     }
 
-    /**
-     * window_slides
-     * Determine if the window slides before absorbing an item,
-     * given the index of the to-be-added item.
-     */
-    pub fn window_slides(added_index: u128) -> bool {
-        added_index != 0 && added_index % BATCH_SIZE as u128 == 0
+    /// Determine if the window slides before absorbing an item,
+    /// given the index of the to-be-added item.
+    pub fn window_slides(added_index: u64) -> bool {
+        added_index != 0 && added_index % BATCH_SIZE as u64 == 0
 
         // example cases:
         //  - index == 0 we don't care about
@@ -105,21 +102,23 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         //  - index == n * BATCH_SIZE generates a slide for any n
     }
 
-    pub fn window_slides_back(removed_index: u128) -> bool {
+    pub fn window_slides_back(removed_index: u64) -> bool {
         Self::window_slides(removed_index)
     }
 
     /// Return the batch index for the latest addition to the mutator set
-    pub fn get_batch_index(&mut self) -> u128 {
+    pub fn get_batch_index(&mut self) -> u64 {
         match self.aocl.count_leaves() {
             0 => 0,
-            n => (n - 1) / BATCH_SIZE as u128,
+            n => (n - 1) / BATCH_SIZE as u64,
         }
     }
 
-    /// Helper function. Like `add` but also returns the chunk that was added to the inactive SWBF
-    /// since this is needed by the archival version of the mutator set.
-    pub fn add_helper(&mut self, addition_record: &mut AdditionRecord) -> Option<(u128, Chunk)> {
+    /// Helper function. Like `add` but also returns the chunk that
+    /// was added to the inactive SWBF if the window slid (and None
+    /// otherwise) since this is needed by the archival version of
+    /// the mutator set.
+    pub fn add_helper(&mut self, addition_record: &mut AdditionRecord) -> Option<(u64, Chunk)> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
@@ -154,13 +153,13 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
     /// Remove a record and return the chunks that have been updated in this process,
     /// after applying the update. Does not mutate the removal record.
-    pub fn remove_helper(&mut self, removal_record: &RemovalRecord<H>) -> HashMap<u128, Chunk> {
+    pub fn remove_helper(&mut self, removal_record: &RemovalRecord<H>) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index();
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
         // insert all indices
         let mut new_target_chunks: ChunkDictionary<H> = removal_record.target_chunks.clone();
-        let chunkindices_to_indices_dict: HashMap<u128, Vec<u128>> =
+        let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
             removal_record.get_chunkidx_to_indices_dict();
 
         for (chunk_index, indices) in chunkindices_to_indices_dict {
@@ -269,8 +268,8 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         let mut all_auth_paths_are_valid = true;
 
         // prepare parameters of inactive part
-        let current_batch_index: u128 = self.get_batch_index();
-        let window_start = current_batch_index * CHUNK_SIZE as u128;
+        let current_batch_index: u64 = self.get_batch_index();
+        let window_start = current_batch_index as u128 * CHUNK_SIZE as u128;
 
         // We use the cached indices if we have them, otherwise they are recalculated
         let all_indices = match &membership_proof.cached_indices {
@@ -332,13 +331,15 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         is_aocl_member && entries_in_dictionary && all_auth_paths_are_valid && has_absent_index
     }
 
+    /// Apply a bunch of removal records. Return a hashmap of
+    /// { chunk index => updated_chunk }.
     pub fn batch_remove(
         &mut self,
         mut removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
-    ) -> HashMap<u128, Chunk> {
+    ) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index();
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
         // Collect all indices that that are set by the removal records
         let all_removal_records_indices: Vec<u128> = removal_records
@@ -350,14 +351,14 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
         // {chunk index => chunk mutation } where "chunk mutation" has the type of
         // `Chunk` but only represents the values which are set by the removal records
         // being handled.
-        let mut chunkidx_to_chunk_difference_dict: HashMap<u128, Chunk> = HashMap::new();
+        let mut chunkidx_to_chunk_difference_dict: HashMap<u64, Chunk> = HashMap::new();
         all_removal_records_indices.iter().for_each(|index| {
             if *index >= active_window_start {
                 let relative_index = (index - active_window_start) as u32;
                 self.swbf_active.insert(relative_index);
             } else {
                 chunkidx_to_chunk_difference_dict
-                    .entry(index / CHUNK_SIZE as u128)
+                    .entry((index / CHUNK_SIZE as u128) as u64)
                     .or_insert_with(Chunk::empty_chunk)
                     .insert((*index % CHUNK_SIZE as u128) as u32);
             }
@@ -365,7 +366,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> SetCommitment<H, M> {
 
         // Collect all affected chunks as they look before these removal records are applied
         // These chunks are part of the removal records, so we fetch them there.
-        let mut mutation_data_preimage: HashMap<u128, (&mut Chunk, MmrMembershipProof<H>)> =
+        let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof<H>)> =
             HashMap::new();
         for removal_record in removal_records.iter_mut() {
             for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.dictionary.iter_mut()
@@ -444,11 +445,12 @@ mod accumulation_scheme_tests {
 
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+    use twenty_first::util_types::storage_vec::RustyLevelDbVec;
     use twenty_first::utils::has_unique_elements;
 
     use crate::test_shared::mutator_set::insert_item;
     use crate::test_shared::mutator_set::remove_item;
-    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
+    use crate::test_shared::mutator_set::{empty_rustyleveldb_ams, make_item_and_randomness};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -570,7 +572,7 @@ mod accumulation_scheme_tests {
         for _ in 0..1000 {
             let (item, randomness) = make_item_and_randomness();
             let ret: [u128; NUM_TRIALS as usize] =
-                get_swbf_indices::<H>(&item, &randomness, (17 * BATCH_SIZE) as u128);
+                get_swbf_indices::<H>(&item, &randomness, (17 * BATCH_SIZE) as u64);
             assert_eq!(NUM_TRIALS as usize, ret.len());
             assert!(ret
                 .iter()
@@ -584,7 +586,10 @@ mod accumulation_scheme_tests {
         type H = RescuePrimeRegular;
 
         let mut accumulator = MutatorSetAccumulator::<H>::default();
-        let mut archival: ArchivalMutatorSet<RescuePrimeRegular> = empty_archival_ms();
+        let (mut archival, _): (
+            ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
+            _,
+        ) = empty_rustyleveldb_ams();
 
         // Verify that function to get batch index does not overflow for the empty MS
         assert_eq!(
@@ -594,7 +599,7 @@ mod accumulation_scheme_tests {
         );
         assert_eq!(
             0,
-            archival.set_commitment.get_batch_index(),
+            archival.kernel.get_batch_index(),
             "Batch index must be zero for empty archival MS"
         );
     }
@@ -951,12 +956,12 @@ mod accumulation_scheme_tests {
         // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
         type H = RescuePrimeRegular;
         type Mmr = MmrAccumulator<H>;
-        type Ms = SetCommitment<H, Mmr>;
+        type Ms = MutatorSetKernel<H, Mmr>;
         let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
 
         let json_empty = serde_json::to_string(&mutator_set).unwrap();
         println!("json = \n{}", json_empty);
-        let mut s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
+        let s_back = serde_json::from_str::<Ms>(&json_empty).unwrap();
         assert!(s_back.aocl.is_empty());
         assert!(s_back.swbf_inactive.is_empty());
         assert!(s_back.swbf_active.sbf.is_empty());

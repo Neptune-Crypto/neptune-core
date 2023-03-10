@@ -12,7 +12,7 @@ use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use super::chunk_dictionary::ChunkDictionary;
-use super::set_commitment::SetCommitment;
+use super::mutator_set_kernel::MutatorSetKernel;
 use super::shared::{
     get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
     NUM_TRIALS,
@@ -130,12 +130,12 @@ pub struct RemovalRecord<H: AlgebraicHasher> {
 impl<H: AlgebraicHasher> RemovalRecord<H> {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         removal_records: &mut [&mut Self],
-        mutator_set: &mut SetCommitment<H, MMR>,
+        mutator_set: &mut MutatorSetKernel<H, MMR>,
     ) -> Result<(), Box<dyn Error>> {
         let new_item_index = mutator_set.aocl.count_leaves();
 
         // if window does not slide, do nothing
-        if !SetCommitment::<H, MMR>::window_slides(new_item_index) {
+        if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
             return Ok(());
         }
 
@@ -154,13 +154,13 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
             mmra.append(new_chunk_digest);
 
         // Collect all indices for all removal records that are being updated
-        let mut chunk_index_to_mp_index: HashMap<u128, Vec<usize>> = HashMap::new();
+        let mut chunk_index_to_mp_index: HashMap<u64, Vec<usize>> = HashMap::new();
         removal_records.iter().enumerate().for_each(|(i, rr)| {
             let indices = &rr.absolute_indices;
-            let chunks_set: HashSet<u128> = indices
+            let chunks_set: HashSet<u64> = indices
                 .to_array()
                 .iter()
-                .map(|x| x / CHUNK_SIZE as u128)
+                .map(|x| (x / CHUNK_SIZE as u128) as u64)
                 .collect();
             chunks_set.iter().for_each(|chnkidx| {
                 chunk_index_to_mp_index
@@ -172,7 +172,7 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
 
         // Find the removal records that need a new dictionary entry for the chunk that's being
         // added to the inactive part by this addition.
-        let batch_index = new_item_index / BATCH_SIZE as u128;
+        let batch_index = new_item_index / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
         let rrs_for_new_chunk_dictionary_entry: Vec<usize> =
             match chunk_index_to_mp_index.get(&old_window_start_batch_index) {
@@ -272,7 +272,7 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
     }
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate<M>(&self, mutator_set: &mut SetCommitment<H, M>) -> bool
+    pub fn validate<M>(&self, mutator_set: &mut MutatorSetKernel<H, M>) -> bool
     where
         M: Mmr<H>,
     {
@@ -290,7 +290,7 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
     }
 
     /// Returns a hashmap from chunk index to chunk.
-    pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u128, Vec<u128>> {
+    pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u64, Vec<u128>> {
         indices_to_hash_map(&self.absolute_indices.to_array())
     }
 }
@@ -396,7 +396,7 @@ mod removal_record_tests {
         // Verify that the hash map has put the indices into the correct buckets
         for (key, values) in chunks2indices {
             for value in values {
-                assert!((value - key * CHUNK_SIZE as u128) < CHUNK_SIZE as u128);
+                assert!((value - key as u128 * CHUNK_SIZE as u128) < CHUNK_SIZE as u128);
             }
         }
     }

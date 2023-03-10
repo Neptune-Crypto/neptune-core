@@ -55,7 +55,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
     /// Given a database object that has been stored on disk, return an ActiveWindow object
     pub fn restore_from_database(db: DB) -> Self {
         let mut database_vector: DatabaseVector<u32> = DatabaseVector::restore(db);
-        let db_entry_count: u128 = database_vector.len();
+        let db_entry_count = database_vector.len();
         let mut active_window = ActiveWindow::default();
 
         for i in 0..db_entry_count {

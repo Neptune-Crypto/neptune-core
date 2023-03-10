@@ -1,10 +1,12 @@
-use rusty_leveldb::{LdbIterator, DB};
+use rusty_leveldb::{WriteBatch, DB};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::rc::Rc;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::storage_vec::{RustyLevelDbVec, StorageVec};
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::database_vector::DatabaseVector;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -14,40 +16,50 @@ use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
+use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKernelError};
 use super::mutator_set_trait::MutatorSet;
 use super::removal_record::{AbsoluteIndexSet, RemovalRecord};
-use super::set_commitment::{get_swbf_indices, SetCommitment, SetCommitmentError};
 use super::shared::CHUNK_SIZE;
 
-pub struct ArchivalMutatorSet<H: AlgebraicHasher> {
-    pub set_commitment: SetCommitment<H, ArchivalMmr<H>>,
-    pub chunks: DatabaseVector<Chunk>,
+pub struct ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
+where
+    H: AlgebraicHasher,
+    MmrStorage: StorageVec<Digest>,
+    ChunkStorage: StorageVec<Chunk>,
+{
+    pub kernel: MutatorSetKernel<H, ArchivalMmr<H, MmrStorage>>,
+    pub chunks: ChunkStorage,
 }
 
-impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
+impl<H, MmrStorage, ChunkStorage> MutatorSet<H> for ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
+where
+    H: AlgebraicHasher,
+    MmrStorage: StorageVec<Digest>,
+    ChunkStorage: StorageVec<Chunk>,
+{
     fn prove(
         &mut self,
         item: &Digest,
         randomness: &Digest,
         cache_indices: bool,
     ) -> MsMembershipProof<H> {
-        self.set_commitment.prove(item, randomness, cache_indices)
+        self.kernel.prove(item, randomness, cache_indices)
     }
 
     fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
-        self.set_commitment.verify(item, membership_proof)
+        self.kernel.verify(item, membership_proof)
     }
 
     fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord {
-        self.set_commitment.commit(item, randomness)
+        self.kernel.commit(item, randomness)
     }
 
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
-        self.set_commitment.drop(item, membership_proof)
+        self.kernel.drop(item, membership_proof)
     }
 
     fn add(&mut self, addition_record: &mut AdditionRecord) {
-        let new_chunk: Option<(u128, Chunk)> = self.set_commitment.add_helper(addition_record);
+        let new_chunk: Option<(u64, Chunk)> = self.kernel.add_helper(addition_record);
         match new_chunk {
             None => (),
             Some((chunk_index, chunk)) => {
@@ -63,16 +75,16 @@ impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
     }
 
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
-        let new_chunks: HashMap<u128, Chunk> = self.set_commitment.remove_helper(removal_record);
+        let new_chunks: HashMap<u64, Chunk> = self.kernel.remove_helper(removal_record);
         for (chunk_index, chunk) in new_chunks {
             self.chunks.set(chunk_index, chunk);
         }
     }
 
     fn get_commitment(&mut self) -> Digest {
-        let aocl_mmr_bagged = self.set_commitment.aocl.bag_peaks();
-        let inactive_swbf_bagged = self.set_commitment.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = H::hash(&self.set_commitment.swbf_active);
+        let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
+        let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
+        let active_swbf_bagged = H::hash(&self.kernel.swbf_active);
 
         H::hash_pair(
             &aocl_mmr_bagged,
@@ -88,7 +100,7 @@ impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     ) {
         let chunk_index_to_chunk_mutation = self
-            .set_commitment
+            .kernel
             .batch_remove(removal_records, preserved_membership_proofs);
 
         for (chnk_idx, new_chunk_value) in chunk_index_to_chunk_mutation {
@@ -98,56 +110,39 @@ impl<H: AlgebraicHasher> MutatorSet<H> for ArchivalMutatorSet<H> {
 }
 
 /// Methods that only work when implementing using archival MMRs as the underlying two MMRs
-impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
-    pub fn new_empty(aocl_mmr_db: DB, swbf_inactive_mmr_db: DB, chunks_db: DB) -> Self {
-        let aocl: ArchivalMmr<H> = ArchivalMmr::new(aocl_mmr_db);
-        let swbf_inactive: ArchivalMmr<H> = ArchivalMmr::new(swbf_inactive_mmr_db);
+impl<H, MmrStorage, ChunkStorage> ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
+where
+    H: AlgebraicHasher,
+    MmrStorage: StorageVec<Digest>,
+    ChunkStorage: StorageVec<Chunk>,
+{
+    pub fn new_empty(aocl: MmrStorage, swbf_inactive: MmrStorage, chunks: ChunkStorage) -> Self {
+        assert_eq!(0, aocl.len());
+        assert_eq!(0, swbf_inactive.len());
+        assert_eq!(0, chunks.len());
+        let aocl: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(aocl);
+        let swbf_inactive: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(swbf_inactive);
         Self {
-            set_commitment: SetCommitment {
+            kernel: MutatorSetKernel {
                 aocl,
                 swbf_inactive,
                 swbf_active: ActiveWindow::new(),
             },
-            chunks: DatabaseVector::<Chunk>::new(chunks_db),
+            chunks,
         }
     }
 
     pub fn new_or_restore(
-        mut aocl_mmr_db: DB,
-        mut swbf_inactive_mmr_db: DB,
-        mut chunks_db: DB,
-        mut active_window_db: DB,
+        aocl: MmrStorage,
+        swbf_inactive: MmrStorage,
+        chunks: ChunkStorage,
+        active_window: ActiveWindow<H>,
     ) -> Self {
-        let aocl_is_empty = aocl_mmr_db.new_iter().unwrap().next().is_none();
-        let aocl: ArchivalMmr<H> = if aocl_is_empty {
-            ArchivalMmr::new(aocl_mmr_db)
-        } else {
-            ArchivalMmr::restore(aocl_mmr_db)
-        };
-
-        let swbf_inactive_is_empty = swbf_inactive_mmr_db.new_iter().unwrap().next().is_none();
-        let swbf_inactive: ArchivalMmr<H> = if swbf_inactive_is_empty {
-            ArchivalMmr::new(swbf_inactive_mmr_db)
-        } else {
-            ArchivalMmr::restore(swbf_inactive_mmr_db)
-        };
-
-        let chunks_is_empty = chunks_db.new_iter().unwrap().next().is_none();
-        let chunks: DatabaseVector<Chunk> = if chunks_is_empty {
-            DatabaseVector::new(chunks_db)
-        } else {
-            DatabaseVector::restore(chunks_db)
-        };
-
-        let active_window_is_empty = active_window_db.new_iter().unwrap().next().is_none();
-        let active_window: ActiveWindow<H> = if active_window_is_empty {
-            ActiveWindow::new()
-        } else {
-            ActiveWindow::restore_from_database(active_window_db)
-        };
+        let aocl: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(aocl);
+        let swbf_inactive: ArchivalMmr<H, MmrStorage> = ArchivalMmr::new(swbf_inactive);
 
         Self {
-            set_commitment: SetCommitment {
+            kernel: MutatorSetKernel {
                 aocl,
                 swbf_inactive,
                 swbf_active: active_window,
@@ -159,39 +154,36 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
     /// Returns an authentication path for an element in the append-only commitment list
     pub fn get_aocl_authentication_path(
         &mut self,
-        index: u128,
+        index: u64,
     ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<H>, Box<dyn Error>> {
-        if self.set_commitment.aocl.count_leaves() <= index {
+        if self.kernel.aocl.count_leaves() <= index {
             return Err(Box::new(
-                SetCommitmentError::RequestedAoclAuthPathOutOfBounds((
+                MutatorSetKernelError::RequestedAoclAuthPathOutOfBounds((
                     index,
-                    self.set_commitment.aocl.count_leaves(),
+                    self.kernel.aocl.count_leaves(),
                 )),
             ));
         }
 
-        Ok(self.set_commitment.aocl.prove_membership(index).0)
+        Ok(self.kernel.aocl.prove_membership(index).0)
     }
 
     /// Returns an authentication path for a chunk in the sliding window Bloom filter
     pub fn get_chunk_and_auth_path(
         &mut self,
-        chunk_index: u128,
+        chunk_index: u64,
     ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<H>, Chunk), Box<dyn Error>> {
-        if self.set_commitment.swbf_inactive.count_leaves() <= chunk_index {
+        if self.kernel.swbf_inactive.count_leaves() <= chunk_index {
             return Err(Box::new(
-                SetCommitmentError::RequestedSwbfAuthPathOutOfBounds((
+                MutatorSetKernelError::RequestedSwbfAuthPathOutOfBounds((
                     chunk_index,
-                    self.set_commitment.swbf_inactive.count_leaves(),
+                    self.kernel.swbf_inactive.count_leaves(),
                 )),
             ));
         }
 
-        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> = self
-            .set_commitment
-            .swbf_inactive
-            .prove_membership(chunk_index)
-            .0;
+        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
+            self.kernel.swbf_inactive.prove_membership(chunk_index).0;
 
         // This check should never fail. It would mean that chunks are missing but that the
         // archival MMR has the membership proof for the chunk. That would be a programming
@@ -212,22 +204,22 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         &mut self,
         item: &Digest,
         randomness: &Digest,
-        index: u128,
+        aocl_index: u64,
     ) -> Result<MsMembershipProof<H>, Box<dyn Error>> {
-        if self.set_commitment.aocl.is_empty() {
-            return Err(Box::new(SetCommitmentError::MutatorSetIsEmpty));
+        if self.kernel.aocl.is_empty() {
+            return Err(Box::new(MutatorSetKernelError::MutatorSetIsEmpty));
         }
 
-        let auth_path_aocl = self.get_aocl_authentication_path(index)?;
-        let swbf_indices = get_swbf_indices::<H>(item, randomness, index);
+        let auth_path_aocl = self.get_aocl_authentication_path(aocl_index)?;
+        let swbf_indices = get_swbf_indices::<H>(item, randomness, aocl_index);
 
-        let batch_index = self.set_commitment.get_batch_index();
-        let window_start = batch_index * CHUNK_SIZE as u128;
+        let batch_index = self.kernel.get_batch_index();
+        let window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
-        let chunk_indices: HashSet<u128> = swbf_indices
+        let chunk_indices: HashSet<u64> = swbf_indices
             .iter()
             .filter(|bi| **bi < window_start)
-            .map(|bi| *bi / CHUNK_SIZE as u128)
+            .map(|bi| (*bi / CHUNK_SIZE as u128) as u64)
             .collect();
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
         for chunk_index in chunk_indices {
@@ -236,11 +228,8 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
                 "Chunks must be known if its authentication path is known."
             );
             let chunk = self.chunks.get(chunk_index);
-            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<H> = self
-                .set_commitment
-                .swbf_inactive
-                .prove_membership(chunk_index)
-                .0;
+            let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<H> =
+                self.kernel.swbf_inactive.prove_membership(chunk_index).0;
             target_chunks
                 .dictionary
                 .insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
@@ -260,9 +249,9 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
     ///
     /// Fails if attempting to remove an index that wasn't set.
     pub fn revert_remove(&mut self, removal_record_indices: Vec<u128>) {
-        let batch_index = self.set_commitment.get_batch_index();
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
-        let mut chunkidx_to_difference_dict: HashMap<u128, Chunk> = HashMap::new();
+        let batch_index = self.kernel.get_batch_index();
+        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
+        let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
 
         // Populate the dictionary by iterating over all the removal
         // record's indices and inserting them into the correct
@@ -271,9 +260,9 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
         for rr_index in removal_record_indices {
             if rr_index >= active_window_start {
                 let relative_index = (rr_index - active_window_start) as u32;
-                self.set_commitment.swbf_active.remove(relative_index);
+                self.kernel.swbf_active.remove(relative_index);
             } else {
-                let chunkidx = rr_index / CHUNK_SIZE as u128;
+                let chunkidx = (rr_index / CHUNK_SIZE as u128) as u64;
                 let relative_index = (rr_index % CHUNK_SIZE as u128) as u32;
                 chunkidx_to_difference_dict
                     .entry(chunkidx)
@@ -290,7 +279,7 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
             self.chunks.set(chunk_index, new_chunk.clone());
 
             // update archival mmr
-            self.set_commitment
+            self.kernel
                 .swbf_inactive
                 .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
         }
@@ -299,8 +288,8 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
     /// Determine whether the given `AdditionRecord` can be reversed.
     /// Equivalently, determine if it was added last.
     pub fn add_is_reversible(&mut self, addition_record: &AdditionRecord) -> bool {
-        let leaf_index = self.set_commitment.aocl.count_leaves() - 1;
-        let digest = self.set_commitment.aocl.get_leaf(leaf_index);
+        let leaf_index = self.kernel.aocl.count_leaves() - 1;
+        let digest = self.kernel.aocl.get_leaf(leaf_index);
         addition_record.canonical_commitment == digest
     }
 
@@ -311,25 +300,26 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
     ///   from the inactive window, and slide window back by putting the
     ///   last inactive chunk in the active window.
     pub fn revert_add(&mut self, addition_record: &AdditionRecord) {
-        let removed_add_index = self.set_commitment.aocl.count_leaves() - 1;
+        let removed_add_index = self.kernel.aocl.count_leaves() - 1;
 
         // 1. Remove last leaf from AOCL
-        let digest = self.set_commitment.aocl.remove_last_leaf().unwrap();
+        let digest = self.kernel.aocl.remove_last_leaf().unwrap();
         assert_eq!(addition_record.canonical_commitment, digest);
 
         // 2. Possibly shrink bloom filter by moving a chunk back into active window
         //
         // This happens when the batch index changes (i.e. every `BATCH_SIZE` addition).
-        if !SetCommitment::<H, ArchivalMmr<H>>::window_slides_back(removed_add_index) {
+        if !MutatorSetKernel::<H, ArchivalMmr<H, MmrStorage>>::window_slides_back(removed_add_index)
+        {
             return;
         }
 
         // 2.a. Remove a chunk from inactive window
-        let _digest = self.set_commitment.swbf_inactive.remove_last_leaf();
+        let _digest = self.kernel.swbf_inactive.remove_last_leaf();
         let last_inactive_chunk = self.chunks.pop().unwrap();
 
         // 2.b. Slide active window back by putting `last_inactive_chunk` back
-        self.set_commitment
+        self.kernel
             .swbf_active
             .slide_window_back(&last_inactive_chunk);
     }
@@ -337,26 +327,62 @@ impl<H: AlgebraicHasher> ArchivalMutatorSet<H> {
     /// Determine whether the index `index` is set in the Bloom
     /// filter, whether in the active window, or in some chunk.
     pub fn bloom_filter_contains(&mut self, index: u128) -> bool {
-        let batch_index = self.set_commitment.get_batch_index();
-        let active_window_start = batch_index * CHUNK_SIZE as u128;
+        let batch_index = self.kernel.get_batch_index();
+        let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
         if index >= active_window_start {
             let relative_index = (index - active_window_start) as u32;
-            self.set_commitment.swbf_active.contains(relative_index)
+            self.kernel.swbf_active.contains(relative_index)
         } else {
-            let chunk_index = index / CHUNK_SIZE as u128;
-            let relative_index = index % CHUNK_SIZE as u128;
+            let chunk_index = (index / CHUNK_SIZE as u128) as u64;
+            let relative_index = (index % CHUNK_SIZE as u128) as u32;
             let relevant_chunk = self.chunks.get(chunk_index);
-            relevant_chunk.contains(relative_index as u32)
+            relevant_chunk.contains(relative_index)
         }
     }
 
-    /// Flush the databases. Does not persist the active window as this lives in memory. The caller
-    /// must persist the active window seperately.
-    pub fn flush(&mut self) {
-        self.chunks.flush();
-        self.set_commitment.aocl.flush();
-        self.set_commitment.swbf_inactive.flush();
+    // /// Flush the databases. Does not persist the active window as this lives in memory. The caller
+    // /// must persist the active window seperately.
+    // pub fn flush(&mut self) {
+    //     self.chunks.flush();
+    //     self.set_commitment.aocl.flush();
+    //     self.set_commitment.swbf_inactive.flush();
+    // }
+}
+
+pub const AOCL_KEY: u8 = 0u8;
+pub const SWBFI_KEY: u8 = 1u8;
+pub const CHUNK_KEY: u8 = 2u8;
+pub const ACTIVE_WINDOW_KEY: u8 = 3u8;
+
+type RustyLevelDbArchivalMutatorSet<H> =
+    ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>;
+
+impl<H: AlgebraicHasher> RustyLevelDbArchivalMutatorSet<H> {
+    pub fn restore_from_rusty_leveldb(db: Rc<RefCell<DB>>) -> Self {
+        let aw_bytes = db.borrow_mut().get(&[ACTIVE_WINDOW_KEY]);
+        let aw = match aw_bytes {
+            Some(bytes) => bincode::deserialize(&bytes).unwrap(),
+            None => ActiveWindow::default(),
+        };
+
+        let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
+        let swbfi_storage = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");
+        let chunk_storage = RustyLevelDbVec::new(db, CHUNK_KEY, "chunks");
+
+        Self::new_or_restore(aocl_storage, swbfi_storage, chunk_storage, aw)
+    }
+
+    pub fn persist(&mut self, write_batch: &mut WriteBatch) {
+        self.kernel.aocl.persist(write_batch);
+        self.kernel.swbf_inactive.persist(write_batch);
+        self.chunks.pull_queue(write_batch);
+        // self.kernel.swbf_active.sbf.pull_queue(write_batch);
+
+        write_batch.put(
+            &[ACTIVE_WINDOW_KEY],
+            &bincode::serialize(&self.kernel.swbf_active).unwrap(),
+        );
     }
 }
 
@@ -367,17 +393,21 @@ mod archival_mutator_set_tests {
 
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
-    use crate::test_shared::mutator_set::{empty_archival_ms, make_item_and_randomness};
+    use crate::test_shared::mutator_set::{empty_rustyleveldb_ams, make_item_and_randomness};
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, WINDOW_SIZE};
 
     use super::*;
 
-    fn get_all_indices_with_duplicates<H: AlgebraicHasher>(
-        archival_mutator_set: &mut ArchivalMutatorSet<H>,
+    fn get_all_indices_with_duplicates<
+        H: AlgebraicHasher,
+        MmrStorage: StorageVec<Digest>,
+        ChunkStorage: StorageVec<Chunk>,
+    >(
+        archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
     ) -> Vec<u128> {
         let mut ret: Vec<u128> = vec![];
 
-        for index in archival_mutator_set.set_commitment.swbf_active.sbf.iter() {
+        for index in archival_mutator_set.kernel.swbf_active.sbf.iter() {
             ret.push(*index as u128);
         }
 
@@ -385,7 +415,7 @@ mod archival_mutator_set_tests {
         for chunk_index in 0..chunk_count {
             let chunk = archival_mutator_set.chunks.get(chunk_index);
             for index in chunk.relative_indices.iter() {
-                ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index);
+                ret.push(*index as u128 + CHUNK_SIZE as u128 * chunk_index as u128);
             }
         }
 
@@ -393,65 +423,86 @@ mod archival_mutator_set_tests {
     }
 
     #[test]
-    fn new_or_restore_test() {
+    fn persist_test() {
         type H = RescuePrimeRegular;
-        let opt = rusty_leveldb::in_memory();
-        let chunks_db = DB::open("chunks", opt.clone()).unwrap();
-        let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
-        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
-        let active_window_db = DB::open("active_window", opt.clone()).unwrap();
+        // let opt = rusty_leveldb::in_memory();
+        // let chunks_db = DB::open("chunks", opt.clone()).unwrap();
+        // let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
+        // let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt.clone()).unwrap();
+        // let active_window_db = DB::open("active_window", opt.clone()).unwrap();
 
-        let mut archival_mutator_set = ArchivalMutatorSet::<H>::new_or_restore(
-            aocl_mmr_db,
-            swbf_inactive_mmr_db,
-            chunks_db,
-            active_window_db,
-        );
+        // let mut archival_mutator_set = ArchivalMutatorSet::<H>::new_or_restore(
+        //     aocl_mmr_db,
+        //     swbf_inactive_mmr_db,
+        //     chunks_db,
+        //     active_window_db,
+        // );
+        let (mut archival_mutator_set, db) = empty_rustyleveldb_ams();
 
-        let (item, randomness) = make_item_and_randomness();
+        let (item0, randomness0) = make_item_and_randomness();
+        let (item1, randomness1) = make_item_and_randomness();
 
-        let mut addition_record = archival_mutator_set.commit(&item, &randomness);
-        let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
-        archival_mutator_set.add(&mut addition_record);
-        assert!(archival_mutator_set.verify(&item, &membership_proof));
+        // Add both items
+        let mut addition_record0 = archival_mutator_set.commit(&item0, &randomness0);
+        let mut membership_proof0 = archival_mutator_set.prove(&item0, &randomness0, false);
+        archival_mutator_set.add(&mut addition_record0);
+        let mut addition_record1 = archival_mutator_set.commit(&item1, &randomness1);
+        let mut membership_proof1 = archival_mutator_set.prove(&item1, &randomness1, false);
 
-        let removal_record: RemovalRecord<H> = archival_mutator_set.drop(&item, &membership_proof);
-        archival_mutator_set.remove(&removal_record);
+        membership_proof0
+            .update_from_addition(&item0, &mut archival_mutator_set.kernel, &addition_record1)
+            .unwrap();
 
-        let mut removal_record_indices = removal_record.absolute_indices.to_vec();
+        archival_mutator_set.add(&mut addition_record1);
+
+        // Verify membership
+        assert!(archival_mutator_set.verify(&item0, &membership_proof0));
+        assert!(archival_mutator_set.verify(&item1, &membership_proof1));
+
+        // Remove item 0
+        let removal_record0: RemovalRecord<H> =
+            archival_mutator_set.drop(&item0, &membership_proof0);
+        archival_mutator_set.remove(&removal_record0);
+        membership_proof1
+            .update_from_remove(&removal_record0)
+            .unwrap();
+
+        let mut removal_record_indices0 = removal_record0.absolute_indices.to_vec();
         let mut set_indices_in_archival_ms =
             get_all_indices_with_duplicates(&mut archival_mutator_set);
-        removal_record_indices.sort_unstable();
+        removal_record_indices0.sort_unstable();
         set_indices_in_archival_ms.sort_unstable();
 
-        assert_eq!(removal_record_indices, set_indices_in_archival_ms, "Set indices in MS must match removal record indices when Bloom filter was empty prior to removal.");
+        assert_eq!(removal_record_indices0, set_indices_in_archival_ms, "Set indices in MS must match removal record indices when Bloom filter was empty prior to removal.");
 
         // Let's store the active window back to the database and create
         // a new archival object from the databases it contains and then check
         // that this archival MS contains the same values
-        let mut active_window_db = DB::open("active_window", opt.clone()).unwrap();
-        active_window_db = archival_mutator_set
-            .set_commitment
-            .swbf_active
-            .store_to_database(active_window_db);
+        let mut write_batch = WriteBatch::new();
+        archival_mutator_set.persist(&mut write_batch);
+        db.borrow_mut().write(write_batch, true).unwrap();
 
         drop(archival_mutator_set);
-        let chunks_db = DB::open("chunks", opt.clone()).unwrap();
-        let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
-        let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt).unwrap();
-        let mut archival_mutator_set = ArchivalMutatorSet::new_or_restore(
-            aocl_mmr_db,
-            swbf_inactive_mmr_db,
-            chunks_db,
-            active_window_db,
-        );
-        assert!(!archival_mutator_set.verify(&item, &membership_proof));
+        // let chunks_db = DB::open("chunks", opt.clone()).unwrap();
+        // let aocl_mmr_db = DB::open("aocl", opt.clone()).unwrap();
+        // let swbf_inactive_mmr_db = DB::open("swbf_inactive", opt).unwrap();
+        // let mut archival_mutator_set = ArchivalMutatorSet::new_or_restore(
+        //     aocl_mmr_db,
+        //     swbf_inactive_mmr_db,
+        //     chunks_db,
+        //     active_window_db,
+        // );
+        let mut new_archival_mutator_set =
+            RustyLevelDbArchivalMutatorSet::<H>::restore_from_rusty_leveldb(db);
+        assert!(!new_archival_mutator_set.verify(&item0, &membership_proof0));
+        assert!(new_archival_mutator_set.verify(&item1, &membership_proof1));
     }
 
     #[test]
     fn archival_set_commitment_test() {
         type H = RescuePrimeRegular;
-        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
+            empty_rustyleveldb_ams();
 
         let num_additions = 65;
 
@@ -467,7 +518,7 @@ mod archival_mutator_set_tests {
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut archival_mutator_set.set_commitment,
+                &mut archival_mutator_set.kernel,
                 &addition_record,
             );
             assert!(res.is_ok());
@@ -505,7 +556,8 @@ mod archival_mutator_set_tests {
     fn archival_mutator_set_revert_add_test() {
         type H = RescuePrimeRegular;
 
-        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
+            empty_rustyleveldb_ams();
 
         // Repeatedly insert `AdditionRecord` into empty MutatorSet and revert it
         //
@@ -563,7 +615,8 @@ mod archival_mutator_set_tests {
     fn revert_remove_from_active_bloom_filter_panic() {
         type H = blake3::Hasher;
 
-        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
+            empty_rustyleveldb_ams();
         let record = prepare_random_addition(&mut archival_mutator_set);
         let (item, mut addition_record, membership_proof) = record;
         archival_mutator_set.add(&mut addition_record);
@@ -580,7 +633,8 @@ mod archival_mutator_set_tests {
     fn revert_remove_from_inactive_bloom_filter_panic() {
         type H = blake3::Hasher;
 
-        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
+            empty_rustyleveldb_ams();
 
         for _ in 0..2 * BATCH_SIZE {
             let (_item, mut addition_record, _membership_proof) =
@@ -597,7 +651,8 @@ mod archival_mutator_set_tests {
     fn archival_mutator_set_revert_remove_test() {
         type H = blake3::Hasher;
 
-        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
+            empty_rustyleveldb_ams();
 
         let n_iterations = 11 * BATCH_SIZE as usize;
         let mut records = Vec::with_capacity(n_iterations);
@@ -639,7 +694,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_batch_remove_simple_test() {
         type H = blake3::Hasher;
-        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
+            empty_rustyleveldb_ams();
 
         let num_additions = 130;
 
@@ -655,7 +711,7 @@ mod archival_mutator_set_tests {
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut archival_mutator_set.set_commitment,
+                &mut archival_mutator_set.kernel,
                 &addition_record,
             )
             .expect("MS membership update must work");
@@ -683,7 +739,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_batch_remove_dynamic_test() {
         type H = blake3::Hasher;
-        let mut archival_mutator_set: ArchivalMutatorSet<H> = empty_archival_ms();
+        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
+            empty_rustyleveldb_ams();
 
         let num_additions = 4 * BATCH_SIZE;
 
@@ -699,7 +756,7 @@ mod archival_mutator_set_tests {
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut archival_mutator_set.set_commitment,
+                    &mut archival_mutator_set.kernel,
                     &addition_record,
                 )
                 .expect("MS membership update must work");
@@ -752,13 +809,15 @@ mod archival_mutator_set_tests {
         }
     }
 
-    fn prepare_random_addition<H: AlgebraicHasher>(
-        archival_mutator_set: &mut ArchivalMutatorSet<H>,
+    fn prepare_random_addition<
+        H: AlgebraicHasher,
+        MmrStorage: StorageVec<Digest>,
+        ChunkStorage: StorageVec<Chunk>,
+    >(
+        archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
     ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
         let (item, randomness) = make_item_and_randomness();
-        let addition_record = archival_mutator_set
-            .set_commitment
-            .commit(&item, &randomness);
+        let addition_record = archival_mutator_set.kernel.commit(&item, &randomness);
         let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
 
         (item, addition_record, membership_proof)

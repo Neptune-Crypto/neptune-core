@@ -19,7 +19,7 @@ mod transfer_ms_membership_proof_tests {
     use crate::test_shared::mutator_set::insert_item;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::set_commitment::SetCommitment;
+    use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
@@ -32,7 +32,7 @@ mod transfer_ms_membership_proof_tests {
         // to me so far.
         type H = RescuePrimeRegular;
         type Mmr = MmrAccumulator<H>;
-        type Ms = SetCommitment<H, Mmr>;
+        type Ms = MutatorSetKernel<H, Mmr>;
         let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
 
         let (mp, item) = insert_item(&mut mutator_set);

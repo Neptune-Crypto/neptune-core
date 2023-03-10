@@ -13,11 +13,11 @@ pub const CHUNK_SIZE: u32 = 1 << 12;
 pub const BATCH_SIZE: u32 = 1 << 3;
 pub const NUM_TRIALS: u32 = 45;
 
-pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap<u128, Vec<u128>> {
-    let mut chunkidx_to_indices_dict: HashMap<u128, Vec<u128>> = HashMap::new();
+pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap<u64, Vec<u128>> {
+    let mut chunkidx_to_indices_dict: HashMap<u64, Vec<u128>> = HashMap::new();
     all_indices
         .iter()
-        .map(|bi| (bi / CHUNK_SIZE as u128, bi))
+        .map(|bi| ((bi / CHUNK_SIZE as u128) as u64, bi))
         .for_each(|(chunk_index, index)| {
             chunkidx_to_indices_dict
                 .entry(chunk_index)
@@ -57,9 +57,9 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
     removal_record: &RemovalRecord<H>,
     chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
 ) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, Digest)>) {
-    let mut mutation_argument_hash_map: HashMap<u128, (MmrMembershipProof<H>, Digest)> =
+    let mut mutation_argument_hash_map: HashMap<u64, (MmrMembershipProof<H>, Digest)> =
         HashMap::new();
-    let rem_record_chunkidx_to_indices_dict: HashMap<u128, Vec<u128>> =
+    let rem_record_chunkidx_to_indices_dict: HashMap<u64, Vec<u128>> =
         removal_record.get_chunkidx_to_indices_dict();
 
     // `mutated_chunks_by_input_indices` records the indices into the input `chunk_dictionaries` slice

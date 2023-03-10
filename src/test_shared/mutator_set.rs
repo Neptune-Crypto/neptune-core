@@ -1,14 +1,23 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use rand::Rng;
 use rusty_leveldb::DB;
 
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::storage_vec::RustyLevelDbVec;
 
-use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
+use crate::util_types::mutator_set::active_window::ActiveWindow;
+use crate::util_types::mutator_set::archival_mutator_set::{
+    ArchivalMutatorSet, AOCL_KEY, CHUNK_KEY, SWBFI_KEY,
+};
+use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::set_commitment::SetCommitment;
 
 pub fn make_item_and_randomness() -> (Digest, Digest) {
     let mut rng = rand::thread_rng();
@@ -17,16 +26,27 @@ pub fn make_item_and_randomness() -> (Digest, Digest) {
     (item, randomness)
 }
 
-pub fn empty_archival_ms<H: AlgebraicHasher>() -> ArchivalMutatorSet<H> {
+#[allow(clippy::type_complexity)]
+pub fn empty_rustyleveldb_ams<H: AlgebraicHasher>() -> (
+    ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
+    Rc<RefCell<DB>>,
+) {
     let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
-    let chunks_db = DB::open("chunks", opt.clone()).unwrap();
-    let aocl_db = DB::open("aocl", opt.clone()).unwrap();
-    let swbf_db = DB::open("swbf", opt).unwrap();
-    ArchivalMutatorSet::new_empty(aocl_db, swbf_db, chunks_db)
+    let db = DB::open("unit test ams", opt).unwrap();
+    let db = Rc::new(RefCell::new(db));
+    let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
+    let swbfi = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");
+    let chunks = RustyLevelDbVec::new(db.clone(), CHUNK_KEY, "chunks");
+    let kernel = MutatorSetKernel {
+        aocl: ArchivalMmr::new(aocl_storage),
+        swbf_inactive: ArchivalMmr::new(swbfi),
+        swbf_active: ActiveWindow::default(),
+    };
+    (ArchivalMutatorSet { kernel, chunks }, db)
 }
 
 pub fn insert_item<H: AlgebraicHasher, M: Mmr<H>>(
-    mutator_set: &mut SetCommitment<H, M>,
+    mutator_set: &mut MutatorSetKernel<H, M>,
 ) -> (MsMembershipProof<H>, Digest) {
     let (new_item, randomness) = make_item_and_randomness();
 
@@ -38,7 +58,7 @@ pub fn insert_item<H: AlgebraicHasher, M: Mmr<H>>(
 }
 
 pub fn remove_item<H: AlgebraicHasher, M: Mmr<H>>(
-    mutator_set: &mut SetCommitment<H, M>,
+    mutator_set: &mut MutatorSetKernel<H, M>,
     item: &Digest,
     mp: &MsMembershipProof<H>,
 ) {
