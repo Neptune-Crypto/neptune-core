@@ -16,6 +16,14 @@
 #
 # So whenever a block is found by 0 or by 2, it should be propagated to all participants.
 
+if ! command -v cpulimit &> /dev/null
+then
+    echo "cpulimit could not be found. Please install it."
+    echo "For example, on unbuntu: sudo apt-get install cpulimit"
+    # Add installation instructions for other Linux distributions here.
+    exit
+fi
+
 set -e # Exit on first error.
 
 export RUST_LOG=debug;
