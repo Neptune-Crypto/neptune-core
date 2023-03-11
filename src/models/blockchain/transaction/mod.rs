@@ -91,7 +91,7 @@ impl Hashable for Transaction {
 /// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
 ///
 /// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
-#[allow(clippy::derive_hash_xor_eq)]
+#[allow(clippy::derived_hash_with_manual_eq)]
 impl StdHash for Transaction {
     fn hash<H: StdHasher>(&self, state: &mut H) {
         let neptune_hash = Hash::hash(self);
@@ -212,12 +212,8 @@ impl Transaction {
 
         // Sanity check of block validity
         assert_eq!(
-            msa_state.get_commitment(),
-            block
-                .body
-                .next_mutator_set_accumulator
-                .clone()
-                .get_commitment(),
+            msa_state.hash(),
+            block.body.next_mutator_set_accumulator.clone().hash(),
             "Internal MSA state must match that from block"
         );
 

@@ -32,9 +32,7 @@ impl Hashable for BlockBody {
         // It's not necessary to hash `previous_mutator_set_accumulator` and `ms_update_digest` here,
         // as they are fully determined by `next_ms_acc_digest` assuming a good hash function.
         let mut block_body_copy: BlockBody = self.to_owned();
-        let next_ms_acc_digest = block_body_copy
-            .next_mutator_set_accumulator
-            .get_commitment();
+        let next_ms_acc_digest = block_body_copy.next_mutator_set_accumulator.hash();
 
         // Append digest of STARK proof
         let stark_proof_digest = Hash::hash_varlen(&self.stark_proof);

@@ -109,7 +109,7 @@ impl Block {
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
-            mutator_set_commitment: genesis_mutator_set.get_commitment(),
+            mutator_set_hash: genesis_mutator_set.hash(),
             prev_block_digest: Digest::default(),
             timestamp,
             nonce: [
@@ -187,7 +187,7 @@ impl Block {
         let block_header = BlockHeader {
             version: self.header.version,
             height: self.header.height,
-            mutator_set_commitment: next_mutator_set_accumulator.get_commitment(),
+            mutator_set_hash: next_mutator_set_accumulator.hash(),
             prev_block_digest: self.header.prev_block_digest,
             timestamp: block_timestamp,
             nonce: self.header.nonce,
@@ -327,12 +327,7 @@ impl Block {
 
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.
-        if ms.get_commitment()
-            != block_copy
-                .body
-                .next_mutator_set_accumulator
-                .get_commitment()
-        {
+        if ms.hash() != block_copy.body.next_mutator_set_accumulator.hash() {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
                 "From Block\n{:?}. \n\n\nCalculated\n{:?}",
@@ -342,7 +337,7 @@ impl Block {
         }
 
         // Verify that the locally constructed mutator set matches that in the received block's header
-        if ms.get_commitment() != block_copy.header.mutator_set_commitment {
+        if ms.hash() != block_copy.header.mutator_set_hash {
             warn!("Mutator set commitment does not match calculated object");
             return false;
         }

@@ -137,12 +137,6 @@ impl BlockIndexValue {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MsBlockSyncKey;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MsBlockSyncValue(pub Digest);
-
 pub struct PeerDatabases {
     pub peer_standings: RustyLevelDB<IpAddr, PeerStanding>,
 }

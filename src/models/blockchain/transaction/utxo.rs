@@ -59,7 +59,7 @@ fn convert<const N: usize>(bytes: &[u8]) -> BFieldElement {
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
 ///
 /// The Clippy warning is safe to suppress, because we do not violate the invariant: k1 == k2 => hash(k1) == hash(k2).
-#[allow(clippy::derive_hash_xor_eq)]
+#[allow(clippy::derived_hash_with_manual_eq)]
 impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
         let neptune_hash = Hash::hash(self);

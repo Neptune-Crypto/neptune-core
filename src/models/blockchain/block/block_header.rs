@@ -15,7 +15,7 @@ pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,
-    pub mutator_set_commitment: Digest,
+    pub mutator_set_hash: Digest,
     pub prev_block_digest: Digest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
@@ -59,7 +59,7 @@ impl Display for BlockHeader {
 impl Hashable for BlockHeader {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         let mut ret: Vec<BFieldElement> = vec![self.version, self.height.into()];
-        ret.append(&mut self.mutator_set_commitment.values().to_vec());
+        ret.append(&mut self.mutator_set_hash.values().to_vec());
         ret.append(&mut self.prev_block_digest.values().to_vec());
         ret.push(self.timestamp);
         ret.append(&mut self.nonce.to_vec());

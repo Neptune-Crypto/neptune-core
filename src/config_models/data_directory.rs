@@ -5,10 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config_models::network::Network;
 use crate::models::database::DATABASE_DIRECTORY_ROOT_NAME;
-use crate::models::state::archival_state::{
-    BLOCK_INDEX_DB_NAME, MS_AOCL_MMR_DB_NAME, MS_BLOCK_SYNC_DB_NAME, MS_CHUNKS_DB_NAME,
-    MS_SWBF_ACTIVE_DB_NAME, MS_SWBF_INACTIVE_MMR_DB_NAME, MUTATOR_SET_DIRECTORY_NAME,
-};
+use crate::models::state::archival_state::{BLOCK_INDEX_DB_NAME, MUTATOR_SET_DIRECTORY_NAME};
 use crate::models::state::networking_state::BANNED_IPS_DB_NAME;
 use crate::models::state::shared::{
     BLOCK_FILENAME_EXTENSION, BLOCK_FILENAME_PREFIX, DIR_NAME_FOR_BLOCKS,
@@ -116,46 +113,6 @@ impl DataDirectory {
     pub fn mutator_set_database_dir_path(&self) -> PathBuf {
         self.database_dir_path()
             .join(Path::new(MUTATOR_SET_DIRECTORY_NAME))
-    }
-
-    /// The active window database directory path.
-    ///
-    /// This directory lives within `DataDirectory::mutator_set_database_dir_path()`.
-    pub fn active_window_database_dir_path(&self) -> PathBuf {
-        self.mutator_set_database_dir_path()
-            .join(Path::new(MS_SWBF_ACTIVE_DB_NAME))
-    }
-
-    /// The append-only commitment list database directory path.
-    ///
-    /// This directory lives within `DataDirectory::mutator_set_database_dir_path()`.
-    pub fn aocl_database_dir_path(&self) -> PathBuf {
-        self.mutator_set_database_dir_path()
-            .join(Path::new(MS_AOCL_MMR_DB_NAME))
-    }
-
-    /// The inactive sliding window bloom-filter database directory path.
-    ///
-    /// This directory lives within `DataDirectory::mutator_set_database_dir_path()`.
-    pub fn swbfi_database_dir_path(&self) -> PathBuf {
-        self.mutator_set_database_dir_path()
-            .join(Path::new(MS_SWBF_INACTIVE_MMR_DB_NAME))
-    }
-
-    /// The chunks database directory path.
-    ///
-    /// This directory lives within `DataDirectory::mutator_set_database_dir_path()`.
-    pub fn chunks_database_dir_path(&self) -> PathBuf {
-        self.mutator_set_database_dir_path()
-            .join(Path::new(MS_CHUNKS_DB_NAME))
-    }
-
-    /// The mutator set block sync database directory path
-    ///
-    /// This directory lives within `DataDirectory::mutator_set_database_dir_path()`.
-    pub fn mutator_set_block_sync_database_dir_path(&self) -> PathBuf {
-        self.mutator_set_database_dir_path()
-            .join(Path::new(MS_BLOCK_SYNC_DB_NAME))
     }
 
     ///////////////////////////////////////////////////////////////////////////

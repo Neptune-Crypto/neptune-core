@@ -8,7 +8,7 @@ use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
 use crate::Hash;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct WalletStatusElement(pub u128, pub Utxo);
+pub struct WalletStatusElement(pub u64, pub Utxo);
 
 impl Display for WalletStatusElement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

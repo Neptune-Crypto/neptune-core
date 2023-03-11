@@ -337,12 +337,8 @@ impl WalletState {
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
-            block
-                .body
-                .next_mutator_set_accumulator
-                .clone()
-                .get_commitment(),
-            msa_state.get_commitment(),
+            block.body.next_mutator_set_accumulator.clone().hash(),
+            msa_state.hash(),
             "Mutator set in wallet-handler must agree with that from applied block"
         );
 

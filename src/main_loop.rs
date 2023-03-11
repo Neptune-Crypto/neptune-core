@@ -3,17 +3,13 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
-use crate::models::database::{
-    BlockIndexKey, BlockIndexValue, MsBlockSyncKey, MsBlockSyncValue, WalletDbKey, WalletDbValue,
-};
+use crate::models::database::{BlockIndexKey, BlockIndexValue, WalletDbKey, WalletDbValue};
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
 use crate::models::state::mempool::MempoolInternal;
 use crate::models::state::GlobalState;
-use crate::Hash;
 use anyhow::Result;
-use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
@@ -321,24 +317,13 @@ impl MainLoopHandler {
                         .block_index_db
                         .lock()
                         .await;
-                    let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                    let mut ams_lock = self
                         .global_state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
                         .archival_mutator_set
-                        .lock()
-                        .await;
-                    let mut ms_block_sync_lock: tokio::sync::MutexGuard<
-                        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
-                    > = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .ms_block_sync_db
                         .lock()
                         .await;
                     let mut light_state_locked = self
@@ -384,12 +369,7 @@ impl MainLoopHandler {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .update_mutator_set(
-                            &mut db_lock,
-                            &mut ams_lock,
-                            &mut ms_block_sync_lock,
-                            &new_block,
-                        )?;
+                        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)?;
 
                     // update wallet state with relevant UTXOs from this block
                     self.global_state
@@ -444,24 +424,13 @@ impl MainLoopHandler {
                         .block_index_db
                         .lock()
                         .await;
-                    let mut ams_lock: tokio::sync::MutexGuard<ArchivalMutatorSet<Hash>> = self
+                    let mut ams_lock = self
                         .global_state
                         .chain
                         .archival_state
                         .as_ref()
                         .unwrap()
                         .archival_mutator_set
-                        .lock()
-                        .await;
-                    let mut ms_block_sync_lock: tokio::sync::MutexGuard<
-                        RustyLevelDB<MsBlockSyncKey, MsBlockSyncValue>,
-                    > = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .ms_block_sync_db
                         .lock()
                         .await;
                     let mut light_state_locked: tokio::sync::MutexGuard<Block> = self
@@ -527,12 +496,7 @@ impl MainLoopHandler {
                             .archival_state
                             .as_ref()
                             .unwrap()
-                            .update_mutator_set(
-                                &mut block_db_lock,
-                                &mut ams_lock,
-                                &mut ms_block_sync_lock,
-                                &new_block,
-                            )?;
+                            .update_mutator_set(&mut block_db_lock, &mut ams_lock, &new_block)?;
 
                         // update wallet state with relevant UTXOs from this block
                         self.global_state
@@ -1016,7 +980,7 @@ impl MainLoopHandler {
             .await
             .flush();
 
-        // flush archival_mutator_set
+        // persist archival_mutator_set
         self.global_state
             .chain
             .archival_state
@@ -1025,29 +989,16 @@ impl MainLoopHandler {
             .archival_mutator_set
             .lock()
             .await
-            .flush();
-
-        // Write back active part of Bloom filter to database
-        let _active_window_db = self
-            .global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .flush_active_window()
-            .await;
-
-        // flush ms_block_sync_db
-        self.global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .ms_block_sync_db
-            .as_ref()
-            .lock()
-            .await
-            .flush();
+            .persist(
+                self.global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .get_latest_block()
+                    .await
+                    .hash,
+            );
 
         // flush peer_standings
         self.global_state

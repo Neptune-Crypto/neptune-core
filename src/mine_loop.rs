@@ -71,7 +71,7 @@ fn make_devnet_block_template(
     let zero = BFieldElement::zero();
     let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
     let new_pow_line: U32s<5> = previous_block.header.proof_of_work_family + difficulty;
-    let mutator_set_commitment: Digest = next_mutator_set_accumulator.get_commitment();
+    let mutator_set_commitment: Digest = next_mutator_set_accumulator.hash();
     let next_block_height = previous_block.header.height.next();
     let block_timestamp = BFieldElement::new(
         SystemTime::now()
@@ -83,7 +83,7 @@ fn make_devnet_block_template(
     let block_header = BlockHeader {
         version: zero,
         height: next_block_height,
-        mutator_set_commitment,
+        mutator_set_hash: mutator_set_commitment,
         prev_block_digest: Hash::hash(&previous_block.header),
         timestamp: block_timestamp,
         nonce: [zero, zero, zero],

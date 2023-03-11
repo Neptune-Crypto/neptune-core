@@ -3,6 +3,7 @@ use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
+use mutator_set_tf::util_types::mutator_set::synced_rustyleveldb_mutator_set::SyncedRustyLevelDbArchivalMutatorSet;
 use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
@@ -28,7 +29,6 @@ use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use mutator_set_tf::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -413,7 +413,7 @@ pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment = block.body.next_mutator_set_accumulator.get_commitment();
+    block.header.mutator_set_hash = block.body.next_mutator_set_accumulator.hash();
     block.header.block_body_merkle_root = Hash::hash(&block.body);
 }
 
@@ -454,7 +454,7 @@ pub fn add_unsigned_dev_net_input_to_block_transaction(
     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
     // update header fields
-    block.header.mutator_set_commitment = block.body.next_mutator_set_accumulator.get_commitment();
+    block.header.mutator_set_hash = block.body.next_mutator_set_accumulator.hash();
     block.header.block_body_merkle_root = Hash::hash(&block.body);
 }
 
@@ -481,19 +481,20 @@ pub async fn add_unsigned_input_to_block_ams(
     block: &mut Block,
     consumed_utxo: Utxo,
     randomness: Digest,
-    ams: &Arc<tokio::sync::Mutex<ArchivalMutatorSet<Hash>>>,
-    aocl_leaf_index: u128,
+    ams: &Arc<tokio::sync::Mutex<SyncedRustyLevelDbArchivalMutatorSet<Hash>>>,
+    aocl_leaf_index: u64,
 ) {
     let item = Hash::hash(&consumed_utxo);
     let input_membership_proof = ams
         .lock()
         .await
+        .ms
         .restore_membership_proof(&item, &randomness, aocl_leaf_index)
         .unwrap();
 
     // Sanity check that restored membership proof agrees with AMS
     assert!(
-        ams.lock().await.verify(&item, &input_membership_proof),
+        ams.lock().await.ms.verify(&item, &input_membership_proof),
         "Restored MS membership proof must validate against own AMS"
     );
 
@@ -509,7 +510,8 @@ pub async fn add_unsigned_input_to_block_ams(
     let input_removal_record = ams
         .lock()
         .await
-        .set_commitment
+        .ms
+        .kernel
         .drop(&item, &input_membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(
         block,
@@ -673,7 +675,7 @@ pub fn make_mock_block(
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
-        mutator_set_commitment: new_ms.get_commitment(),
+        mutator_set_hash: new_ms.hash(),
         prev_block_digest: previous_block.hash,
         timestamp: block_body.transaction.timestamp,
         nonce: [zero, zero, zero],
@@ -737,12 +739,10 @@ pub async fn make_unit_test_archival_state(
 ) -> (ArchivalState, Arc<tokio::sync::Mutex<PeerDatabases>>) {
     let (block_index_db_lock, peer_db_lock, data_dir) = unit_test_databases(network).unwrap();
 
-    let (ams, ms_block_sync) = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
+    let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
     let ams_lock = Arc::new(tokio::sync::Mutex::new(ams));
-    let ms_block_sync_lock = Arc::new(tokio::sync::Mutex::new(ms_block_sync));
 
-    let archival_state =
-        ArchivalState::new(data_dir, block_index_db_lock, ams_lock, ms_block_sync_lock).await;
+    let archival_state = ArchivalState::new(data_dir, block_index_db_lock, ams_lock).await;
 
     (archival_state, peer_db_lock)
 }
