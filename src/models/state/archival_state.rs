@@ -125,9 +125,8 @@ impl ArchivalState {
                 for mut addition_record in genesis_block.body.mutator_set_update.additions.clone() {
                     synced_rldb_ams_lock.ms.add(&mut addition_record);
                 }
+                synced_rldb_ams_lock.persist(genesis_block.hash);
             }
-
-            synced_rldb_ams_lock.persist(genesis_block.hash);
         }
 
         Self {
@@ -774,6 +773,56 @@ mod archival_state_tests {
             "Archival mutator set must be populated with premine outputs"
         );
 
+        assert_eq!(
+            Block::genesis_block().hash,
+            archival_state
+                .archival_mutator_set
+                .lock()
+                .await
+                .get_sync_label(),
+            "AMS must be synced to genesis block after initialization from genesis block"
+        );
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn archival_state_restore_test() -> Result<()> {
+        // Verify that a restored archival mutator set is populated with the right `sync_label`
+        let archival_state = make_test_archival_state(Network::Main).await;
+        let genesis_wallet_state = get_mock_wallet_state(None).await;
+        let mock_block_1 = make_mock_block(
+            &archival_state.genesis_block,
+            None,
+            genesis_wallet_state.wallet.get_public_key(),
+        );
+        {
+            let mut block_db_lock = archival_state.block_index_db.lock().await;
+            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+
+            archival_state.update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)?;
+        }
+
+        // Create a new archival MS that should be synced to block 1, not the genesis block
+        let restored_archival_state = ArchivalState::new(
+            archival_state.data_dir.clone(),
+            archival_state.block_index_db.clone(),
+            archival_state.archival_mutator_set.clone(),
+        )
+        .await;
+        drop(archival_state);
+
+        assert_eq!(
+            mock_block_1.hash,
+            restored_archival_state
+                .archival_mutator_set
+                .lock()
+                .await
+                .get_sync_label(),
+            "sync_label of restored archival mutator set must be digest of latest block"
+        );
+
         Ok(())
     }
 
@@ -1174,7 +1223,7 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn allow_mutliple_inputs_and_outputs_in_block() -> Result<()> {
+    async fn allow_multiple_inputs_and_outputs_in_block() -> Result<()> {
         let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Main).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
         let genesis_wallet = genesis_wallet_state.wallet;
