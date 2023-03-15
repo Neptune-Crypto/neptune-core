@@ -84,7 +84,7 @@ mod ms_accumulator_tests {
     use itertools::Itertools;
     use proptest::prelude::Rng;
 
-    use crate::test_shared::mutator_set::{empty_rustyleveldb_ams, make_item_and_randomness};
+    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
 
     use super::*;
 
@@ -164,8 +164,8 @@ mod ms_accumulator_tests {
         type H = blake3::Hasher;
 
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (mut archival_after_remove, _) = empty_rustyleveldb_ams();
-        let (mut archival_before_remove, _) = empty_rustyleveldb_ams();
+        let (mut archival_after_remove, _) = empty_rustyleveldbvec_ams();
+        let (mut archival_before_remove, _) = empty_rustyleveldbvec_ams();
         let number_of_interactions = 100;
         let mut rng = rand::thread_rng();
 

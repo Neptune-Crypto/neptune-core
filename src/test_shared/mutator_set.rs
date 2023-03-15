@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use rand::Rng;
 use rusty_leveldb::DB;
@@ -16,7 +15,7 @@ use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::rustyleveldb_mutator_set::{AOCL_KEY, CHUNK_KEY, SWBFI_KEY};
+use crate::util_types::mutator_set::rusty_archival_mutator_set::{AOCL_KEY, CHUNK_KEY, SWBFI_KEY};
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
 pub fn get_all_indices_with_duplicates<
@@ -51,13 +50,13 @@ pub fn make_item_and_randomness() -> (Digest, Digest) {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn empty_rustyleveldb_ams<H: AlgebraicHasher>() -> (
+pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher>() -> (
     ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
-    Rc<RefCell<DB>>,
+    Arc<Mutex<DB>>,
 ) {
     let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
     let db = DB::open("unit test ams", opt).unwrap();
-    let db = Rc::new(RefCell::new(db));
+    let db = Arc::new(Mutex::new(db));
     let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
     let swbfi = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");
     let chunks = RustyLevelDbVec::new(db.clone(), CHUNK_KEY, "chunks");

@@ -450,7 +450,7 @@ mod accumulation_scheme_tests {
 
     use crate::test_shared::mutator_set::insert_item;
     use crate::test_shared::mutator_set::remove_item;
-    use crate::test_shared::mutator_set::{empty_rustyleveldb_ams, make_item_and_randomness};
+    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -589,7 +589,7 @@ mod accumulation_scheme_tests {
         let (mut archival, _): (
             ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
             _,
-        ) = empty_rustyleveldb_ams();
+        ) = empty_rustyleveldbvec_ams();
 
         // Verify that function to get batch index does not overflow for the empty MS
         assert_eq!(

@@ -353,8 +353,7 @@ mod archival_mutator_set_tests {
     use rand::Rng;
     use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
 
-    use crate::test_shared::mutator_set::{empty_rustyleveldb_ams, make_item_and_randomness};
-    use crate::util_types::mutator_set::rustyleveldb_mutator_set::RustyLevelDbArchivalMutatorSet;
+    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
 
     use super::*;
@@ -362,8 +361,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_commitment_test() {
         type H = RescuePrimeRegular;
-        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
-            empty_rustyleveldb_ams();
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
 
         let num_additions = 65;
 
@@ -417,8 +416,8 @@ mod archival_mutator_set_tests {
     fn archival_mutator_set_revert_add_test() {
         type H = RescuePrimeRegular;
 
-        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
-            empty_rustyleveldb_ams();
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
 
         // Repeatedly insert `AdditionRecord` into empty MutatorSet and revert it
         //
@@ -476,8 +475,8 @@ mod archival_mutator_set_tests {
     fn revert_remove_from_active_bloom_filter_panic() {
         type H = blake3::Hasher;
 
-        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
-            empty_rustyleveldb_ams();
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
         let record = prepare_random_addition(&mut archival_mutator_set);
         let (item, mut addition_record, membership_proof) = record;
         archival_mutator_set.add(&mut addition_record);
@@ -494,8 +493,8 @@ mod archival_mutator_set_tests {
     fn revert_remove_from_inactive_bloom_filter_panic() {
         type H = blake3::Hasher;
 
-        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
-            empty_rustyleveldb_ams();
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
 
         for _ in 0..2 * BATCH_SIZE {
             let (_item, mut addition_record, _membership_proof) =
@@ -512,8 +511,8 @@ mod archival_mutator_set_tests {
     fn archival_mutator_set_revert_remove_test() {
         type H = blake3::Hasher;
 
-        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
-            empty_rustyleveldb_ams();
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
 
         let n_iterations = 11 * BATCH_SIZE as usize;
         let mut records = Vec::with_capacity(n_iterations);
@@ -555,8 +554,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_batch_remove_simple_test() {
         type H = blake3::Hasher;
-        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
-            empty_rustyleveldb_ams();
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
 
         let num_additions = 130;
 
@@ -600,8 +599,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_batch_remove_dynamic_test() {
         type H = blake3::Hasher;
-        let (mut archival_mutator_set, _): (RustyLevelDbArchivalMutatorSet<H>, _) =
-            empty_rustyleveldb_ams();
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
 
         let num_additions = 4 * BATCH_SIZE;
 
