@@ -78,7 +78,7 @@ where
         }
     }
 
-    fn get_commitment(&mut self) -> Digest {
+    fn hash(&mut self) -> Digest {
         let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
         let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
         let active_swbf_bagged = H::hash(&self.kernel.swbf_active);
@@ -427,12 +427,12 @@ mod archival_mutator_set_tests {
             let (item, mut addition_record, membership_proof) =
                 prepare_random_addition(&mut archival_mutator_set);
 
-            let commitment_before_add = archival_mutator_set.get_commitment();
+            let commitment_before_add = archival_mutator_set.hash();
             archival_mutator_set.add(&mut addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
 
             archival_mutator_set.revert_add(&addition_record);
-            let commitment_after_revert = archival_mutator_set.get_commitment();
+            let commitment_after_revert = archival_mutator_set.hash();
             assert!(!archival_mutator_set.verify(&item, &membership_proof));
             assert_eq!(commitment_before_add, commitment_after_revert);
         }
@@ -446,7 +446,7 @@ mod archival_mutator_set_tests {
             let record = prepare_random_addition(&mut archival_mutator_set);
             let (item, mut addition_record, membership_proof) = record.clone();
             records.push(record);
-            commitments_before.push(archival_mutator_set.get_commitment());
+            commitments_before.push(archival_mutator_set.hash());
             archival_mutator_set.add(&mut addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
         }
@@ -458,7 +458,7 @@ mod archival_mutator_set_tests {
         // This reaches the sliding window every `BATCH_SIZE` iteration.
         for (item, addition_record, membership_proof) in records.into_iter().rev() {
             archival_mutator_set.revert_add(&addition_record);
-            let commitment_after_revert = archival_mutator_set.get_commitment();
+            let commitment_after_revert = archival_mutator_set.hash();
             assert!(!archival_mutator_set.verify(&item, &membership_proof));
 
             let commitment_before_add = commitments_before.pop().unwrap();
@@ -540,12 +540,12 @@ mod archival_mutator_set_tests {
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
 
             let removal_record = archival_mutator_set.drop(&item, &restored_membership_proof);
-            let commitment_before_remove = archival_mutator_set.get_commitment();
+            let commitment_before_remove = archival_mutator_set.hash();
             archival_mutator_set.remove(&removal_record);
             assert!(!archival_mutator_set.verify(&item, &restored_membership_proof));
 
             archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
-            let commitment_after_revert = archival_mutator_set.get_commitment();
+            let commitment_after_revert = archival_mutator_set.hash();
             assert_eq!(commitment_before_remove, commitment_after_revert);
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
         }
@@ -642,7 +642,7 @@ mod archival_mutator_set_tests {
                 assert!(archival_mutator_set.verify(item, mp));
             }
 
-            let commitment_prior_to_removal = archival_mutator_set.get_commitment();
+            let commitment_prior_to_removal = archival_mutator_set.hash();
             archival_mutator_set.batch_remove(
                 removal_records.clone(),
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -665,7 +665,7 @@ mod archival_mutator_set_tests {
             archival_mutator_set.revert_remove(all_removal_record_indices);
 
             // Verify that mutator set before and after removal are the same
-            assert_eq!(commitment_prior_to_removal, archival_mutator_set.get_commitment(), "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");
+            assert_eq!(commitment_prior_to_removal, archival_mutator_set.hash(), "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");
         }
     }
 

@@ -54,7 +54,7 @@ pub trait MutatorSet<H: AlgebraicHasher> {
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     );
 
-    /// get_commitment
-    /// Return a commitment to the entire mutator set
-    fn get_commitment(&mut self) -> Digest;
+    /// hash
+    /// Return single hash digest that commits to the entire mutator set
+    fn hash(&mut self) -> Digest;
 }

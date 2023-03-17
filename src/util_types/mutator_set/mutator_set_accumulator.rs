@@ -58,7 +58,7 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         self.set_commitment.remove_helper(removal_record);
     }
 
-    fn get_commitment(&mut self) -> Digest {
+    fn hash(&mut self) -> Digest {
         let aocl_mmr_bagged = self.set_commitment.aocl.bag_peaks();
         let inactive_swbf_bagged = self.set_commitment.swbf_inactive.bag_peaks();
         let active_swbf_bagged = H::hash(&self.set_commitment.swbf_active);
@@ -181,10 +181,10 @@ mod ms_accumulator_tests {
             let mut last_ms_commitment: Option<Digest> = None;
             for i in 0..number_of_interactions {
                 // Verify that commitment to both the accumulator and archival data structure agree
-                let new_commitment = accumulator.get_commitment();
+                let new_commitment = accumulator.hash();
                 assert_eq!(
                     new_commitment,
-                    archival_after_remove.get_commitment(),
+                    archival_after_remove.hash(),
                     "Commitment to archival/accumulator MS must agree"
                 );
                 match last_ms_commitment {

@@ -491,11 +491,11 @@ mod accumulation_scheme_tests {
     }
 
     #[test]
-    fn mutator_set_commitment_test() {
+    fn mutator_set_hash_test() {
         type H = RescuePrimeRegular;
 
         let mut empty_set = MutatorSetAccumulator::<H>::default();
-        let commitment_to_empty = empty_set.get_commitment();
+        let empty_hash = empty_set.hash();
 
         // Add one element to append-only commitment list
         let mut set_with_aocl_append = MutatorSetAccumulator::<H>::default();
@@ -503,10 +503,10 @@ mod accumulation_scheme_tests {
         let (item0, _randomness) = make_item_and_randomness();
 
         set_with_aocl_append.set_commitment.aocl.append(item0);
-        let commitment_to_aocl_append = set_with_aocl_append.get_commitment();
+        let hash_of_aocl_append = set_with_aocl_append.hash();
 
         assert_ne!(
-            commitment_to_empty, commitment_to_aocl_append,
+            empty_hash, hash_of_aocl_append,
             "Appending to AOCL must change MutatorSet commitment"
         );
 
@@ -516,13 +516,13 @@ mod accumulation_scheme_tests {
             .set_commitment
             .swbf_inactive
             .append(item0);
-        let commitment_to_one_in_inactive = set_with_swbf_inactive_append.get_commitment();
+        let hash_of_one_in_inactive = set_with_swbf_inactive_append.hash();
         assert_ne!(
-            commitment_to_empty, commitment_to_one_in_inactive,
-            "Changing inactive must change MS commitment"
+            empty_hash, hash_of_one_in_inactive,
+            "Changing inactive must change MS hash"
         );
         assert_ne!(
-            commitment_to_aocl_append, commitment_to_one_in_inactive,
+            hash_of_aocl_append, hash_of_one_in_inactive,
             "One in AOCL and one in inactive must hash to different digests"
         );
 
@@ -530,16 +530,16 @@ mod accumulation_scheme_tests {
         let mut active_window_changed = empty_set;
         active_window_changed.set_commitment.swbf_active.insert(42);
         assert_ne!(
-            commitment_to_empty,
-            active_window_changed.get_commitment(),
+            empty_hash,
+            active_window_changed.hash(),
             "Changing active window must change commitment"
         );
 
         // Sanity check bc reasons
         active_window_changed.set_commitment.swbf_active.remove(42);
         assert_eq!(
-            commitment_to_empty,
-            active_window_changed.get_commitment(),
+            empty_hash,
+            active_window_changed.hash(),
             "Commitment to empty MS must be consistent"
         );
     }
