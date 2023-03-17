@@ -6,7 +6,7 @@ use twenty_first::{
     shared_math::{b_field_element::BFieldElement, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher,
-        mmr::{archival_mmr::ArchivalMmr, mmr_trait::Mmr},
+        mmr::archival_mmr::ArchivalMmr,
         storage_schema::{
             DbtSchema, DbtSingleton, DbtVec, RustyKey, StorageReader, StorageSingleton,
             StorageWriter, WriteOperation,
@@ -209,10 +209,6 @@ impl<H: AlgebraicHasher> StorageWriter<RustyKey, RustyMSValue> for RustyArchival
         // least one element (a dummy digest), owing to 1-indexation.
         self.ams.kernel.aocl.fix_dummy();
         self.ams.kernel.swbf_inactive.fix_dummy();
-        println!(
-            "Number of leafs in aocl at restoration: {}",
-            self.ams.kernel.aocl.count_leaves(),
-        );
 
         // populate active window
         self.ams.kernel.swbf_active.sbf = self.active_window_storage.get();
