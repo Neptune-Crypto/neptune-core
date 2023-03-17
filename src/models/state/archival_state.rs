@@ -1,6 +1,6 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
-use mutator_set_tf::util_types::mutator_set::synced_rustyleveldb_mutator_set::SyncedRustyLevelDbArchivalMutatorSet;
+use mutator_set_tf::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use num_traits::Zero;
 use rusty_leveldb::DB;
 use std::fs;
@@ -12,6 +12,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::storage_schema::StorageWriter;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -51,7 +52,7 @@ pub struct ArchivalState {
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
-    pub archival_mutator_set: Arc<TokioMutex<SyncedRustyLevelDbArchivalMutatorSet<Hash>>>,
+    pub archival_mutator_set: Arc<TokioMutex<RustyArchivalMutatorSet<Hash>>>,
 }
 
 impl ArchivalState {
@@ -73,22 +74,21 @@ impl ArchivalState {
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
     pub fn initialize_mutator_set(
         data_dir: &DataDirectory,
-    ) -> Result<SyncedRustyLevelDbArchivalMutatorSet<Hash>> {
+    ) -> Result<RustyArchivalMutatorSet<Hash>> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
 
         let options = rusty_leveldb::Options::default();
-        let db = std::sync::Arc::new(std::sync::Mutex::new(
-            match DB::open(ms_db_dir_path, options) {
-                Ok(db) => db,
-                Err(e) => {
-                    tracing::error!("Could not open mutator set database: {e}");
-                    panic!("Could not open database; do not know how to proceed. Panicking.");
-                }
-            },
-        ));
+        let db = match DB::open(ms_db_dir_path, options) {
+            Ok(db) => db,
+            Err(e) => {
+                tracing::error!("Could not open mutator set database: {e}");
+                panic!("Could not open database; do not know how to proceed. Panicking.");
+            }
+        };
 
-        let archival_set = SyncedRustyLevelDbArchivalMutatorSet::<Hash>::restore_from(db);
+        let mut archival_set = RustyArchivalMutatorSet::<Hash>::connect(db);
+        archival_set.restore_or_new();
 
         Ok(archival_set)
     }
@@ -109,7 +109,7 @@ impl ArchivalState {
     pub async fn new(
         data_dir: DataDirectory,
         block_index_db: Arc<TokioMutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
-        archival_mutator_set: Arc<TokioMutex<SyncedRustyLevelDbArchivalMutatorSet<Hash>>>,
+        archival_mutator_set: Arc<TokioMutex<RustyArchivalMutatorSet<Hash>>>,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block());
 
@@ -120,12 +120,18 @@ impl ArchivalState {
         // sense to do it here.
         {
             let mut synced_rldb_ams_lock = archival_mutator_set.lock().await;
-            let ams_is_empty = synced_rldb_ams_lock.ms.kernel.aocl.count_leaves().is_zero();
+            let ams_is_empty = synced_rldb_ams_lock
+                .ams
+                .kernel
+                .aocl
+                .count_leaves()
+                .is_zero();
             if ams_is_empty {
                 for mut addition_record in genesis_block.body.mutator_set_update.additions.clone() {
-                    synced_rldb_ams_lock.ms.add(&mut addition_record);
+                    synced_rldb_ams_lock.ams.add(&mut addition_record);
                 }
-                synced_rldb_ams_lock.persist(genesis_block.hash);
+                synced_rldb_ams_lock.set_sync_label(genesis_block.hash);
+                synced_rldb_ams_lock.persist();
             }
         }
 
@@ -572,7 +578,7 @@ impl ArchivalState {
     pub fn update_mutator_set(
         &self,
         block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
-        ams_lock: &mut tokio::sync::MutexGuard<SyncedRustyLevelDbArchivalMutatorSet<Hash>>,
+        ams_lock: &mut tokio::sync::MutexGuard<RustyArchivalMutatorSet<Hash>>,
         new_block: &Block,
     ) -> Result<()> {
         // Get the block digest that the mutator set was most recently synced to
@@ -610,10 +616,10 @@ impl ArchivalState {
                 .rev()
             {
                 assert!(
-                    ams_lock.ms.add_is_reversible(addition_record),
+                    ams_lock.ams.add_is_reversible(addition_record),
                     "Addition record must be in sync with block being rolled back."
                 );
-                ams_lock.ms.revert_add(addition_record);
+                ams_lock.ams.revert_add(addition_record);
             }
 
             // Roll back all removal records contained in block
@@ -629,7 +635,7 @@ impl ArchivalState {
                 "block_diff_indices being rolled back = {:?}",
                 block_diff_indices
             );
-            ams_lock.ms.revert_remove(block_diff_indices);
+            ams_lock.ams.revert_remove(block_diff_indices);
 
             ms_block_rollback_digest = roll_back_block.header.prev_block_digest;
         }
@@ -647,11 +653,11 @@ impl ArchivalState {
             // Batch-update all removal records to keep them valid after next addition
             RemovalRecord::batch_update_from_addition(
                 &mut removal_records,
-                &mut ams_lock.ms.kernel,
+                &mut ams_lock.ams.kernel,
             ).expect("MS removal record update from add must succeed in update_mutator_set as block should already be verified");
 
             // Add the element to the mutator set
-            ams_lock.ms.add(&mut addition_record);
+            ams_lock.ams.add(&mut addition_record);
         }
 
         // Remove items, thus removing the input UTXOs from the mutator set
@@ -663,7 +669,7 @@ impl ArchivalState {
             ).expect("MS removal record update from remove must succeed in update_mutator_set as block should already be verified");
 
             // Remove the element from the mutator set
-            ams_lock.ms.remove(removal_record);
+            ams_lock.ams.remove(removal_record);
         }
 
         // Sanity check that archival mutator set has been updated consistently with the new block
@@ -674,12 +680,13 @@ impl ArchivalState {
                 .body
                 .next_mutator_set_accumulator
                 .hash(),
-            ams_lock.ms.hash(),
+            ams_lock.ams.hash(),
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block_copy.hash
         );
 
         // Persist updated mutator set to disk, with sync label
-        ams_lock.persist(new_block.hash);
+        ams_lock.set_sync_label(new_block.hash);
+        ams_lock.persist();
 
         Ok(())
     }
@@ -766,7 +773,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .lock()
                 .await
-                .ms
+                .ams
                 .kernel
                 .aocl
                 .count_leaves(),
@@ -845,7 +852,7 @@ mod archival_state_tests {
 
             archival_state.update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)?;
 
-            assert_ne!(0, ams_lock.ms.kernel.aocl.count_leaves());
+            assert_ne!(0, ams_lock.ams.kernel.aocl.count_leaves());
         }
 
         // Add an input to the next block's transaction. This will add a removal record
@@ -869,7 +876,7 @@ mod archival_state_tests {
 
             archival_state.update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_2)?;
 
-            assert_ne!(0, ams_lock.ms.kernel.swbf_active.sbf.len());
+            assert_ne!(0, ams_lock.ams.kernel.swbf_active.sbf.len());
         }
 
         Ok(())
@@ -989,7 +996,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .lock()
                 .await
-                .ms
+                .ams
                 .kernel
                 .swbf_active
                 .sbf
@@ -1003,7 +1010,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .lock()
                 .await
-                .ms
+                .ams
                 .kernel
                 .aocl
                 .count_leaves(),
@@ -1120,7 +1127,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .lock()
                 .await
-                .ms
+                .ams
                 .kernel
                 .swbf_active
                 .sbf
@@ -1134,7 +1141,7 @@ mod archival_state_tests {
                 .archival_mutator_set
                 .lock()
                 .await
-                .ms
+                .ams
                 .kernel
                 .aocl
                 .count_leaves(),
@@ -1186,7 +1193,7 @@ mod archival_state_tests {
             // Before updating, the active window must be empty
             let mut db_bc_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
-            assert!(ams_lock.ms.kernel.swbf_active.sbf.is_empty());
+            assert!(ams_lock.ams.kernel.swbf_active.sbf.is_empty());
 
             // Write the block to disk
             archival_state.write_block(
@@ -1199,7 +1206,7 @@ mod archival_state_tests {
             archival_state.update_mutator_set(&mut db_bc_lock, &mut ams_lock, &block_1_a)?;
 
             // Verify that the active window is not empty as a removal record has inserted indices into the Bloom filter
-            assert!(!ams_lock.ms.kernel.swbf_active.sbf.is_empty());
+            assert!(!ams_lock.ams.kernel.swbf_active.sbf.is_empty());
 
             // Verify that a block containing a removal record `block_1_a` can be reverted
             let block_1_b = make_mock_block(
@@ -1215,7 +1222,7 @@ mod archival_state_tests {
             archival_state.update_mutator_set(&mut db_bc_lock, &mut ams_lock, &block_1_b)?;
 
             // Verify that the active window is empty after reverting the removal record
-            assert!(ams_lock.ms.kernel.swbf_active.sbf.is_empty());
+            assert!(ams_lock.ams.kernel.swbf_active.sbf.is_empty());
         }
 
         Ok(())

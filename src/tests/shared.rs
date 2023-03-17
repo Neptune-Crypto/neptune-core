@@ -3,7 +3,7 @@ use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
-use mutator_set_tf::util_types::mutator_set::synced_rustyleveldb_mutator_set::SyncedRustyLevelDbArchivalMutatorSet;
+use mutator_set_tf::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
@@ -481,20 +481,20 @@ pub async fn add_unsigned_input_to_block_ams(
     block: &mut Block,
     consumed_utxo: Utxo,
     randomness: Digest,
-    ams: &Arc<tokio::sync::Mutex<SyncedRustyLevelDbArchivalMutatorSet<Hash>>>,
+    ams: &Arc<tokio::sync::Mutex<RustyArchivalMutatorSet<Hash>>>,
     aocl_leaf_index: u64,
 ) {
     let item = Hash::hash(&consumed_utxo);
     let input_membership_proof = ams
         .lock()
         .await
-        .ms
+        .ams
         .restore_membership_proof(&item, &randomness, aocl_leaf_index)
         .unwrap();
 
     // Sanity check that restored membership proof agrees with AMS
     assert!(
-        ams.lock().await.ms.verify(&item, &input_membership_proof),
+        ams.lock().await.ams.verify(&item, &input_membership_proof),
         "Restored MS membership proof must validate against own AMS"
     );
 
@@ -510,7 +510,7 @@ pub async fn add_unsigned_input_to_block_ams(
     let input_removal_record = ams
         .lock()
         .await
-        .ms
+        .ams
         .kernel
         .drop(&item, &input_membership_proof);
     add_unsigned_dev_net_input_to_block_transaction(

@@ -22,6 +22,7 @@ use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::util_types::emojihash_trait::Emojihash;
+use twenty_first::util_types::storage_schema::StorageWriter;
 
 use crate::models::channel::{
     MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
@@ -980,7 +981,7 @@ impl MainLoopHandler {
             .await
             .flush();
 
-        // persist archival_mutator_set
+        // persist archival_mutator_set, with sync label
         self.global_state
             .chain
             .archival_state
@@ -989,7 +990,7 @@ impl MainLoopHandler {
             .archival_mutator_set
             .lock()
             .await
-            .persist(
+            .set_sync_label(
                 self.global_state
                     .chain
                     .archival_state
@@ -999,6 +1000,15 @@ impl MainLoopHandler {
                     .await
                     .hash,
             );
+        self.global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .archival_mutator_set
+            .lock()
+            .await
+            .persist();
 
         // flush peer_standings
         self.global_state
