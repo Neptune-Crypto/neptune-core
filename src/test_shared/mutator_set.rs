@@ -15,7 +15,6 @@ use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::rusty_archival_mutator_set::{AOCL_KEY, CHUNK_KEY, SWBFI_KEY};
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
 pub fn get_all_indices_with_duplicates<
@@ -54,6 +53,9 @@ pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher>() -> (
     ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
     Arc<Mutex<DB>>,
 ) {
+    const AOCL_KEY: u8 = 0;
+    const SWBFI_KEY: u8 = 1;
+    const CHUNK_KEY: u8 = 2;
     let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
     let db = DB::open("unit test ams", opt).unwrap();
     let db = Arc::new(Mutex::new(db));

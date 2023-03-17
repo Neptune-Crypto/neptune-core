@@ -19,12 +19,6 @@ use super::{
     mutator_set_kernel::MutatorSetKernel,
 };
 
-pub const AOCL_KEY: u8 = 0u8;
-pub const SWBFI_KEY: u8 = 1u8;
-pub const CHUNK_KEY: u8 = 2u8;
-pub const ACTIVE_WINDOW_KEY: u8 = 3u8;
-pub const SYNC_KEY: u8 = 4u8;
-
 struct RamsReader {
     db: Arc<RefCell<DB>>,
 }
