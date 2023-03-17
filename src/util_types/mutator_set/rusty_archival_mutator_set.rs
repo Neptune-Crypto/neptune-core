@@ -1,4 +1,7 @@
-use std::{cell::RefCell, sync::Arc};
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex},
+};
 
 use itertools::Itertools;
 use rusty_leveldb::{WriteBatch, DB};
@@ -20,12 +23,12 @@ use super::{
 };
 
 struct RamsReader {
-    db: Arc<RefCell<DB>>,
+    db: Arc<Mutex<DB>>,
 }
 
 impl StorageReader<RustyKey, RustyMSValue> for RamsReader {
     fn get(&mut self, key: RustyKey) -> Option<RustyMSValue> {
-        self.db.as_ref().borrow_mut().get(&key.0).map(RustyMSValue)
+        self.db.lock().expect("StorageReader for RustyArchivalMutatorSet: could not get database lock for reading (get)").get(&key.0).map(RustyMSValue)
     }
 }
 
@@ -130,14 +133,14 @@ where
 {
     pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
     schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
-    db: Arc<RefCell<DB>>,
+    db: Arc<Mutex<DB>>,
     active_window_storage: Arc<RefCell<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
     sync_label: Arc<RefCell<DbtSingleton<RustyKey, RustyMSValue, Digest>>>,
 }
 
 impl<H: AlgebraicHasher> RustyArchivalMutatorSet<H> {
     pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
-        let db_pointer = Arc::new(RefCell::new(db));
+        let db_pointer = Arc::new(Mutex::new(db));
         let reader = RamsReader {
             db: db_pointer.clone(),
         };
@@ -195,8 +198,7 @@ impl<H: AlgebraicHasher> StorageWriter<RustyKey, RustyMSValue> for RustyArchival
         }
 
         self.db
-            .as_ref()
-            .borrow_mut()
+            .lock().expect("RustyArchivalMutatorSet: StorageWriter -- could not get lock on database for writing.")
             .write(write_batch, true)
             .expect("Could not persist to database.");
     }
@@ -326,8 +328,8 @@ mod tests {
 
         rusty_mutator_set
             .db
-            .as_ref()
-            .borrow_mut()
+            .lock()
+            .expect("(In test:) Could not get lock on database for closing.")
             .close()
             .expect("Could not close database.");
 
