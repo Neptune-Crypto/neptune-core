@@ -1,7 +1,4 @@
-use std::{
-    cell::RefCell,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
 use rusty_leveldb::{WriteBatch, DB};
@@ -125,8 +122,8 @@ impl From<Vec<u32>> for RustyMSValue {
     }
 }
 
-type AmsMmrStorage = Arc<RefCell<DbtVec<RustyKey, RustyMSValue, u64, Digest>>>;
-type AmsChunkStorage = Arc<RefCell<DbtVec<RustyKey, RustyMSValue, u64, Chunk>>>;
+type AmsMmrStorage = Arc<Mutex<DbtVec<RustyKey, RustyMSValue, u64, Digest>>>;
+type AmsChunkStorage = Arc<Mutex<DbtVec<RustyKey, RustyMSValue, u64, Chunk>>>;
 pub struct RustyArchivalMutatorSet<H>
 where
     H: AlgebraicHasher,
@@ -134,8 +131,8 @@ where
     pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
     schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
     db: Arc<Mutex<DB>>,
-    active_window_storage: Arc<RefCell<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
-    sync_label: Arc<RefCell<DbtSingleton<RustyKey, RustyMSValue, Digest>>>,
+    active_window_storage: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
+    sync_label: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Digest>>>,
 }
 
 impl<H: AlgebraicHasher> RustyArchivalMutatorSet<H> {
@@ -144,7 +141,7 @@ impl<H: AlgebraicHasher> RustyArchivalMutatorSet<H> {
         let reader = RamsReader {
             db: db_pointer.clone(),
         };
-        let reader_pointer = Arc::new(RefCell::new(reader));
+        let reader_pointer = Arc::new(Mutex::new(reader));
         let mut schema = DbtSchema::<RustyKey, RustyMSValue, RamsReader> {
             tables: vec![],
             reader: reader_pointer,
@@ -188,7 +185,7 @@ impl<H: AlgebraicHasher> StorageWriter<RustyKey, RustyMSValue> for RustyArchival
             .set(self.ams.kernel.swbf_active.sbf.clone());
 
         for table in &self.schema.tables {
-            let operations = table.as_ref().borrow_mut().pull_queue();
+            let operations = table.lock().expect("Could not obtain lock on table in RustyArchivalMutatorSet as StorageWriter (persist).").pull_queue();
             for op in operations {
                 match op {
                     WriteOperation::Write(key, value) => write_batch.put(&key.0, &value.0),
@@ -205,7 +202,7 @@ impl<H: AlgebraicHasher> StorageWriter<RustyKey, RustyMSValue> for RustyArchival
 
     fn restore_or_new(&mut self) {
         for table in &self.schema.tables {
-            table.as_ref().borrow_mut().restore_or_new();
+            table.lock().expect("Could not obtain lock on table in RustyArchivalMutatorSet as StorageWriter (restore_or_new).").restore_or_new();
         }
 
         // The field `digests` of ArchivalMMR should always have at
