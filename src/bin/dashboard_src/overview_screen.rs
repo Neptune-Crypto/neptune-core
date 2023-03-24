@@ -23,6 +23,7 @@ use tui::{
 };
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
+use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
 #[derive(Debug, Default, Clone)]
@@ -106,6 +107,7 @@ pub struct OverviewScreen {
     data: Arc<std::sync::Mutex<OverviewData>>,
     server: Arc<RPCClient>,
     poll_thread: Option<Arc<RefCell<JoinHandle<()>>>>,
+    escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
 
 impl OverviewScreen {
@@ -119,12 +121,14 @@ impl OverviewScreen {
             data: Arc::new(Mutex::new(OverviewData::default())),
             server: rpc_server,
             poll_thread: None,
+            escalatable_event: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
         overview_data: Arc<std::sync::Mutex<OverviewData>>,
+        escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) {
         // use macros to reduce boilerplate
         macro_rules! setup_poller {
@@ -159,10 +163,13 @@ impl OverviewScreen {
         loop {
             select! {
                 _ = &mut balance => {
-                    if let Ok(b) = rpc_client.get_balance(context::current()).await {
-                        overview_data.lock().unwrap().balance = Some(b);
+                    match rpc_client.get_balance(context::current()).await {
+                        Ok(b) => {
+                            overview_data.lock().unwrap().balance = Some(b);
+                            reset_poller!(balance, Duration::from_secs(10));
+                        },
+                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
                     }
-                    reset_poller!(balance, Duration::from_secs(10));
                 },
 
                 // _ = &mut confirmations => {
@@ -178,9 +185,14 @@ impl OverviewScreen {
                 // },
 
                 _ = &mut block_height => {
-                    let bh = rpc_client.block_height(context::current()).await.unwrap();
-                    overview_data.lock().unwrap().block_height = Some(bh);
-                    reset_poller!(block_height, Duration::from_secs(10));
+                    match rpc_client.block_height(context::current()).await {
+                        Ok(bh) => {
+
+                            overview_data.lock().unwrap().block_height = Some(bh);
+                            reset_poller!(block_height, Duration::from_secs(10));
+                        },
+                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                    }
                 },
 
                 // _ = &mut block_interval => {
@@ -219,27 +231,35 @@ impl OverviewScreen {
                 // },
 
                 _ = &mut mempool_size => {
-                    let ms = rpc_client.get_mempool_size(context::current()).await.unwrap();
-                    overview_data.lock().unwrap().mempool_size = Some(ByteSize::b(ms.try_into().unwrap()));
-                    reset_poller!(mempool_size, Duration::from_secs(10));
+                    match rpc_client.get_mempool_size(context::current()).await {
+                        Ok(ms) => {
+                            overview_data.lock().unwrap().mempool_size=Some(ByteSize::b(ms.try_into().unwrap()));
+                            reset_poller!(mempool_size,Duration::from_secs(10));
+                        },
+                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                    }
                 }
 
                 _ = &mut mempool_tx_count => {
-                    let txc = rpc_client.get_mempool_tx_count(context::current()).await.unwrap();
-                    overview_data.lock().unwrap().mempool_tx_count = Some(txc.try_into().unwrap());
-                    reset_poller!(mempool_tx_count, Duration::from_secs(10));
+                    match rpc_client.get_mempool_tx_count(context::current()).await {
+                        Ok(txc) => {
+                            overview_data.lock().unwrap().mempool_tx_count = Some(txc.try_into().unwrap());
+                            reset_poller!(mempool_tx_count, Duration::from_secs(10));
+                        },
+                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                    }
                 }
 
                 _ = &mut peer_count => {
-                    let peers = rpc_client.get_peer_info(context::current()).await.unwrap();
-                    // consider doing some filter and / or separation, e.g. based on
-                    //  - authentication
-                    //  - standing
-                    //  - latest activity
-                    let num_peers = peers.len();
-                    overview_data.lock().unwrap().peer_count = Some(num_peers);
-                    overview_data.lock().unwrap().authenticated_peer_count = Some(0);
-                    reset_poller!(peer_count, Duration::from_secs(5));
+                    match rpc_client.get_peer_info(context::current()).await {
+                        Ok(peers) => {
+                            let num_peers=peers.len();
+                            overview_data.lock().unwrap().peer_count=Some(num_peers);
+                            overview_data.lock().unwrap().authenticated_peer_count=Some(0);
+                            reset_poller!(peer_count,Duration::from_secs(5));
+                        },
+                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                    }
                 }
 
                 // _ = &mut max_peer_count => {
@@ -288,8 +308,9 @@ impl Screen for OverviewScreen {
         self.active = true;
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
+        let escalatable_event_arc = self.escalatable_event.clone();
         self.poll_thread = Some(Arc::new(RefCell::new(tokio::spawn(async move {
-            OverviewScreen::run_polling_loop(server_arc, data_arc).await;
+            OverviewScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
         }))));
     }
 
@@ -308,6 +329,10 @@ impl Screen for OverviewScreen {
     fn unfocus(&mut self) {
         self.fg = Color::Gray;
         self.in_focus = false;
+    }
+
+    fn escalatable_event(&self) -> Arc<std::sync::Mutex<Option<DashboardEvent>>> {
+        self.escalatable_event.clone()
     }
 }
 

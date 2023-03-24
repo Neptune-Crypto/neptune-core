@@ -38,6 +38,7 @@ pub struct SendScreen {
     amount: String,
     notice: Arc<Mutex<String>>,
     reset_me: Arc<Mutex<bool>>,
+    escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
 
 impl SendScreen {
@@ -53,6 +54,7 @@ impl SendScreen {
             amount: "".to_string(),
             notice: Arc::new(Mutex::new("".to_string())),
             reset_me: Arc::new(Mutex::new(false)),
+            escalatable_event: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -273,6 +275,10 @@ impl Screen for SendScreen {
     fn unfocus(&mut self) {
         self.fg = Color::Gray;
         self.in_focus = false;
+    }
+
+    fn escalatable_event(&self) -> Arc<std::sync::Mutex<Option<DashboardEvent>>> {
+        self.escalatable_event.clone()
     }
 }
 

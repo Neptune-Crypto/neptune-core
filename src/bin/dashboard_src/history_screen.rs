@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use super::screen::Screen;
+use super::{dashboard_app::DashboardEvent, screen::Screen};
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use neptune_core::{models::blockchain::transaction::amount::Amount, rpc_server::RPCClient};
@@ -35,6 +35,7 @@ pub struct HistoryScreen {
     data: Arc<std::sync::Mutex<Vec<BalanceUpdate>>>,
     server: Arc<RPCClient>,
     poll_thread: Option<Arc<RefCell<JoinHandle<()>>>>,
+    escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
 
 impl HistoryScreen {
@@ -47,12 +48,14 @@ impl HistoryScreen {
             data: Arc::new(Mutex::new(vec![])),
             server: rpc_server,
             poll_thread: None,
+            escalatable_event: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
     async fn run_polling_loop(
         _rpc_client: Arc<RPCClient>,
         balance_updates: Arc<std::sync::Mutex<Vec<BalanceUpdate>>>,
+        _escalatable_event_arc: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) -> ! {
         // use macros to reduce boilerplate
         macro_rules! setup_poller {
@@ -92,8 +95,9 @@ impl Screen for HistoryScreen {
         self.active = true;
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
+        let escalatable_event_arc = self.escalatable_event.clone();
         self.poll_thread = Some(Arc::new(RefCell::new(tokio::spawn(async move {
-            HistoryScreen::run_polling_loop(server_arc, data_arc).await;
+            HistoryScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
         }))));
     }
 
@@ -112,6 +116,10 @@ impl Screen for HistoryScreen {
     fn unfocus(&mut self) {
         self.fg = Color::Gray;
         self.in_focus = false;
+    }
+
+    fn escalatable_event(&self) -> Arc<std::sync::Mutex<Option<DashboardEvent>>> {
+        self.escalatable_event.clone()
     }
 }
 

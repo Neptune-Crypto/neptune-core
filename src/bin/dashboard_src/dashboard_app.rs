@@ -99,6 +99,7 @@ pub enum ConsoleIO {
 pub enum DashboardEvent {
     ConsoleEvent(Event),
     ConsoleMode(ConsoleIO),
+    Shutdown(String),
 }
 
 /// App holds the state of the application
@@ -265,6 +266,18 @@ impl DashboardApp {
                 }
             }
 
+            // handle events triggered downstream and escalated here (if any)
+            if app.have_current_screen() {
+                let maybe_event_arc = app.current_screen().escalatable_event();
+                if maybe_event_arc.lock().unwrap().is_some() {
+                    let event = maybe_event_arc.lock().unwrap().clone().unwrap();
+                    app.handle(event).await?;
+
+                    // mark handled
+                    *maybe_event_arc.lock().unwrap() = None;
+                };
+            }
+
             continue_running = app.is_running();
         }
         app.stop();
@@ -276,7 +289,10 @@ impl DashboardApp {
     }
 
     async fn handle(&mut self, event: DashboardEvent) -> Result<Option<Event>, Box<dyn Error>> {
-        if self.menu_in_focus {
+        if let DashboardEvent::Shutdown(error_message) = event {
+            self.stop();
+            self.output = error_message + "\n";
+        } else if self.menu_in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => {

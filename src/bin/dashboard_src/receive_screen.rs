@@ -34,6 +34,7 @@ pub struct ReceiveScreen {
     data: Arc<std::sync::Mutex<Option<String>>>,
     server: Arc<RPCClient>,
     generating: Arc<Mutex<bool>>,
+    escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
 
 impl ReceiveScreen {
@@ -46,6 +47,7 @@ impl ReceiveScreen {
             data: Arc::new(Mutex::new(None)),
             server: rpc_server,
             generating: Arc::new(Mutex::new(false)),
+            escalatable_event: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -129,6 +131,10 @@ impl Screen for ReceiveScreen {
     fn unfocus(&mut self) {
         self.fg = Color::Gray;
         self.in_focus = false;
+    }
+
+    fn escalatable_event(&self) -> Arc<std::sync::Mutex<Option<DashboardEvent>>> {
+        self.escalatable_event.clone()
     }
 }
 
