@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,14 +27,14 @@ impl Hashable for AdditionRecord {
 mod addition_record_tests {
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
     use super::*;
 
     #[test]
     fn hash_identity_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let mut msa0: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let addition_record_0: AdditionRecord = msa0
@@ -67,7 +67,7 @@ mod addition_record_tests {
 
     #[test]
     fn serialization_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let mut msa: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = H::hash(&1492u128);

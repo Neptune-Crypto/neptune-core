@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::{
     algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,

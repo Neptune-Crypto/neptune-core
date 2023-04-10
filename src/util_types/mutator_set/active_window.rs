@@ -188,7 +188,7 @@ mod active_window_tests {
 
     use super::*;
     use rand::{thread_rng, RngCore};
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::tip5::Tip5;
 
     impl<H: AlgebraicHasher> ActiveWindow<H> {
         fn new_from(sbf: Vec<u32>) -> Self {
@@ -302,12 +302,12 @@ mod active_window_tests {
         // works in the runtime, for relevant hash functions. It also tests that different
         // indices being inserted results in different digests.
         hash_unequal::<blake3::Hasher>();
-        hash_unequal::<RescuePrimeRegular>();
+        hash_unequal::<Tip5>();
     }
 
     #[test]
     fn test_active_window_serialization() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let aw0 = ActiveWindow::<H>::new();
         let json_aw0 = serde_json::to_string(&aw0).unwrap();

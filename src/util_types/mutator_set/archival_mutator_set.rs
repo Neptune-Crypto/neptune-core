@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -351,7 +351,7 @@ where
 mod archival_mutator_set_tests {
     use itertools::Itertools;
     use rand::Rng;
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
     use crate::util_types::mutator_set::shared::BATCH_SIZE;
@@ -360,7 +360,7 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_set_commitment_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
 
@@ -414,7 +414,7 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_mutator_set_revert_add_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();

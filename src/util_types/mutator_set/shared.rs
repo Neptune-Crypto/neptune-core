@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
-use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
+use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, SpongeHasher};
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 

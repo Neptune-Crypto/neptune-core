@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
+use twenty_first::shared_math::tip5::Digest;
 
-use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
@@ -462,12 +462,12 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use num_traits::Zero;
     use twenty_first::shared_math::other::random_elements;
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     #[test]
     fn mp_cache_indices_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let mut accumulator = MutatorSetAccumulator::<H>::default();
         let (item, randomness) = make_item_and_randomness();
@@ -490,7 +490,7 @@ mod ms_proof_tests {
 
     #[test]
     fn mp_equality_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let (randomness, other_randomness) = make_item_and_randomness();
 
@@ -560,7 +560,7 @@ mod ms_proof_tests {
     fn serialization_test() {
         // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
         // in this code base as a macro. So this is basically a test of that macro.
-        type H = RescuePrimeRegular;
+        type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         for _ in 0..10 {
             let (item, randomness) = make_item_and_randomness();

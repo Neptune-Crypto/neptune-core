@@ -1,4 +1,4 @@
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::addition_record::AdditionRecord;

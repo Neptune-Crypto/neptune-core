@@ -57,8 +57,7 @@ mod chunk_dict_tests {
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
     use twenty_first::shared_math::other::random_elements;
-    use twenty_first::shared_math::rescue_prime_digest::Digest;
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::tip5::{Digest, Tip5};
     use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
@@ -66,7 +65,7 @@ mod chunk_dict_tests {
 
     #[test]
     fn hash_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let chunkdict0 = ChunkDictionary::<H>::default();
         let chunkdict00 = ChunkDictionary::<H>::default();
@@ -141,7 +140,7 @@ mod chunk_dict_tests {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
-        type H = RescuePrimeRegular;
+        type H = Tip5;
         let s_empty: ChunkDictionary<H> = ChunkDictionary::new(HashMap::new());
         let json = serde_json::to_string(&s_empty).unwrap();
         println!("json = {}", json);

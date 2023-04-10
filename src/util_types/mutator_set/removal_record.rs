@@ -8,7 +8,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use super::chunk_dictionary::ChunkDictionary;
@@ -311,6 +311,7 @@ mod removal_record_tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rand::{thread_rng, RngCore};
+    use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::make_item_and_randomness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -319,19 +320,15 @@ mod removal_record_tests {
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
 
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
     use twenty_first::utils::{self, has_unique_elements};
 
     use super::*;
 
-    fn get_mp_and_removal_record() -> (
-        MsMembershipProof<RescuePrimeRegular>,
-        RemovalRecord<RescuePrimeRegular>,
-    ) {
-        type H = RescuePrimeRegular;
+    fn get_mp_and_removal_record() -> (MsMembershipProof<Tip5>, RemovalRecord<Tip5>) {
+        type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, randomness) = make_item_and_randomness();
-        let mp: MsMembershipProof<RescuePrimeRegular> = accumulator.prove(&item, &randomness, true);
+        let mp: MsMembershipProof<H> = accumulator.prove(&item, &randomness, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         (mp, removal_record)
     }
@@ -353,7 +350,7 @@ mod removal_record_tests {
 
     #[test]
     fn hash_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let (_mp, removal_record) = get_mp_and_removal_record();
 
@@ -406,7 +403,7 @@ mod removal_record_tests {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let (_mp, removal_record) = get_mp_and_removal_record();
 
@@ -419,7 +416,7 @@ mod removal_record_tests {
     #[test]
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = RescuePrimeRegular;
+        type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, randomness) = make_item_and_randomness();
         let mut addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
@@ -445,7 +442,7 @@ mod removal_record_tests {
     #[test]
     fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = RescuePrimeRegular;
+        type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let test_iterations = 10;

@@ -3,7 +3,7 @@ use std::{error::Error, fmt};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -443,7 +443,7 @@ mod accumulation_scheme_tests {
     use rand::prelude::*;
     use rand::Rng;
 
-    use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+    use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::util_types::storage_vec::RustyLevelDbVec;
     use twenty_first::utils::has_unique_elements;
@@ -492,7 +492,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn mutator_set_hash_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let mut empty_set = MutatorSetAccumulator::<H>::default();
         let empty_hash = empty_set.hash();
@@ -548,7 +548,7 @@ mod accumulation_scheme_tests {
     fn ms_get_indices_test() {
         // Test that `get_indices` behaves as expected. I.e. that it does not return any
         // duplicates, and always returns something of length `NUM_TRIALS`.
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let (item, randomness) = make_item_and_randomness();
         let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices::<H>(&item, &randomness, 0);
@@ -583,7 +583,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn init_test() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let mut accumulator = MutatorSetAccumulator::<H>::default();
         let (mut archival, _): (
@@ -608,7 +608,7 @@ mod accumulation_scheme_tests {
     fn verify_future_indices_test() {
         // Ensure that `verify` does not crash when given a membership proof
         // that represents a future addition to the AOCL.
-        type H = RescuePrimeRegular;
+        type H = Tip5;
         let mut mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
         let mut empty_mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
 
@@ -616,7 +616,7 @@ mod accumulation_scheme_tests {
             let (item, randomness) = make_item_and_randomness();
 
             let mut addition_record: AdditionRecord = mutator_set.commit(&item, &randomness);
-            let membership_proof: MsMembershipProof<RescuePrimeRegular> =
+            let membership_proof: MsMembershipProof<H> =
                 mutator_set.prove(&item, &randomness, false);
             mutator_set.add_helper(&mut addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
@@ -628,7 +628,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_membership_proof_update_from_add() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let (own_item, randomness) = make_item_and_randomness();
@@ -733,7 +733,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_add_and_prove() {
-        type H = RescuePrimeRegular;
+        type H = Tip5;
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let (item0, randomness0) = make_item_and_randomness();
@@ -954,7 +954,7 @@ mod accumulation_scheme_tests {
         // in the runtime. This test is to verify that that does not happen.
         // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
         // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
-        type H = RescuePrimeRegular;
+        type H = Tip5;
         type Mmr = MmrAccumulator<H>;
         type Ms = MutatorSetKernel<H, Mmr>;
         let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
