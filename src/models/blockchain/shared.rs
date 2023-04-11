@@ -1,3 +1,3 @@
-use twenty_first::shared_math::rescue_prime_regular::RescuePrimeRegular;
+use twenty_first::shared_math::tip5::Tip5;
 
-pub type Hash = RescuePrimeRegular;
+pub type Hash = Tip5;

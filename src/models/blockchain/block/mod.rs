@@ -410,7 +410,7 @@ impl Block {
 mod block_tests {
     use crate::{
         config_models::network::Network,
-        models::state::wallet::{self, Wallet},
+        models::state::wallet::{self, WalletSecret},
         tests::shared::{get_mock_global_state, make_mock_block},
     };
 
@@ -429,7 +429,7 @@ mod block_tests {
         let mut block_1 = make_mock_block(
             &genesis_block,
             None,
-            global_state.wallet_state.wallet.get_public_key(),
+            global_state.wallet_state.wallet_secret.get_public_key(),
         );
         assert!(
             block_1.is_valid_for_devnet(&genesis_block),
@@ -437,7 +437,7 @@ mod block_tests {
         );
 
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
-        let other_wallet = Wallet::new(wallet::generate_secret_key());
+        let other_wallet = WalletSecret::new(wallet::generate_secret_key());
         let new_utxo = Utxo {
             amount: 5.into(),
             public_key: other_wallet.get_public_key(),

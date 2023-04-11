@@ -3,11 +3,12 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
-use crate::models::database::{BlockIndexKey, BlockIndexValue, WalletDbKey, WalletDbValue};
+use crate::models::database::{BlockIndexKey, BlockIndexValue};
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
 use crate::models::state::mempool::MempoolInternal;
+use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
 use crate::models::state::GlobalState;
 use anyhow::Result;
 use rand::prelude::{IteratorRandom, SliceRandom};
@@ -304,9 +305,8 @@ impl MainLoopHandler {
                 // Store block in database
                 // Acquire all locks before updating
                 {
-                    let mut wallet_state_db: tokio::sync::MutexGuard<
-                        RustyLevelDB<WalletDbKey, WalletDbValue>,
-                    > = self.global_state.wallet_state.wallet_db.lock().await;
+                    let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
+                        self.global_state.wallet_state.wallet_db.lock().await;
                     let mut db_lock: tokio::sync::MutexGuard<
                         RustyLevelDB<BlockIndexKey, BlockIndexValue>,
                     > = self
@@ -411,9 +411,8 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    let mut wallet_state_db: tokio::sync::MutexGuard<
-                        RustyLevelDB<WalletDbKey, WalletDbValue>,
-                    > = self.global_state.wallet_state.wallet_db.lock().await;
+                    let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
+                        self.global_state.wallet_state.wallet_db.lock().await;
                     let mut block_db_lock: tokio::sync::MutexGuard<
                         RustyLevelDB<BlockIndexKey, BlockIndexValue>,
                     > = self
@@ -958,17 +957,11 @@ impl MainLoopHandler {
         // flush wallet databases
         self.global_state
             .wallet_state
-            .outgoing_utxo_counter_db
-            .lock()
-            .await
-            .flush();
-        self.global_state
-            .wallet_state
             .wallet_db
             .as_ref()
             .lock()
             .await
-            .flush();
+            .persist();
 
         // flush block_index database
         self.global_state

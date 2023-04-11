@@ -23,7 +23,7 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::wallet_state::WalletState;
-use crate::models::state::wallet::Wallet;
+use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
@@ -69,8 +69,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     debug!("Data directory is {}", data_dir);
 
     // Get wallet object, create one if none exists
-    let wallet: Wallet = Wallet::read_from_file_or_create(&data_dir.wallet_file_path())?;
-    let wallet_state = WalletState::new_from_wallet(&data_dir, wallet).await;
+    let wallet_secret: WalletSecret =
+        WalletSecret::read_from_file_or_create(&data_dir.wallet_file_path())?;
+    let wallet_state = WalletState::new_from_wallet_secret(&data_dir, wallet_secret).await;
 
     // Connect to or create databases for block index, peers, mutator set, block sync
     let block_index_db = ArchivalState::initialize_block_index_database(&data_dir)?;

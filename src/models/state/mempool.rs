@@ -493,7 +493,7 @@ mod tests {
                 transaction::{amount::Amount, utxo::Utxo, Transaction},
             },
             shared::SIZE_1MB_IN_BYTES,
-            state::wallet::{generate_secret_key, Wallet},
+            state::wallet::{generate_secret_key, WalletSecret},
         },
         tests::shared::{
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
@@ -606,8 +606,8 @@ mod tests {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let premine_wallet = &premine_receiver_global_state.wallet_state.wallet;
-        let other_wallet = Wallet::new(generate_secret_key());
+        let premine_wallet = &premine_receiver_global_state.wallet_state.wallet_secret;
+        let other_wallet = WalletSecret::new(generate_secret_key());
         let other_global_state =
             get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
 
@@ -724,7 +724,7 @@ mod tests {
     pub async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state = get_mock_global_state(Network::Main, 2, None).await;
-        let premine_wallet = &preminer_state.wallet_state.wallet;
+        let premine_wallet = &preminer_state.wallet_state.wallet_secret;
 
         // Create a transaction and insert it into the mempool
         let new_utxo = Utxo {

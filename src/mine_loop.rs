@@ -198,7 +198,7 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
         .iter()
         .fold(Amount::zero(), |acc, x| acc + x.fee);
     let coinbase_transaction = make_coinbase_transaction(
-        state.wallet_state.wallet.get_public_key(),
+        state.wallet_state.wallet_secret.get_public_key(),
         &latest_block.header,
         transaction_fees,
     );
@@ -348,7 +348,7 @@ mod mine_loop_tests {
             amount: 4.into(),
             public_key: premine_receiver_global_state
                 .wallet_state
-                .wallet
+                .wallet_secret
                 .get_public_key(),
         };
         let tx_by_preminer = premine_receiver_global_state

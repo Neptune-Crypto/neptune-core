@@ -1,20 +1,21 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, fmt, net::IpAddr};
+use std::time::Duration;
+use std::{fmt, net::IpAddr};
 use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::util_types::storage_schema::RustyValue;
 
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::Block;
 use super::blockchain::transaction::utxo::Utxo;
 use super::peer::PeerStanding;
-use super::state::wallet::wallet_block_utxos::WalletBlockUtxos;
 use crate::database::rusty::RustyLevelDB;
-use crate::Hash;
+use crate::models::blockchain::shared::Hash;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
-const MAX_NUMBER_OF_MPS_STORED: usize = 500; // TODO: Move this to CLI config
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockFileLocation {
@@ -147,118 +148,50 @@ impl fmt::Debug for PeerDatabases {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum WalletDbKey {
-    SyncDigest,
-
-    // digest represents a block hash
-    WalletBlockUtxos(Digest),
-
-    MonitoredUtxos,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoredUtxo {
     pub utxo: Utxo,
 
-    // Record a mapping from block hash to membership proof
-    // We're using this as a FIFO queue, and using `VecDeque` for this allows us to pop
-    // from the front of the vector in constant time.
-    pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof<Hash>)>,
+    // if we have a membership proof, which block is it synced to?
+    pub sync_digest: Digest,
 
-    pub max_number_of_mps_stored: usize,
+    // we might not have a membership proof
+    pub membership_proof: Option<MsMembershipProof<Hash>>,
 
-    pub has_synced_membership_proof: bool,
+    // hash of the block, if any, in which this UTXO was spent
+    pub spent_in_block: Option<(Digest, Duration)>,
 
-    // TODO: Change last type to whatever we use for timestamp in the block header.
-    pub spent_in_block: Option<(Digest, BlockHeight, BFieldElement)>,
+    // hash of the block, if any, in which this UTXO was confirmed
+    pub confirmed_in_block: Option<(Digest, Duration)>,
 }
 
 impl MonitoredUtxo {
     pub fn new(utxo: Utxo) -> Self {
         Self {
             utxo,
-            blockhash_to_membership_proof: VecDeque::<(Digest, MsMembershipProof<Hash>)>::from([]),
-            max_number_of_mps_stored: MAX_NUMBER_OF_MPS_STORED,
-            has_synced_membership_proof: true,
+            sync_digest: Digest::default(),
+            membership_proof: None,
             spent_in_block: None,
+            confirmed_in_block: None,
         }
     }
 
-    pub fn add_membership_proof_for_tip(
-        &mut self,
-        block_digest: Digest,
-        updated_membership_proof: MsMembershipProof<Hash>,
-    ) {
-        while self.blockhash_to_membership_proof.len() >= self.max_number_of_mps_stored {
-            self.blockhash_to_membership_proof.pop_front();
-        }
-
-        self.blockhash_to_membership_proof
-            .push_back((block_digest, updated_membership_proof));
-    }
-
-    pub fn get_membership_proof_for_block(
-        &self,
-        block_digest: &Digest,
-    ) -> Option<MsMembershipProof<Hash>> {
-        self.blockhash_to_membership_proof
-            .iter()
-            .find(|x| x.0 == *block_digest)
-            .map(|x| x.1.clone())
-    }
-
-    pub fn get_latest_membership_proof(&self) -> MsMembershipProof<Hash> {
-        self.blockhash_to_membership_proof[self.blockhash_to_membership_proof.len() - 1]
-            .1
-            .clone()
+    // determine whether the attached membership proof is synced to the given block
+    pub fn is_synced_to(&self, block: &Block) -> bool {
+        self.sync_digest == block.hash
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WalletDbValue {
-    // Stores the block hash representing the state of the wallet
-    SyncDigest(Digest),
-
-    // Stores the relevant (own) UTXOs associated with a block
-    // TODO: Alan wants this gone bc. transaction histories don't need to be
-    // part of the client's functionality -- that can be handled by
-    // an overlay program. Alan suggests that we instead record
-    // "initiated transactions". That doesn't, however, record historic
-    // *incoming* transactions (i.e. spent UTXOs).
-    WalletBlockUtxos(WalletBlockUtxos),
-
-    // Stores all confirmed UTXOs controlled by this wallet, and the associated membership proofs
-    // This is stored as a vector an not as a (aocl_leaf_index => MonitoredUtxo) map since in case of forks
-    // UTXOs can have their `aocl_leaf_index` changed, and managing that in the wallet would be messy.
-    MonitoredUtxos(Vec<MonitoredUtxo>),
+impl From<RustyValue> for MonitoredUtxo {
+    fn from(value: RustyValue) -> Self {
+        bincode::deserialize(&value.0).expect(
+            "failed to deserialize database object to monitored utxo; database seems corrupted",
+        )
+    }
 }
 
-impl WalletDbValue {
-    pub fn as_sync_digest(&self) -> Digest {
-        match self {
-            WalletDbValue::SyncDigest(digest) => *digest,
-            _val => panic!("Requested sync digest, found {:?}", self),
-        }
-    }
-
-    /// Returns true iff value is a wallet block UTXO entry
-    /// Intended to be used when all balance changes are presented
-    pub fn is_wallet_block_utxos(&self) -> bool {
-        matches!(self, WalletDbValue::WalletBlockUtxos(_))
-    }
-
-    pub fn as_wallet_block_utxos(&self) -> WalletBlockUtxos {
-        match self {
-            WalletDbValue::WalletBlockUtxos(wb_utxos) => wb_utxos.to_owned(),
-            _val => panic!("Requested wallet block UTXOs, found {:?}", self),
-        }
-    }
-
-    pub fn as_monitored_utxos(&self) -> Vec<MonitoredUtxo> {
-        match self {
-            WalletDbValue::MonitoredUtxos(vals) => vals.to_vec(),
-            _val => panic!("Requested monitored UTXOs, found {:?}", self),
-        }
+impl From<MonitoredUtxo> for RustyValue {
+    fn from(value: MonitoredUtxo) -> Self {
+        RustyValue(bincode::serialize(&value).expect("Totally nonsensical that serialize can fail, but that is how the interface has been defined."))
     }
 }

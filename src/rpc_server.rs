@@ -4,14 +4,17 @@ use futures::future::{self, Ready};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::time::Duration;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::storage_vec::StorageVec;
 
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
@@ -59,6 +62,8 @@ pub trait RPC {
     // Get sum of unspent UTXOs.
     async fn get_balance() -> Amount;
 
+    async fn get_history() -> Vec<(Duration, Amount, Sign)>;
+
     async fn get_wallet_status() -> WalletStatus;
 
     async fn get_public_key() -> secp256k1::PublicKey;
@@ -94,6 +99,7 @@ impl RPC for NeptuneRPCServer {
     type GetPublicKeyFut = Ready<secp256k1::PublicKey>;
     type GetMempoolTxCountFut = Ready<usize>;
     type GetMempoolSizeFut = Ready<usize>;
+    type GetHistoryFut = Ready<Vec<(Duration, Amount, Sign)>>;
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
@@ -182,7 +188,7 @@ impl RPC for NeptuneRPCServer {
 
         tracing::debug!(
             "Wallet public key: {}",
-            self.state.wallet_state.wallet.get_public_key()
+            self.state.wallet_state.wallet_secret.get_public_key()
         );
 
         let recipient_utxos: Vec<Utxo> = [Utxo::new(amount, address)].to_vec();
@@ -269,11 +275,12 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {
-        let mut lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
+        let mut db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
+        let block_lock = executor::block_on(self.state.chain.light_state.latest_block.lock());
         let wallet_status = self
             .state
             .wallet_state
-            .get_wallet_status_with_lock(&mut lock);
+            .get_wallet_status_from_lock(&mut db_lock, &block_lock);
         future::ready(wallet_status)
     }
 
@@ -294,7 +301,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_public_key(self, _context: tarpc::context::Context) -> Self::GetPublicKeyFut {
-        future::ready(self.state.wallet_state.wallet.get_public_key())
+        future::ready(self.state.wallet_state.wallet_secret.get_public_key())
     }
 
     fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> Self::GetMempoolTxCountFut {
@@ -303,6 +310,36 @@ impl RPC for NeptuneRPCServer {
 
     fn get_mempool_size(self, _context: tarpc::context::Context) -> Self::GetMempoolSizeFut {
         future::ready(self.state.mempool.get_size())
+    }
+
+    fn get_history(self, _context: tarpc::context::Context) -> Self::GetHistoryFut {
+        // lock db to get all monitored utxos
+        let mut history: Vec<(Duration, Amount, Sign)> = vec![];
+        {
+            let wallet_db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
+            let num_monitored_utxos = wallet_db_lock.monitored_utxos.len();
+            for i in 0..num_monitored_utxos {
+                let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+                if let Some((_confirmed_block_hash, confirmed_timestamp)) =
+                    monitored_utxo.confirmed_in_block
+                {
+                    history.push((
+                        confirmed_timestamp,
+                        monitored_utxo.utxo.amount,
+                        Sign::NonNegative,
+                    ));
+                }
+                if let Some((_spent_block_hash, spent_timestamp)) = monitored_utxo.spent_in_block {
+                    history.push((spent_timestamp, monitored_utxo.utxo.amount, Sign::Negative));
+                }
+            }
+        } // release lock
+
+        // sort
+        history.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+        // return
+        future::ready(history)
     }
 }
 
@@ -313,7 +350,7 @@ mod rpc_server_tests {
         config_models::network::Network,
         models::{
             peer::PeerSanctionReason,
-            state::wallet::{generate_secret_key, Wallet},
+            state::wallet::{generate_secret_key, WalletSecret},
         },
         rpc_server::NeptuneRPCServer,
         tests::shared::{get_mock_global_state, get_test_genesis_setup},
@@ -332,8 +369,12 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
-        let state =
-            get_mock_global_state(Network::Main, 2, Some(Wallet::new(generate_secret_key()))).await;
+        let state = get_mock_global_state(
+            Network::Main,
+            2,
+            Some(WalletSecret::new(generate_secret_key())),
+        )
+        .await;
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),

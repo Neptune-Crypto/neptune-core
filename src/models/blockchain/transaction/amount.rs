@@ -34,6 +34,12 @@ pub trait AmountLike<'a>:
 {
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Sign {
+    NonNegative,
+    Negative,
+}
+
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq)]

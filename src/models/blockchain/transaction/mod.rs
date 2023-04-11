@@ -31,7 +31,7 @@ use self::utxo::Utxo;
 use super::block::Block;
 use super::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
 use super::shared::Hash;
-use crate::models::state::wallet::Wallet;
+use crate::models::state::wallet::WalletSecret;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Transaction {
@@ -247,7 +247,7 @@ impl Transaction {
     }
 
     /// Sign all transaction inputs with the same signature
-    pub fn sign(&mut self, wallet: &Wallet) {
+    pub fn sign(&mut self, wallet: &WalletSecret) {
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = Hash::hash(&kernel);
         let signature = wallet.sign_digest(kernel_digest);
@@ -264,7 +264,7 @@ impl Transaction {
     pub fn devnet_authority_sign(&mut self) {
         let kernel: TransactionKernel = self.get_kernel();
         let kernel_digest: Digest = Hash::hash(&kernel);
-        let authority_wallet = Wallet::devnet_authority_wallet();
+        let authority_wallet = WalletSecret::devnet_authority_wallet();
         let signature = authority_wallet.sign_digest(kernel_digest);
 
         self.authority_proof = Some(signature)
@@ -306,7 +306,7 @@ impl Transaction {
                 .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
 
         if let Some(signature) = self.authority_proof {
-            let authority_public_key = Wallet::devnet_authority_wallet().get_public_key();
+            let authority_public_key = WalletSecret::devnet_authority_wallet().get_public_key();
             let valid: bool = signature.verify(&msg, &authority_public_key).is_ok();
             if !valid {
                 warn!("Invalid authority-merge-signature for transaction");
@@ -447,7 +447,7 @@ mod transaction_tests {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let other_wallet = wallet::Wallet::new(wallet::generate_secret_key());
+        let other_wallet = wallet::WalletSecret::new(wallet::generate_secret_key());
 
         // Create a transaction that's valid after the Genesis block
         let new_utxo = Utxo {
@@ -497,7 +497,7 @@ mod transaction_tests {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let own_global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let own_wallet = &own_global_state.wallet_state.wallet;
+        let own_wallet = &own_global_state.wallet_state.wallet_secret;
 
         // Create a transaction that's valid after the Genesis block
         let mut output_utxos: Vec<Utxo> = vec![];
@@ -517,7 +517,7 @@ mod transaction_tests {
 
         // Create next block and verify that transaction is not valid with this block as tip
         let genesis_block = Block::genesis_block();
-        let other_wallet = Wallet::new(generate_secret_key());
+        let other_wallet = WalletSecret::new(generate_secret_key());
         let block_1 = make_mock_block(&genesis_block, None, own_wallet.get_public_key());
         let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
         assert!(
