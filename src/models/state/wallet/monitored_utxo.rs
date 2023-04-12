@@ -1,21 +1,22 @@
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 
-use crate::{models::blockchain::block::Block, Hash};
+use crate::Hash;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 use twenty_first::{shared_math::tip5::Digest, util_types::storage_schema::RustyValue};
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 
+const MAX_NUMBER_OF_MPS_STORED: usize = 500; // TODO: Move this to CLI config
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoredUtxo {
     pub utxo: Utxo,
 
-    // if we have a membership proof, which block is it synced to?
-    pub sync_digest: Digest,
+    // Mapping from block digest to membership proof
+    pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof<Hash>)>,
 
-    // we might not have a membership proof
-    pub membership_proof: Option<MsMembershipProof<Hash>>,
+    pub max_number_of_mps_stored: usize,
 
     // hash of the block, if any, in which this UTXO was spent
     pub spent_in_block: Option<(Digest, Duration)>,
@@ -28,16 +29,48 @@ impl MonitoredUtxo {
     pub fn new(utxo: Utxo) -> Self {
         Self {
             utxo,
-            sync_digest: Digest::default(),
-            membership_proof: None,
+            blockhash_to_membership_proof: VecDeque::default(),
+            max_number_of_mps_stored: MAX_NUMBER_OF_MPS_STORED,
             spent_in_block: None,
             confirmed_in_block: None,
         }
     }
 
     // determine whether the attached membership proof is synced to the given block
-    pub fn is_synced_to(&self, block: &Block) -> bool {
-        self.sync_digest == block.hash
+    pub fn is_synced_to(&self, block_hash: &Digest) -> bool {
+        self.blockhash_to_membership_proof
+            .iter()
+            .any(|(hash, _mp)| hash == block_hash)
+    }
+
+    pub fn add_membership_proof_for_tip(
+        &mut self,
+        block_digest: Digest,
+        updated_membership_proof: MsMembershipProof<Hash>,
+    ) {
+        while self.blockhash_to_membership_proof.len() >= self.max_number_of_mps_stored {
+            self.blockhash_to_membership_proof.pop_back();
+        }
+
+        self.blockhash_to_membership_proof
+            .push_front((block_digest, updated_membership_proof));
+    }
+
+    pub fn get_membership_proof_for_block(
+        &self,
+        block_digest: &Digest,
+    ) -> Option<MsMembershipProof<Hash>> {
+        self.blockhash_to_membership_proof
+            .iter()
+            .find(|x| x.0 == *block_digest)
+            .map(|x| x.1.clone())
+    }
+
+    pub fn get_latest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof<Hash>)> {
+        self.blockhash_to_membership_proof
+            .iter()
+            .next()
+            .map(|x| x.clone())
     }
 }
 

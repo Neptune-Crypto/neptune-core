@@ -65,22 +65,17 @@ impl GlobalState {
         // acquire a lock on `WalletState` to prevent it from being updated
         let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
 
-        // Acquire a lock on latest block to prevent it from being updated
-        let block_lock = self.chain.light_state.latest_block.lock().await;
+        // Get the block tip as the transaction is made relative to it
+        let bc_tip = self.chain.light_state.latest_block.lock().await.to_owned();
 
         // Get the UTXOs required for this transaction
         let total_spend: Amount = recipient_utxos.iter().map(|x| x.amount).sum::<Amount>() + fee;
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
             .wallet_state
-            .allocate_sufficient_input_funds_from_lock(
-                &mut wallet_db_lock,
-                total_spend,
-                &block_lock,
-            )?;
+            .allocate_sufficient_input_funds_from_lock(&mut wallet_db_lock, total_spend, &bc_tip)?;
 
         // Create all removal records. These must be relative to the block tip.
-        println!("PMD0");
-        let mut msa_tip = block_lock.body.next_mutator_set_accumulator.clone();
+        let mut msa_tip = bc_tip.body.next_mutator_set_accumulator.clone();
         let mut inputs: Vec<DevNetInput> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, mp) in spendable_utxos_and_mps {
@@ -95,7 +90,6 @@ impl GlobalState {
                 signature: None,
             });
         }
-        println!("PMD1");
 
         let mut outputs: Vec<(Utxo, Digest)> = vec![];
         for output_utxo in recipient_utxos {
@@ -104,7 +98,6 @@ impl GlobalState {
                 .next_output_randomness_from_lock(&mut wallet_db_lock);
             outputs.push((output_utxo, output_randomness));
         }
-        println!("PMD2");
 
         // Send remaining amount back to self
         let change_amount = match input_amount.checked_sub(&total_spend) {
@@ -113,7 +106,6 @@ impl GlobalState {
                 bail!("Cannot create change UTXO with negative amount.");
             }
         };
-        println!("PMD3");
         if input_amount > total_spend {
             let change_utxo = Utxo {
                 amount: change_amount,
@@ -125,7 +117,6 @@ impl GlobalState {
                     .next_output_randomness_from_lock(&mut wallet_db_lock),
             ));
         }
-        println!("PMD4");
 
         let mut transaction = Transaction {
             inputs,
@@ -140,9 +131,7 @@ impl GlobalState {
             ),
             authority_proof: None,
         };
-        println!("PMD5");
         transaction.sign(&self.wallet_state.wallet_secret);
-        println!("PMD6");
 
         Ok(transaction)
     }

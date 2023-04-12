@@ -503,6 +503,7 @@ mod tests {
     use anyhow::Result;
     use num_bigint::BigInt;
     use num_traits::Zero;
+    use tracing_test::traced_test;
     use twenty_first::shared_math::b_field_element::BFieldElement;
 
     #[tokio::test]
@@ -547,8 +548,9 @@ mod tests {
         mempool
     }
 
+    #[traced_test]
     #[tokio::test]
-    pub async fn get_densest_transactions() {
+    async fn get_densest_transactions() {
         let mempool = setup(10).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
@@ -562,8 +564,9 @@ mod tests {
         assert!(!mempool.is_empty())
     }
 
+    #[traced_test]
     #[tokio::test]
-    pub async fn prune_stale_transactions() {
+    async fn prune_stale_transactions() {
         let wallet_state = get_mock_wallet_state(None).await;
         let mempool = Mempool::default();
         assert!(
@@ -601,8 +604,9 @@ mod tests {
         assert_eq!(mempool.len(), 5)
     }
 
+    #[traced_test]
     #[tokio::test]
-    pub async fn remove_transactions_with_block_test() -> Result<()> {
+    async fn remove_transactions_with_block_test() -> Result<()> {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
@@ -620,7 +624,11 @@ mod tests {
             .wallet_state
             .update_wallet_state_with_new_block(
                 &block_1,
-                &mut other_global_state.wallet_state.wallet_db.lock().await,
+                &mut premine_receiver_global_state
+                    .wallet_state
+                    .wallet_db
+                    .lock()
+                    .await,
             )?;
         *premine_receiver_global_state
             .chain
@@ -720,8 +728,9 @@ mod tests {
         Ok(())
     }
 
+    #[traced_test]
     #[tokio::test]
-    pub async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
+    async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state = get_mock_global_state(Network::Main, 2, None).await;
         let premine_wallet = &preminer_state.wallet_state.wallet_secret;
@@ -780,8 +789,9 @@ mod tests {
         Ok(())
     }
 
+    #[traced_test]
     #[tokio::test]
-    pub async fn get_sorted_iter() {
+    async fn get_sorted_iter() {
         let mempool = setup(10).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
@@ -794,8 +804,9 @@ mod tests {
         assert!(!mempool.is_empty())
     }
 
+    #[traced_test]
     #[tokio::test]
-    pub async fn get_mempool_size() {
+    async fn get_mempool_size() {
         // Verify that the `get_size` method on mempool returns sane results
         let mempool_small = setup(10).await;
         let size_gs_small = mempool_small.get_size();
