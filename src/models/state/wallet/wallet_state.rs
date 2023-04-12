@@ -47,6 +47,21 @@ pub struct WalletState {
     pub wallet_secret: WalletSecret,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct StrongUtxoKey {
+    utxo_digest: Digest,
+    aocl_index: u64,
+}
+
+impl StrongUtxoKey {
+    fn new(utxo_digest: Digest, aocl_index: u64) -> Self {
+        Self {
+            utxo_digest,
+            aocl_index,
+        }
+    }
+}
+
 impl Debug for WalletState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WalletState")
@@ -152,7 +167,7 @@ impl WalletState {
         // Find the membership proofs that were valid at the previous tip, as these all have
         // to be updated to the mutator set of the new block.
         let mut valid_membership_proofs_and_own_utxo_count: HashMap<
-            Digest,
+            StrongUtxoKey,
             (MsMembershipProof<Hash>, u64),
         > = HashMap::default();
         for i in 0..wallet_db_lock.monitored_utxos.len() {
@@ -162,7 +177,14 @@ impl WalletState {
             match monitored_utxo.get_membership_proof_for_block(&block.header.prev_block_digest) {
                 Some(ms_mp) => {
                     debug!("Found valid mp for UTXO");
-                    valid_membership_proofs_and_own_utxo_count.insert(utxo_digest, (ms_mp, i));
+                    let insert_ret = valid_membership_proofs_and_own_utxo_count.insert(
+                        StrongUtxoKey::new(utxo_digest, ms_mp.auth_path_aocl.leaf_index),
+                        (ms_mp, i),
+                    );
+                    assert!(
+                        insert_ret.is_none(),
+                        "Strong key must be unique in wallet DB"
+                    );
                 }
                 None => warn!(
                     "Unable to find valid membership proof for UTXO with digest {utxo_digest}"
@@ -191,7 +213,7 @@ impl WalletState {
             {
                 let utxo_digests = valid_membership_proofs_and_own_utxo_count
                     .keys()
-                    .cloned()
+                    .map(|key| key.utxo_digest)
                     .collect_vec();
                 let res: Result<Vec<usize>, Box<dyn Error>> =
                     MsMembershipProof::batch_update_from_addition(
@@ -233,7 +255,10 @@ impl WalletState {
                     msa_state.prove(&utxo_digest, &commitment_randomness, true);
 
                 valid_membership_proofs_and_own_utxo_count.insert(
-                    utxo_digest,
+                    StrongUtxoKey::new(
+                        utxo_digest,
+                        new_own_membership_proof.auth_path_aocl.leaf_index,
+                    ),
                     (
                         new_own_membership_proof,
                         wallet_db_lock.monitored_utxos.len(),
@@ -329,13 +354,44 @@ impl WalletState {
                     }
                     _n => {
                         // If we are monitoring multiple UTXOs with the same hash, we need another
-                        // method to mark the correct UTXO as spent. In DevNet we use the membership
-                        // proof from the block for this. In MainNet, where the input membership
-                        // proofs are not included in the blocks, we can probably just check which
-                        // of our own membership proofs that have become invalid with this block.
-                        panic!(
-                            "We are monitoring multiple UTXOs with the same hash, which shouldn't ever happen."
-                        );
+                        // method to mark the correct UTXO as spent. Since we have the removal record
+                        // we know the Bloom filter indices that this UTXO flips. So we can look for
+                        // a membership proof in our list of monitored transactions that match those
+                        // indices.
+                        warn!("We are monitoring multiple UTXOs with the same hash");
+                        let mut removal_record_indices = removal_record.absolute_indices.clone();
+                        removal_record_indices.sort_unstable();
+                        let removal_record_indices = removal_record_indices.to_vec();
+                        for matching_index in matching_utxo_indices {
+                            match wallet_db_lock
+                                .monitored_utxos
+                                .get(matching_index)
+                                .get_latest_membership_proof_entry()
+                                .map(|x| x.1.cached_indices)
+                            {
+                                Some(indices) => match indices {
+                                    Some(mut indices) => {
+                                        indices.sort_unstable();
+                                        if indices.to_vec() == removal_record_indices {
+                                            let mut mutxo =
+                                                wallet_db_lock.monitored_utxos.get(matching_index);
+                                            mutxo.spent_in_block = Some((
+                                                block.hash,
+                                                Duration::from_millis(
+                                                    block.header.timestamp.value(),
+                                                ),
+                                            ));
+                                            wallet_db_lock
+                                                .monitored_utxos
+                                                .set(matching_index, mutxo);
+                                            break;
+                                        }
+                                    }
+                                    None => error!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
+                                },
+                                None => error!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
+                            }
+                        }
                     }
                 }
             }
@@ -369,8 +425,13 @@ impl WalletState {
         }
         debug!("Number of unspent UTXOs: {}", num_unspent_utxos);
 
-        for (utxo_digest, (updated_ms_mp, own_utxo_index)) in
-            valid_membership_proofs_and_own_utxo_count
+        for (
+            StrongUtxoKey {
+                utxo_digest,
+                aocl_index,
+            },
+            (updated_ms_mp, own_utxo_index),
+        ) in valid_membership_proofs_and_own_utxo_count
         {
             let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(own_utxo_index);
             monitored_utxo.add_membership_proof_for_tip(block.hash, updated_ms_mp.to_owned());
