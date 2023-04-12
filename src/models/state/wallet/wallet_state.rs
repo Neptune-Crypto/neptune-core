@@ -28,7 +28,7 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
-use crate::models::database::MonitoredUtxo;
+use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::rusty_wallet_database::BalanceUpdate;
 use crate::Hash;
 
@@ -106,12 +106,15 @@ impl WalletState {
         block: &Block,
         wallet_db_lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
     ) -> Result<()> {
+        println!("hi from update_wallet_state_with_new_block");
+        println!("block: {block:#?}");
         // A transaction contains a set of input and output UTXOs,
         // each of which contains an address (public key),
 
         let transaction: Transaction = block.body.transaction.clone();
 
         let my_pub_key = self.wallet_secret.get_public_key();
+        println!("my_pub_key = {my_pub_key}");
 
         let input_utxos: Vec<Utxo> = transaction.get_own_input_utxos(my_pub_key);
 
@@ -128,9 +131,12 @@ impl WalletState {
             && output_utxos_commitment_randomness.is_empty()
             && num_monitored_utxos == 0
         {
+            println!("early return from update_wallet_state_with_new_block");
             return Ok(());
         }
 
+        println!("continuing in update_wallet_state_with_new_block...");
+        println!("own output utxos: {:?}", output_utxos_commitment_randomness);
         let block_timestamp = Duration::from_millis(block.header.timestamp.value());
         for input_utxo in input_utxos.iter() {
             wallet_db_lock.balance_updates.push(BalanceUpdate {
@@ -160,7 +166,7 @@ impl WalletState {
         let mut own_items_as_digests: Vec<Digest> = vec![];
         for i in 0..num_monitored_utxos {
             // for mut monitored_utxo in wallet_db_lock.monitored_utxos.iter_mut() {
-            let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+            let monitored_utxo: MonitoredUtxo = wallet_db_lock.monitored_utxos.get(i);
             let utxo_digest = Hash::hash(&monitored_utxo.utxo);
             let maybe_membership_proof: Option<MsMembershipProof<Hash>> =
                 monitored_utxo.membership_proof;
@@ -232,9 +238,12 @@ impl WalletState {
                 own_membership_proofs.push(new_own_membership_proof);
                 own_items_as_digests.push(utxo_digest);
 
-                wallet_db_lock
-                    .monitored_utxos
-                    .push(MonitoredUtxo::new(utxo));
+                let mut mutxo = MonitoredUtxo::new(utxo);
+                mutxo.confirmed_in_block = Some((
+                    block.hash,
+                    Duration::from_millis(block.header.timestamp.value()),
+                ));
+                wallet_db_lock.monitored_utxos.push(mutxo);
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
@@ -352,7 +361,8 @@ impl WalletState {
             num_unspent_membership_proofs
         );
 
-        for j in 0..num_monitored_utxos {
+        let num_monitored_utxos_new = wallet_db_lock.monitored_utxos.len();
+        for j in 0..num_monitored_utxos_new {
             let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(j);
             let updated_mp = own_membership_proofs.get(j as usize);
             // Sanity check that all membership proofs are valid for the next mutator set defined
@@ -372,6 +382,7 @@ impl WalletState {
 
             // update the new membership proof
             monitored_utxo.membership_proof = updated_mp.cloned();
+            monitored_utxo.sync_digest = block.hash;
             wallet_db_lock.monitored_utxos.set(j, monitored_utxo);
         }
 
@@ -423,8 +434,10 @@ impl WalletState {
         let mut unsynced_unspent = vec![];
         let mut synced_spent = vec![];
         let mut unsynced_spent = vec![];
+        println!("num_monitored_utxos = {num_monitored_utxos}");
         for i in 0..num_monitored_utxos {
             let mutxo = lock.monitored_utxos.get(i);
+            println!("mutxo: {mutxo:?}");
             let utxo = mutxo.utxo;
             if let Some(membership_proof) = mutxo.membership_proof.clone() {
                 if mutxo.is_synced_to(block) {
@@ -469,17 +482,19 @@ impl WalletState {
     }
 
     /// Fetch the output counter from the database and increase the counter by one
-    async fn next_output_counter(&self) -> u64 {
-        let mut lock = self.wallet_db.lock().await;
-        let current_counter: u64 = lock.get_counter();
-        lock.set_counter(current_counter + 1);
+    fn next_output_counter_from_lock(&self, db_lock: &mut MutexGuard<RustyWalletDatabase>) -> u64 {
+        let current_counter: u64 = db_lock.get_counter();
+        db_lock.set_counter(current_counter + 1);
 
         current_counter
     }
 
     /// Get the randomness for the next output UTXO and increment the output counter by one
-    pub async fn next_output_randomness(&self) -> Digest {
-        let counter = self.next_output_counter().await;
+    pub fn next_output_randomness_from_lock(
+        &self,
+        db_lock: &mut MutexGuard<RustyWalletDatabase>,
+    ) -> Digest {
+        let counter = self.next_output_counter_from_lock(db_lock);
 
         // TODO: Ugly hack used to generate a `Digest` from a `u128` here.
         // Once we've updated to twenty-first 0.2.0 or later use its `to_sequence` instead.
@@ -504,7 +519,7 @@ impl WalletState {
         // First check that we have enough. Otherwise return an error.
         if wallet_status.synced_unspent_amount < requested_amount {
             // TODO: Change this to `Display` print once available.
-            bail!("Insufficient synced amount to create transaction. Requested: {:?}, synced available amount: {:?}", requested_amount, wallet_status.synced_unspent_amount);
+            bail!("Insufficient synced amount to create transaction. Requested: {:?}, synced unspent amount: {:?}. Unsynced unspent amount: {:?}", requested_amount, wallet_status.synced_unspent_amount, wallet_status.unsynced_unspent_amount);
         }
 
         let mut ret: Vec<(Utxo, MsMembershipProof<Hash>)> = vec![];
@@ -538,10 +553,11 @@ mod wallet_state_tests {
     async fn increase_output_counter_test() {
         // Verify that output counter is incremented when the counter value is fetched
         let wallet_state = get_mock_wallet_state(None).await;
+        let mut db_lock = wallet_state.wallet_db.lock().await;
         for i in 0..12 {
             assert_eq!(
                 i,
-                wallet_state.next_output_counter().await,
+                wallet_state.next_output_counter_from_lock(&mut db_lock),
                 "Output counter must match number of calls"
             );
         }

@@ -133,7 +133,7 @@ impl Block {
         // let devnet_authority_wallet = Wallet::devnet_authority_wallet();
         vec![Utxo::new_from_hex(
             20000.into(),
-            "02411147a47b398f5ee938241aaeb76a68af37645bdee5b0d29407c2c7a8496db4",
+            "02b64811839de445c7715368051d4006aa01f03107444bd0c2f551089f80fe1f1b",
             // &devnet_authority_wallet.get_public_key().to_string(),
         )]
     }

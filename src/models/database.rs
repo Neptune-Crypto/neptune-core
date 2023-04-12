@@ -1,19 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use std::{fmt, net::IpAddr};
-use twenty_first::shared_math::rescue_prime_digest::Digest;
-use twenty_first::util_types::storage_schema::RustyValue;
-
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::rescue_prime_digest::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
-use super::blockchain::block::Block;
-use super::blockchain::transaction::utxo::Utxo;
 use super::peer::PeerStanding;
 use crate::database::rusty::RustyLevelDB;
-use crate::models::blockchain::shared::Hash;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 
@@ -145,53 +138,5 @@ pub struct PeerDatabases {
 impl fmt::Debug for PeerDatabases {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("").finish()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MonitoredUtxo {
-    pub utxo: Utxo,
-
-    // if we have a membership proof, which block is it synced to?
-    pub sync_digest: Digest,
-
-    // we might not have a membership proof
-    pub membership_proof: Option<MsMembershipProof<Hash>>,
-
-    // hash of the block, if any, in which this UTXO was spent
-    pub spent_in_block: Option<(Digest, Duration)>,
-
-    // hash of the block, if any, in which this UTXO was confirmed
-    pub confirmed_in_block: Option<(Digest, Duration)>,
-}
-
-impl MonitoredUtxo {
-    pub fn new(utxo: Utxo) -> Self {
-        Self {
-            utxo,
-            sync_digest: Digest::default(),
-            membership_proof: None,
-            spent_in_block: None,
-            confirmed_in_block: None,
-        }
-    }
-
-    // determine whether the attached membership proof is synced to the given block
-    pub fn is_synced_to(&self, block: &Block) -> bool {
-        self.sync_digest == block.hash
-    }
-}
-
-impl From<RustyValue> for MonitoredUtxo {
-    fn from(value: RustyValue) -> Self {
-        bincode::deserialize(&value.0).expect(
-            "failed to deserialize database object to monitored utxo; database seems corrupted",
-        )
-    }
-}
-
-impl From<MonitoredUtxo> for RustyValue {
-    fn from(value: MonitoredUtxo) -> Self {
-        RustyValue(bincode::serialize(&value).expect("Totally nonsensical that serialize can fail, but that is how the interface has been defined."))
     }
 }

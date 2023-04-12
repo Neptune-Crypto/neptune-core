@@ -1,3 +1,4 @@
+pub mod monitored_utxo;
 pub mod rusty_wallet_database;
 pub mod wallet_block_utxos;
 pub mod wallet_state;
@@ -218,12 +219,12 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::amount::Amount;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::database::MonitoredUtxo;
     use crate::tests::shared::{
         add_output_to_block, add_unsigned_input_to_block, add_unsigned_input_to_block_ams,
         get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
     };
 
+    use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
     use super::*;
 
@@ -241,9 +242,11 @@ mod wallet_tests {
     async fn output_digest_changes_test() {
         // Verify that output randomness is not repeated
         let wallet_state = get_mock_wallet_state(None).await;
-        let mut previous_digest = wallet_state.next_output_randomness().await;
+        let mut db_lock = wallet_state.wallet_db.lock().await;
+        let mut previous_digest = wallet_state.next_output_randomness_from_lock(&mut db_lock);
         for _ in 0..12 {
-            let next_output_randomness = wallet_state.next_output_randomness().await;
+            let next_output_randomness =
+                wallet_state.next_output_randomness_from_lock(&mut db_lock);
             assert_ne!(
                 previous_digest, next_output_randomness,
                 "Output randomness must not be repeated"
