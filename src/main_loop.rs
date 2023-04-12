@@ -1034,7 +1034,8 @@ impl MainLoopHandler {
 
         //TODO: wait for child processes to finish - using stored tokio JoinHandles.
 
-        sleep(Duration::new(0, 100 * 1_000_000)); // wait 0.1 seconds
+        // wait 0.5 seconds to ensure that child processes have been shut down
+        sleep(Duration::new(0, 500 * 1_000_000));
 
         Ok(())
     }
