@@ -207,9 +207,11 @@ impl WalletSecret {
 mod wallet_tests {
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use tokio::sync::Mutex;
     use tracing_test::traced_test;
+    use twenty_first::util_types::emojihash_trait::Emojihash;
     use twenty_first::util_types::storage_vec::StorageVec;
 
     use crate::config_models::network::Network;
@@ -596,19 +598,19 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
-        // an archival state is needed for how we currently add inputs to a transaction.
+        // An archival state is needed for how we currently add inputs to a transaction.
         // So it's just used to generate test data, not in any of the functions that are
         // actually tested.
         let (archival_state, _peer_databases) = make_unit_test_archival_state(Network::Main).await;
         let own_wallet = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
+        let non_premine_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
         let premine_wallet = get_mock_wallet_state(None).await.wallet_secret;
         let genesis_block = Block::genesis_block();
 
         let mut block_1 = make_mock_block(
             &genesis_block,
             None,
-            own_wallet_state.wallet_secret.get_public_key(),
+            non_premine_wallet_state.wallet_secret.get_public_key(),
         );
 
         // Add a valid input to the block transaction
@@ -626,14 +628,14 @@ mod wallet_tests {
         // Add one output to the block's transaction
         let output_utxo_0: Utxo = Utxo::new(
             Amount::one(),
-            own_wallet_state.wallet_secret.get_public_key(),
+            non_premine_wallet_state.wallet_secret.get_public_key(),
         );
         add_output_to_block(&mut block_1, output_utxo_0);
 
         // Add three more outputs, two of them to self
         let output_utxo_1: Utxo = Utxo::new(
             Amount::one() + Amount::one(),
-            own_wallet_state.wallet_secret.get_public_key(),
+            non_premine_wallet_state.wallet_secret.get_public_key(),
         );
         add_output_to_block(&mut block_1, output_utxo_1);
         let output_utxo_2: Utxo = Utxo::new(
@@ -643,7 +645,7 @@ mod wallet_tests {
         add_output_to_block(&mut block_1, output_utxo_2);
         let output_utxo_3: Utxo = Utxo::new(
             Amount::one() + Amount::one() + Amount::one() + Amount::one() + Amount::one(),
-            own_wallet_state.wallet_secret.get_public_key(),
+            non_premine_wallet_state.wallet_secret.get_public_key(),
         );
         add_output_to_block(&mut block_1, output_utxo_3);
 
@@ -653,19 +655,19 @@ mod wallet_tests {
         assert!(block_1.is_valid_for_devnet(&genesis_block));
 
         // Update wallet state with block_1
-        let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
+        let mut monitored_utxos = get_monitored_utxos(&non_premine_wallet_state).await;
         assert!(
             monitored_utxos.is_empty(),
             "List of monitored UTXOs must be empty prior to updating wallet state"
         );
-        own_wallet_state.update_wallet_state_with_new_block(
+        non_premine_wallet_state.update_wallet_state_with_new_block(
             &block_1,
-            &mut own_wallet_state.wallet_db.lock().await,
+            &mut non_premine_wallet_state.wallet_db.lock().await,
         )?;
 
         // Verify that update added 4 UTXOs to list of monitored transactions:
         // three as regular outputs, and one as coinbase UTXO
-        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
+        monitored_utxos = get_monitored_utxos(&non_premine_wallet_state).await;
         assert_eq!(
             4,
             monitored_utxos.len(),
@@ -693,16 +695,16 @@ mod wallet_tests {
             next_block = make_mock_block(
                 &previous_block,
                 None,
-                own_wallet_state.wallet_secret.get_public_key(),
+                non_premine_wallet_state.wallet_secret.get_public_key(),
             );
-            own_wallet_state.update_wallet_state_with_new_block(
+            non_premine_wallet_state.update_wallet_state_with_new_block(
                 &next_block,
-                &mut own_wallet_state.wallet_db.lock().await,
+                &mut non_premine_wallet_state.wallet_db.lock().await,
             )?;
         }
 
         let mut block_18 = next_block;
-        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
+        monitored_utxos = get_monitored_utxos(&non_premine_wallet_state).await;
         assert_eq!(
             4 + 17,
             monitored_utxos.len(),
@@ -729,10 +731,10 @@ mod wallet_tests {
 
         // Check that `WalletStatus` is returned correctly
         let wallet_status = {
-            let mut wallet_db_lock = own_wallet_state.wallet_db.lock().await;
+            let mut wallet_db_lock = non_premine_wallet_state.wallet_db.lock().await;
             let wrapped_block = Arc::new(Mutex::new(block_18.clone()));
             let block_lock = wrapped_block.lock().await;
-            own_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
+            non_premine_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
         };
         assert_eq!(
             21,
@@ -755,11 +757,11 @@ mod wallet_tests {
         // verify that membership proofs are valid after forks
         let mut block_2_b =
             make_mock_block(&block_1, Some(100.into()), premine_wallet.get_public_key());
-        own_wallet_state.update_wallet_state_with_new_block(
+        non_premine_wallet_state.update_wallet_state_with_new_block(
             &block_2_b,
-            &mut own_wallet_state.wallet_db.lock().await,
+            &mut non_premine_wallet_state.wallet_db.lock().await,
         )?;
-        let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&own_wallet_state)
+        let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.is_synced_to(&block_2_b.hash))
@@ -787,11 +789,11 @@ mod wallet_tests {
         // all work again
         let mut block_19 =
             make_mock_block(&block_18, Some(100.into()), premine_wallet.get_public_key());
-        own_wallet_state.update_wallet_state_with_new_block(
+        non_premine_wallet_state.update_wallet_state_with_new_block(
             &block_19,
-            &mut own_wallet_state.wallet_db.lock().await,
+            &mut non_premine_wallet_state.wallet_db.lock().await,
         )?;
-        let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&own_wallet_state)
+        let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
             .await
             .into_iter()
             .filter(|monitored_utxo| monitored_utxo.is_synced_to(&block_19.hash))
@@ -820,7 +822,7 @@ mod wallet_tests {
         let mut block_3_b = make_mock_block(
             &block_2_b,
             Some(100.into()),
-            own_wallet_state.wallet_secret.get_public_key(),
+            non_premine_wallet_state.wallet_secret.get_public_key(),
         );
 
         let consumed_utxo_1 = monitored_utxos_at_2b[0].utxo;
@@ -830,20 +832,20 @@ mod wallet_tests {
         add_unsigned_input_to_block(&mut block_3_b, consumed_utxo_1, consumed_utxo_1_mp.clone());
         let forked_utxo: Utxo = Utxo::new(
             Amount::from(6u32),
-            own_wallet_state.wallet_secret.get_public_key(),
+            non_premine_wallet_state.wallet_secret.get_public_key(),
         );
         add_output_to_block(&mut block_3_b, forked_utxo);
         block_3_b
             .body
             .transaction
-            .sign(&own_wallet_state.wallet_secret);
+            .sign(&non_premine_wallet_state.wallet_secret);
         assert!(block_3_b.is_valid_for_devnet(&block_2_b));
-        own_wallet_state.update_wallet_state_with_new_block(
+        non_premine_wallet_state.update_wallet_state_with_new_block(
             &block_3_b,
-            &mut own_wallet_state.wallet_db.lock().await,
+            &mut non_premine_wallet_state.wallet_db.lock().await,
         )?;
 
-        let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&own_wallet_state)
+        let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.is_synced_to(&block_3_b.hash))
@@ -880,7 +882,7 @@ mod wallet_tests {
         let mut block_20 = make_mock_block(
             &block_19,
             Some(100.into()),
-            own_wallet_state.wallet_secret.get_public_key(),
+            non_premine_wallet_state.wallet_secret.get_public_key(),
         );
         let consumed_utxo_2 = monitored_utxos_block_19[0].utxo;
         let consumed_utxo_2_mp = monitored_utxos_block_19[0]
@@ -891,14 +893,14 @@ mod wallet_tests {
         block_20
             .body
             .transaction
-            .sign(&own_wallet_state.wallet_secret);
-        own_wallet_state.update_wallet_state_with_new_block(
+            .sign(&non_premine_wallet_state.wallet_secret);
+        non_premine_wallet_state.update_wallet_state_with_new_block(
             &block_20,
-            &mut own_wallet_state.wallet_db.lock().await,
+            &mut non_premine_wallet_state.wallet_db.lock().await,
         )?;
 
         // Verify that we have two membership proofs of `forked_utxo`: one matching block20 and one matching block_3b
-        let monitored_utxos_20: Vec<_> = get_monitored_utxos(&own_wallet_state)
+        let monitored_utxos_20: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.is_synced_to(&block_20.hash))
@@ -942,11 +944,29 @@ mod wallet_tests {
                 .is_some(),
             "Wallet state must contain membership proof for current block"
         );
+        let wallet_status = {
+            let mut wallet_db_lock = non_premine_wallet_state.wallet_db.lock().await;
+            let wrapped_block = Arc::new(Mutex::new(block_18.clone()));
+            let block_lock = wrapped_block.lock().await;
+            non_premine_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
+        };
+        println!(
+            "forked_utxo_info AOCL index: {}",
+            forked_utxo_info
+                .get_latest_membership_proof_entry()
+                .unwrap()
+                .1
+                .auth_path_aocl
+                .leaf_index
+        );
+        println!("{wallet_status}");
         assert!(
             forked_utxo_info
                 .get_membership_proof_for_block(&block_3_b.hash)
                 .is_some(),
-            "Wallet state must contain mebership proof for abandoned block"
+            "Wallet state must contain mebership proof for abandoned block. Got member ship proofs for:\n\n {}\n\n Looking for hash: {}",
+            forked_utxo_info.blockhash_to_membership_proof.iter().map(|x| x.0.emojihash()).join(", "),
+            block_3_b.hash.emojihash()
         );
         println!("forked_utxo_info\n {:?}", forked_utxo_info);
         assert_eq!(

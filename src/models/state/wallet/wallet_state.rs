@@ -358,6 +358,7 @@ impl WalletState {
                         // we know the Bloom filter indices that this UTXO flips. So we can look for
                         // a membership proof in our list of monitored transactions that match those
                         // indices.
+                        // This case will probably not be hit on main net.
                         warn!("We are monitoring multiple UTXOs with the same hash");
                         let mut removal_record_indices = removal_record.absolute_indices.clone();
                         removal_record_indices.sort_unstable();
@@ -387,9 +388,10 @@ impl WalletState {
                                             break;
                                         }
                                     }
-                                    None => error!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
+                                    None => panic!("Unable to mark monitored UTXO as spent, as I don't know which one to mark")
+                                    ,
                                 },
-                                None => error!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
+                                None => panic!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
                             }
                         }
                     }
@@ -428,7 +430,7 @@ impl WalletState {
         for (
             StrongUtxoKey {
                 utxo_digest,
-                aocl_index,
+                aocl_index: _,
             },
             (updated_ms_mp, own_utxo_index),
         ) in valid_membership_proofs_and_own_utxo_count
@@ -445,6 +447,11 @@ impl WalletState {
             wallet_db_lock
                 .monitored_utxos
                 .set(own_utxo_index, monitored_utxo);
+
+            // TODO: What if a newly added transaction replaces a transaction that was in another fork?
+            // How do we ensure that this transaction is not counted twice?
+            // One option is to only count UTXOs that are synced as valid.
+            // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
 
         wallet_db_lock.set_sync_label(block.hash);
