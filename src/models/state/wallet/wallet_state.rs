@@ -45,6 +45,7 @@ pub struct WalletState {
     // new output.
     pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
     pub wallet_secret: WalletSecret,
+    pub number_of_mps_per_utxo: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,6 +75,7 @@ impl WalletState {
     pub async fn new_from_wallet_secret(
         data_dir: &DataDirectory,
         wallet_secret: WalletSecret,
+        number_of_mps_per_utxo: usize,
     ) -> Self {
         // Create or connect to wallet block DB
         let wallet_db = DB::open(
@@ -97,6 +99,7 @@ impl WalletState {
         let ret = Self {
             wallet_db: rusty_wallet_database.clone(),
             wallet_secret,
+            number_of_mps_per_utxo,
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -266,7 +269,7 @@ impl WalletState {
                 );
 
                 // Add a new UTXO to the list of monitored UTXOs
-                let mut mutxo = MonitoredUtxo::new(utxo);
+                let mut mutxo = MonitoredUtxo::new(utxo, self.number_of_mps_per_utxo);
                 mutxo.confirmed_in_block = Some((
                     block.hash,
                     Duration::from_millis(block.header.timestamp.value()),

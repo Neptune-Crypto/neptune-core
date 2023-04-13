@@ -696,8 +696,8 @@ pub fn make_mock_block(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(wallet: Option<WalletSecret>) -> WalletState {
-    let wallet = match wallet {
+pub async fn get_mock_wallet_state(wallet_secret: Option<WalletSecret>) -> WalletState {
+    let wallet = match wallet_secret {
         Some(wallet) => wallet,
         None => WalletSecret::devnet_authority_wallet(),
     };
@@ -716,6 +716,8 @@ pub async fn get_mock_wallet_state(wallet: Option<WalletSecret>) -> WalletState 
     let ret = WalletState {
         wallet_db: wallet_db.clone(),
         wallet_secret: wallet,
+        // This number is set high since some tests depend on a high number here.
+        number_of_mps_per_utxo: 30,
     };
 
     // Wallet state has to be initialized with the genesis block, otherwise the outputs

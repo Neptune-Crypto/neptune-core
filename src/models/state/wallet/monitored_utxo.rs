@@ -7,8 +7,6 @@ use twenty_first::{shared_math::tip5::Digest, util_types::storage_schema::RustyV
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 
-const MAX_NUMBER_OF_MPS_STORED: usize = 500; // TODO: Move this to CLI config
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoredUtxo {
     pub utxo: Utxo,
@@ -16,7 +14,7 @@ pub struct MonitoredUtxo {
     // Mapping from block digest to membership proof
     pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof<Hash>)>,
 
-    pub max_number_of_mps_stored: usize,
+    pub number_of_mps_per_utxo: usize,
 
     // hash of the block, if any, in which this UTXO was spent
     pub spent_in_block: Option<(Digest, Duration)>,
@@ -26,11 +24,11 @@ pub struct MonitoredUtxo {
 }
 
 impl MonitoredUtxo {
-    pub fn new(utxo: Utxo) -> Self {
+    pub fn new(utxo: Utxo, max_number_of_mps_stored: usize) -> Self {
         Self {
             utxo,
             blockhash_to_membership_proof: VecDeque::default(),
-            max_number_of_mps_stored: MAX_NUMBER_OF_MPS_STORED,
+            number_of_mps_per_utxo: max_number_of_mps_stored,
             spent_in_block: None,
             confirmed_in_block: None,
         }
@@ -48,7 +46,7 @@ impl MonitoredUtxo {
         block_digest: Digest,
         updated_membership_proof: MsMembershipProof<Hash>,
     ) {
-        while self.blockhash_to_membership_proof.len() >= self.max_number_of_mps_stored {
+        while self.blockhash_to_membership_proof.len() >= self.number_of_mps_per_utxo {
             self.blockhash_to_membership_proof.pop_back();
         }
 
