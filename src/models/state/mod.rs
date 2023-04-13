@@ -2,7 +2,9 @@ use anyhow::{bail, Result};
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
+use std::num;
 use std::time::{SystemTime, UNIX_EPOCH};
+use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
@@ -11,6 +13,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
+use self::wallet::monitored_utxo;
 use self::wallet::wallet_state::WalletState;
 use super::blockchain::transaction::devnet_input::DevNetInput;
 use super::blockchain::transaction::utxo::Utxo;
@@ -195,6 +198,30 @@ impl GlobalState {
                     .put(ip, PeerStanding::default())
             }
         }
+    }
+
+    pub async fn resync_membership_proofs_to_tip(&self, tip_hash: Digest) -> Result<()> {
+        // loop over all monitored utxos
+        let monitored_utxos = self
+            .wallet_state
+            .wallet_db
+            .lock()
+            .await
+            .monitored_utxos
+            .clone();
+        let num_monitored_utxos = monitored_utxos.len();
+        for i in 0..num_monitored_utxos {
+            let monitored_utxo = monitored_utxos.get(i);
+
+            // ignore synced ones
+            if monitored_utxo.is_synced_to(&tip_hash) {
+                continue;
+            }
+        }
+        // request path-to-tip
+        // apply revert with orphaned block, in reverse order
+        // apply canonical block
+        Ok(())
     }
 }
 

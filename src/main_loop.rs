@@ -32,6 +32,7 @@ use crate::models::channel::{
 const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
 const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
+const MP_RESYNC_INTERVAL_IN_SECS: u64 = 59;
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
@@ -78,6 +79,7 @@ impl MutableMainLoopState {
     }
 }
 
+/// handles batch-downloading of blocks if we are more than n blocks behind
 struct SyncState {
     peer_sync_states: HashMap<SocketAddr, PeerSynchronizationState>,
     last_sync_request: Option<(SystemTime, BlockHeight, SocketAddr)>,
@@ -145,6 +147,7 @@ impl SyncState {
     }
 }
 
+/// holds information about a potential peer in the process of peer discovery
 struct PotentialPeerInfo {
     _reported: SystemTime,
     _reported_by: SocketAddr,
@@ -163,6 +166,7 @@ impl PotentialPeerInfo {
     }
 }
 
+/// holds information about a set of potential peers in the process of peer discovery
 struct PotentialPeersState {
     potential_peers: HashMap<SocketAddr, PotentialPeerInfo>,
 }
@@ -398,9 +402,7 @@ impl MainLoopHandler {
 
         Ok(())
     }
-}
 
-impl MainLoopHandler {
     async fn handle_peer_thread_message(
         &self,
         msg: PeerThreadToMain,
@@ -834,6 +836,10 @@ impl MainLoopHandler {
         let mempool_cleanup_timer = time::sleep(mempool_cleanup_timer_interval);
         tokio::pin!(mempool_cleanup_timer);
 
+        let mp_resync_timer_interval = Duration::from_secs(MP_RESYNC_INTERVAL_IN_SECS);
+        let mp_resync_timer = time::sleep(mp_resync_timer_interval);
+        tokio::pin!(mp_resync_timer);
+
         loop {
             // Set a timer to run peer discovery process every N seconds
 
@@ -917,11 +923,53 @@ impl MainLoopHandler {
                     // Reset the timer to run this branch again in P seconds
                     mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
                 }
+
+                // Handle membership proof resynchronization
+                _ = &mut mp_resync_timer => {
+                    debug!("Running membproof resync job");
+                    self.resync_membership_proofs().await?;
+
+                    mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_timer_interval);
+                }
             }
         }
 
         self.graceful_shutdown().await?;
         info!("Shutdown completed.");
+        Ok(())
+    }
+
+    async fn resync_membership_proofs(&self) -> Result<()> {
+        // is it necessary?
+        let current_tip_digest = self
+            .global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock()
+            .await
+            .hash;
+        if self
+            .global_state
+            .wallet_state
+            .is_synced_to(current_tip_digest)
+            .await
+        {
+            return Ok(());
+        }
+
+        // do we have blocks?
+        let we_have_blocks = self.global_state.chain.archival_state.is_some();
+        if we_have_blocks {
+            return self
+                .global_state
+                .resync_membership_proofs_to_tip(current_tip_digest)
+                .await;
+        }
+
+        // request blocks from peers
+        todo!("We don't yet support non-archival nodes");
+
         Ok(())
     }
 
