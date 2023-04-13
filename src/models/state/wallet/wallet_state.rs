@@ -46,6 +46,9 @@ pub struct WalletState {
     pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
+
+    // Indicating that the last update of the wallet state only ended in synced MS membership proofs
+    pub all_mps_synced: Arc<std::sync::RwLock<bool>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -96,10 +99,11 @@ impl WalletState {
 
         let rusty_wallet_database = Arc::new(TokioMutex::new(rusty_wallet_database));
 
-        let ret = Self {
+        let mut ret = Self {
             wallet_db: rusty_wallet_database.clone(),
             wallet_secret,
             number_of_mps_per_utxo,
+            all_mps_synced: Arc::new(std::sync::RwLock::new(false)),
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -432,9 +436,9 @@ impl WalletState {
                 aocl_index: _,
             },
             (updated_ms_mp, own_utxo_index),
-        ) in valid_membership_proofs_and_own_utxo_count
+        ) in valid_membership_proofs_and_own_utxo_count.iter()
         {
-            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(own_utxo_index);
+            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(*own_utxo_index);
             monitored_utxo.add_membership_proof_for_tip(block.hash, updated_ms_mp.to_owned());
 
             // Sanity check that membership proofs of non-spent transactions are still valid
@@ -445,7 +449,7 @@ impl WalletState {
 
             wallet_db_lock
                 .monitored_utxos
-                .set(own_utxo_index, monitored_utxo);
+                .set(*own_utxo_index, monitored_utxo);
 
             // TODO: What if a newly added transaction replaces a transaction that was in another fork?
             // How do we ensure that this transaction is not counted twice?
@@ -456,7 +460,17 @@ impl WalletState {
         wallet_db_lock.set_sync_label(block.hash);
         wallet_db_lock.persist();
 
+        // Store a boolean value indicating whether all monitored UTXOs have synced membership proofs
+        *self.all_mps_synced.write().unwrap() = valid_membership_proofs_and_own_utxo_count.len()
+            as u64
+            == wallet_db_lock.monitored_utxos.len();
+
         Ok(())
+    }
+
+    pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
+        let db_sync_digest = self.wallet_db.lock().await.get_sync_label();
+        *self.all_mps_synced.read().unwrap() && db_sync_digest == tip_hash
     }
 
     pub async fn get_balance(&self) -> Amount {
