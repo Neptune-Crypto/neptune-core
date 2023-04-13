@@ -608,7 +608,7 @@ impl WalletState {
     pub async fn allocate_sufficient_input_funds(
         &self,
         requested_amount: Amount,
-        block: &MutexGuard<'_, Block>,
+        block: &Block,
     ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
         let mut lock = self.wallet_db.lock().await;
         self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, block)

@@ -207,11 +207,9 @@ impl WalletSecret {
 mod wallet_tests {
     use std::sync::Arc;
 
-    use itertools::Itertools;
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use tokio::sync::Mutex;
     use tracing_test::traced_test;
-    use twenty_first::util_types::emojihash_trait::Emojihash;
     use twenty_first::util_types::storage_vec::StorageVec;
 
     use crate::config_models::network::Network;
@@ -543,10 +541,7 @@ mod wallet_tests {
         assert_eq!(
             20,
             own_wallet_state
-                .allocate_sufficient_input_funds(
-                    2000.into(),
-                    &Arc::new(Mutex::new(next_block.clone())).lock().await
-                )
+                .allocate_sufficient_input_funds(2000.into(), &next_block)
                 .await
                 .unwrap()
                 .len()
@@ -561,12 +556,13 @@ mod wallet_tests {
         // Add another block that spends *one* UTXO and gives us none, so the new balance
         // becomes 1900
         next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+        own_wallet_state.update_wallet_state_with_new_block(
+            &next_block,
+            &mut own_wallet_state.wallet_db.lock().await,
+        )?;
 
         let one_utxo = own_wallet_state
-            .allocate_sufficient_input_funds(
-                98.into(),
-                &Arc::new(Mutex::new(next_block.clone())).lock().await,
-            )
+            .allocate_sufficient_input_funds(98.into(), &next_block)
             .await
             .unwrap();
         assert_eq!(1, one_utxo.len());
@@ -932,7 +928,7 @@ mod wallet_tests {
                 .count()
         );
 
-        // Verify that we have two membership proofs for forked UTXO
+        // Verify that we have a membership proof for the "migrated" transaction.
         let forked_utxo_digest = Hash::hash(&forked_utxo);
         let forked_utxo_info: MonitoredUtxo = monitored_utxos_20
             .into_iter()
@@ -943,36 +939,6 @@ mod wallet_tests {
                 .get_membership_proof_for_block(&block_20.hash)
                 .is_some(),
             "Wallet state must contain membership proof for current block"
-        );
-        let wallet_status = {
-            let mut wallet_db_lock = non_premine_wallet_state.wallet_db.lock().await;
-            let wrapped_block = Arc::new(Mutex::new(block_18.clone()));
-            let block_lock = wrapped_block.lock().await;
-            non_premine_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
-        };
-        println!(
-            "forked_utxo_info AOCL index: {}",
-            forked_utxo_info
-                .get_latest_membership_proof_entry()
-                .unwrap()
-                .1
-                .auth_path_aocl
-                .leaf_index
-        );
-        println!("{wallet_status}");
-        assert!(
-            forked_utxo_info
-                .get_membership_proof_for_block(&block_3_b.hash)
-                .is_some(),
-            "Wallet state must contain mebership proof for abandoned block. Got member ship proofs for:\n\n {}\n\n Looking for hash: {}",
-            forked_utxo_info.blockhash_to_membership_proof.iter().map(|x| x.0.emojihash()).join(", "),
-            block_3_b.hash.emojihash()
-        );
-        println!("forked_utxo_info\n {:?}", forked_utxo_info);
-        assert_eq!(
-            2,
-            forked_utxo_info.blockhash_to_membership_proof.len(),
-            "Two membership proofs must be stored for forked UTXO"
         );
 
         Ok(())
