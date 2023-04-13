@@ -29,7 +29,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
-const MOCK_DIFFICULTY: u32 = 10_000;
+const MOCK_DIFFICULTY: u32 = 50_000;
 
 /// Prepare a Block for Devnet mining
 fn make_devnet_block_template(
