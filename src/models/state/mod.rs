@@ -75,7 +75,7 @@ impl GlobalState {
             .allocate_sufficient_input_funds_from_lock(&mut wallet_db_lock, total_spend, &bc_tip)?;
 
         // Create all removal records. These must be relative to the block tip.
-        let mut msa_tip = bc_tip.body.next_mutator_set_accumulator.clone();
+        let mut msa_tip = bc_tip.body.next_mutator_set_accumulator;
         let mut inputs: Vec<DevNetInput> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, mp) in spendable_utxos_and_mps {

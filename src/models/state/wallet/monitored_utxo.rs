@@ -65,10 +65,7 @@ impl MonitoredUtxo {
     }
 
     pub fn get_latest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof<Hash>)> {
-        self.blockhash_to_membership_proof
-            .iter()
-            .next()
-            .map(|x| x.clone())
+        self.blockhash_to_membership_proof.iter().next().cloned()
     }
 }
 

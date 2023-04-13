@@ -373,8 +373,7 @@ impl WalletState {
                                 .get_latest_membership_proof_entry()
                                 .map(|x| x.1.cached_indices)
                             {
-                                Some(indices) => match indices {
-                                    Some(mut indices) => {
+                                Some(Some(mut indices)) => {
                                         indices.sort_unstable();
                                         if indices.to_vec() == removal_record_indices {
                                             let mut mutxo =
@@ -391,10 +390,7 @@ impl WalletState {
                                             break;
                                         }
                                     }
-                                    None => panic!("Unable to mark monitored UTXO as spent, as I don't know which one to mark")
-                                    ,
-                                },
-                                None => panic!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
+                                _ => panic!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
                             }
                         }
                     }
