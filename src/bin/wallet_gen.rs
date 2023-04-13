@@ -1,8 +1,7 @@
 use anyhow::Result;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
-use neptune_core::models::state::wallet::wallet_state::WalletState;
-use neptune_core::models::state::wallet::Wallet;
+use neptune_core::models::state::wallet::WalletSecret;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -16,15 +15,10 @@ async fn main() -> Result<()> {
     DataDirectory::create_dir_if_not_exists(&root_data_dir_path).unwrap();
 
     let wallet_file = root_data_dir.wallet_file_path();
-    let wallet = Wallet::read_from_file_or_create(&wallet_file).unwrap();
-
-    let wallet_state: WalletState = WalletState::new_from_wallet(&root_data_dir, wallet).await;
+    let wallet_secret = WalletSecret::read_from_file_or_create(&wallet_file).unwrap();
 
     println!("Wallet stored in: {}", wallet_file.display());
-    println!(
-        "Wallet public key: {}",
-        wallet_state.wallet.get_public_key()
-    );
+    println!("Wallet public key: {}", wallet_secret.get_public_key());
 
     Ok(())
 }

@@ -9,6 +9,7 @@ use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
 use rusty_leveldb;
+use rusty_leveldb::DB;
 use secp256k1::ecdsa;
 use std::path::Path;
 use std::path::PathBuf;
@@ -27,6 +28,7 @@ use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::storage_schema::StorageWriter;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
@@ -55,8 +57,6 @@ use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;
 use crate::models::database::PeerDatabases;
-use crate::models::database::WalletDbKey;
-use crate::models::database::WalletDbValue;
 use crate::models::peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding};
 use crate::models::shared::LatestBlockInfo;
 use crate::models::state::archival_state::ArchivalState;
@@ -65,8 +65,9 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet;
+use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
 use crate::models::state::wallet::wallet_state::WalletState;
-use crate::models::state::wallet::Wallet;
+use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
@@ -168,7 +169,7 @@ pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeDat
 pub async fn get_mock_global_state(
     network: Network,
     peer_count: u8,
-    wallet: Option<Wallet>,
+    wallet: Option<WalletSecret>,
 ) -> GlobalState {
     let (archival_state, peer_db_lock) = make_unit_test_archival_state(network).await;
 
@@ -521,14 +522,14 @@ pub async fn add_unsigned_input_to_block_ams(
     );
 }
 
-pub fn new_random_wallet() -> Wallet {
-    Wallet::new(wallet::generate_secret_key())
+pub fn new_random_wallet() -> WalletSecret {
+    WalletSecret::new(wallet::generate_secret_key())
 }
 
 /// Create a mock `DevNetInput`
 ///
 /// This mock currently contains a lot of things that don't pass block validation.
-pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &Wallet) -> DevNetInput {
+pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &WalletSecret) -> DevNetInput {
     let mock_mmr_membership_proof = MmrMembershipProof::new(0, vec![]);
     let randomness = Digest::default();
     let mock_ms_membership_proof = MsMembershipProof {
@@ -605,7 +606,7 @@ pub fn make_mock_transaction_with_wallet(
 ) -> Transaction {
     let input_utxos_with_signature = inputs
         .iter()
-        .map(|in_utxo| make_mock_unsigned_devnet_input(in_utxo.amount, &wallet_state.wallet))
+        .map(|in_utxo| make_mock_unsigned_devnet_input(in_utxo.amount, &wallet_state.wallet_secret))
         .collect::<Vec<_>>();
 
     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
@@ -695,34 +696,28 @@ pub fn make_mock_block(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(wallet: Option<Wallet>) -> WalletState {
-    let wallet = match wallet {
+pub async fn get_mock_wallet_state(wallet_secret: Option<WalletSecret>) -> WalletState {
+    let wallet = match wallet_secret {
         Some(wallet) => wallet,
-        None => Wallet::devnet_authority_wallet(),
+        None => WalletSecret::devnet_authority_wallet(),
     };
 
     let data_dir = unit_test_data_directory(Network::Main).unwrap();
-
-    let wallet_db = Arc::new(TokioMutex::new(
-        RustyLevelDB::<WalletDbKey, WalletDbValue>::new(
-            &data_dir.wallet_database_dir_path(),
+    let mut raw_wallet_db = RustyWalletDatabase::connect(
+        DB::open(
+            data_dir.wallet_database_dir_path(),
             rusty_leveldb::in_memory(),
         )
         .unwrap(),
-    ));
-
-    let outgoing_utxo_counter_db = Arc::new(TokioMutex::new(
-        RustyLevelDB::<(), u128>::new(
-            &data_dir.wallet_output_count_database_dir_path(),
-            rusty_leveldb::in_memory(),
-        )
-        .unwrap(),
-    ));
+    );
+    raw_wallet_db.restore_or_new();
+    let wallet_db = Arc::new(TokioMutex::new(raw_wallet_db));
 
     let ret = WalletState {
-        outgoing_utxo_counter_db,
         wallet_db: wallet_db.clone(),
-        wallet,
+        wallet_secret: wallet,
+        // This number is set high since some tests depend on a high number here.
+        number_of_mps_per_utxo: 30,
     };
 
     // Wallet state has to be initialized with the genesis block, otherwise the outputs

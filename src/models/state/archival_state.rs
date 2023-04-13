@@ -802,7 +802,7 @@ mod archival_state_tests {
         let mock_block_1 = make_mock_block(
             &archival_state.genesis_block,
             None,
-            genesis_wallet_state.wallet.get_public_key(),
+            genesis_wallet_state.wallet_secret.get_public_key(),
         );
         {
             let mut block_db_lock = archival_state.block_index_db.lock().await;
@@ -841,7 +841,7 @@ mod archival_state_tests {
         let network = Network::Main;
         let archival_state = make_test_archival_state(network).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
-        let wallet = genesis_wallet_state.wallet;
+        let wallet = genesis_wallet_state.wallet_secret;
 
         let mock_block_1 =
             make_mock_block(&archival_state.genesis_block, None, wallet.get_public_key());
@@ -927,7 +927,7 @@ mod archival_state_tests {
         // blocks.
         let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Main).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
-        let genesis_wallet = genesis_wallet_state.wallet;
+        let genesis_wallet = genesis_wallet_state.wallet_secret;
 
         // 1. Create new block 1 with two inputs and three outputs and store it to disk
         let mut block_1a = make_mock_block(
@@ -1029,7 +1029,7 @@ mod archival_state_tests {
         // mutator set forwards.
         let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Main).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
-        let genesis_wallet = genesis_wallet_state.wallet;
+        let genesis_wallet = genesis_wallet_state.wallet_secret;
 
         let genesis_block: Block = *archival_state.genesis_block.to_owned();
         let mut consumed_utxo = genesis_block.body.transaction.outputs[0].0;
@@ -1156,7 +1156,7 @@ mod archival_state_tests {
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Main).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
-        let genesis_wallet = genesis_wallet_state.wallet;
+        let genesis_wallet = genesis_wallet_state.wallet_secret;
         let mut block_1_a = make_mock_block(
             &archival_state.genesis_block,
             None,
@@ -1233,7 +1233,7 @@ mod archival_state_tests {
     async fn allow_multiple_inputs_and_outputs_in_block() -> Result<()> {
         let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Main).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
-        let genesis_wallet = genesis_wallet_state.wallet;
+        let genesis_wallet = genesis_wallet_state.wallet_secret;
         let mut block_1 = make_mock_block(
             &archival_state.genesis_block,
             None,

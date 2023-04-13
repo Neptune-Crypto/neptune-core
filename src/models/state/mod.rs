@@ -65,17 +65,17 @@ impl GlobalState {
         // acquire a lock on `WalletState` to prevent it from being updated
         let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
 
-        // Acquire a lock on `LightState` to prevent it from being updated
-        let light_state_lock = self.chain.light_state.latest_block.lock().await;
+        // Get the block tip as the transaction is made relative to it
+        let bc_tip = self.chain.light_state.latest_block.lock().await.to_owned();
 
         // Get the UTXOs required for this transaction
         let total_spend: Amount = recipient_utxos.iter().map(|x| x.amount).sum::<Amount>() + fee;
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
             .wallet_state
-            .allocate_sufficient_input_funds_with_lock(&mut wallet_db_lock, total_spend)?;
+            .allocate_sufficient_input_funds_from_lock(&mut wallet_db_lock, total_spend, &bc_tip)?;
 
         // Create all removal records. These must be relative to the block tip.
-        let mut msa_tip = light_state_lock.body.next_mutator_set_accumulator.clone();
+        let mut msa_tip = bc_tip.body.next_mutator_set_accumulator;
         let mut inputs: Vec<DevNetInput> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, mp) in spendable_utxos_and_mps {
@@ -93,7 +93,9 @@ impl GlobalState {
 
         let mut outputs: Vec<(Utxo, Digest)> = vec![];
         for output_utxo in recipient_utxos {
-            let output_randomness = self.wallet_state.next_output_randomness().await;
+            let output_randomness = self
+                .wallet_state
+                .next_output_randomness_from_lock(&mut wallet_db_lock);
             outputs.push((output_utxo, output_randomness));
         }
 
@@ -107,11 +109,12 @@ impl GlobalState {
         if input_amount > total_spend {
             let change_utxo = Utxo {
                 amount: change_amount,
-                public_key: self.wallet_state.wallet.get_public_key(),
+                public_key: self.wallet_state.wallet_secret.get_public_key(),
             };
             outputs.push((
                 change_utxo,
-                self.wallet_state.next_output_randomness().await,
+                self.wallet_state
+                    .next_output_randomness_from_lock(&mut wallet_db_lock),
             ));
         }
 
@@ -128,7 +131,7 @@ impl GlobalState {
             ),
             authority_proof: None,
         };
-        transaction.sign(&self.wallet_state.wallet);
+        transaction.sign(&self.wallet_state.wallet_secret);
 
         Ok(transaction)
     }
@@ -200,12 +203,12 @@ mod global_state_tests {
     use crate::{config_models::network::Network, tests::shared::get_mock_global_state};
     use tracing_test::traced_test;
 
-    use super::{wallet::Wallet, *};
+    use super::{wallet::WalletSecret, *};
 
     #[traced_test]
     #[tokio::test]
     async fn premine_recipient_can_spend_genesis_block_output() {
-        let other_wallet = Wallet::new(wallet::generate_secret_key());
+        let other_wallet = WalletSecret::new(wallet::generate_secret_key());
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
         let output_utxo = Utxo {
             amount: 20.into(),

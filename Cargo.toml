@@ -12,10 +12,10 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = "0.19.1"
+twenty-first = "0.19.3"
 # twenty-first = { path = "../twenty-first/twenty-first" }
-# mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git", tag = "v0.8.0" }
-mutator-set-tf = { path = "../mutator-set-tf" }
+mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }
+# mutator-set-tf = { path = "../mutator-set-tf" }
 anyhow = "1"
 bincode = "1"
 bytes = "1"

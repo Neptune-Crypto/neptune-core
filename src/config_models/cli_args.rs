@@ -87,6 +87,10 @@ pub struct Args {
     /// Specify network, `main`, `testnet`, or `regtest`
     #[structopt(long, short, default_value = "main")]
     pub network: Network,
+
+    /// Max number of membership proofs stored per owned UTXO
+    #[structopt(long, default_value = "3")]
+    pub number_of_mps_per_utxo: usize,
 }
 
 impl Args {
