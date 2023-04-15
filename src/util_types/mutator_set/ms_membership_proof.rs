@@ -717,6 +717,8 @@ mod ms_proof_tests {
                 removal_records.push(removal_record);
             }
         }
+        let cutoff_point = rng.next_u32() as usize % removal_records.len();
+        let mut membership_proof_snapshot = None;
 
         // apply removal records
         for i in 0..removal_records.len() {
@@ -736,6 +738,10 @@ mod ms_proof_tests {
                 .expect("Could not update membership proof from removal record");
 
             archival_mutator_set.remove(applied_removal_record);
+
+            if i + 1 == cutoff_point {
+                membership_proof_snapshot = Some(own_membership_proof.as_ref().unwrap().clone());
+            }
         }
 
         println!("Removed {} items.", removal_records.len());
@@ -746,7 +752,6 @@ mod ms_proof_tests {
         );
 
         // revert some removal records
-        let cutoff_point = rng.next_u32() as usize % removal_records.len();
         let mut reversions = removal_records[cutoff_point..].to_vec();
         reversions.reverse();
         for revert_removal_record in reversions.iter() {
@@ -768,6 +773,12 @@ mod ms_proof_tests {
         // assert valid
         assert!(
             archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+        );
+
+        // assert same as snapshot before application-and-reversion
+        assert_eq!(
+            own_membership_proof.unwrap(),
+            membership_proof_snapshot.unwrap()
         );
     }
 }
