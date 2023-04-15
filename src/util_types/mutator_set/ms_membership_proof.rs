@@ -762,7 +762,6 @@ mod ms_proof_tests {
                 .expect("Could not revert update from removal record.");
 
             archival_mutator_set.revert_remove(revert_removal_record);
-            // archival_mutator_set.remove(revert_removal_record); // <-- this works, and shouldn't
 
             // keep other removal records up-to-date?
             // - nah, we don't need them for anything anymore
