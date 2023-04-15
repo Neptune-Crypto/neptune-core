@@ -15,7 +15,10 @@ use super::chunk_dictionary::ChunkDictionary;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel};
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
-use super::shared::{get_batch_mutation_argument_for_removal_record, BATCH_SIZE, CHUNK_SIZE};
+use super::shared::{
+    generate_authenticated_batch_modification_for_removal_record_reversion,
+    get_batch_mutation_argument_for_removal_record, BATCH_SIZE, CHUNK_SIZE,
+};
 use super::transfer_ms_membership_proof::TransferMsMembershipProof;
 
 impl Error for MembershipProofError {}
@@ -423,6 +426,11 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         &mut self,
         removal_record: &RemovalRecord<H>,
     ) -> Result<bool, Box<dyn Error>> {
+        // Removing items does not slide the active window. We only
+        // need to take into account new indices in the sparse Bloom
+        // filter, and only in the inactive part. Specifically: we
+        // need to update the chunks and their membership proofs.
+
         // Set all chunk values to the new values and calculate the mutation argument
         // for the batch updating of the MMR membership proofs.
         let mut chunk_dictionaries = vec![&mut self.target_chunks];
@@ -451,16 +459,58 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
         Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
     }
+
+    /// Resets a membership proof to its state prior to updating it
+    /// with a removal record.
+    pub fn revert_update_from_remove(
+        &mut self,
+        removal_record: &RemovalRecord<H>,
+    ) -> Result<bool, Box<dyn Error>> {
+        // The logic here is essentially the same as in
+        // `update_from_remove` but with the new and old chunks
+        // swapped.
+
+        // Set all chunk values to the old values and calculate the mutation argument
+        // for the batch updating of the MMR membership proofs.
+        let mut chunk_dictionaries = vec![&mut self.target_chunks];
+        let (mutated_chunk_dictionary_index, batch_membership) =
+            generate_authenticated_batch_modification_for_removal_record_reversion(
+                removal_record,
+                &mut chunk_dictionaries,
+            );
+
+        // update MMR membership proofs
+        // Note that *all* MMR membership proofs must be updated. It's not sufficient to update
+        // those whose leaf has changed, since an authentication path changes if *any* leaf
+        // in the same Merkle tree (under the same MMR peak) changes.
+        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<H>> = self
+            .target_chunks
+            .dictionary
+            .iter_mut()
+            .map(|(_, (mmr_mp, _))| mmr_mp)
+            .collect();
+
+        let mutated_mmr_mp_indices: Vec<usize> =
+            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+                &mut chunk_mmr_mps,
+                batch_membership,
+            );
+
+        Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
+    }
 }
 
 #[cfg(test)]
 mod ms_proof_tests {
     use super::*;
-    use crate::test_shared::mutator_set::make_item_and_randomness;
+    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
+    use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use num_traits::Zero;
+    use rand::{thread_rng, RngCore};
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -603,5 +653,124 @@ mod ms_proof_tests {
                 mp_no_cached_indices.target_chunks
             );
         }
+    }
+
+    #[test]
+    fn revert_update_from_remove_test() {
+        type H = Tip5;
+        let n = 100;
+        let mut rng = thread_rng();
+
+        let own_index = rng.next_u32() as usize % n;
+        let mut own_membership_proof = None;
+        let mut own_item = None;
+
+        // set up mutator set
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
+        let mut membership_proofs: Vec<(Digest, MsMembershipProof<Tip5>)> = vec![];
+
+        // add items
+        for i in 0..n {
+            let item: Digest = random_elements(1)[0];
+            let randomness: Digest = random_elements(1)[0];
+            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+
+            for (oi, mp) in membership_proofs.iter_mut() {
+                mp.update_from_addition(oi, &mut archival_mutator_set.kernel, &addition_record)
+                    .expect("Could not update membership proof from addition.");
+            }
+
+            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+            if i == own_index {
+                own_membership_proof = Some(membership_proof);
+                own_item = Some(item);
+            } else {
+                membership_proofs.push((item, membership_proof));
+                if i > own_index {
+                    own_membership_proof
+                        .as_mut()
+                        .unwrap()
+                        .update_from_addition(
+                            own_item.as_ref().unwrap(),
+                            &mut archival_mutator_set.kernel,
+                            &addition_record,
+                        )
+                        .expect("Could not update membership proof from addition record.");
+                }
+            }
+
+            archival_mutator_set.add(&mut addition_record);
+        }
+        println!("Added {n} items.");
+
+        // assert valid
+        assert!(
+            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+        );
+
+        // generate some removal records
+        let mut removal_records = vec![];
+        for (item, membership_proof) in membership_proofs.into_iter() {
+            if rng.next_u32() % 2 == 1 {
+                let removal_record = archival_mutator_set.drop(&item, &membership_proof);
+                removal_records.push(removal_record);
+            }
+        }
+
+        // apply removal records
+        for i in 0..removal_records.len() {
+            let (immutable_records, mutable_records) = removal_records.split_at_mut(i + 1);
+            let applied_removal_record = immutable_records.last().unwrap();
+
+            RemovalRecord::batch_update_from_remove(
+                &mut mutable_records.iter_mut().collect::<Vec<_>>(),
+                applied_removal_record,
+            )
+            .expect("Could not apply removal record.");
+
+            own_membership_proof
+                .as_mut()
+                .unwrap()
+                .update_from_remove(applied_removal_record)
+                .expect("Could not update membership proof from removal record");
+
+            archival_mutator_set.remove(applied_removal_record);
+        }
+
+        println!("Removed {} items.", removal_records.len());
+
+        // assert valid
+        assert!(
+            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+        );
+
+        // revert some removal records
+        let mut reversions = vec![];
+        for removal_record in removal_records {
+            if rng.next_u32() % 2 == 1 {
+                reversions.push(removal_record.clone());
+            }
+        }
+        reversions.reverse();
+        for revert_removal_record in reversions.iter() {
+            own_membership_proof
+                .as_mut()
+                .unwrap()
+                .revert_update_from_remove(revert_removal_record)
+                .expect("Could not revert update from removal record.");
+
+            archival_mutator_set.remove(revert_removal_record);
+
+            // keep other removal records up-to-date?
+            // - nah, we don't need them for anything anymore
+        }
+
+        println!("Reverted {} removals.", reversions.len());
+
+        // assert valid
+        assert!(
+            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+        );
     }
 }
