@@ -746,12 +746,8 @@ mod ms_proof_tests {
         );
 
         // revert some removal records
-        let mut reversions = vec![];
-        for removal_record in removal_records {
-            if rng.next_u32() % 2 == 1 {
-                reversions.push(removal_record.clone());
-            }
-        }
+        let cutoff_point = rng.next_u32() as usize % removal_records.len();
+        let mut reversions = removal_records[cutoff_point..].to_vec();
         reversions.reverse();
         for revert_removal_record in reversions.iter() {
             own_membership_proof
@@ -760,7 +756,8 @@ mod ms_proof_tests {
                 .revert_update_from_remove(revert_removal_record)
                 .expect("Could not revert update from removal record.");
 
-            archival_mutator_set.remove(revert_removal_record);
+            archival_mutator_set.revert_remove(revert_removal_record);
+            // archival_mutator_set.remove(revert_removal_record); // <-- this works, and shouldn't
 
             // keep other removal records up-to-date?
             // - nah, we don't need them for anything anymore

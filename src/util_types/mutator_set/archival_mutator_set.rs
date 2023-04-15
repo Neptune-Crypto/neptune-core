@@ -240,12 +240,11 @@ where
         })
     }
 
-    /// Revert the `RemovalRecord`s in a block by removing the indices that
-    /// were inserted by the removal record. These live in either the active window, or
+    /// Revert the `RemovalRecord` by removing the indices that
+    /// were inserted by it. These live in either the active window, or
     /// in a relevant chunk.
-    ///
-    /// Fails if attempting to remove an index that wasn't set.
-    pub fn revert_remove(&mut self, removal_record_indices: Vec<u128>) {
+    pub fn revert_remove(&mut self, removal_record: &RemovalRecord<H>) {
+        let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
         let batch_index = self.kernel.get_batch_index();
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
         let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
@@ -354,7 +353,7 @@ mod archival_mutator_set_tests {
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
 
     use super::*;
 
@@ -485,12 +484,12 @@ mod archival_mutator_set_tests {
 
         // This next line should panic, as we're attempting to remove an index that is not present
         // in the active window
-        archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
+        archival_mutator_set.revert_remove(&removal_record);
     }
 
     #[should_panic(expected = "Attempted to remove index that was not present in chunk.")]
     #[test]
-    fn revert_remove_from_inactive_bloom_filter_panic() {
+    fn revert_remove_invalid_panic() {
         type H = blake3::Hasher;
 
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
@@ -502,9 +501,16 @@ mod archival_mutator_set_tests {
             archival_mutator_set.add(&mut addition_record);
         }
 
+        let mut fake_indices = [2u128; NUM_TRIALS as usize];
+        fake_indices[0] = 0;
+        let fake_removal_record = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new(&fake_indices),
+            target_chunks: ChunkDictionary::default(),
+        };
+
         // This next line should panic, as we're attempting to remove an index that is not present
         // in the inactive part of the Bloom filter
-        archival_mutator_set.revert_remove(vec![0, 2]);
+        archival_mutator_set.revert_remove(&fake_removal_record);
     }
 
     #[test]
@@ -544,7 +550,7 @@ mod archival_mutator_set_tests {
             archival_mutator_set.remove(&removal_record);
             assert!(!archival_mutator_set.verify(&item, &restored_membership_proof));
 
-            archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
+            archival_mutator_set.revert_remove(&removal_record);
             let commitment_after_revert = archival_mutator_set.hash();
             assert_eq!(commitment_before_remove, commitment_after_revert);
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
@@ -658,11 +664,9 @@ mod archival_mutator_set_tests {
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
-            let all_removal_record_indices = removal_records
-                .iter()
-                .map(|x| x.absolute_indices.to_vec())
-                .concat();
-            archival_mutator_set.revert_remove(all_removal_record_indices);
+            for removal_record in removal_records.iter() {
+                archival_mutator_set.revert_remove(removal_record);
+            }
 
             // Verify that mutator set before and after removal are the same
             assert_eq!(commitment_prior_to_removal, archival_mutator_set.hash(), "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");
