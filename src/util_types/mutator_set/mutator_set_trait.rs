@@ -18,7 +18,7 @@ pub trait MutatorSet<H: AlgebraicHasher> {
         cache_indices: bool,
     ) -> MsMembershipProof<H>;
 
-    fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool;
+    fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool;
 
     /// Generates an addition record from an item and explicit random-
     /// ness. The addition record is itself a commitment to the item,
@@ -26,21 +26,12 @@ pub trait MutatorSet<H: AlgebraicHasher> {
     /// current state.
     fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord;
 
-    /**
-     * drop
-     * Generates a removal record with which to update the set commitment.
-     */
+    /// Generates a removal record with which to update the set commitment.
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
 
-    ///   add
-    ///   Updates the set-commitment with an addition record. The new
-    ///   commitment represents the set $S union {c}$ ,
-    ///   where S is the set represented by the old
-    ///   commitment and c is the commitment to the new item AKA the
-    ///   *addition record*.
+    /// Updates the set-commitment with an addition record.
     fn add(&mut self, addition_record: &mut AdditionRecord);
 
-    /// remove
     /// Updates the mutator set so as to remove the item determined by
     /// its removal record.
     fn remove(&mut self, removal_record: &RemovalRecord<H>);

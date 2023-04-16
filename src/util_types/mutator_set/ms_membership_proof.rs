@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -12,6 +13,7 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
 use super::chunk_dictionary::ChunkDictionary;
+use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel};
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
@@ -34,6 +36,7 @@ pub enum MembershipProofError {
     AlreadyExistingChunk(u64),
     MissingChunkOnUpdateFromAdd(u64),
     MissingChunkOnUpdateFromRemove(u64),
+    MissingChunkOnRevertUpdateFromAdd(u64),
 }
 
 // In order to store this structure in the database, it needs to be serializable. But it should not be
@@ -371,6 +374,143 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         }
 
         Ok(swbf_chunk_dictionary_updated || aocl_mp_updated)
+    }
+
+    /// Resets a membership proof to its state prior to updating it
+    /// with an addition record, given the item it pertains to and
+    /// the state of the mutator set kernel prior to adding it.
+    pub fn revert_update_from_addition(
+        &mut self,
+        own_item: &Digest,
+        prior_mutator_set: &MutatorSetAccumulator<H>,
+    ) -> Result<bool, Box<dyn Error>> {
+        // How can we even revert an addition when we aren't given
+        // the addition record as input?
+        // An addition record does not come with its aocl index
+        // so we would have to assume it is being reverted in the
+        // correct order. The AOCL index is the only piece of
+        // information we need, but we can get it from the mutator
+        // set kernel instead.
+        // In fact, this number is equal to the number of leafs in
+        // the AOCL MMR prior to adding the item.
+        let aocl_index = prior_mutator_set.set_commitment.aocl.count_leaves();
+
+        // Revert update to AOCL MMR membership proof.
+
+        // MMR membership proofs can only grow (or not) under
+        // additions, so under addition-reversions they can only
+        // shrink (or not).
+
+        // Find out if we have to shrink.
+        let own_commitment = H::hash_pair(own_item, &self.randomness);
+        assert!(
+            prior_mutator_set.set_commitment.aocl.count_leaves() > self.auth_path_aocl.leaf_index
+        );
+        let mut valid = self
+            .auth_path_aocl
+            .verify(
+                &prior_mutator_set.set_commitment.aocl.get_peaks(),
+                &own_commitment,
+                prior_mutator_set.set_commitment.aocl.count_leaves(),
+            )
+            .0;
+
+        // If we have to shrink, shrink until valid or empty
+        while !valid {
+            if self.auth_path_aocl.authentication_path.pop().is_none() {
+                break;
+            }
+            valid = self
+                .auth_path_aocl
+                .verify(
+                    &prior_mutator_set.set_commitment.aocl.get_peaks(),
+                    &own_commitment,
+                    prior_mutator_set.set_commitment.aocl.count_leaves(),
+                )
+                .0;
+        }
+
+        assert!(
+            self.auth_path_aocl
+                .verify(
+                    &prior_mutator_set.set_commitment.aocl.get_peaks(),
+                    &own_commitment,
+                    prior_mutator_set.set_commitment.aocl.count_leaves()
+                )
+                .0,
+            "auth path: {:?}",
+            self.auth_path_aocl.authentication_path
+        );
+
+        // If the addition record did not induce a window slide, then
+        // we are done.
+        if !MutatorSetKernel::<H, MmrAccumulator<H>>::window_slides(aocl_index) {
+            return Ok(true);
+        }
+
+        // As a result of the window slide, two types of things may
+        // have happened:
+        //  1. Some of the membership proof's indices were moved from
+        //     the active window into the new chunk.
+        //  2. Some of the MS membership proof's existing chunks get
+        //     updated MMR membership proofs.
+
+        // The moved indices do not include indices from this
+        // membership proof. So the net effect is a new chunk that
+        // must be dropped for reversion, if it is even present.
+        let leaf_count = prior_mutator_set
+            .set_commitment
+            .swbf_inactive
+            .count_leaves();
+        self.target_chunks.dictionary.remove(&leaf_count);
+
+        println!("swbfi leaf count: {leaf_count}");
+        println!(
+            "chunks keys: {:?}",
+            self.target_chunks.dictionary.keys().collect_vec()
+        );
+
+        assert!(self.target_chunks.dictionary.len() <= leaf_count as usize);
+
+        // The SWBF MMR membership proofs grew by 0 or more. So
+        // find out which and trim them if necessary.
+        for (_chunkidx_key, (mmr_mp, chunk)) in self.target_chunks.dictionary.iter_mut() {
+            let mut already_valid = mmr_mp
+                .verify(
+                    &prior_mutator_set.set_commitment.swbf_inactive.get_peaks(),
+                    &H::hash(chunk),
+                    leaf_count,
+                )
+                .0;
+            while !already_valid {
+                if mmr_mp.authentication_path.pop().is_none() {
+                    break;
+                }
+                already_valid = mmr_mp
+                    .verify(
+                        &prior_mutator_set.set_commitment.swbf_inactive.get_peaks(),
+                        &H::hash(chunk),
+                        leaf_count,
+                    )
+                    .0;
+            }
+            if !mmr_mp
+                .verify(
+                    &prior_mutator_set.set_commitment.swbf_inactive.get_peaks(),
+                    &H::hash(chunk),
+                    leaf_count,
+                )
+                .0
+            {
+                println!("chunk index: {_chunkidx_key}");
+                println!("chunk: {:?}", chunk);
+                panic!("No prefix of chunk MMR membership proof is valid.");
+            }
+        }
+
+        assert!(prior_mutator_set.set_commitment.verify(own_item, self));
+
+        Ok(true)
     }
 
     /// Update multiple membership proofs from one remove operation. Returns the indices of the membership proofs
@@ -779,5 +919,83 @@ mod ms_proof_tests {
             own_membership_proof.unwrap(),
             membership_proof_snapshot.unwrap()
         );
+    }
+
+    #[test]
+    fn revert_update_from_addition_test() {
+        type H = Tip5;
+        let mut rng = thread_rng();
+        // let n = rng.next_u32() as usize % 100 + 1;
+        let n = 55;
+
+        // let own_index = rng.next_u32() as usize % n;
+        let own_index = 8;
+        println!("own index: {own_index}");
+        let mut own_membership_proof = None;
+        let mut own_item = None;
+
+        // set up mutator set
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams::<H>();
+
+        // add items
+        for i in 0..n {
+            let item: Digest = random_elements(1)[0];
+            let randomness: Digest = random_elements(1)[0];
+            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+
+            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+            match i.cmp(&own_index) {
+                std::cmp::Ordering::Less => {}
+                std::cmp::Ordering::Equal => {
+                    own_membership_proof = Some(membership_proof);
+                    own_item = Some(item);
+                }
+                std::cmp::Ordering::Greater => {
+                    assert!(archival_mutator_set.verify(
+                        own_item.as_ref().unwrap(),
+                        own_membership_proof.as_ref().unwrap()
+                    ));
+                    own_membership_proof
+                        .as_mut()
+                        .unwrap()
+                        .update_from_addition(
+                            own_item.as_ref().unwrap(),
+                            &mut archival_mutator_set.kernel,
+                            &addition_record,
+                        )
+                        .expect("Could not update membership proof from addition record.");
+                }
+            }
+
+            let mutator_set_before = archival_mutator_set.accumulator();
+
+            archival_mutator_set.add(&mut addition_record);
+
+            if i > own_index {
+                assert!(archival_mutator_set.kernel.verify(
+                    own_item.as_ref().unwrap(),
+                    own_membership_proof.as_ref().unwrap(),
+                ));
+
+                let mut memproof = own_membership_proof.as_ref().unwrap().clone();
+
+                assert!(archival_mutator_set
+                    .kernel
+                    .verify(own_item.as_ref().unwrap(), &memproof,));
+
+                println!("reverting addition of element {}", i);
+                memproof
+                    .revert_update_from_addition(own_item.as_ref().unwrap(), &mutator_set_before)
+                    .expect("Could not revert update to own membership proof from addition.");
+
+                println!(
+                    "reverted memproof =/= old memproof? {}",
+                    memproof != *own_membership_proof.as_ref().unwrap()
+                );
+                assert!(mutator_set_before.verify(own_item.as_ref().unwrap(), &memproof));
+            }
+        }
+        println!("Added {n} items.");
     }
 }

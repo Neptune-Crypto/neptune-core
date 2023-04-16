@@ -107,7 +107,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
     }
 
     /// Return the batch index for the latest addition to the mutator set
-    pub fn get_batch_index(&mut self) -> u64 {
+    pub fn get_batch_index(&self) -> u64 {
         match self.aocl.count_leaves() {
             0 => 0,
             n => (n - 1) / BATCH_SIZE as u64,
@@ -242,12 +242,13 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
         }
     }
 
-    pub fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    pub fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         // If data index does not exist in AOCL, return false
         // This also ensures that no "future" indices will be
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
         if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.leaf_index {
+            println!("leaf count less than or equal to leaf index");
             return false;
         }
 
@@ -259,6 +260,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
             self.aocl.count_leaves(),
         );
         if !is_aocl_member {
+            println!("not aocl member");
             return false;
         }
 
@@ -325,6 +327,16 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
                     }
                 }
             }
+        }
+
+        if !entries_in_dictionary {
+            println!("entries not in dictionary");
+        }
+        if !all_auth_paths_are_valid {
+            println!("not all auth paths are valid");
+        }
+        if !has_absent_index {
+            println!("membership proof does not list index that is absent from the swbf");
         }
 
         // return verdict
@@ -585,8 +597,8 @@ mod accumulation_scheme_tests {
     fn init_test() {
         type H = Tip5;
 
-        let mut accumulator = MutatorSetAccumulator::<H>::default();
-        let (mut archival, _): (
+        let accumulator = MutatorSetAccumulator::<H>::default();
+        let (archival, _): (
             ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
             _,
         ) = empty_rustyleveldbvec_ams();
@@ -610,7 +622,7 @@ mod accumulation_scheme_tests {
         // that represents a future addition to the AOCL.
         type H = Tip5;
         let mut mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
-        let mut empty_mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
+        let empty_mutator_set = MutatorSetAccumulator::<H>::default().set_commitment;
 
         for _ in 0..2 * BATCH_SIZE + 2 {
             let (item, randomness) = make_item_and_randomness();
@@ -970,7 +982,7 @@ mod accumulation_scheme_tests {
         let (mp, item) = insert_item(&mut mutator_set);
         let json_one_add = serde_json::to_string(&mutator_set).unwrap();
         println!("json_one_add = \n{}", json_one_add);
-        let mut s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
+        let s_back_one_add = serde_json::from_str::<Ms>(&json_one_add).unwrap();
         assert_eq!(1, s_back_one_add.aocl.count_leaves());
         assert!(s_back_one_add.swbf_inactive.is_empty());
         assert!(s_back_one_add.swbf_active.sbf.is_empty());
@@ -980,7 +992,7 @@ mod accumulation_scheme_tests {
         remove_item(&mut mutator_set, &item, &mp);
         let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
         println!("json_one_add = \n{}", json_one_add_one_remove);
-        let mut s_back_one_add_one_remove =
+        let s_back_one_add_one_remove =
             serde_json::from_str::<Ms>(&json_one_add_one_remove).unwrap();
         assert_eq!(
             1,

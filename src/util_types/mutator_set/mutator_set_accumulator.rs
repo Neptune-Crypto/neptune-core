@@ -38,7 +38,7 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         self.set_commitment.prove(item, randomness, store_indices)
     }
 
-    fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.set_commitment.verify(item, membership_proof)
     }
 

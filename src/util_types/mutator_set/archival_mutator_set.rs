@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use twenty_first::shared_math::tip5::Digest;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -13,6 +14,7 @@ use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
+use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKernelError};
 use super::mutator_set_trait::MutatorSet;
 use super::removal_record::{AbsoluteIndexSet, RemovalRecord};
@@ -43,7 +45,7 @@ where
         self.kernel.prove(item, randomness, cache_indices)
     }
 
-    fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.kernel.verify(item, membership_proof)
     }
 
@@ -337,13 +339,20 @@ where
         }
     }
 
-    // /// Flush the databases. Does not persist the active window as this lives in memory. The caller
-    // /// must persist the active window seperately.
-    // pub fn flush(&mut self) {
-    //     self.chunks.flush();
-    //     self.set_commitment.aocl.flush();
-    //     self.set_commitment.swbf_inactive.flush();
-    // }
+    pub fn accumulator(&self) -> MutatorSetAccumulator<H> {
+        let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
+            aocl: MmrAccumulator::init(
+                self.kernel.aocl.get_peaks(),
+                self.kernel.aocl.count_leaves(),
+            ),
+            swbf_inactive: MmrAccumulator::init(
+                self.kernel.aocl.get_peaks(),
+                self.kernel.swbf_inactive.count_leaves(),
+            ),
+            swbf_active: self.kernel.swbf_active.clone(),
+        };
+        MutatorSetAccumulator { set_commitment }
+    }
 }
 
 #[cfg(test)]
