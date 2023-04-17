@@ -650,7 +650,7 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use num_traits::Zero;
-    use rand::{thread_rng, RngCore};
+    use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -812,8 +812,8 @@ mod ms_proof_tests {
 
         // add items
         for i in 0..n {
-            let item: Digest = random_elements(1)[0];
-            let randomness: Digest = random_elements(1)[0];
+            let item: Digest = random();
+            let randomness: Digest = random();
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
 
             for (oi, mp) in membership_proofs.iter_mut() {
@@ -844,10 +844,15 @@ mod ms_proof_tests {
         }
         println!("Added {n} items.");
 
-        // assert valid
+        // assert that own mp is valid
         assert!(
             archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
         );
+
+        // Assert that all other mps are valid
+        for (itm, mp) in membership_proofs.iter() {
+            assert!(archival_mutator_set.verify(itm, mp));
+        }
 
         // generate some removal records
         let mut removal_records = vec![];
