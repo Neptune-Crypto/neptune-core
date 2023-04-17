@@ -918,10 +918,12 @@ mod ms_proof_tests {
             empty_rustyleveldbvec_ams::<H>();
 
         // add items
+        let mut addition_records = vec![];
         for i in 0..n {
             let item: Digest = random();
             let randomness: Digest = random();
-            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
+            addition_records.push(addition_record.clone());
 
             let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
             match i.cmp(&own_index) {
@@ -973,5 +975,24 @@ mod ms_proof_tests {
             }
         }
         println!("Added {n} items.");
+
+        // revert additions
+        let (_petrified, revertible) = addition_records.split_at(own_index + 1);
+        for addition_record in revertible.iter().rev() {
+            archival_mutator_set.revert_add(addition_record);
+            own_membership_proof
+                .as_mut()
+                .unwrap()
+                .revert_update_from_addition(
+                    own_item.as_ref().unwrap(),
+                    &archival_mutator_set.accumulator(),
+                )
+                .expect("Could not batch revert update from addition.");
+
+            assert!(archival_mutator_set.verify(
+                own_item.as_ref().unwrap(),
+                own_membership_proof.as_ref().unwrap()
+            ));
+        }
     }
 }
