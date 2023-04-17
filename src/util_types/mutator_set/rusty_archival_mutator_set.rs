@@ -257,20 +257,20 @@ mod tests {
 
         for _ in 0..num_additions {
             let (item, randomness) = make_item_and_randomness();
-            let mut addition_record = rusty_mutator_set.ams.kernel.commit(&item, &randomness);
+            let addition_record = rusty_mutator_set.ams.kernel.commit(&item, &randomness);
             let mp = rusty_mutator_set.ams.kernel.prove(&item, &randomness, true);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
-                &mut rusty_mutator_set.ams.kernel,
+                &rusty_mutator_set.ams.kernel,
                 &addition_record,
             )
             .expect("Cannot batch update from addition");
 
             mps.push(mp);
             items.push(item);
-            rusty_mutator_set.ams.add(&mut addition_record);
+            rusty_mutator_set.ams.add(&addition_record);
         }
 
         println!(

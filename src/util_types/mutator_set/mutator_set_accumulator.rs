@@ -50,7 +50,7 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         self.set_commitment.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &mut AdditionRecord) {
+    fn add(&mut self, addition_record: &AdditionRecord) {
         self.set_commitment.add_helper(addition_record);
     }
 
@@ -101,18 +101,18 @@ mod ms_accumulator_tests {
         for _ in 0..num_additions {
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record = accumulator.commit(&item, &randomness);
+            let addition_record = accumulator.commit(&item, &randomness);
             let membership_proof = accumulator.prove(&item, &randomness, false);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut accumulator.set_commitment,
+                &accumulator.set_commitment,
                 &addition_record,
             )
             .expect("MS membership update must work");
 
-            accumulator.add(&mut addition_record);
+            accumulator.add(&addition_record);
 
             membership_proofs.push(membership_proof);
             items.push(item);
@@ -200,8 +200,7 @@ mod ms_accumulator_tests {
                     // Add a new item to the mutator set and update all membership proofs
                     let (item, randomness) = make_item_and_randomness();
 
-                    let mut addition_record: AdditionRecord =
-                        accumulator.commit(&item, &randomness);
+                    let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
                     let membership_proof_acc = accumulator.prove(&item, &randomness, true);
 
                     // Update all membership proofs
@@ -210,7 +209,7 @@ mod ms_accumulator_tests {
                     let update_result = MsMembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
-                        &mut accumulator.set_commitment,
+                        &accumulator.set_commitment,
                         &addition_record,
                     );
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
@@ -226,9 +225,9 @@ mod ms_accumulator_tests {
                         assert!(update_res_seq.is_ok());
                     }
 
-                    accumulator.add(&mut addition_record);
-                    archival_after_remove.add(&mut addition_record);
-                    archival_before_remove.add(&mut addition_record);
+                    accumulator.add(&addition_record);
+                    archival_after_remove.add(&addition_record);
+                    archival_before_remove.add(&addition_record);
 
                     let updated_mp_indices = update_result.unwrap();
                     println!("{}: Inserted", i);

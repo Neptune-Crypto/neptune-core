@@ -100,7 +100,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
         own_items: &[Digest],
-        mutator_set: &mut MutatorSetKernel<H, MMR>,
+        mutator_set: &MutatorSetKernel<H, MMR>,
         addition_record: &AdditionRecord,
     ) -> Result<Vec<usize>, Box<dyn Error>> {
         assert!(
@@ -789,7 +789,7 @@ mod ms_proof_tests {
         for i in 0..n {
             let item: Digest = random();
             let randomness: Digest = random();
-            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
 
             for (oi, mp) in membership_proofs.iter_mut() {
                 mp.update_from_addition(oi, &archival_mutator_set.kernel, &addition_record)
@@ -815,7 +815,7 @@ mod ms_proof_tests {
                 }
             }
 
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
         }
         println!("Added {n} items.");
 
@@ -952,7 +952,7 @@ mod ms_proof_tests {
             }
 
             let mutator_set_before = archival_mutator_set.accumulator();
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
 
             if i > own_index {
                 let own_item = own_item.as_ref().unwrap().to_owned();

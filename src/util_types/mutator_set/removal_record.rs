@@ -419,14 +419,14 @@ mod removal_record_tests {
         type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, randomness) = make_item_and_randomness();
-        let mut addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
+        let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
         let mp = accumulator.prove(&item, &randomness, true);
 
         assert!(
             !accumulator.verify(&item, &mp),
             "Item must fail to verify before it is added"
         );
-        accumulator.add(&mut addition_record);
+        accumulator.add(&addition_record);
         let rr = accumulator.drop(&item, &mp);
         assert!(
             accumulator.verify(&item, &mp),
@@ -453,7 +453,7 @@ mod removal_record_tests {
             for i in 0..2 * BATCH_SIZE + 4 {
                 let (item, randomness) = make_item_and_randomness();
 
-                let mut addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
+                let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
                 let mp = accumulator.prove(&item, &randomness, true);
 
                 // Update all removal records from addition, then add the element
@@ -472,7 +472,7 @@ mod removal_record_tests {
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut accumulator.set_commitment,
+                    &accumulator.set_commitment,
                     &addition_record,
                 );
                 assert!(
@@ -480,7 +480,7 @@ mod removal_record_tests {
                     "batch update must return OK, i = {}",
                     i
                 );
-                accumulator.add(&mut addition_record);
+                accumulator.add(&addition_record);
                 mps.push(mp.clone());
                 items.push(item);
 
@@ -522,7 +522,7 @@ mod removal_record_tests {
         for i in 0..12 * BATCH_SIZE + 4 {
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
+            let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
             let mp = accumulator.prove(&item, &randomness, true);
 
             // Update all removal records from addition, then add the element
@@ -541,7 +541,7 @@ mod removal_record_tests {
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut accumulator.set_commitment,
+                &accumulator.set_commitment,
                 &addition_record,
             );
             assert!(
@@ -549,7 +549,7 @@ mod removal_record_tests {
                 "batch update must return OK, i = {}",
                 i
             );
-            accumulator.add(&mut addition_record);
+            accumulator.add(&addition_record);
             mps.push(mp.clone());
             items.push(item);
 

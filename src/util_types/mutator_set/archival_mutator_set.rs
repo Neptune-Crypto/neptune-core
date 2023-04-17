@@ -57,7 +57,7 @@ where
         self.kernel.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &mut AdditionRecord) {
+    fn add(&mut self, addition_record: &AdditionRecord) {
         let new_chunk: Option<(u64, Chunk)> = self.kernel.add_helper(addition_record);
         match new_chunk {
             None => (),
@@ -380,18 +380,18 @@ mod archival_mutator_set_tests {
         for i in 0..num_additions {
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut archival_mutator_set.kernel,
+                &archival_mutator_set.kernel,
                 &addition_record,
             );
             assert!(res.is_ok());
 
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
 
             // Verify that we can just read out the same membership proofs from the
@@ -432,11 +432,11 @@ mod archival_mutator_set_tests {
         // This does not reach the sliding window, and the MutatorSet reverts back
         // to being empty on every iteration.
         for _ in 0..2 * BATCH_SIZE {
-            let (item, mut addition_record, membership_proof) =
+            let (item, addition_record, membership_proof) =
                 prepare_random_addition(&mut archival_mutator_set);
 
             let commitment_before_add = archival_mutator_set.hash();
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
 
             archival_mutator_set.revert_add(&addition_record);
@@ -452,10 +452,10 @@ mod archival_mutator_set_tests {
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
             let record = prepare_random_addition(&mut archival_mutator_set);
-            let (item, mut addition_record, membership_proof) = record.clone();
+            let (item, addition_record, membership_proof) = record.clone();
             records.push(record);
             commitments_before.push(archival_mutator_set.hash());
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
         }
 
@@ -486,8 +486,8 @@ mod archival_mutator_set_tests {
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
         let record = prepare_random_addition(&mut archival_mutator_set);
-        let (item, mut addition_record, membership_proof) = record;
-        archival_mutator_set.add(&mut addition_record);
+        let (item, addition_record, membership_proof) = record;
+        archival_mutator_set.add(&addition_record);
 
         let removal_record = archival_mutator_set.drop(&item, &membership_proof);
 
@@ -505,9 +505,9 @@ mod archival_mutator_set_tests {
             empty_rustyleveldbvec_ams();
 
         for _ in 0..2 * BATCH_SIZE {
-            let (_item, mut addition_record, _membership_proof) =
+            let (_item, addition_record, _membership_proof) =
                 prepare_random_addition(&mut archival_mutator_set);
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
         }
 
         let mut fake_indices = [2u128; NUM_TRIALS as usize];
@@ -535,9 +535,9 @@ mod archival_mutator_set_tests {
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
             let record = prepare_random_addition(&mut archival_mutator_set);
-            let (item, mut addition_record, membership_proof) = record.clone();
+            let (item, addition_record, membership_proof) = record.clone();
             records.push(record);
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
         }
 
@@ -580,18 +580,18 @@ mod archival_mutator_set_tests {
         for _ in 0..num_additions {
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut archival_mutator_set.kernel,
+                &archival_mutator_set.kernel,
                 &addition_record,
             )
             .expect("MS membership update must work");
 
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
 
             membership_proofs.push(membership_proof);
             items.push(item);
@@ -625,18 +625,18 @@ mod archival_mutator_set_tests {
             for _ in 0..num_additions {
                 let (item, randomness) = make_item_and_randomness();
 
-                let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+                let addition_record = archival_mutator_set.commit(&item, &randomness);
                 let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut archival_mutator_set.kernel,
+                    &archival_mutator_set.kernel,
                     &addition_record,
                 )
                 .expect("MS membership update must work");
 
-                archival_mutator_set.add(&mut addition_record);
+                archival_mutator_set.add(&addition_record);
 
                 membership_proofs.push(membership_proof);
                 items.push(item);

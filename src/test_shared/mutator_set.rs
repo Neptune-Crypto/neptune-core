@@ -75,9 +75,9 @@ pub fn insert_item<H: AlgebraicHasher, M: Mmr<H>>(
 ) -> (MsMembershipProof<H>, Digest) {
     let (new_item, randomness) = make_item_and_randomness();
 
-    let mut addition_record = mutator_set.commit(&new_item, &randomness);
+    let addition_record = mutator_set.commit(&new_item, &randomness);
     let membership_proof = mutator_set.prove(&new_item, &randomness, true);
-    mutator_set.add_helper(&mut addition_record);
+    mutator_set.add_helper(&addition_record);
 
     (membership_proof, new_item)
 }

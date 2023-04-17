@@ -118,7 +118,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
     /// was added to the inactive SWBF if the window slid (and None
     /// otherwise) since this is needed by the archival version of
     /// the mutator set.
-    pub fn add_helper(&mut self, addition_record: &mut AdditionRecord) -> Option<(u64, Chunk)> {
+    pub fn add_helper(&mut self, addition_record: &AdditionRecord) -> Option<(u64, Chunk)> {
         // Notice that `add` cannot return a membership proof since `add` cannot know the
         // randomness that was used to create the commitment. This randomness can only be know
         // by the sender and/or receiver of the UTXO. And `add` must be run be all nodes keeping
@@ -470,8 +470,8 @@ mod accumulation_scheme_tests {
 
         for i in 0..BATCH_SIZE {
             let (item, randomness) = make_item_and_randomness();
-            let mut addition_record = mutator_set.commit(&item, &randomness);
-            mutator_set.add(&mut addition_record);
+            let addition_record = mutator_set.commit(&item, &randomness);
+            mutator_set.add(&addition_record);
             assert_eq!(
                 0,
                 mutator_set.set_commitment.get_batch_index(),
@@ -481,8 +481,8 @@ mod accumulation_scheme_tests {
         }
 
         let (item, randomness) = make_item_and_randomness();
-        let mut addition_record = mutator_set.commit(&item, &randomness);
-        mutator_set.add(&mut addition_record);
+        let addition_record = mutator_set.commit(&item, &randomness);
+        mutator_set.add(&addition_record);
         assert_eq!(
             1,
             mutator_set.set_commitment.get_batch_index(),
@@ -615,10 +615,10 @@ mod accumulation_scheme_tests {
         for _ in 0..2 * BATCH_SIZE + 2 {
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record: AdditionRecord = mutator_set.commit(&item, &randomness);
+            let addition_record: AdditionRecord = mutator_set.commit(&item, &randomness);
             let membership_proof: MsMembershipProof<H> =
                 mutator_set.prove(&item, &randomness, false);
-            mutator_set.add_helper(&mut addition_record);
+            mutator_set.add_helper(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
 
             // Verify that a future membership proof returns false and does not crash
@@ -633,13 +633,13 @@ mod accumulation_scheme_tests {
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let (own_item, randomness) = make_item_and_randomness();
 
-        let mut addition_record = mutator_set.commit(&own_item, &randomness);
+        let addition_record = mutator_set.commit(&own_item, &randomness);
         let mut membership_proof = mutator_set.prove(&own_item, &randomness, false);
-        mutator_set.set_commitment.add_helper(&mut addition_record);
+        mutator_set.set_commitment.add_helper(&addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
         let (new_item, new_randomness) = make_item_and_randomness();
-        let mut new_addition_record = mutator_set.commit(&new_item, &new_randomness);
+        let new_addition_record = mutator_set.commit(&new_item, &new_randomness);
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
             &own_item,
@@ -668,9 +668,7 @@ mod accumulation_scheme_tests {
 
         // Insert the new element into the mutator set, then verify that the membership proof works and
         // that the original membership proof is invalid.
-        mutator_set
-            .set_commitment
-            .add_helper(&mut new_addition_record);
+        mutator_set.set_commitment.add_helper(&new_addition_record);
         assert!(
             !mutator_set.verify(&own_item, &original_membership_proof),
             "Original membership proof must fail to verify after addition"
@@ -700,7 +698,7 @@ mod accumulation_scheme_tests {
 
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record = mutator_set.commit(&item, &randomness);
+            let addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
 
             // Update all membership proofs
@@ -716,7 +714,7 @@ mod accumulation_scheme_tests {
 
             // Add the element
             assert!(!mutator_set.verify(&item, &membership_proof));
-            mutator_set.set_commitment.add_helper(&mut addition_record);
+            mutator_set.set_commitment.add_helper(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
             membership_proofs_and_items.push((membership_proof, item));
 
@@ -735,22 +733,22 @@ mod accumulation_scheme_tests {
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let (item0, randomness0) = make_item_and_randomness();
 
-        let mut addition_record = mutator_set.commit(&item0, &randomness0);
+        let addition_record = mutator_set.commit(&item0, &randomness0);
         let membership_proof = mutator_set.prove(&item0, &randomness0, false);
 
         assert!(!mutator_set.verify(&item0, &membership_proof));
 
-        mutator_set.set_commitment.add_helper(&mut addition_record);
+        mutator_set.set_commitment.add_helper(&addition_record);
 
         assert!(mutator_set.verify(&item0, &membership_proof));
 
         // Insert a new item and verify that this still works
         let (item1, randomness1) = make_item_and_randomness();
-        let mut addition_record = mutator_set.commit(&item1, &randomness1);
+        let addition_record = mutator_set.commit(&item1, &randomness1);
         let membership_proof = mutator_set.prove(&item1, &randomness1, false);
         assert!(!mutator_set.verify(&item1, &membership_proof));
 
-        mutator_set.set_commitment.add_helper(&mut addition_record);
+        mutator_set.set_commitment.add_helper(&addition_record);
         assert!(mutator_set.verify(&item1, &membership_proof));
 
         // Insert ~2*BATCH_SIZE  more elements and
@@ -759,11 +757,11 @@ mod accumulation_scheme_tests {
         // position.
         for _ in 0..2 * BATCH_SIZE + 4 {
             let (item, randomness) = make_item_and_randomness();
-            let mut addition_record = mutator_set.commit(&item, &randomness);
+            let addition_record = mutator_set.commit(&item, &randomness);
             let membership_proof = mutator_set.prove(&item, &randomness, false);
             assert!(!mutator_set.verify(&item, &membership_proof));
 
-            mutator_set.set_commitment.add_helper(&mut addition_record);
+            mutator_set.set_commitment.add_helper(&addition_record);
             assert!(mutator_set.verify(&item, &membership_proof));
         }
     }
@@ -793,19 +791,19 @@ mod accumulation_scheme_tests {
             for _ in 0..num_additions {
                 let (new_item, randomness) = make_item_and_randomness();
 
-                let mut addition_record = mutator_set.commit(&new_item, &randomness);
+                let addition_record = mutator_set.commit(&new_item, &randomness);
                 let membership_proof = mutator_set.prove(&new_item, &randomness, true);
 
                 // Update *all* membership proofs with newly added item
                 let batch_update_res = MsMembershipProof::<H>::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut mutator_set.set_commitment,
+                    &mutator_set.set_commitment,
                     &addition_record,
                 );
                 assert!(batch_update_res.is_ok());
 
-                mutator_set.set_commitment.add_helper(&mut addition_record);
+                mutator_set.set_commitment.add_helper(&addition_record);
                 assert!(mutator_set.verify(&new_item, &membership_proof));
 
                 for (_, (mp, item)) in membership_proofs.iter().zip(items.iter()).enumerate() {
@@ -857,7 +855,7 @@ mod accumulation_scheme_tests {
         for _ in 0..num_additions {
             let (new_item, randomness) = make_item_and_randomness();
 
-            let mut addition_record = mutator_set.commit(&new_item, &randomness);
+            let addition_record = mutator_set.commit(&new_item, &randomness);
             let membership_proof = mutator_set.prove(&new_item, &randomness, false);
 
             // Update *all* membership proofs with newly added item
@@ -875,7 +873,7 @@ mod accumulation_scheme_tests {
                 assert_eq!(changed_res.unwrap(), original_mp != *mp);
             }
 
-            mutator_set.set_commitment.add_helper(&mut addition_record);
+            mutator_set.set_commitment.add_helper(&addition_record);
             assert!(mutator_set.verify(&new_item, &membership_proof));
 
             (0..items_and_membership_proofs.len()).for_each(|j| {
