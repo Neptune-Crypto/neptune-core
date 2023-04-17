@@ -346,7 +346,7 @@ where
                 self.kernel.aocl.count_leaves(),
             ),
             swbf_inactive: MmrAccumulator::init(
-                self.kernel.aocl.get_peaks(),
+                self.kernel.swbf_inactive.get_peaks(),
                 self.kernel.swbf_inactive.count_leaves(),
             ),
             swbf_active: self.kernel.swbf_active.clone(),
