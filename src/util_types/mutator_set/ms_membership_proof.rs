@@ -393,7 +393,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // set kernel instead.
         // In fact, this number is equal to the number of leafs in
         // the AOCL MMR prior to adding the item.
-        let aocl_index = prior_mutator_set.set_commitment.aocl.count_leaves();
+        let aocl_index = previous_mutator_set.set_commitment.aocl.count_leaves();
 
         // Revert update to AOCL MMR membership proof.
 
@@ -404,28 +404,30 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // Find out if we have to shrink.
         let own_commitment = H::hash_pair(own_item, &self.randomness);
         assert!(
-            prior_mutator_set.set_commitment.aocl.count_leaves() > self.auth_path_aocl.leaf_index
+            previous_mutator_set.set_commitment.aocl.count_leaves()
+                > self.auth_path_aocl.leaf_index
         );
         let mut valid = self
             .auth_path_aocl
             .verify(
-                &prior_mutator_set.set_commitment.aocl.get_peaks(),
+                &previous_mutator_set.set_commitment.aocl.get_peaks(),
                 &own_commitment,
-                prior_mutator_set.set_commitment.aocl.count_leaves(),
+                previous_mutator_set.set_commitment.aocl.count_leaves(),
             )
             .0;
 
         // If we have to shrink, shrink until valid or empty
         while !valid {
-            if self.auth_path_aocl.authentication_path.pop().is_none() {
+            let last_ap_elem = self.auth_path_aocl.authentication_path.pop();
+            if last_ap_elem.is_none() {
                 break;
             }
             valid = self
                 .auth_path_aocl
                 .verify(
-                    &prior_mutator_set.set_commitment.aocl.get_peaks(),
+                    &previous_mutator_set.set_commitment.aocl.get_peaks(),
                     &own_commitment,
-                    prior_mutator_set.set_commitment.aocl.count_leaves(),
+                    previous_mutator_set.set_commitment.aocl.count_leaves(),
                 )
                 .0;
         }
@@ -433,9 +435,9 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         assert!(
             self.auth_path_aocl
                 .verify(
-                    &prior_mutator_set.set_commitment.aocl.get_peaks(),
+                    &previous_mutator_set.set_commitment.aocl.get_peaks(),
                     &own_commitment,
-                    prior_mutator_set.set_commitment.aocl.count_leaves()
+                    previous_mutator_set.set_commitment.aocl.count_leaves()
                 )
                 .0,
             "auth path: {:?}",
@@ -458,28 +460,31 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // The moved indices do not include indices from this
         // membership proof. So the net effect is a new chunk that
         // must be dropped for reversion, if it is even present.
-        let leaf_count = prior_mutator_set
+        let swbfi_leaf_count = previous_mutator_set
             .set_commitment
             .swbf_inactive
             .count_leaves();
-        self.target_chunks.dictionary.remove(&leaf_count);
+        self.target_chunks.dictionary.remove(&swbfi_leaf_count);
 
-        println!("swbfi leaf count: {leaf_count}");
+        println!("swbfi leaf count: {swbfi_leaf_count}");
         println!(
             "chunks keys: {:?}",
             self.target_chunks.dictionary.keys().collect_vec()
         );
 
-        assert!(self.target_chunks.dictionary.len() <= leaf_count as usize);
+        assert!(self.target_chunks.dictionary.len() <= swbfi_leaf_count as usize);
 
         // The SWBF MMR membership proofs grew by 0 or more. So
         // find out which and trim them if necessary.
         for (_chunkidx_key, (mmr_mp, chunk)) in self.target_chunks.dictionary.iter_mut() {
             let mut already_valid = mmr_mp
                 .verify(
-                    &prior_mutator_set.set_commitment.swbf_inactive.get_peaks(),
+                    &previous_mutator_set
+                        .set_commitment
+                        .swbf_inactive
+                        .get_peaks(),
                     &H::hash(chunk),
-                    leaf_count,
+                    swbfi_leaf_count,
                 )
                 .0;
             while !already_valid {
@@ -488,17 +493,23 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 }
                 already_valid = mmr_mp
                     .verify(
-                        &prior_mutator_set.set_commitment.swbf_inactive.get_peaks(),
+                        &previous_mutator_set
+                            .set_commitment
+                            .swbf_inactive
+                            .get_peaks(),
                         &H::hash(chunk),
-                        leaf_count,
+                        swbfi_leaf_count,
                     )
                     .0;
             }
             if !mmr_mp
                 .verify(
-                    &prior_mutator_set.set_commitment.swbf_inactive.get_peaks(),
+                    &previous_mutator_set
+                        .set_commitment
+                        .swbf_inactive
+                        .get_peaks(),
                     &H::hash(chunk),
-                    leaf_count,
+                    swbfi_leaf_count,
                 )
                 .0
             {
@@ -508,7 +519,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             }
         }
 
-        assert!(prior_mutator_set.set_commitment.verify(own_item, self));
+        assert!(previous_mutator_set.set_commitment.verify(own_item, self));
 
         Ok(true)
     }
