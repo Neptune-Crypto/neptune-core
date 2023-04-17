@@ -220,7 +220,7 @@ mod ms_accumulator_tests {
                     {
                         let update_res_seq = mp.update_from_addition(
                             own_item,
-                            &mut accumulator.set_commitment,
+                            &accumulator.set_commitment,
                             &addition_record,
                         );
                         assert!(update_res_seq.is_ok());

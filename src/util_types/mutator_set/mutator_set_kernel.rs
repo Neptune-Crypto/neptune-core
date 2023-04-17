@@ -655,7 +655,7 @@ mod accumulation_scheme_tests {
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
             &own_item,
-            &mut mutator_set.set_commitment,
+            &mutator_set.set_commitment,
             &new_addition_record,
         ) {
             Ok(changed) => changed,
@@ -881,7 +881,7 @@ mod accumulation_scheme_tests {
                 assert!(mutator_set.verify(updatee_item, mp));
                 let changed_res = mp.update_from_addition(
                     updatee_item,
-                    &mut mutator_set.set_commitment,
+                    &mutator_set.set_commitment,
                     &addition_record,
                 );
                 assert!(changed_res.is_ok());

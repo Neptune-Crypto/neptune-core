@@ -276,7 +276,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     pub fn update_from_addition<MMR: Mmr<H>>(
         &mut self,
         own_item: &Digest,
-        mutator_set: &mut MutatorSetKernel<H, MMR>,
+        mutator_set: &MutatorSetKernel<H, MMR>,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
         assert!(self.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves());
@@ -382,7 +382,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     pub fn revert_update_from_addition(
         &mut self,
         own_item: &Digest,
-        prior_mutator_set: &MutatorSetAccumulator<H>,
+        previous_mutator_set: &MutatorSetAccumulator<H>,
     ) -> Result<bool, Box<dyn Error>> {
         // How can we even revert an addition when we aren't given
         // the addition record as input?
@@ -817,7 +817,7 @@ mod ms_proof_tests {
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
 
             for (oi, mp) in membership_proofs.iter_mut() {
-                mp.update_from_addition(oi, &mut archival_mutator_set.kernel, &addition_record)
+                mp.update_from_addition(oi, &archival_mutator_set.kernel, &addition_record)
                     .expect("Could not update membership proof from addition.");
             }
 
@@ -833,7 +833,7 @@ mod ms_proof_tests {
                         .unwrap()
                         .update_from_addition(
                             own_item.as_ref().unwrap(),
-                            &mut archival_mutator_set.kernel,
+                            &archival_mutator_set.kernel,
                             &addition_record,
                         )
                         .expect("Could not update membership proof from addition record.");
@@ -957,7 +957,13 @@ mod ms_proof_tests {
                     own_item = Some(item);
                 }
                 std::cmp::Ordering::Greater => {
+                    println!("\n\n\nVerifying with AMS:");
                     assert!(archival_mutator_set.verify(
+                        own_item.as_ref().unwrap(),
+                        own_membership_proof.as_ref().unwrap()
+                    ));
+                    println!("\n\n\nVerifying with MSA");
+                    assert!(archival_mutator_set.accumulator().verify(
                         own_item.as_ref().unwrap(),
                         own_membership_proof.as_ref().unwrap()
                     ));
@@ -966,7 +972,7 @@ mod ms_proof_tests {
                         .unwrap()
                         .update_from_addition(
                             own_item.as_ref().unwrap(),
-                            &mut archival_mutator_set.kernel,
+                            &archival_mutator_set.kernel,
                             &addition_record,
                         )
                         .expect("Could not update membership proof from addition record.");
