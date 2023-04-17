@@ -272,29 +272,29 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
      * update_from_addition
      * Updates a membership proof in anticipation of an addition to the set.
      */
-    pub fn update_from_addition<MMR: Mmr<H>>(
+    pub fn update_from_addition(
         &mut self,
         own_item: &Digest,
-        mutator_set: &MutatorSetKernel<H, MMR>,
+        mutator_set: &MutatorSetAccumulator<H>,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
-        assert!(self.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves());
-        let new_item_index = mutator_set.aocl.count_leaves();
+        assert!(self.auth_path_aocl.leaf_index < mutator_set.kernel.aocl.count_leaves());
+        let new_item_index = mutator_set.kernel.aocl.count_leaves();
 
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
-            mutator_set.aocl.count_leaves(),
+            mutator_set.kernel.aocl.count_leaves(),
             &addition_record.canonical_commitment,
-            &mutator_set.aocl.get_peaks(),
+            &mutator_set.kernel.aocl.get_peaks(),
         );
 
         // if window does not slide, we are done
-        if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
+        if !MutatorSetKernel::<H, MmrAccumulator<H>>::window_slides(new_item_index) {
             return Ok(aocl_mp_updated);
         }
 
         // window does slide
-        let new_chunk = mutator_set.swbf_active.slid_chunk();
+        let new_chunk = mutator_set.kernel.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Get indices from either the cached indices, or by recalculating them. Notice
@@ -317,7 +317,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
+        let mut mmra: MmrAccumulator<H> = mutator_set.kernel.swbf_inactive.to_accumulator();
         let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
             mmra.append(new_chunk_digest);
 
@@ -340,9 +340,9 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                     Some((m, _chnk)) => m,
                 };
                 let swbf_chunk_dict_updated_local: bool = mp.update_from_append(
-                    mutator_set.swbf_inactive.count_leaves(),
+                    mutator_set.kernel.swbf_inactive.count_leaves(),
                     &new_chunk_digest,
-                    &mutator_set.swbf_inactive.get_peaks(),
+                    &mutator_set.kernel.swbf_inactive.get_peaks(),
                 );
                 swbf_chunk_dictionary_updated =
                     swbf_chunk_dictionary_updated || swbf_chunk_dict_updated_local;
@@ -392,7 +392,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // set kernel instead.
         // In fact, this number is equal to the number of leafs in
         // the AOCL MMR prior to adding the item.
-        let aocl_index = previous_mutator_set.set_commitment.aocl.count_leaves();
+        let aocl_index = previous_mutator_set.kernel.aocl.count_leaves();
 
         // Revert update to AOCL MMR membership proof.
 
@@ -402,16 +402,13 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
         // Find out if we have to shrink.
         let own_commitment = H::hash_pair(own_item, &self.randomness);
-        assert!(
-            previous_mutator_set.set_commitment.aocl.count_leaves()
-                > self.auth_path_aocl.leaf_index
-        );
+        assert!(previous_mutator_set.kernel.aocl.count_leaves() > self.auth_path_aocl.leaf_index);
         let mut valid = self
             .auth_path_aocl
             .verify(
-                &previous_mutator_set.set_commitment.aocl.get_peaks(),
+                &previous_mutator_set.kernel.aocl.get_peaks(),
                 &own_commitment,
-                previous_mutator_set.set_commitment.aocl.count_leaves(),
+                previous_mutator_set.kernel.aocl.count_leaves(),
             )
             .0;
 
@@ -424,9 +421,9 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             valid = self
                 .auth_path_aocl
                 .verify(
-                    &previous_mutator_set.set_commitment.aocl.get_peaks(),
+                    &previous_mutator_set.kernel.aocl.get_peaks(),
                     &own_commitment,
-                    previous_mutator_set.set_commitment.aocl.count_leaves(),
+                    previous_mutator_set.kernel.aocl.count_leaves(),
                 )
                 .0;
         }
@@ -447,10 +444,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // The moved indices do not include indices from this
         // membership proof. So the net effect is a new chunk that
         // must be dropped for reversion, if it is even present.
-        let swbfi_leaf_count = previous_mutator_set
-            .set_commitment
-            .swbf_inactive
-            .count_leaves();
+        let swbfi_leaf_count = previous_mutator_set.kernel.swbf_inactive.count_leaves();
         self.target_chunks.dictionary.remove(&swbfi_leaf_count);
 
         assert!(self.target_chunks.dictionary.len() <= swbfi_leaf_count as usize);
@@ -460,10 +454,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         for (_chunkidx_key, (mmr_mp, chunk)) in self.target_chunks.dictionary.iter_mut() {
             let mut already_valid = mmr_mp
                 .verify(
-                    &previous_mutator_set
-                        .set_commitment
-                        .swbf_inactive
-                        .get_peaks(),
+                    &previous_mutator_set.kernel.swbf_inactive.get_peaks(),
                     &H::hash(chunk),
                     swbfi_leaf_count,
                 )
@@ -474,10 +465,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 }
                 already_valid = mmr_mp
                     .verify(
-                        &previous_mutator_set
-                            .set_commitment
-                            .swbf_inactive
-                            .get_peaks(),
+                        &previous_mutator_set.kernel.swbf_inactive.get_peaks(),
                         &H::hash(chunk),
                         swbfi_leaf_count,
                     )
@@ -617,6 +605,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
 #[cfg(test)]
 mod ms_proof_tests {
+
     use super::*;
     use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
@@ -624,6 +613,7 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use itertools::Either;
     use num_traits::Zero;
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::other::random_elements;
@@ -636,7 +626,7 @@ mod ms_proof_tests {
 
         let mut accumulator = MutatorSetAccumulator::<H>::default();
         let (item, randomness) = make_item_and_randomness();
-        let mut mp = accumulator.set_commitment.prove(&item, &randomness, false);
+        let mut mp = accumulator.kernel.prove(&item, &randomness, false);
 
         // Verify that indices are not cached, then cache them with the helper function
         assert!(mp.cached_indices.is_none());
@@ -645,8 +635,7 @@ mod ms_proof_tests {
 
         // Verify that cached indices are the same as those generated from a new membership proof
         // made with the `cache_indices` argument set to true.
-        let mp_generated_with_cached_indices =
-            accumulator.set_commitment.prove(&item, &randomness, true);
+        let mp_generated_with_cached_indices = accumulator.kernel.prove(&item, &randomness, true);
         assert_eq!(
             mp_generated_with_cached_indices.cached_indices,
             mp.cached_indices
@@ -730,7 +719,7 @@ mod ms_proof_tests {
         for _ in 0..10 {
             let (item, randomness) = make_item_and_randomness();
 
-            let mp_with_cached_indices = accumulator.set_commitment.prove(&item, &randomness, true);
+            let mp_with_cached_indices = accumulator.kernel.prove(&item, &randomness, true);
             assert!(mp_with_cached_indices.cached_indices.is_some());
 
             let json_cached: String = serde_json::to_string(&mp_with_cached_indices).unwrap();
@@ -752,7 +741,7 @@ mod ms_proof_tests {
                 mp_with_cached_indices.target_chunks
             );
 
-            let mp_no_cached_indices = accumulator.set_commitment.prove(&item, &randomness, false);
+            let mp_no_cached_indices = accumulator.kernel.prove(&item, &randomness, false);
             assert!(mp_no_cached_indices.cached_indices.is_none());
 
             let json_no_cached: String = serde_json::to_string(&mp_no_cached_indices).unwrap();
@@ -792,7 +781,7 @@ mod ms_proof_tests {
             let addition_record = archival_mutator_set.commit(&item, &randomness);
 
             for (oi, mp) in membership_proofs.iter_mut() {
-                mp.update_from_addition(oi, &archival_mutator_set.kernel, &addition_record)
+                mp.update_from_addition(oi, &archival_mutator_set.accumulator(), &addition_record)
                     .expect("Could not update membership proof from addition.");
             }
 
@@ -808,7 +797,7 @@ mod ms_proof_tests {
                         .unwrap()
                         .update_from_addition(
                             own_item.as_ref().unwrap(),
-                            &archival_mutator_set.kernel,
+                            &archival_mutator_set.accumulator(),
                             &addition_record,
                         )
                         .expect("Could not update membership proof from addition record.");
@@ -946,7 +935,7 @@ mod ms_proof_tests {
                         .unwrap()
                         .update_from_addition(
                             own_item.as_ref().unwrap(),
-                            &archival_mutator_set.kernel,
+                            &archival_mutator_set.accumulator(),
                             &addition_record,
                         )
                         .expect("Could not update membership proof from addition record.");
@@ -993,6 +982,152 @@ mod ms_proof_tests {
                 own_item.as_ref().unwrap(),
                 own_membership_proof.as_ref().unwrap()
             ));
+        }
+    }
+
+    #[test]
+    fn revert_updates_mixed_test() {
+        type H = Tip5;
+        let n = 50;
+        let margin = 10;
+        let mut rng = thread_rng();
+
+        let (mut mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams::<H>();
+
+        let own_index = rng.next_u32() as usize % 10;
+        let mut own_item = Digest::default();
+        let mut iamp_index = 0;
+
+        let mut rates = HashMap::<String, f64>::new();
+        rates.insert("additions".to_owned(), 0.7);
+        rates.insert("removals".to_owned(), 0.3);
+        rates.insert(
+            "reversions".to_owned(),
+            1.0 - rates.get("additions").unwrap() - rates.get("removals").unwrap(),
+        );
+
+        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>)> = vec![];
+        let mut records: Vec<Either<AdditionRecord, RemovalRecord<H>>> = vec![];
+
+        for i in 0..1000 {
+            let sample: f64 = random();
+            if sample <= rates["additions"] || i == own_index {
+                println!("addition");
+
+                // generate item and randomness
+                let item: Digest = random();
+                let randomness: Digest = random();
+
+                // generate addition record
+                let addition_record = mutator_set.commit(&item, &randomness);
+
+                // record membership proof
+                let membership_proof = mutator_set.prove(&item, &randomness, false);
+
+                // update existing membership proof
+                for (it, mp) in items_and_membership_proofs.iter_mut() {
+                    mp.update_from_addition(it, &mutator_set.accumulator(), &addition_record)
+                        .expect("Could not update membership proof from addition.");
+                }
+
+                // apply record
+                mutator_set.add(&addition_record);
+
+                // record record
+                records.push(Either::Left(addition_record));
+
+                // if own record, set iamp index and own item
+                if i == own_index {
+                    iamp_index = items_and_membership_proofs.len();
+                    own_item = item;
+                }
+
+                // record item, membership proof paiur
+                items_and_membership_proofs.push((item, membership_proof));
+
+                // if too many items are in the mutator set, revise rates
+                if items_and_membership_proofs.len() > n + margin && i > n {
+                    *rates.get_mut("additions").unwrap() = 0.3;
+                    *rates.get_mut("removals").unwrap() = 0.5;
+                    *rates.get_mut("reversions").unwrap() =
+                        1.0 - rates.get("additions").unwrap() - rates.get("removals").unwrap();
+                }
+            } else if sample > rates["additions"] && sample <= rates["removals"] {
+                println!("removal");
+
+                // sample index of item and membership proof to remove,
+                // but not the index of the own item
+                let mut index = iamp_index;
+                while index == iamp_index {
+                    index = rng.next_u32() as usize % items_and_membership_proofs.len()
+                }
+
+                // remove the indicated item and membership proof
+                let (item, membership_proof) = items_and_membership_proofs.remove(index);
+                if iamp_index > index {
+                    iamp_index -= 1;
+                }
+
+                // generate a removal record
+                let removal_record = mutator_set.drop(&item, &membership_proof);
+
+                // update the other membership proofs with the removal record
+                for (_, mp) in items_and_membership_proofs.iter_mut() {
+                    mp.update_from_remove(&removal_record)
+                        .expect("Could not update from remove.");
+                }
+
+                // remove the item from the membership proof
+                mutator_set.remove(&removal_record);
+
+                // record record
+                records.push(Either::Right(removal_record));
+
+                // if there are too few items in the mutator set, revise rates
+                if items_and_membership_proofs.len() < n - margin && i > n {
+                    *rates.get_mut("additions").unwrap() = 0.5;
+                    *rates.get_mut("removals").unwrap() = 0.3;
+                    *rates.get_mut("reversions").unwrap() =
+                        1.0 - rates.get("additions").unwrap() - rates.get("removals").unwrap();
+                }
+            } else {
+                println!("reversion");
+                let max_reversions = items_and_membership_proofs.len() - iamp_index;
+                if max_reversions > 0 {
+                    let num_reversions = rng.next_u32() as usize % max_reversions;
+
+                    for _ in 0..num_reversions {
+                        items_and_membership_proofs.pop();
+                        if let Some(record) = records.pop() {
+                            match record {
+                                Either::Left(addition_record) => {
+                                    mutator_set.revert_add(&addition_record);
+                                    for (i, mp) in items_and_membership_proofs.iter_mut() {
+                                        mp.revert_update_from_addition(
+                                            i,
+                                            &mutator_set.accumulator(),
+                                        )
+                                        .expect("Could not revert add.");
+                                    }
+                                }
+                                Either::Right(removal_record) => {
+                                    mutator_set.revert_remove(&removal_record);
+                                    for (_, mp) in items_and_membership_proofs.iter_mut() {
+                                        mp.revert_update_from_remove(&removal_record)
+                                            .expect("Could not revert remove.");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if i > own_index {
+                assert_eq!(own_item, items_and_membership_proofs[iamp_index].0);
+                assert!(mutator_set.verify(&own_item, &items_and_membership_proofs[iamp_index].1));
+            }
         }
     }
 }

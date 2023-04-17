@@ -37,14 +37,12 @@ mod addition_record_tests {
         type H = Tip5;
 
         let mut msa0: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let addition_record_0: AdditionRecord = msa0
-            .set_commitment
-            .commit(&H::hash(&1492u128), &H::hash(&1522u128));
+        let addition_record_0: AdditionRecord =
+            msa0.kernel.commit(&H::hash(&1492u128), &H::hash(&1522u128));
 
         let mut msa1: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let addition_record_1: AdditionRecord = msa1
-            .set_commitment
-            .commit(&H::hash(&1492u128), &H::hash(&1522u128));
+        let addition_record_1: AdditionRecord =
+            msa1.kernel.commit(&H::hash(&1492u128), &H::hash(&1522u128));
 
         assert_eq!(
             H::hash(&addition_record_0),
@@ -53,9 +51,8 @@ mod addition_record_tests {
         );
 
         let mut msa3: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let addition_record_1: AdditionRecord = msa3
-            .set_commitment
-            .commit(&H::hash(&1451u128), &H::hash(&1480u128));
+        let addition_record_1: AdditionRecord =
+            msa3.kernel.commit(&H::hash(&1451u128), &H::hash(&1480u128));
 
         // Verify behavior with empty mutator sets. All empty MS' are the same.
         assert_ne!(
@@ -72,7 +69,7 @@ mod addition_record_tests {
         let mut msa: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = H::hash(&1492u128);
         let randomness = H::hash(&1522u128);
-        let addition_record: AdditionRecord = msa.set_commitment.commit(&item, &randomness);
+        let addition_record: AdditionRecord = msa.kernel.commit(&item, &randomness);
         let json = serde_json::to_string(&addition_record).unwrap();
         let s_back = serde_json::from_str::<AdditionRecord>(&json).unwrap();
         assert_eq!(

@@ -351,7 +351,9 @@ where
             ),
             swbf_active: self.kernel.swbf_active.clone(),
         };
-        MutatorSetAccumulator { set_commitment }
+        MutatorSetAccumulator {
+            kernel: set_commitment,
+        }
     }
 }
 

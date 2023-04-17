@@ -462,7 +462,7 @@ mod removal_record_tests {
                         .iter_mut()
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
-                    &mut accumulator.set_commitment,
+                    &mut accumulator.kernel,
                 );
                 assert!(
                     update_res_rr.is_ok(),
@@ -472,7 +472,7 @@ mod removal_record_tests {
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &accumulator.set_commitment,
+                    &accumulator.kernel,
                     &addition_record,
                 );
                 assert!(
@@ -486,7 +486,7 @@ mod removal_record_tests {
 
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
-                        removal_record.validate(&mut accumulator.set_commitment),
+                        removal_record.validate(&mut accumulator.kernel),
                         "removal records must validate, i = {}",
                         i
                     );
@@ -531,7 +531,7 @@ mod removal_record_tests {
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
-                &mut accumulator.set_commitment,
+                &mut accumulator.kernel,
             );
             assert!(
                 update_res_rr.is_ok(),
@@ -541,7 +541,7 @@ mod removal_record_tests {
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &accumulator.set_commitment,
+                &accumulator.kernel,
                 &addition_record,
             );
             assert!(
@@ -555,7 +555,7 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator.set_commitment),
+                    removal_record.validate(&mut accumulator.kernel),
                     "removal records must validate, i = {}",
                     i
                 );
@@ -588,7 +588,7 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator.set_commitment),
+                    removal_record.validate(&mut accumulator.kernel),
                     "removal records must validate, i = {}",
                     i
                 );

@@ -13,7 +13,21 @@ use super::{
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutatorSetAccumulator<H: AlgebraicHasher> {
-    pub set_commitment: MutatorSetKernel<H, MmrAccumulator<H>>,
+    pub kernel: MutatorSetKernel<H, MmrAccumulator<H>>,
+}
+
+impl<H: AlgebraicHasher> MutatorSetAccumulator<H> {
+    pub fn new() -> Self {
+        let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
+            aocl: MmrAccumulator::<H>::new(vec![]),
+            swbf_inactive: MmrAccumulator::<H>::new(vec![]),
+            swbf_active: ActiveWindow::new(),
+        };
+
+        Self {
+            kernel: set_commitment,
+        }
+    }
 }
 
 impl<H: AlgebraicHasher> Default for MutatorSetAccumulator<H> {
@@ -24,7 +38,9 @@ impl<H: AlgebraicHasher> Default for MutatorSetAccumulator<H> {
             swbf_active: ActiveWindow::new(),
         };
 
-        Self { set_commitment }
+        Self {
+            kernel: set_commitment,
+        }
     }
 }
 
@@ -35,33 +51,33 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         randomness: &Digest,
         store_indices: bool,
     ) -> MsMembershipProof<H> {
-        self.set_commitment.prove(item, randomness, store_indices)
+        self.kernel.prove(item, randomness, store_indices)
     }
 
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
-        self.set_commitment.verify(item, membership_proof)
+        self.kernel.verify(item, membership_proof)
     }
 
     fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord {
-        self.set_commitment.commit(item, randomness)
+        self.kernel.commit(item, randomness)
     }
 
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
-        self.set_commitment.drop(item, membership_proof)
+        self.kernel.drop(item, membership_proof)
     }
 
     fn add(&mut self, addition_record: &AdditionRecord) {
-        self.set_commitment.add_helper(addition_record);
+        self.kernel.add_helper(addition_record);
     }
 
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
-        self.set_commitment.remove_helper(removal_record);
+        self.kernel.remove_helper(removal_record);
     }
 
     fn hash(&mut self) -> Digest {
-        let aocl_mmr_bagged = self.set_commitment.aocl.bag_peaks();
-        let inactive_swbf_bagged = self.set_commitment.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = H::hash(&self.set_commitment.swbf_active);
+        let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
+        let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
+        let active_swbf_bagged = H::hash(&self.kernel.swbf_active);
 
         H::hash_pair(
             &aocl_mmr_bagged,
@@ -74,7 +90,7 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         removal_records: Vec<RemovalRecord<H>>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
     ) {
-        self.set_commitment
+        self.kernel
             .batch_remove(removal_records, preserved_membership_proofs);
     }
 }
@@ -107,7 +123,7 @@ mod ms_accumulator_tests {
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &accumulator.set_commitment,
+                &accumulator.kernel,
                 &addition_record,
             )
             .expect("MS membership update must work");
@@ -209,7 +225,7 @@ mod ms_accumulator_tests {
                     let update_result = MsMembershipProof::batch_update_from_addition(
                         &mut membership_proofs_batch.iter_mut().collect::<Vec<_>>(),
                         &items,
-                        &accumulator.set_commitment,
+                        &accumulator.kernel,
                         &addition_record,
                     );
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
@@ -217,11 +233,8 @@ mod ms_accumulator_tests {
                     // Update membership proofs sequentially
                     for (mp, own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
                     {
-                        let update_res_seq = mp.update_from_addition(
-                            own_item,
-                            &accumulator.set_commitment,
-                            &addition_record,
-                        );
+                        let update_res_seq =
+                            mp.update_from_addition(own_item, &accumulator, &addition_record);
                         assert!(update_res_seq.is_ok());
                     }
 
@@ -276,7 +289,7 @@ mod ms_accumulator_tests {
                     // generate removal record
                     let removal_record: RemovalRecord<H> =
                         accumulator.drop(&removal_item, &removal_mp);
-                    assert!(removal_record.validate(&mut accumulator.set_commitment));
+                    assert!(removal_record.validate(&mut accumulator.kernel));
 
                     // update membership proofs
                     // Uppdate membership proofs in batch
