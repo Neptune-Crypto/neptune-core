@@ -248,7 +248,6 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
         // returned from `get_indices`, so we don't have to check for
         // future indices in a separate check.
         if self.aocl.count_leaves() <= membership_proof.auth_path_aocl.leaf_index {
-            println!("leaf count less than or equal to leaf index");
             return false;
         }
 
@@ -260,7 +259,6 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
             self.aocl.count_leaves(),
         );
         if !is_aocl_member {
-            println!("not aocl member");
             return false;
         }
 
@@ -327,16 +325,6 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
                     }
                 }
             }
-        }
-
-        if !entries_in_dictionary {
-            println!("entries not in dictionary");
-        }
-        if !all_auth_paths_are_valid {
-            println!("not all auth paths are valid");
-        }
-        if !has_absent_index {
-            println!("membership proof does not list index that is absent from the swbf");
         }
 
         // return verdict
@@ -718,11 +706,8 @@ mod accumulation_scheme_tests {
             // Update all membership proofs
             for (mp, item) in membership_proofs_and_items.iter_mut() {
                 let original_mp = mp.clone();
-                let changed_res = mp.update_from_addition(
-                    item,
-                    &mut mutator_set.set_commitment,
-                    &addition_record,
-                );
+                let changed_res =
+                    mp.update_from_addition(item, &mutator_set.set_commitment, &addition_record);
                 assert!(changed_res.is_ok());
 
                 // verify that the boolean returned value from the updater method is set correctly

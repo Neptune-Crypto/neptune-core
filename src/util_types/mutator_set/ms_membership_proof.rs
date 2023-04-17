@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -432,18 +431,6 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                 .0;
         }
 
-        assert!(
-            self.auth_path_aocl
-                .verify(
-                    &previous_mutator_set.set_commitment.aocl.get_peaks(),
-                    &own_commitment,
-                    previous_mutator_set.set_commitment.aocl.count_leaves()
-                )
-                .0,
-            "auth path: {:?}",
-            self.auth_path_aocl.authentication_path
-        );
-
         // If the addition record did not induce a window slide, then
         // we are done.
         if !MutatorSetKernel::<H, MmrAccumulator<H>>::window_slides(aocl_index) {
@@ -465,12 +452,6 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             .swbf_inactive
             .count_leaves();
         self.target_chunks.dictionary.remove(&swbfi_leaf_count);
-
-        println!("swbfi leaf count: {swbfi_leaf_count}");
-        println!(
-            "chunks keys: {:?}",
-            self.target_chunks.dictionary.keys().collect_vec()
-        );
 
         assert!(self.target_chunks.dictionary.len() <= swbfi_leaf_count as usize);
 
@@ -502,24 +483,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                     )
                     .0;
             }
-            if !mmr_mp
-                .verify(
-                    &previous_mutator_set
-                        .set_commitment
-                        .swbf_inactive
-                        .get_peaks(),
-                    &H::hash(chunk),
-                    swbfi_leaf_count,
-                )
-                .0
-            {
-                println!("chunk index: {_chunkidx_key}");
-                println!("chunk: {:?}", chunk);
-                panic!("No prefix of chunk MMR membership proof is valid.");
-            }
         }
-
-        assert!(previous_mutator_set.set_commitment.verify(own_item, self));
 
         Ok(true)
     }
@@ -941,12 +905,11 @@ mod ms_proof_tests {
     fn revert_update_from_addition_test() {
         type H = Tip5;
         let mut rng = thread_rng();
-        // let n = rng.next_u32() as usize % 100 + 1;
-        let n = 55;
+        let n = rng.next_u32() as usize % 100 + 1;
+        // let n = 55;
 
-        // let own_index = rng.next_u32() as usize % n;
-        let own_index = 8;
-        println!("own index: {own_index}");
+        let own_index = rng.next_u32() as usize % n;
+        // let own_index = 8;
         let mut own_membership_proof = None;
         let mut own_item = None;
 
@@ -956,11 +919,11 @@ mod ms_proof_tests {
 
         // add items
         for i in 0..n {
-            let item: Digest = random_elements(1)[0];
-            let randomness: Digest = random_elements(1)[0];
+            let item: Digest = random();
+            let randomness: Digest = random();
             let mut addition_record = archival_mutator_set.commit(&item, &randomness);
 
-            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+            let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
             match i.cmp(&own_index) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
@@ -968,12 +931,10 @@ mod ms_proof_tests {
                     own_item = Some(item);
                 }
                 std::cmp::Ordering::Greater => {
-                    println!("\n\n\nVerifying with AMS:");
                     assert!(archival_mutator_set.verify(
                         own_item.as_ref().unwrap(),
                         own_membership_proof.as_ref().unwrap()
                     ));
-                    println!("\n\n\nVerifying with MSA");
                     assert!(archival_mutator_set.accumulator().verify(
                         own_item.as_ref().unwrap(),
                         own_membership_proof.as_ref().unwrap()
@@ -991,31 +952,24 @@ mod ms_proof_tests {
             }
 
             let mutator_set_before = archival_mutator_set.accumulator();
-
             archival_mutator_set.add(&mut addition_record);
 
             if i > own_index {
-                assert!(archival_mutator_set.kernel.verify(
-                    own_item.as_ref().unwrap(),
-                    own_membership_proof.as_ref().unwrap(),
-                ));
+                let own_item = own_item.as_ref().unwrap().to_owned();
+                assert!(archival_mutator_set
+                    .kernel
+                    .verify(&own_item, own_membership_proof.as_ref().unwrap(),));
 
                 let mut memproof = own_membership_proof.as_ref().unwrap().clone();
 
-                assert!(archival_mutator_set
-                    .kernel
-                    .verify(own_item.as_ref().unwrap(), &memproof,));
+                assert!(archival_mutator_set.kernel.verify(&own_item, &memproof,));
 
-                println!("reverting addition of element {}", i);
                 memproof
-                    .revert_update_from_addition(own_item.as_ref().unwrap(), &mutator_set_before)
+                    .revert_update_from_addition(&own_item, &mutator_set_before)
                     .expect("Could not revert update to own membership proof from addition.");
 
-                println!(
-                    "reverted memproof =/= old memproof? {}",
-                    memproof != *own_membership_proof.as_ref().unwrap()
-                );
-                assert!(mutator_set_before.verify(own_item.as_ref().unwrap(), &memproof));
+                assert!(mutator_set_before.verify(&own_item, &memproof));
+                // assert!(previous_mutator_set.set_commitment.verify(own_item, self));
             }
         }
         println!("Added {n} items.");
