@@ -798,7 +798,7 @@ mod ms_proof_tests {
                 removal_records.push(removal_record);
             }
         }
-        let cutoff_point = rng.next_u32() as usize % removal_records.len();
+        let cutoff_point = 1 + (rng.next_u32() as usize % (removal_records.len() - 1));
         let mut membership_proof_snapshot = None;
 
         // apply removal records
