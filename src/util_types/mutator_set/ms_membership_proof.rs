@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
+use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -380,7 +381,6 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     /// the state of the mutator set kernel prior to adding it.
     pub fn revert_update_from_addition(
         &mut self,
-        own_item: &Digest,
         previous_mutator_set: &MutatorSetAccumulator<H>,
     ) -> Result<bool, Box<dyn Error>> {
         // How can we even revert an addition when we aren't given
@@ -396,36 +396,20 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
         // Revert update to AOCL MMR membership proof.
 
-        // MMR membership proofs can only grow (or not) under
+        // MMR membership proofs can only grow (or remain) under
         // additions, so under addition-reversions they can only
-        // shrink (or not).
+        // shrink (or remain).
 
-        // Find out if we have to shrink.
-        let own_commitment = H::hash_pair(own_item, &self.randomness);
         assert!(previous_mutator_set.kernel.aocl.count_leaves() > self.auth_path_aocl.leaf_index);
-        let mut valid = self
-            .auth_path_aocl
-            .verify(
-                &previous_mutator_set.kernel.aocl.get_peaks(),
-                &own_commitment,
-                previous_mutator_set.kernel.aocl.count_leaves(),
-            )
-            .0;
 
-        // If we have to shrink, shrink until valid or empty
-        while !valid {
-            let last_ap_elem = self.auth_path_aocl.authentication_path.pop();
-            if last_ap_elem.is_none() {
-                break;
-            }
-            valid = self
-                .auth_path_aocl
-                .verify(
-                    &previous_mutator_set.kernel.aocl.get_peaks(),
-                    &own_commitment,
-                    previous_mutator_set.kernel.aocl.count_leaves(),
-                )
-                .0;
+        // calculate authentication path length using MMR moon math
+        let discrepancies =
+            self.auth_path_aocl.leaf_index ^ previous_mutator_set.kernel.aocl.count_leaves();
+        let local_mt_height = log_2_floor(discrepancies as u128);
+
+        // trim to length
+        while self.auth_path_aocl.authentication_path.len() > local_mt_height as usize {
+            self.auth_path_aocl.authentication_path.pop();
         }
 
         // If the addition record did not induce a window slide, then
@@ -449,27 +433,15 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
         assert!(self.target_chunks.dictionary.len() <= swbfi_leaf_count as usize);
 
-        // The SWBF MMR membership proofs grew by 0 or more. So
+        // The SWBF MMR membership proofs grew (or remain). So
         // find out which and trim them if necessary.
-        for (_chunkidx_key, (mmr_mp, chunk)) in self.target_chunks.dictionary.iter_mut() {
-            let mut already_valid = mmr_mp
-                .verify(
-                    &previous_mutator_set.kernel.swbf_inactive.get_peaks(),
-                    &H::hash(chunk),
-                    swbfi_leaf_count,
-                )
-                .0;
-            while !already_valid {
-                if mmr_mp.authentication_path.pop().is_none() {
-                    break;
-                }
-                already_valid = mmr_mp
-                    .verify(
-                        &previous_mutator_set.kernel.swbf_inactive.get_peaks(),
-                        &H::hash(chunk),
-                        swbfi_leaf_count,
-                    )
-                    .0;
+        for (_chunkidx_key, (mmr_mp, _chunk)) in self.target_chunks.dictionary.iter_mut() {
+            // calculate authentication path length using MMR moon math
+            let discrepancies = mmr_mp.leaf_index ^ swbfi_leaf_count;
+            let local_mt_height = log_2_floor(discrepancies as u128);
+
+            while mmr_mp.authentication_path.len() > local_mt_height as usize {
+                mmr_mp.authentication_path.pop();
             }
         }
 
@@ -956,7 +928,7 @@ mod ms_proof_tests {
                 assert!(archival_mutator_set.kernel.verify(&own_item, &memproof,));
 
                 memproof
-                    .revert_update_from_addition(&own_item, &mutator_set_before)
+                    .revert_update_from_addition(&mutator_set_before)
                     .expect("Could not revert update to own membership proof from addition.");
 
                 assert!(mutator_set_before.verify(&own_item, &memproof));
@@ -972,10 +944,7 @@ mod ms_proof_tests {
             own_membership_proof
                 .as_mut()
                 .unwrap()
-                .revert_update_from_addition(
-                    own_item.as_ref().unwrap(),
-                    &archival_mutator_set.accumulator(),
-                )
+                .revert_update_from_addition(&archival_mutator_set.accumulator())
                 .expect("Could not batch revert update from addition.");
 
             assert!(archival_mutator_set.verify(
@@ -1103,12 +1072,9 @@ mod ms_proof_tests {
                             match record {
                                 Either::Left(addition_record) => {
                                     mutator_set.revert_add(&addition_record);
-                                    for (i, mp) in items_and_membership_proofs.iter_mut() {
-                                        mp.revert_update_from_addition(
-                                            i,
-                                            &mutator_set.accumulator(),
-                                        )
-                                        .expect("Could not revert add.");
+                                    for (_, mp) in items_and_membership_proofs.iter_mut() {
+                                        mp.revert_update_from_addition(&mutator_set.accumulator())
+                                            .expect("Could not revert add.");
                                     }
                                 }
                                 Either::Right(removal_record) => {
