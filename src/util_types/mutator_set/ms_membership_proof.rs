@@ -377,75 +377,39 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     }
 
     /// Resets a membership proof to its state prior to updating it
-    /// with an addition record, given the item it pertains to and
-    /// the state of the mutator set kernel prior to adding it.
-    pub fn revert_update_from_addition(
+    /// with one or many addition records, given only
+    /// the state of the mutator set kernel prior to adding them.
+    pub fn revert_update_from_batch_addition(
         &mut self,
         previous_mutator_set: &MutatorSetAccumulator<H>,
-    ) -> Result<bool, Box<dyn Error>> {
-        // How can we even revert an addition when we aren't given
-        // the addition record as input?
-        // An addition record does not come with its aocl index
-        // so we would have to assume it is being reverted in the
-        // correct order. The AOCL index is the only piece of
-        // information we need, but we can get it from the mutator
-        // set kernel instead.
-        // In fact, this number is equal to the number of leafs in
-        // the AOCL MMR prior to adding the item.
-        let aocl_index = previous_mutator_set.kernel.aocl.count_leaves();
-
-        // Revert update to AOCL MMR membership proof.
-
-        // MMR membership proofs can only grow (or remain) under
-        // additions, so under addition-reversions they can only
-        // shrink (or remain).
-
-        assert!(previous_mutator_set.kernel.aocl.count_leaves() > self.auth_path_aocl.leaf_index);
-
-        // calculate authentication path length using MMR moon math
-        let discrepancies =
-            self.auth_path_aocl.leaf_index ^ previous_mutator_set.kernel.aocl.count_leaves();
-        let local_mt_height = log_2_floor(discrepancies as u128);
+    ) {
+        // calculate AOCL MMR MP length
+        let previous_leaf_count = previous_mutator_set.kernel.aocl.count_leaves();
+        let aocl_discrepancies = self.auth_path_aocl.leaf_index ^ previous_leaf_count;
+        let aocl_mt_height = log_2_floor(aocl_discrepancies as u128);
 
         // trim to length
-        while self.auth_path_aocl.authentication_path.len() > local_mt_height as usize {
+        while self.auth_path_aocl.authentication_path.len() > aocl_mt_height as usize {
             self.auth_path_aocl.authentication_path.pop();
         }
 
-        // If the addition record did not induce a window slide, then
-        // we are done.
-        if !MutatorSetKernel::<H, MmrAccumulator<H>>::window_slides(aocl_index) {
-            return Ok(true);
-        }
-
-        // As a result of the window slide, two types of things may
-        // have happened:
-        //  1. Some of the membership proof's indices were moved from
-        //     the active window into the new chunk.
-        //  2. Some of the MS membership proof's existing chunks get
-        //     updated MMR membership proofs.
-
-        // The moved indices do not include indices from this
-        // membership proof. So the net effect is a new chunk that
-        // must be dropped for reversion, if it is even present.
+        // remove chunks from unslid windows
         let swbfi_leaf_count = previous_mutator_set.kernel.swbf_inactive.count_leaves();
-        self.target_chunks.dictionary.remove(&swbfi_leaf_count);
+        self.target_chunks
+            .dictionary
+            .retain(|k, _v| *k < swbfi_leaf_count);
 
-        assert!(self.target_chunks.dictionary.len() <= swbfi_leaf_count as usize);
+        // iterate over all retained chunk authentication paths
+        for (k, (mp, _chnk)) in self.target_chunks.dictionary.iter_mut() {
+            // calculate length
+            let chunk_discrepancies = swbfi_leaf_count ^ k;
+            let chunk_mt_height = log_2_floor(chunk_discrepancies as u128);
 
-        // The SWBF MMR membership proofs grew (or remain). So
-        // find out which and trim them if necessary.
-        for (_chunkidx_key, (mmr_mp, _chunk)) in self.target_chunks.dictionary.iter_mut() {
-            // calculate authentication path length using MMR moon math
-            let discrepancies = mmr_mp.leaf_index ^ swbfi_leaf_count;
-            let local_mt_height = log_2_floor(discrepancies as u128);
-
-            while mmr_mp.authentication_path.len() > local_mt_height as usize {
-                mmr_mp.authentication_path.pop();
+            // trim to length
+            while mp.authentication_path.len() > chunk_mt_height as usize {
+                mp.authentication_path.pop();
             }
         }
-
-        Ok(true)
     }
 
     /// Update multiple membership proofs from one remove operation. Returns the indices of the membership proofs
@@ -927,9 +891,7 @@ mod ms_proof_tests {
 
                 assert!(archival_mutator_set.kernel.verify(&own_item, &memproof,));
 
-                memproof
-                    .revert_update_from_addition(&mutator_set_before)
-                    .expect("Could not revert update to own membership proof from addition.");
+                memproof.revert_update_from_batch_addition(&mutator_set_before);
 
                 assert!(mutator_set_before.verify(&own_item, &memproof));
                 // assert!(previous_mutator_set.set_commitment.verify(own_item, self));
@@ -944,8 +906,7 @@ mod ms_proof_tests {
             own_membership_proof
                 .as_mut()
                 .unwrap()
-                .revert_update_from_addition(&archival_mutator_set.accumulator())
-                .expect("Could not batch revert update from addition.");
+                .revert_update_from_batch_addition(&archival_mutator_set.accumulator());
 
             assert!(archival_mutator_set.verify(
                 own_item.as_ref().unwrap(),
@@ -1073,8 +1034,9 @@ mod ms_proof_tests {
                                 Either::Left(addition_record) => {
                                     mutator_set.revert_add(&addition_record);
                                     for (_, mp) in items_and_membership_proofs.iter_mut() {
-                                        mp.revert_update_from_addition(&mutator_set.accumulator())
-                                            .expect("Could not revert add.");
+                                        mp.revert_update_from_batch_addition(
+                                            &mutator_set.accumulator(),
+                                        );
                                     }
                                 }
                                 Either::Right(removal_record) => {
