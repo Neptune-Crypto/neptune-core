@@ -555,7 +555,7 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use itertools::Either;
     use num_traits::Zero;
-    use rand::{random, thread_rng, RngCore};
+    use rand::{random, thread_rng, Rng, RngCore};
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -828,6 +828,76 @@ mod ms_proof_tests {
             own_membership_proof.unwrap(),
             membership_proof_snapshot.unwrap()
         );
+    }
+
+    #[test]
+    fn revert_update_from_addition_simple_test() {
+        type H = Tip5;
+
+        let mut msa: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
+
+        let mut rng = thread_rng();
+        for _ in 0..10 {
+            let init_size = rng.gen_range(0..200);
+            let first_batch_size = rng.gen_range(0..200);
+            let last_batch_size = rng.gen_range(0..200);
+
+            // Add `init_size` items to MSA
+            for _ in 0..init_size {
+                let item: Digest = random();
+                let randomness: Digest = random();
+                let addition_record = msa.commit(&item, &randomness);
+                msa.add(&addition_record);
+            }
+
+            // Add own item with associated membership proof that we want to keep updated
+            let own_item: Digest = random();
+            let own_randomness: Digest = random();
+            let own_addition_record = msa.commit(&own_item, &own_randomness);
+            let mut own_mp = msa.prove(&own_item, &own_randomness, true);
+            msa.add(&own_addition_record);
+            let msa_after_own_add = msa.clone();
+
+            // Apply 1st batch of additions
+            for _ in 0..first_batch_size {
+                let item: Digest = random();
+                let randomness: Digest = random();
+                let addition_record = msa.commit(&item, &randomness);
+                own_mp
+                    .update_from_addition(&own_item, &msa, &addition_record)
+                    .unwrap();
+                msa.add(&addition_record);
+                assert!(
+                    msa.verify(&own_item, &own_mp),
+                    "Own mp must be valid after update"
+                );
+            }
+
+            let msa_after_first_batch = msa.clone();
+
+            // Apply 2nd batch of additions
+            for _ in 0..last_batch_size {
+                let item: Digest = random();
+                let randomness: Digest = random();
+                let addition_record = msa.commit(&item, &randomness);
+                own_mp
+                    .update_from_addition(&own_item, &msa, &addition_record)
+                    .unwrap();
+                msa.add(&addition_record);
+                assert!(
+                    msa.verify(&own_item, &own_mp),
+                    "Own mp must be valid after update"
+                );
+            }
+
+            // revert last batch
+            own_mp.revert_update_from_batch_addition(&msa_after_first_batch);
+            assert!(msa_after_first_batch.verify(&own_item, &own_mp));
+
+            // revert first batch
+            own_mp.revert_update_from_batch_addition(&msa_after_own_add);
+            assert!(msa_after_own_add.verify(&own_item, &own_mp));
+        }
     }
 
     #[test]
