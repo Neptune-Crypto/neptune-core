@@ -981,7 +981,10 @@ mod ms_proof_tests {
                     *rates.get_mut("additions").unwrap() = 0.3;
                     *rates.get_mut("removals").unwrap() = 0.8;
                 }
-            } else if sample > rates["additions"] && sample <= rates["removals"] {
+            } else if sample > rates["additions"]
+                && sample <= rates["removals"]
+                && items_and_membership_proofs.len() > 1
+            {
                 println!("removal");
 
                 // sample index of item and membership proof to remove,
@@ -1017,7 +1020,7 @@ mod ms_proof_tests {
                     *rates.get_mut("additions").unwrap() = 0.5;
                     *rates.get_mut("removals").unwrap() = 0.8;
                 }
-            } else {
+            } else if items_and_membership_proofs.len() > 1 {
                 println!("reversion");
                 let max_reversions = items_and_membership_proofs.len() - iamp_index;
                 if max_reversions > 0 {
