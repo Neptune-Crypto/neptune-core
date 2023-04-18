@@ -385,6 +385,10 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     ) {
         // calculate AOCL MMR MP length
         let previous_leaf_count = previous_mutator_set.kernel.aocl.count_leaves();
+        assert!(
+            previous_leaf_count > self.auth_path_aocl.leaf_index,
+            "You're using this function wrong"
+        );
         let aocl_discrepancies = self.auth_path_aocl.leaf_index ^ previous_leaf_count;
         let aocl_mt_height = log_2_floor(aocl_discrepancies as u128);
 
@@ -931,16 +935,12 @@ mod ms_proof_tests {
 
         let mut rates = HashMap::<String, f64>::new();
         rates.insert("additions".to_owned(), 0.7);
-        rates.insert("removals".to_owned(), 0.3);
-        rates.insert(
-            "reversions".to_owned(),
-            1.0 - rates.get("additions").unwrap() - rates.get("removals").unwrap(),
-        );
+        rates.insert("removals".to_owned(), 0.95);
 
         let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>)> = vec![];
         let mut records: Vec<Either<AdditionRecord, RemovalRecord<H>>> = vec![];
 
-        for i in 0..1000 {
+        for i in 0..2000 {
             let sample: f64 = random();
             if sample <= rates["additions"] || i == own_index {
                 println!("addition");
@@ -979,9 +979,7 @@ mod ms_proof_tests {
                 // if too many items are in the mutator set, revise rates
                 if items_and_membership_proofs.len() > n + margin && i > n {
                     *rates.get_mut("additions").unwrap() = 0.3;
-                    *rates.get_mut("removals").unwrap() = 0.5;
-                    *rates.get_mut("reversions").unwrap() =
-                        1.0 - rates.get("additions").unwrap() - rates.get("removals").unwrap();
+                    *rates.get_mut("removals").unwrap() = 0.8;
                 }
             } else if sample > rates["additions"] && sample <= rates["removals"] {
                 println!("removal");
@@ -1017,9 +1015,7 @@ mod ms_proof_tests {
                 // if there are too few items in the mutator set, revise rates
                 if items_and_membership_proofs.len() < n - margin && i > n {
                     *rates.get_mut("additions").unwrap() = 0.5;
-                    *rates.get_mut("removals").unwrap() = 0.3;
-                    *rates.get_mut("reversions").unwrap() =
-                        1.0 - rates.get("additions").unwrap() - rates.get("removals").unwrap();
+                    *rates.get_mut("removals").unwrap() = 0.8;
                 }
             } else {
                 println!("reversion");
@@ -1027,23 +1023,43 @@ mod ms_proof_tests {
                 if max_reversions > 0 {
                     let num_reversions = rng.next_u32() as usize % max_reversions;
 
-                    for _ in 0..num_reversions {
-                        items_and_membership_proofs.pop();
-                        if let Some(record) = records.pop() {
-                            match record {
-                                Either::Left(addition_record) => {
-                                    mutator_set.revert_add(&addition_record);
-                                    for (_, mp) in items_and_membership_proofs.iter_mut() {
-                                        mp.revert_update_from_batch_addition(
-                                            &mutator_set.accumulator(),
-                                        );
+                    let mut all_reversions_are_additions = true;
+                    for j in 0..num_reversions {
+                        if !matches!(records[records.len() - 1 - j], Either::Left(_)) {
+                            all_reversions_are_additions = false;
+                        }
+                    }
+
+                    if all_reversions_are_additions {
+                        println!("reverting batch of additions \\o/");
+                        for _ in 0..num_reversions {
+                            if let Some(Either::Left(addition_record)) = records.pop() {
+                                mutator_set.revert_add(&addition_record);
+                            }
+                            items_and_membership_proofs.pop();
+                        }
+                        for (_, mp) in items_and_membership_proofs.iter_mut() {
+                            mp.revert_update_from_batch_addition(&mutator_set.accumulator());
+                        }
+                    } else {
+                        for _ in 0..num_reversions {
+                            items_and_membership_proofs.pop();
+                            if let Some(record) = records.pop() {
+                                match record {
+                                    Either::Left(addition_record) => {
+                                        mutator_set.revert_add(&addition_record);
+                                        for (_, mp) in items_and_membership_proofs.iter_mut() {
+                                            mp.revert_update_from_batch_addition(
+                                                &mutator_set.accumulator(),
+                                            );
+                                        }
                                     }
-                                }
-                                Either::Right(removal_record) => {
-                                    mutator_set.revert_remove(&removal_record);
-                                    for (_, mp) in items_and_membership_proofs.iter_mut() {
-                                        mp.revert_update_from_remove(&removal_record)
-                                            .expect("Could not revert remove.");
+                                    Either::Right(removal_record) => {
+                                        mutator_set.revert_remove(&removal_record);
+                                        for (_, mp) in items_and_membership_proofs.iter_mut() {
+                                            mp.revert_update_from_remove(&removal_record)
+                                                .expect("Could not revert remove.");
+                                        }
                                     }
                                 }
                             }
