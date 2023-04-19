@@ -555,7 +555,8 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use itertools::Either;
     use num_traits::Zero;
-    use rand::{random, thread_rng, Rng, RngCore};
+    use rand::rngs::StdRng;
+    use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -992,9 +993,18 @@ mod ms_proof_tests {
     #[test]
     fn revert_updates_mixed_test() {
         type H = Tip5;
-        let n = 50;
-        let margin = 10;
+        let n = 200;
+        let margin = n / 5;
         let mut rng = thread_rng();
+        let seed = rng.next_u32();
+        println!("*********************** seed: {seed} ***********************");
+        let seed = seed.to_be_bytes();
+        let mut seed_as_bytes = [0u8; 32];
+        for i in 0..32 {
+            seed_as_bytes[i] = seed[i % 4];
+        }
+
+        let mut rng = StdRng::from_seed(seed_as_bytes);
 
         let (mut mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams::<H>();
@@ -1011,13 +1021,13 @@ mod ms_proof_tests {
         let mut records: Vec<Either<AdditionRecord, RemovalRecord<H>>> = vec![];
 
         for i in 0..2000 {
-            let sample: f64 = random();
+            let sample: f64 = rng.gen();
             if sample <= rates["additions"] || i == own_index {
-                println!("addition");
+                // println!("addition");
 
                 // generate item and randomness
-                let item: Digest = random();
-                let randomness: Digest = random();
+                let item: Digest = rng.gen();
+                let randomness: Digest = rng.gen();
 
                 // generate addition record
                 let addition_record = mutator_set.commit(&item, &randomness);
@@ -1055,7 +1065,7 @@ mod ms_proof_tests {
                 && sample <= rates["removals"]
                 && items_and_membership_proofs.len() > 1
             {
-                println!("removal");
+                // println!("removal");
 
                 // sample index of item and membership proof to remove,
                 // but not the index of the own item
@@ -1091,7 +1101,7 @@ mod ms_proof_tests {
                     *rates.get_mut("removals").unwrap() = 0.8;
                 }
             } else if items_and_membership_proofs.len() > 1 {
-                println!("reversion");
+                // println!("reversion");
                 let max_reversions = items_and_membership_proofs.len() - iamp_index;
                 if max_reversions > 0 {
                     let num_reversions = rng.next_u32() as usize % max_reversions;
@@ -1104,7 +1114,7 @@ mod ms_proof_tests {
                     }
 
                     if all_reversions_are_additions {
-                        println!("reverting batch of additions \\o/");
+                        // println!("reverting batch of additions \\o/");
                         for _ in 0..num_reversions {
                             if let Some(Either::Left(addition_record)) = records.pop() {
                                 mutator_set.revert_add(&addition_record);
