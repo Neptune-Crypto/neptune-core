@@ -387,7 +387,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         let previous_leaf_count = previous_mutator_set.kernel.aocl.count_leaves();
         assert!(
             previous_leaf_count > self.auth_path_aocl.leaf_index,
-            "You're using this function wrong"
+            "Cannot revert a membership proof for an item to back its state before the item was added to the mutator set."
         );
         let aocl_discrepancies = self.auth_path_aocl.leaf_index ^ previous_leaf_count;
         let aocl_mt_height = log_2_floor(aocl_discrepancies as u128);
@@ -993,10 +993,16 @@ mod ms_proof_tests {
     #[test]
     fn revert_updates_mixed_test() {
         type H = Tip5;
-        let n = 200;
+        // let mut rng = thread_rng();
+        // let seed_integer = rng.next_u32();
+        // let error_tuple: (usize, u32) = (100, 3875773514);
+        // let error_tuple: (usize, u32) = (101, 3742263158);
+        let error_tuple: (usize, u32) = (117, 2741285497);
+        // let n = 100;
+        // let seed_integer: u32 = 3875773514;
+        let n = error_tuple.0;
+        let seed_integer = error_tuple.1;
         let margin = n / 5;
-        let mut rng = thread_rng();
-        let seed_integer = rng.next_u32();
         println!("*********************** seed: {seed_integer} ***********************");
         let seed = seed_integer.to_be_bytes();
         let mut seed_as_bytes = [0u8; 32];
@@ -1011,19 +1017,26 @@ mod ms_proof_tests {
 
         let own_index = rng.next_u32() as usize % 10;
         let mut own_item = Digest::default();
-        let mut iamp_index = 0;
+        let mut track_index = 0;
 
         let mut rates = HashMap::<String, f64>::new();
         rates.insert("additions".to_owned(), 0.7);
         rates.insert("removals".to_owned(), 0.95);
 
-        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>)> = vec![];
+        let mut tracked_items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>)> = vec![];
+        let mut removed_items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>, usize)> =
+            vec![];
         let mut records: Vec<Either<AdditionRecord, RemovalRecord<H>>> = vec![];
 
         for i in 0..2000 {
             let sample: f64 = rng.gen();
+
+            // addition
             if sample <= rates["additions"] || i == own_index {
-                // println!("addition");
+                println!(
+                    "{i}. (set size {}) addition",
+                    tracked_items_and_membership_proofs.len()
+                );
 
                 // generate item and randomness
                 let item: Digest = rng.gen();
@@ -1036,7 +1049,7 @@ mod ms_proof_tests {
                 let membership_proof = mutator_set.prove(&item, &randomness, false);
 
                 // update existing membership proof
-                for (it, mp) in items_and_membership_proofs.iter_mut() {
+                for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {
                     mp.update_from_addition(it, &mutator_set.accumulator(), &addition_record)
                         .expect("Could not update membership proof from addition.");
                 }
@@ -1049,45 +1062,68 @@ mod ms_proof_tests {
 
                 // if own record, set iamp index and own item
                 if i == own_index {
-                    iamp_index = items_and_membership_proofs.len();
+                    track_index = tracked_items_and_membership_proofs.len();
                     own_item = item;
+                    println!("own item index: {track_index}");
                 }
 
-                // record item, membership proof paiur
-                items_and_membership_proofs.push((item, membership_proof));
+                // record item, membership proof pair
+                tracked_items_and_membership_proofs.push((item, membership_proof));
+
+                // assert all tracked membership proofs are still valid
+                for (j, (item, membership_proof)) in
+                    tracked_items_and_membership_proofs.iter().enumerate()
+                {
+                    assert!(
+                        mutator_set.verify(item, membership_proof),
+                        "membership proofs not all valid after addition. Invalid index: {j}"
+                    );
+                }
 
                 // if too many items are in the mutator set, revise rates
-                if items_and_membership_proofs.len() > n + margin && i > n {
+                if tracked_items_and_membership_proofs.len() > n + margin && i > n {
                     *rates.get_mut("additions").unwrap() = 0.3;
                     *rates.get_mut("removals").unwrap() = 0.8;
                 }
-            } else if sample > rates["additions"]
+            }
+            // removal
+            else if sample > rates["additions"]
                 && sample <= rates["removals"]
-                && items_and_membership_proofs.len() > 1
+                && tracked_items_and_membership_proofs.len() > 1
             {
-                // println!("removal");
+                println!(
+                    "{i}. (set size {}) removal",
+                    tracked_items_and_membership_proofs.len()
+                );
 
                 // sample index of item and membership proof to remove,
                 // but not the index of the own item
-                let mut index = iamp_index;
-                while index == iamp_index {
-                    index = rng.next_u32() as usize % items_and_membership_proofs.len()
+                let mut index = track_index;
+                while index == track_index {
+                    index = rng.next_u32() as usize % tracked_items_and_membership_proofs.len()
                 }
 
-                // remove the indicated item and membership proof
-                let (item, membership_proof) = items_and_membership_proofs.remove(index);
-                if iamp_index > index {
-                    iamp_index -= 1;
+                // remove the indicated item and membership proof from the track list
+                let (item, membership_proof) = tracked_items_and_membership_proofs.remove(index);
+                if track_index > index {
+                    track_index -= 1;
                 }
 
                 // generate a removal record
                 let removal_record = mutator_set.drop(&item, &membership_proof);
 
                 // update the other membership proofs with the removal record
-                for (_, mp) in items_and_membership_proofs.iter_mut() {
+                for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
                     mp.update_from_remove(&removal_record)
                         .expect("Could not update from remove.");
                 }
+
+                // don't lose track of the removed item
+                assert!(
+                    mutator_set.verify(&item, &membership_proof),
+                    "track index: {track_index}\nitem index: {index}",
+                );
+                removed_items_and_membership_proofs.push((item, membership_proof.clone(), index));
 
                 // remove the item from the membership proof
                 mutator_set.remove(&removal_record);
@@ -1095,67 +1131,157 @@ mod ms_proof_tests {
                 // record record
                 records.push(Either::Right(removal_record));
 
+                // assert all tracked membership proofs are still valid
+                for (j, (item, membership_proof)) in
+                    tracked_items_and_membership_proofs.iter().enumerate()
+                {
+                    assert!(
+                        mutator_set.verify(item, membership_proof),
+                        "membership proofs not all valid after removal. Invalid index: {j}"
+                    );
+                }
+
                 // if there are too few items in the mutator set, revise rates
-                if items_and_membership_proofs.len() < n - margin && i > n {
+                if tracked_items_and_membership_proofs.len() < n - margin && i > n {
                     *rates.get_mut("additions").unwrap() = 0.5;
                     *rates.get_mut("removals").unwrap() = 0.8;
                 }
-            } else if items_and_membership_proofs.len() > 1 {
-                // println!("reversion");
-                let max_reversions = items_and_membership_proofs.len() - iamp_index;
+            }
+            // reversion
+            else if tracked_items_and_membership_proofs.len() > 1 {
+                // sample reversion depth
+                let max_reversions = tracked_items_and_membership_proofs.len() - track_index;
                 if max_reversions > 0 {
                     let num_reversions = rng.next_u32() as usize % max_reversions;
+                    if num_reversions > 0 {
+                        let set_size_was = tracked_items_and_membership_proofs.len();
+                        println!("reverting {num_reversions} records");
 
-                    let mut all_reversions_are_additions = true;
-                    for j in 0..num_reversions {
-                        if !matches!(records[records.len() - 1 - j], Either::Left(_)) {
-                            all_reversions_are_additions = false;
-                        }
-                    }
-
-                    if all_reversions_are_additions {
-                        // println!("reverting batch of additions \\o/");
-                        for _ in 0..num_reversions {
-                            if let Some(Either::Left(addition_record)) = records.pop() {
-                                mutator_set.revert_add(&addition_record);
+                        // test if all records to be reverted are additions
+                        let mut all_reversions_are_additions = true;
+                        for j in 0..num_reversions {
+                            if !matches!(records[records.len() - 1 - j], Either::Left(_)) {
+                                all_reversions_are_additions = false;
                             }
-                            items_and_membership_proofs.pop();
                         }
-                        for (_, mp) in items_and_membership_proofs.iter_mut() {
-                            mp.revert_update_from_batch_addition(&mutator_set.accumulator());
+
+                        // if they are, revert via batch
+                        if all_reversions_are_additions && num_reversions > 1 {
+                            println!(
+                                "{i}. (set size {}) reversion [{}]",
+                                tracked_items_and_membership_proofs.len(),
+                                vec!["a"; num_reversions].join("")
+                            );
+                            for _ in 0..num_reversions {
+                                if let Some(Either::Left(addition_record)) = records.pop() {
+                                    mutator_set.revert_add(&addition_record);
+                                }
+                                tracked_items_and_membership_proofs.pop();
+                            }
+                            for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
+                                mp.revert_update_from_batch_addition(&mutator_set.accumulator());
+                            }
+
+                            // assert all tracked membership proofs are still valid
+                            for (j, (item, membership_proof)) in
+                                tracked_items_and_membership_proofs.iter().enumerate()
+                            {
+                                assert!(mutator_set.verify(item, membership_proof), "membership proofs not all valid after reverting batch addition. Invalid index: {j}");
+                            }
                         }
-                    } else {
-                        for _ in 0..num_reversions {
-                            items_and_membership_proofs.pop();
-                            if let Some(record) = records.pop() {
-                                match record {
-                                    Either::Left(addition_record) => {
-                                        mutator_set.revert_add(&addition_record);
-                                        for (_, mp) in items_and_membership_proofs.iter_mut() {
-                                            mp.revert_update_from_batch_addition(
-                                                &mutator_set.accumulator(),
-                                            );
+                        // otherwise, revert individually
+                        else {
+                            let mut records_abbreviation = "".to_string();
+                            for _ in 0..num_reversions {
+                                if let Some(record) = records.pop() {
+                                    match record {
+                                        Either::Left(addition_record) => {
+                                            records_abbreviation =
+                                                format!("{records_abbreviation}a");
+                                            mutator_set.revert_add(&addition_record);
+                                            tracked_items_and_membership_proofs.pop();
+                                            for (_, mp) in
+                                                tracked_items_and_membership_proofs.iter_mut()
+                                            {
+                                                mp.revert_update_from_batch_addition(
+                                                    &mutator_set.accumulator(),
+                                                );
+                                            }
+
+                                            // assert all tracked membership proofs are still valid
+                                            for (j, (item, membership_proof)) in
+                                                tracked_items_and_membership_proofs
+                                                    .iter()
+                                                    .enumerate()
+                                            {
+                                                assert!(mutator_set.verify(item, membership_proof), "membership proofs not all valid after reverting addition record. Invalid index: {j}");
+                                            }
                                         }
-                                    }
-                                    Either::Right(removal_record) => {
-                                        mutator_set.revert_remove(&removal_record);
-                                        for (_, mp) in items_and_membership_proofs.iter_mut() {
-                                            mp.revert_update_from_remove(&removal_record)
-                                                .expect("Could not revert remove.");
+                                        Either::Right(removal_record) => {
+                                            // first, assert all tracked membership proofs are still valid
+                                            for (j, (item, membership_proof)) in
+                                                tracked_items_and_membership_proofs
+                                                    .iter()
+                                                    .enumerate()
+                                            {
+                                                assert!(mutator_set.verify(item, membership_proof), "membership proofs not all valid before reverting removal record. Invalid index: {j}; reverted records {records_abbreviation}");
+                                            }
+
+                                            let mut report_index = 0;
+
+                                            // start reverting removal record
+                                            records_abbreviation =
+                                                format!("{records_abbreviation}r");
+                                            mutator_set.revert_remove(&removal_record);
+                                            for (_, mp) in
+                                                tracked_items_and_membership_proofs.iter_mut()
+                                            {
+                                                mp.revert_update_from_remove(&removal_record)
+                                                    .expect("Could not revert remove.");
+                                            }
+                                            match removed_items_and_membership_proofs.pop() {
+                                                Some((item, membership_proof, index)) => {
+                                                    assert!(mutator_set
+                                                        .verify(&item, &membership_proof));
+                                                    tracked_items_and_membership_proofs
+                                                        .insert(index, (item, membership_proof));
+                                                    report_index = index;
+                                                    if index <= track_index {
+                                                        track_index += 1;
+                                                    }
+                                                }
+                                                None => {
+                                                    panic!("No entries in removed_items_and_membership_proofs to pop!");
+                                                }
+                                            }
+
+                                            // assert all tracked membership proofs are still valid
+                                            for (j, (item, membership_proof)) in
+                                                tracked_items_and_membership_proofs
+                                                    .iter()
+                                                    .enumerate()
+                                            {
+                                                assert!(mutator_set.verify(item, membership_proof), "membership proofs not all valid after reverting removal record. Invalid index: {j}; reverted records {records_abbreviation}; unremoved item reinserted at index {report_index}; tracking own item at index {track_index}");
+                                            }
                                         }
                                     }
                                 }
                             }
+                            println!(
+                                "{i}. (set size {}) reversion ({})",
+                                set_size_was, records_abbreviation
+                            );
                         }
                     }
                 }
             }
 
             if i > own_index {
-                assert_eq!(own_item, items_and_membership_proofs[iamp_index].0);
+                assert_eq!(own_item, tracked_items_and_membership_proofs[track_index].0);
                 assert!(
-                    mutator_set.verify(&own_item, &items_and_membership_proofs[iamp_index].1),
-                    "seed: {seed_integer}"
+                    mutator_set.verify(&own_item, &tracked_items_and_membership_proofs[track_index].1),
+                    "seed: {seed_integer}, iteration: {i}, own index: {own_index}, track index: {track_index}, size of set: {}",
+                    tracked_items_and_membership_proofs.len()
                 );
             }
         }

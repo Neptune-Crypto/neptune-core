@@ -259,6 +259,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
             self.aocl.count_leaves(),
         );
         if !is_aocl_member {
+            println!("not aocl member");
             return false;
         }
 
@@ -306,6 +307,14 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
                     self.swbf_inactive.count_leaves(),
                 );
 
+                if !valid_auth_path {
+                    println!("peaks: {:?}", self.swbf_inactive.count_leaves());
+                    println!("leaf hash: {}", H::hash(&mp_and_chunk.1));
+                    println!("chunk: {:?}", mp_and_chunk.1);
+                    println!("swbfi leaf count: {}", self.swbf_inactive.count_leaves());
+                    println!("chunk index: {} ", chunk_index,);
+                }
+
                 all_auth_paths_are_valid = all_auth_paths_are_valid && valid_auth_path;
 
                 'inner_inactive: for index in indices {
@@ -325,6 +334,16 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
                     }
                 }
             }
+        }
+
+        if !entries_in_dictionary {
+            println!("entries not in dictionary");
+        }
+        if !all_auth_paths_are_valid {
+            println!("not all auth paths are valid");
+        }
+        if !has_absent_index {
+            println!("all indices already present");
         }
 
         // return verdict
