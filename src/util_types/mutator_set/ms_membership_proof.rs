@@ -996,9 +996,9 @@ mod ms_proof_tests {
         let n = 200;
         let margin = n / 5;
         let mut rng = thread_rng();
-        let seed = rng.next_u32();
-        println!("*********************** seed: {seed} ***********************");
-        let seed = seed.to_be_bytes();
+        let seed_integer = rng.next_u32();
+        println!("*********************** seed: {seed_integer} ***********************");
+        let seed = seed_integer.to_be_bytes();
         let mut seed_as_bytes = [0u8; 32];
         for i in 0..32 {
             seed_as_bytes[i] = seed[i % 4];
@@ -1153,7 +1153,10 @@ mod ms_proof_tests {
 
             if i > own_index {
                 assert_eq!(own_item, items_and_membership_proofs[iamp_index].0);
-                assert!(mutator_set.verify(&own_item, &items_and_membership_proofs[iamp_index].1));
+                assert!(
+                    mutator_set.verify(&own_item, &items_and_membership_proofs[iamp_index].1),
+                    "seed: {seed_integer}"
+                );
             }
         }
     }
