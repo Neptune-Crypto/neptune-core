@@ -161,18 +161,18 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
 /// This function is factored out because it is shared by
 /// `revert_update_from_remove` and `batch_revert_update_from_remove`.
 #[allow(clippy::type_complexity)]
-pub fn generate_authenticated_batch_modification_for_removal_record_reversion<
-    H: AlgebraicHasher,
->(
+pub fn prepare_authenticated_batch_modification_for_removal_record_reversion<H: AlgebraicHasher>(
     removal_record: &RemovalRecord<H>,
     chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
 ) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
     let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<H>, Digest)> =
         HashMap::new();
+
     // `mutated_chunk_dictionaries` records the indices in `chunk_dictionaries`
     // of modified chunks.
     let mut mutated_chunk_dictionaries: HashSet<usize> = HashSet::new();
+
     for (chunk_index, indices) in removal_record.get_chunkidx_to_indices_dict().iter() {
         for (i, chunk_dictionary) in chunk_dictionaries.iter_mut().enumerate() {
             match chunk_dictionary.dictionary.get_mut(chunk_index) {
@@ -181,7 +181,7 @@ pub fn generate_authenticated_batch_modification_for_removal_record_reversion<
                     for index in indices.iter() {
                         let relative_index = (index % CHUNK_SIZE as u128) as u32;
                         mutated_chunk_dictionaries.insert(i);
-                        chunk.remove(relative_index);
+                        chunk.remove_once(relative_index);
                     }
 
                     // Insert into the mutation_argument_hash_map the updated chunk and its

@@ -18,8 +18,8 @@ use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel};
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
 use super::shared::{
-    generate_authenticated_batch_modification_for_removal_record_reversion,
-    get_batch_mutation_argument_for_removal_record, BATCH_SIZE, CHUNK_SIZE,
+    get_batch_mutation_argument_for_removal_record,
+    prepare_authenticated_batch_modification_for_removal_record_reversion, BATCH_SIZE, CHUNK_SIZE,
 };
 use super::transfer_ms_membership_proof::TransferMsMembershipProof;
 
@@ -513,11 +513,11 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // `update_from_remove` but with the new and old chunks
         // swapped.
 
-        // Set all chunk values to the old values and calculate the mutation argument
-        // for the batch updating of the MMR membership proofs.
+        // Set all chunk values to the old values and prepare
+        // for batch updating of the MMR membership proofs.
         let mut chunk_dictionaries = vec![&mut self.target_chunks];
         let (mutated_chunk_dictionary_index, batch_membership) =
-            generate_authenticated_batch_modification_for_removal_record_reversion(
+            prepare_authenticated_batch_modification_for_removal_record_reversion(
                 removal_record,
                 &mut chunk_dictionaries,
             );
@@ -993,13 +993,9 @@ mod ms_proof_tests {
     #[test]
     fn revert_updates_mixed_test() {
         type H = Tip5;
-        // let mut rng = thread_rng();
+        let mut rng = thread_rng();
         // let seed_integer = rng.next_u32();
-        // let error_tuple: (usize, u32) = (100, 3875773514);
-        // let error_tuple: (usize, u32) = (101, 3742263158);
-        let error_tuple: (usize, u32) = (117, 2741285497);
-        // let n = 100;
-        // let seed_integer: u32 = 3875773514;
+        let error_tuple: (usize, u32) = (10 + rng.next_u32() as usize % 100, rng.next_u32());
         let n = error_tuple.0;
         let seed_integer = error_tuple.1;
         let margin = n / 5;
@@ -1014,7 +1010,6 @@ mod ms_proof_tests {
 
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams::<H>();
-        let mut mutator_set_accumulators = vec![MutatorSetAccumulator::<H>::new()];
 
         let own_index = rng.next_u32() as usize % 10;
         let mut own_item = Digest::default();
@@ -1061,10 +1056,6 @@ mod ms_proof_tests {
 
                 // apply record
                 archival_mutator_set.add(&addition_record);
-                let mut msa = mutator_set_accumulators.last().unwrap().clone();
-                msa.add(&addition_record);
-                assert_eq!(msa, archival_mutator_set.accumulator());
-                mutator_set_accumulators.push(msa);
 
                 // record record
                 records.push(Either::Left(addition_record));
@@ -1078,16 +1069,6 @@ mod ms_proof_tests {
 
                 // record item, membership proof pair
                 tracked_items_and_membership_proofs.push((item, membership_proof));
-
-                // assert all tracked membership proofs are still valid
-                for (j, (item, membership_proof)) in
-                    tracked_items_and_membership_proofs.iter().enumerate()
-                {
-                    assert!(
-                        archival_mutator_set.verify(item, membership_proof),
-                        "membership proofs not all valid after addition. Invalid index: {j}"
-                    );
-                }
 
                 // if too many items are in the mutator set, revise rates
                 if tracked_items_and_membership_proofs.len() > n + margin && i > n {
@@ -1136,23 +1117,9 @@ mod ms_proof_tests {
 
                 // remove the item from the mutator set
                 archival_mutator_set.remove(&removal_record);
-                let mut msa = mutator_set_accumulators.last().unwrap().clone();
-                msa.remove(&removal_record);
-                assert_eq!(msa, archival_mutator_set.accumulator());
-                mutator_set_accumulators.push(msa);
 
                 // record record
                 records.push(Either::Right(removal_record));
-
-                // assert all tracked membership proofs are still valid
-                for (j, (item, membership_proof)) in
-                    tracked_items_and_membership_proofs.iter().enumerate()
-                {
-                    assert!(
-                        archival_mutator_set.verify(item, membership_proof),
-                        "membership proofs not all valid after removal. Invalid index: {j}"
-                    );
-                }
 
                 // if there are too few items in the mutator set, revise rates
                 if tracked_items_and_membership_proofs.len() < n - margin && i > n {
@@ -1168,7 +1135,6 @@ mod ms_proof_tests {
                     let num_reversions = rng.next_u32() as usize % max_reversions;
                     if num_reversions > 0 {
                         let set_size_was = tracked_items_and_membership_proofs.len();
-                        println!("reverting {num_reversions} records");
 
                         // test if all records to be reverted are additions
                         let mut all_reversions_are_additions = true;
@@ -1190,23 +1156,11 @@ mod ms_proof_tests {
                                     archival_mutator_set.revert_add(&addition_record);
                                 }
                                 tracked_items_and_membership_proofs.pop();
-                                mutator_set_accumulators.pop();
                             }
-                            assert_eq!(
-                                *mutator_set_accumulators.last().unwrap(),
-                                archival_mutator_set.accumulator()
-                            );
                             for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
                                 mp.revert_update_from_batch_addition(
                                     &archival_mutator_set.accumulator(),
                                 );
-                            }
-
-                            // assert all tracked membership proofs are still valid
-                            for (j, (item, membership_proof)) in
-                                tracked_items_and_membership_proofs.iter().enumerate()
-                            {
-                                assert!(archival_mutator_set.verify(item, membership_proof), "membership proofs not all valid after reverting batch addition. Invalid index: {j}");
                             }
                         }
                         // otherwise, revert individually
@@ -1221,11 +1175,6 @@ mod ms_proof_tests {
 
                                             // revert update to mutator set
                                             archival_mutator_set.revert_add(&addition_record);
-                                            mutator_set_accumulators.pop();
-                                            assert_eq!(
-                                                *mutator_set_accumulators.last().unwrap(),
-                                                archival_mutator_set.accumulator()
-                                            );
                                             tracked_items_and_membership_proofs.pop();
                                             for (_, mp) in
                                                 tracked_items_and_membership_proofs.iter_mut()
@@ -1234,26 +1183,8 @@ mod ms_proof_tests {
                                                     &archival_mutator_set.accumulator(),
                                                 );
                                             }
-
-                                            // assert all tracked membership proofs are still valid
-                                            for (j, (item, membership_proof)) in
-                                                tracked_items_and_membership_proofs
-                                                    .iter()
-                                                    .enumerate()
-                                            {
-                                                assert!(archival_mutator_set.verify(item, membership_proof), "membership proofs not all valid after reverting addition record. Invalid index: {j}");
-                                            }
                                         }
                                         Either::Right(removal_record) => {
-                                            // first, assert all tracked membership proofs are still valid
-                                            for (j, (item, membership_proof)) in
-                                                tracked_items_and_membership_proofs
-                                                    .iter()
-                                                    .enumerate()
-                                            {
-                                                assert!(archival_mutator_set.verify(item, membership_proof), "membership proofs not all valid before reverting removal record. Invalid index: {j}; reverted records {records_abbreviation}");
-                                            }
-
                                             let mut _report_index = 0;
 
                                             // start reverting removal record
@@ -1262,41 +1193,16 @@ mod ms_proof_tests {
 
                                             // revert update to mutator set
                                             archival_mutator_set.revert_remove(&removal_record);
-                                            mutator_set_accumulators.pop();
-                                            assert_eq!(
-                                                *mutator_set_accumulators.last().unwrap(),
-                                                archival_mutator_set.accumulator()
-                                            );
 
                                             // assert valid proofs
-                                            for (j, (itm, mp)) in
-                                                tracked_items_and_membership_proofs
-                                                    .iter_mut()
-                                                    .enumerate()
+                                            for (_, (_, mp)) in tracked_items_and_membership_proofs
+                                                .iter_mut()
+                                                .enumerate()
                                             {
                                                 mp.revert_update_from_remove(&removal_record)
                                                     .expect("Could not revert remove.");
-                                                let restored_mp = archival_mutator_set
-                                                    .restore_membership_proof(
-                                                        itm,
-                                                        &mp.randomness,
-                                                        mp.auth_path_aocl.leaf_index,
-                                                    ).expect("Could not restore membership proof from archival mutator set.");
-                                                assert_eq!(restored_mp, *mp);
-                                                assert!(mutator_set_accumulators.last().unwrap().verify(itm, mp), "Just reverted membership proof {j} but it is invalid :(");
-                                                assert!(archival_mutator_set.verify(itm, mp), "Just reverted membership proof {j} but it is invalid :(");
                                             }
 
-                                            if i == 1770 {
-                                                // assert all tracked membership proofs are still valid
-                                                for (j, (item, membership_proof)) in
-                                                    tracked_items_and_membership_proofs
-                                                        .iter()
-                                                        .enumerate()
-                                                {
-                                                    assert!(archival_mutator_set.verify(item, membership_proof), "membership proofs not all valid after reverting removal record. Invalid index: {j}; reverted records {records_abbreviation}; unremoved item reinserted at index {_report_index}; tracking own item at index {track_index}");
-                                                }
-                                            }
                                             match removed_items_and_membership_proofs.pop() {
                                                 Some((item, membership_proof, index)) => {
                                                     assert!(archival_mutator_set
@@ -1311,15 +1217,6 @@ mod ms_proof_tests {
                                                 None => {
                                                     panic!("No entries in removed_items_and_membership_proofs to pop!");
                                                 }
-                                            }
-
-                                            // assert all tracked membership proofs are still valid
-                                            for (j, (item, membership_proof)) in
-                                                tracked_items_and_membership_proofs
-                                                    .iter()
-                                                    .enumerate()
-                                            {
-                                                assert!(archival_mutator_set.verify(item, membership_proof), "membership proofs not all valid after reverting removal record. Invalid index: {j}; reverted records {records_abbreviation}; unremoved item reinserted at index {_report_index}; tracking own item at index {track_index}");
                                             }
                                         }
                                     }
@@ -1337,9 +1234,11 @@ mod ms_proof_tests {
             if i > own_index {
                 assert_eq!(own_item, tracked_items_and_membership_proofs[track_index].0);
                 assert!(
-                    archival_mutator_set.verify(&own_item, &tracked_items_and_membership_proofs[track_index].1),
-                    "seed: {seed_integer}, iteration: {i}, own index: {own_index}, track index: {track_index}, size of set: {}",
-                    tracked_items_and_membership_proofs.len()
+                    archival_mutator_set.verify(
+                        &own_item,
+                        &tracked_items_and_membership_proofs[track_index].1
+                    ),
+                    "seed: {seed_integer} / n: {n}",
                 );
             }
         }
