@@ -152,6 +152,27 @@ mod chunk_tests {
     use super::*;
 
     #[test]
+    fn chunk_is_reversible_bloom_filter() {
+        let mut aw = Chunk::empty_chunk();
+
+        // Insert an index twice, remove it once and the verify that
+        // it is still there
+        let index = 7;
+        assert!(!aw.contains(index));
+        aw.insert(index);
+        assert!(aw.contains(index));
+        aw.insert(index);
+        assert!(aw.contains(index));
+        aw.remove_once(index);
+        assert!(aw.contains(index));
+        aw.remove_once(index);
+        assert!(!aw.contains(index));
+
+        // Verify that we can remove once without index being present, without crashing
+        aw.remove_once(index);
+    }
+
+    #[test]
     fn insert_remove_contains_pbt() {
         let mut aw = Chunk::empty_chunk();
         for i in 0..CHUNK_SIZE {
