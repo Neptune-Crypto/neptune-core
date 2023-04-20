@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
-use std::num;
 use std::time::{SystemTime, UNIX_EPOCH};
 use twenty_first::util_types::storage_vec::StorageVec;
 
@@ -13,7 +13,6 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
-use self::wallet::monitored_utxo;
 use self::wallet::wallet_state::WalletState;
 use super::blockchain::transaction::devnet_input::DevNetInput;
 use super::blockchain::transaction::utxo::Utxo;
@@ -82,9 +81,7 @@ impl GlobalState {
         let mut inputs: Vec<DevNetInput> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, mp) in spendable_utxos_and_mps {
-            let removal_record = msa_tip
-                .set_commitment
-                .drop(&Hash::hash(&spendable_utxo), &mp);
+            let removal_record = msa_tip.kernel.drop(&Hash::hash(&spendable_utxo), &mp);
             input_amount = input_amount + spendable_utxo.amount;
             inputs.push(DevNetInput {
                 utxo: spendable_utxo,
@@ -202,7 +199,7 @@ impl GlobalState {
 
     pub async fn resync_membership_proofs_to_tip(&self, tip_hash: Digest) -> Result<()> {
         // loop over all monitored utxos
-        let monitored_utxos = self
+        let mut monitored_utxos = self
             .wallet_state
             .wallet_db
             .lock()
@@ -210,24 +207,145 @@ impl GlobalState {
             .monitored_utxos
             .clone();
         let num_monitored_utxos = monitored_utxos.len();
-        for i in 0..num_monitored_utxos {
-            let monitored_utxo = monitored_utxos.get(i);
+        'outer: for i in 0..num_monitored_utxos {
+            let mut monitored_utxo = monitored_utxos.get(i).clone();
 
             // ignore synced ones
             if monitored_utxo.is_synced_to(&tip_hash) {
                 continue;
             }
+
+            // If the UTXO was not confirmed yet, there is no
+            // point in synchronizing its membership proof.
+            let confirming_block = match monitored_utxo.confirmed_in_block {
+                Some((confirmed_block_hash, _timestamp)) => confirmed_block_hash,
+                None => {
+                    continue;
+                }
+            };
+
+            // try latest (block hash, membership proof) entry
+            let (block_hash, mut membership_proof) = monitored_utxo
+                .get_latest_membership_proof_entry()
+                .expect("Database not in consistent state. Monitored UTXO must have at least one membership proof.");
+
+            // request path-to-tip
+            let (backwards, _luca, forwards) = self
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .find_path(&block_hash, &tip_hash)
+                .await;
+
+            // walk backwards, reverting
+            for revert_block_hash in backwards.into_iter() {
+                // Was the UTXO confirmed in this block? If so, there
+                // is nothing we can do except orphan the UTXO: that
+                // is, leave it without a synced membership proof.
+                // Whenever current owned UTXOs are queried, one
+                // should take care to filter for UTXOs that have a
+                // membership proof synced to the current block tip.
+                if confirming_block == revert_block_hash {
+                    break 'outer;
+                }
+
+                let revert_block = self
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .get_block(revert_block_hash)
+                    .await?
+                    .unwrap();
+
+                // revert removals
+                let removal_records = revert_block.body.mutator_set_update.removals;
+                for removal_record in removal_records.iter().rev() {
+                    // membership_proof.revert_update_from_removal(&removal);
+                    membership_proof
+                        .revert_update_from_remove(removal_record)
+                        .expect("Could not revert membership proof from removal record.");
+                }
+
+                // revert additions
+                let previous_mutator_set = revert_block.body.previous_mutator_set_accumulator;
+                membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
+
+                // assert valid
+                assert!(previous_mutator_set
+                    .verify(&Hash::hash(&monitored_utxo.utxo), &membership_proof));
+            }
+
+            // walk forwards, applying
+            for apply_block_hash in forwards.into_iter() {
+                // Was the UTXO confirmed in this block?
+                // This can occur in some edge cases of forward-only
+                // resynchronization. In this case, assume the
+                // membership proof is already synced to this block.
+                if confirming_block == apply_block_hash {
+                    continue;
+                }
+
+                let apply_block = self
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .get_block(apply_block_hash)
+                    .await?
+                    .unwrap();
+                let addition_records = apply_block.body.mutator_set_update.additions;
+                let removal_records = apply_block.body.mutator_set_update.removals;
+                let mut block_msa = apply_block.body.previous_mutator_set_accumulator.clone();
+
+                // apply additions
+                for addition_record in addition_records.iter() {
+                    membership_proof
+                        .update_from_addition(
+                            &Hash::hash(&monitored_utxo.utxo),
+                            &block_msa,
+                            addition_record,
+                        )
+                        .expect("Could not update membership proof with addition record.");
+                    block_msa.add(addition_record);
+                }
+
+                // apply removals
+                for removal_record in removal_records.iter() {
+                    membership_proof
+                        .update_from_remove(removal_record)
+                        .expect("Could not update membership proof from removal record.");
+                    block_msa.remove(removal_record);
+                }
+
+                assert_eq!(block_msa, apply_block.body.next_mutator_set_accumulator);
+            }
+
+            // store updated membership proof
+            monitored_utxo.add_membership_proof_for_tip(tip_hash, membership_proof);
+            monitored_utxos.set(i, monitored_utxo);
         }
-        // request path-to-tip
-        // apply revert with orphaned block, in reverse order
-        // apply canonical block
+
+        // mark as synced
+        self.wallet_state
+            .wallet_db
+            .lock()
+            .await
+            .set_sync_label(tip_hash);
+
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod global_state_tests {
-    use crate::{config_models::network::Network, tests::shared::get_mock_global_state};
+    use crate::{
+        config_models::network::Network,
+        tests::shared::{get_mock_global_state, make_mock_block},
+    };
+    use rand::thread_rng;
+    use secp256k1::Secp256k1;
     use tracing_test::traced_test;
 
     use super::{wallet::WalletSecret, *};
@@ -283,5 +401,77 @@ mod global_state_tests {
             new_tx.inputs.len(),
             "tx must have exactly one input, a genesis UTXO"
         );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn resync_ms_membership_proofs_test() -> Result<()> {
+        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+
+        // 1. Create new block 1 and store it to the DB
+        let genesis_block = global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let mock_block_1a = make_mock_block(&genesis_block, None, public_key);
+        {
+            let mut block_db_lock = global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_index_db
+                .lock()
+                .await;
+            global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .write_block(
+                    Box::new(mock_block_1a.clone()),
+                    &mut block_db_lock,
+                    Some(mock_block_1a.header.proof_of_work_family),
+                )?;
+        }
+
+        // Verify that wallet has a monitored UTXO (from genesis)
+        assert!(!global_state.wallet_state.get_balance().await.is_zero());
+
+        // Verify that this is unsynced with mock_block_1a
+        assert!(
+            global_state
+                .wallet_state
+                .is_synced_to(genesis_block.hash)
+                .await
+        );
+        assert!(
+            !global_state
+                .wallet_state
+                .is_synced_to(mock_block_1a.hash)
+                .await
+        );
+
+        // Call resync
+        global_state
+            .resync_membership_proofs_to_tip(mock_block_1a.hash)
+            .await
+            .unwrap();
+
+        // Verify that it is synced
+        assert!(
+            global_state
+                .wallet_state
+                .is_synced_to(mock_block_1a.hash)
+                .await
+        );
+
+        Ok(())
     }
 }

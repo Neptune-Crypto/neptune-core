@@ -88,9 +88,9 @@ impl Block {
             let bad_randomness = Digest::default();
 
             // Add pre-mine UTXO to MutatorSet
-            let mut addition_record = genesis_mutator_set.commit(&utxo_commitment, &bad_randomness);
+            let addition_record = genesis_mutator_set.commit(&utxo_commitment, &bad_randomness);
             ms_update.additions.push(addition_record.clone());
-            genesis_mutator_set.add(&mut addition_record);
+            genesis_mutator_set.add(&addition_record);
 
             // Add pre-mine UTXO + commitment to coinbase transaction
             genesis_coinbase_tx

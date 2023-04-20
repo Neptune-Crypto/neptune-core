@@ -652,13 +652,13 @@ pub fn make_mock_block(
     let previous_ms = new_ms.clone();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
-    let mut coinbase_addition_record: AdditionRecord =
+    let coinbase_addition_record: AdditionRecord =
         new_ms.commit(&coinbase_digest, &output_randomness);
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
     };
-    new_ms.add(&mut coinbase_addition_record);
+    new_ms.add(&coinbase_addition_record);
 
     let block_body: BlockBody = BlockBody {
         transaction,
@@ -718,7 +718,6 @@ pub async fn get_mock_wallet_state(wallet_secret: Option<WalletSecret>) -> Walle
         wallet_secret: wallet,
         // This number is set high since some tests depend on a high number here.
         number_of_mps_per_utxo: 30,
-        all_mps_synced: Arc::new(std::sync::RwLock::new(false)),
     };
 
     // Wallet state has to be initialized with the genesis block, otherwise the outputs

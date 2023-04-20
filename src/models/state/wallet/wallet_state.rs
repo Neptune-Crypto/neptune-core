@@ -46,9 +46,6 @@ pub struct WalletState {
     pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
-
-    // Indicating that the last update of the wallet state only ended in synced MS membership proofs
-    pub all_mps_synced: Arc<std::sync::RwLock<bool>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -99,11 +96,10 @@ impl WalletState {
 
         let rusty_wallet_database = Arc::new(TokioMutex::new(rusty_wallet_database));
 
-        let mut ret = Self {
+        let ret = Self {
             wallet_db: rusty_wallet_database.clone(),
             wallet_secret,
             number_of_mps_per_utxo,
-            all_mps_synced: Arc::new(std::sync::RwLock::new(false)),
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -209,7 +205,7 @@ impl WalletState {
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
-        for (mut addition_record, (utxo, commitment_randomness)) in block
+        for (addition_record, (utxo, commitment_randomness)) in block
             .body
             .mutator_set_update
             .additions
@@ -229,7 +225,7 @@ impl WalletState {
                             .map(|(mp, _index)| mp)
                             .collect_vec(),
                         &utxo_digests,
-                        &mut msa_state.set_commitment,
+                        &msa_state.kernel,
                         &addition_record,
                     );
                 match res {
@@ -241,11 +237,8 @@ impl WalletState {
             }
 
             // Batch update removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(
-                &mut removal_records,
-                &mut msa_state.set_commitment,
-            )
-            .expect("MS removal record update from add must succeed in wallet handler");
+            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel)
+                .expect("MS removal record update from add must succeed in wallet handler");
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
@@ -282,7 +275,7 @@ impl WalletState {
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
-            msa_state.add(&mut addition_record);
+            msa_state.add(&addition_record);
         }
 
         // sanity checks
@@ -444,7 +437,7 @@ impl WalletState {
             // Sanity check that membership proofs of non-spent transactions are still valid
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || msa_state.verify(&utxo_digest, &updated_ms_mp)
+                    || msa_state.verify(utxo_digest, updated_ms_mp)
             );
 
             wallet_db_lock
@@ -460,17 +453,30 @@ impl WalletState {
         wallet_db_lock.set_sync_label(block.hash);
         wallet_db_lock.persist();
 
-        // Store a boolean value indicating whether all monitored UTXOs have synced membership proofs
-        *self.all_mps_synced.write().unwrap() = valid_membership_proofs_and_own_utxo_count.len()
-            as u64
-            == wallet_db_lock.monitored_utxos.len();
-
         Ok(())
     }
 
     pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
         let db_sync_digest = self.wallet_db.lock().await.get_sync_label();
-        *self.all_mps_synced.read().unwrap() && db_sync_digest == tip_hash
+        if db_sync_digest != tip_hash {
+            return false;
+        }
+        let wallet_db_lock = self.wallet_db.lock().await;
+        let monitored_utxos = &wallet_db_lock.monitored_utxos;
+        for i in 0..monitored_utxos.len() {
+            let monitored_utxo = monitored_utxos.get(i);
+            let has_current_mp = monitored_utxo
+                .blockhash_to_membership_proof
+                .iter()
+                .any(|(bh, _mp)| *bh == tip_hash);
+            // We assume that the membership proof can only be stored
+            // if it is valid for the given block hash, so there is
+            // no need to test that here.
+            if !has_current_mp {
+                return false;
+            }
+        }
+        true
     }
 
     pub async fn get_balance(&self) -> Amount {

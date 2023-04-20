@@ -92,6 +92,71 @@ impl ArchivalState {
 
         Ok(archival_set)
     }
+
+    /// Find the path connecting two blocks. Every path involves
+    /// going down some number of steps and then going up some number
+    /// of steps. So this function returns two lists, the list of
+    /// down steps and the list of up steps. (Note the deliberate
+    /// omission of the Oxford comma.)
+    pub async fn find_path(
+        &self,
+        start: &Digest,
+        stop: &Digest,
+    ) -> (Vec<Digest>, Digest, Vec<Digest>) {
+        // We build two lists, initially populated with the start
+        // and stop of the walk. We extend the lists downwards by
+        // appending predecessors.
+        let mut leaving = vec![*start];
+        let mut arriving = vec![*stop];
+
+        let mut leaving_deepest_block_header = self
+            .get_block_header(*leaving.last().unwrap())
+            .await
+            .unwrap();
+        let mut arriving_deepest_block_header = self
+            .get_block_header(*arriving.last().unwrap())
+            .await
+            .unwrap();
+        // let mut db_lock = self.block_index_db.lock().await;
+        while leaving_deepest_block_header.height != arriving_deepest_block_header.height {
+            if leaving_deepest_block_header.height < arriving_deepest_block_header.height {
+                arriving.push(arriving_deepest_block_header.prev_block_digest);
+                arriving_deepest_block_header = self
+                    .get_block_header(arriving_deepest_block_header.prev_block_digest)
+                    .await
+                    .unwrap();
+            } else {
+                leaving.push(leaving_deepest_block_header.prev_block_digest);
+                leaving_deepest_block_header = self
+                    .get_block_header(leaving_deepest_block_header.prev_block_digest)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        // Extend both lists until their deepest blocks match.
+        while leaving.last().unwrap() != arriving.last().unwrap() {
+            let leaving_predecessor = self
+                .get_block_header(*leaving.last().unwrap())
+                .await
+                .unwrap()
+                .prev_block_digest;
+            leaving.push(leaving_predecessor);
+            let arriving_predecessor = self
+                .get_block_header(*arriving.last().unwrap())
+                .await
+                .unwrap()
+                .prev_block_digest;
+            arriving.push(arriving_predecessor);
+        }
+
+        // reformat
+        let luca = leaving.pop().unwrap();
+        arriving.pop();
+        arriving.reverse();
+
+        (leaving, luca, arriving)
+    }
 }
 
 // FIXME: The `Debug` for `ArchivalState` does not contain `archival_mutator_set` or `ms_block_sync_db`. Is this intentional?
@@ -127,8 +192,8 @@ impl ArchivalState {
                 .count_leaves()
                 .is_zero();
             if ams_is_empty {
-                for mut addition_record in genesis_block.body.mutator_set_update.additions.clone() {
-                    synced_rldb_ams_lock.ams.add(&mut addition_record);
+                for addition_record in genesis_block.body.mutator_set_update.additions.clone() {
+                    synced_rldb_ams_lock.ams.add(&addition_record);
                 }
                 synced_rldb_ams_lock.set_sync_label(genesis_block.hash);
                 synced_rldb_ams_lock.persist();
@@ -623,19 +688,9 @@ impl ArchivalState {
             }
 
             // Roll back all removal records contained in block
-            // This is done by reading out the indices from the block.
-            let block_diff_indices = roll_back_block
-                .body
-                .mutator_set_update
-                .removals
-                .iter()
-                .flat_map(|rr| rr.absolute_indices.to_array())
-                .collect();
-            debug!(
-                "block_diff_indices being rolled back = {:?}",
-                block_diff_indices
-            );
-            ams_lock.ams.revert_remove(block_diff_indices);
+            for removal_record in roll_back_block.body.mutator_set_update.removals.iter() {
+                ams_lock.ams.revert_remove(removal_record);
+            }
 
             ms_block_rollback_digest = roll_back_block.header.prev_block_digest;
         }
@@ -649,7 +704,7 @@ impl ArchivalState {
             removal_records.iter_mut().collect::<Vec<_>>();
 
         // Add items, thus adding the output UTXOs to the mutator set
-        while let Some(mut addition_record) = addition_records.pop() {
+        while let Some(addition_record) = addition_records.pop() {
             // Batch-update all removal records to keep them valid after next addition
             RemovalRecord::batch_update_from_addition(
                 &mut removal_records,
@@ -657,7 +712,7 @@ impl ArchivalState {
             ).expect("MS removal record update from add must succeed in update_mutator_set as block should already be verified");
 
             // Add the element to the mutator set
-            ams_lock.ams.add(&mut addition_record);
+            ams_lock.ams.add(&addition_record);
         }
 
         // Remove items, thus removing the input UTXOs from the mutator set

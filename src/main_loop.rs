@@ -970,7 +970,7 @@ impl MainLoopHandler {
         // request blocks from peers
         todo!("We don't yet support non-archival nodes");
 
-        Ok(())
+        // Ok(())
     }
 
     async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
