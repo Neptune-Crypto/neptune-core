@@ -466,12 +466,11 @@ impl WalletState {
         for i in 0..monitored_utxos.len() {
             let monitored_utxo = monitored_utxos.get(i);
             let has_current_mp = monitored_utxo
-                .blockhash_to_membership_proof
-                .iter()
-                .any(|(bh, _mp)| *bh == tip_hash);
+                .get_membership_proof_for_block(&tip_hash)
+                .is_some();
             // We assume that the membership proof can only be stored
             // if it is valid for the given block hash, so there is
-            // no need to test that here.
+            // no need to test validity here.
             if !has_current_mp {
                 return false;
             }
