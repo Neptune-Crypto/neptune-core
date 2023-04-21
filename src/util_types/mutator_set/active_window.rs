@@ -125,7 +125,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
             index
         );
 
-        // locate
+        // locate last match
         let mut found = false;
         let mut drop_index_index = 0;
         for (index_index, index_value) in self.sbf.iter().enumerate() {
@@ -135,7 +135,7 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
             }
         }
 
-        // if found, drop
+        // if found, drop last match
         if found {
             self.sbf.remove(drop_index_index);
         }
@@ -197,6 +197,25 @@ mod active_window_tests {
                 _hasher: PhantomData,
             }
         }
+    }
+
+    #[test]
+    fn aw_is_reversible_bloom_filter() {
+        let sbf = Vec::<u32>::new();
+        let mut aw = ActiveWindow::<blake3::Hasher>::new_from(sbf);
+
+        // Insert an index twice, remove it once and the verify that
+        // it is still there
+        let index = 7;
+        assert!(!aw.contains(index));
+        aw.insert(index);
+        assert!(aw.contains(index));
+        aw.insert(index);
+        assert!(aw.contains(index));
+        aw.remove(index);
+        assert!(aw.contains(index));
+        aw.remove(index);
+        assert!(!aw.contains(index));
     }
 
     #[test]

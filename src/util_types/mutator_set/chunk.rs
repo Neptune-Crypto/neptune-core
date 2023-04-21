@@ -77,6 +77,7 @@ impl Chunk {
 
     pub fn subtract(&mut self, other: Self) {
         for remove_index in other.relative_indices {
+            // Find the 1st match and remove that
             match self
                 .relative_indices
                 .iter()

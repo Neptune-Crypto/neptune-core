@@ -360,7 +360,8 @@ where
 #[cfg(test)]
 mod archival_mutator_set_tests {
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
@@ -478,6 +479,173 @@ mod archival_mutator_set_tests {
                 "Commitment to MutatorSet from before adding should be valid after reverting adding"
             );
         }
+    }
+
+    #[test]
+    fn bloom_filter_is_reversible() {
+        type H = Tip5;
+
+        // With the `3086841408u32` seed a collission is generated at i = 1 and i = 38, on index 510714
+        let seed_integer = 3086841408u32;
+        let seed = seed_integer.to_be_bytes();
+        let mut seed_as_bytes = [0u8; 32];
+        for i in 0..32 {
+            seed_as_bytes[i] = seed[i % 4];
+        }
+
+        let mut seeded_rng = StdRng::from_seed(seed_as_bytes);
+
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
+
+        // Also keep track of a mutator set accumulator to verify that this uses an invertible Bloom filter
+        let mut msa = MutatorSetAccumulator::<H>::default();
+
+        let mut items = vec![];
+        let mut mps = vec![];
+        let mut saw_collission_at = None;
+        let mut all_indices: HashMap<u128, usize> = HashMap::default();
+        let added_items = 50;
+        for current_item in 0..added_items {
+            let (item, addition_record, membership_proof) =
+                prepare_seeded_prng_addition(&mut archival_mutator_set, &mut seeded_rng);
+
+            // Update all MPs
+            MsMembershipProof::batch_update_from_addition(
+                &mut mps.iter_mut().collect_vec(),
+                &items.iter().cloned().collect_vec(),
+                &archival_mutator_set.accumulator().kernel,
+                &addition_record,
+            )
+            .unwrap();
+
+            items.push(item.clone());
+            mps.push(membership_proof.clone());
+
+            archival_mutator_set.add(&addition_record);
+            msa.add(&addition_record);
+
+            for index in membership_proof.cached_indices.unwrap().to_vec() {
+                let seen_before = all_indices.insert(index, current_item);
+                if let Some(colliding_item) = seen_before {
+                    saw_collission_at = Some(((colliding_item, current_item), index))
+                }
+            }
+        }
+
+        let saw_collission_at = if let Some(collission) = saw_collission_at {
+            collission
+        } else {
+            panic!("Collission must be generated with seeded RNG");
+        };
+
+        println!("collission: {saw_collission_at:?}");
+
+        // Verify that the MPs with colliding indices are still valid
+        assert!(
+            archival_mutator_set.verify(
+                &items[saw_collission_at.0 .0],
+                &mps[saw_collission_at.0 .0].clone()
+            ),
+            "First colliding MS MP must be valid"
+        );
+        assert!(
+            archival_mutator_set.verify(
+                &items[saw_collission_at.0 .1],
+                &mps[saw_collission_at.0 .1].clone()
+            ),
+            "Second colliding MS MP must be valid"
+        );
+
+        // Remove 1st colliding element
+        assert!(
+            !archival_mutator_set.bloom_filter_contains(saw_collission_at.1),
+            "Bloom filter must be empty when no removal records have been applied"
+        );
+        let digest_before_removal = archival_mutator_set.hash();
+        let rem0 =
+            archival_mutator_set.drop(&items[saw_collission_at.0 .0], &mps[saw_collission_at.0 .0]);
+        archival_mutator_set.remove(&rem0);
+        msa.remove(&rem0);
+        assert!(
+            archival_mutator_set.bloom_filter_contains(saw_collission_at.1),
+            "Bloom filter must have collission bit set after 1st removal"
+        );
+
+        // Update all MPs
+        MsMembershipProof::batch_update_from_remove(&mut mps.iter_mut().collect_vec(), &rem0)
+            .unwrap();
+        assert!(
+            !archival_mutator_set.verify(
+                &items[saw_collission_at.0 .0],
+                &mps[saw_collission_at.0 .0].clone()
+            ),
+            "First colliding MS MP must be invalid after removal"
+        );
+
+        // Remove 2nd colliding element
+        let rem1 =
+            archival_mutator_set.drop(&items[saw_collission_at.0 .1], &mps[saw_collission_at.0 .1]);
+        archival_mutator_set.remove(&rem1);
+        msa.remove(&rem1);
+        assert!(
+            archival_mutator_set.bloom_filter_contains(saw_collission_at.1),
+            "Bloom filter must have collission bit set after 2nd removal"
+        );
+
+        // Update all MPs
+        MsMembershipProof::batch_update_from_remove(&mut mps.iter_mut().collect_vec(), &rem1)
+            .unwrap();
+        assert!(
+            !archival_mutator_set.verify(
+                &items[saw_collission_at.0 .1],
+                &mps[saw_collission_at.0 .1].clone()
+            ),
+            "Second colliding MS MP must be invalid after removal"
+        );
+
+        // Verify that AMS and MSA agree now that we know we have an index in the Bloom filter
+        // that was set twice
+        assert_eq!(archival_mutator_set.hash(), msa.hash(), "Archival MS and MS accumulator must agree also with collissions in the Bloom filter indices");
+
+        // Reverse 1st removal
+        archival_mutator_set.revert_remove(&rem0);
+        assert!(
+            archival_mutator_set.bloom_filter_contains(saw_collission_at.1),
+            "Bloom filter must have collission bit set after 1st removal revert"
+        );
+
+        // Update all MPs
+        for (i, (mp, itm)) in mps.iter_mut().zip_eq(items.iter()).enumerate() {
+            mp.revert_update_from_remove(&rem0).unwrap();
+            assert!(
+                i == saw_collission_at.0 .1 || archival_mutator_set.verify(itm, mp),
+                "MS MP must be valid after reversing a removal update"
+            );
+        }
+
+        // Reverse 2nd removal
+        archival_mutator_set.revert_remove(&rem1);
+        assert!(
+            !archival_mutator_set.bloom_filter_contains(saw_collission_at.1),
+            "Bloom filter must not have collission bit set after 2nd removal revert"
+        );
+
+        // Update all MPs
+        for (mp, itm) in mps.iter_mut().zip_eq(items.iter()) {
+            mp.revert_update_from_remove(&rem0).unwrap();
+            assert!(
+                archival_mutator_set.verify(itm, mp),
+                "MS MP must be valid after reversing a removal update"
+            );
+        }
+
+        assert_eq!(digest_before_removal, archival_mutator_set.hash(), "Digest of archival MS must agree before removals and after reversion of those removals");
+        assert_eq!(
+            added_items,
+            mps.len(),
+            "number of membership proofs must be as expected"
+        );
     }
 
     #[should_panic(expected = "Decremented integer is already zero.")]
@@ -682,6 +850,22 @@ mod archival_mutator_set_tests {
             // Verify that mutator set before and after removal are the same
             assert_eq!(commitment_prior_to_removal, archival_mutator_set.hash(), "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");
         }
+    }
+
+    fn prepare_seeded_prng_addition<
+        H: AlgebraicHasher,
+        MmrStorage: StorageVec<Digest>,
+        ChunkStorage: StorageVec<Chunk>,
+    >(
+        archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
+        rng: &mut StdRng,
+    ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
+        let item: Digest = rng.gen();
+        let randomness: Digest = rng.gen();
+        let addition_record = archival_mutator_set.kernel.commit(&item, &randomness);
+        let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
+
+        (item, addition_record, membership_proof)
     }
 
     fn prepare_random_addition<

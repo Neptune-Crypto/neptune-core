@@ -98,6 +98,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         self.cached_indices = Some(AbsoluteIndexSet::new(&indices));
     }
 
+    /// Update a list of membership proofs in anticipation of an addition
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
         own_items: &[Digest],
