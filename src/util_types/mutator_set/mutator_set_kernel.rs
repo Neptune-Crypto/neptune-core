@@ -66,18 +66,14 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
     /// ness. The addition record is itself a commitment to the item,
     /// but tailored to adding the item to the mutator set in its
     /// current state.
-    pub fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord {
+    pub fn commit(&self, item: &Digest, randomness: &Digest) -> AdditionRecord {
         let canonical_commitment = H::hash_pair(item, randomness);
 
         AdditionRecord::new(canonical_commitment)
     }
 
     /// Generates a removal record with which to update the set commitment.
-    pub fn drop(
-        &mut self,
-        item: &Digest,
-        membership_proof: &MsMembershipProof<H>,
-    ) -> RemovalRecord<H> {
+    pub fn drop(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         let indices: AbsoluteIndexSet =
             membership_proof.cached_indices.clone().unwrap_or_else(|| {
                 let leaf_index = membership_proof.auth_path_aocl.leaf_index;
@@ -212,7 +208,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
      * is added to the mutator set.
      */
     pub fn prove(
-        &mut self,
+        &self,
         item: &Digest,
         randomness: &Digest,
         cache_indices: bool,

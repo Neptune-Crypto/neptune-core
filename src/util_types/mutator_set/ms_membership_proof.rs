@@ -566,7 +566,7 @@ mod ms_proof_tests {
     fn mp_cache_indices_test() {
         type H = Tip5;
 
-        let mut accumulator = MutatorSetAccumulator::<H>::default();
+        let accumulator = MutatorSetAccumulator::<H>::default();
         let (item, randomness) = make_item_and_randomness();
         let mut mp = accumulator.kernel.prove(&item, &randomness, false);
 
@@ -657,7 +657,7 @@ mod ms_proof_tests {
         // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
         // in this code base as a macro. So this is basically a test of that macro.
         type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         for _ in 0..10 {
             let (item, randomness) = make_item_and_randomness();
 
