@@ -9,7 +9,6 @@ use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::storage_vec::StorageVec;
 
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -313,33 +312,17 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_history(self, _context: tarpc::context::Context) -> Self::GetHistoryFut {
-        // lock db to get all monitored utxos
-        let mut history: Vec<(Duration, Amount, Sign)> = vec![];
-        {
-            let wallet_db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
-            let num_monitored_utxos = wallet_db_lock.monitored_utxos.len();
-            for i in 0..num_monitored_utxos {
-                let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
-                if let Some((_confirmed_block_hash, confirmed_timestamp)) =
-                    monitored_utxo.confirmed_in_block
-                {
-                    history.push((
-                        confirmed_timestamp,
-                        monitored_utxo.utxo.amount,
-                        Sign::NonNegative,
-                    ));
-                }
-                if let Some((_spent_block_hash, spent_timestamp)) = monitored_utxo.spent_in_block {
-                    history.push((spent_timestamp, monitored_utxo.utxo.amount, Sign::Negative));
-                }
-            }
-        } // release lock
+        let history = executor::block_on(self.state.wallet_state.get_balance_history());
 
         // sort
-        history.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut display_history: Vec<(Duration, Amount, Sign)> = history
+            .iter()
+            .map(|(_h, t, a, s)| (*t, *a, *s))
+            .collect::<Vec<_>>();
+        display_history.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
         // return
-        future::ready(history)
+        future::ready(display_history)
     }
 }
 

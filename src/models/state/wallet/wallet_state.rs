@@ -26,6 +26,7 @@ use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::WalletSecret;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
+use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -607,6 +608,31 @@ impl WalletState {
     ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
         let mut lock = self.wallet_db.lock().await;
         self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, block)
+    }
+
+    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, Amount, Sign)> {
+        let db_lock = self.wallet_db.lock().await;
+        let monitored_utxos = db_lock.monitored_utxos.clone();
+        let num_monitored_utxos = monitored_utxos.len();
+        let mut history = vec![];
+        for i in 0..num_monitored_utxos {
+            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
+            if let Some((confirming_block, confirmation_timestamp)) =
+                monitored_utxo.confirmed_in_block
+            {
+                let amount = monitored_utxo.utxo.amount;
+                history.push((
+                    confirming_block,
+                    confirmation_timestamp,
+                    amount,
+                    Sign::NonNegative,
+                ));
+                if let Some((spending_block, spending_timestamp)) = monitored_utxo.spent_in_block {
+                    history.push((spending_block, spending_timestamp, amount, Sign::Negative));
+                }
+            }
+        }
+        history
     }
 }
 

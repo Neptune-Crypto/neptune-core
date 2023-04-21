@@ -2,13 +2,18 @@ use std::{
     cell::RefCell,
     cmp::{max, min},
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, UNIX_EPOCH},
 };
 
 use super::{dashboard_app::DashboardEvent, screen::Screen};
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
-use neptune_core::{models::blockchain::transaction::amount::Amount, rpc_server::RPCClient};
+use neptune_core::{
+    models::blockchain::transaction::amount::{Amount, Sign},
+    rpc_server::RPCClient,
+};
+use num_traits::{CheckedSub, Zero};
+use tarpc::context;
 use tokio::time::sleep;
 use tokio::{select, task::JoinHandle};
 use tui::{
@@ -18,13 +23,7 @@ use tui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Sign {
-    In,
-    Out,
-}
-
-type BalanceUpdate = (SystemTime, Amount, Sign, Amount);
+type BalanceUpdate = (Duration, Amount, Sign, Amount);
 
 #[derive(Debug, Clone)]
 pub struct HistoryScreen {
@@ -53,7 +52,7 @@ impl HistoryScreen {
     }
 
     async fn run_polling_loop(
-        _rpc_client: Arc<RPCClient>,
+        rpc_client: Arc<RPCClient>,
         balance_updates: Arc<std::sync::Mutex<Vec<BalanceUpdate>>>,
         _escalatable_event_arc: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     ) -> ! {
@@ -76,13 +75,22 @@ impl HistoryScreen {
         loop {
             select! {
                 _ = &mut balance_history => {
-                    // let bh = rpc_client.get_balance_history(context::current()).await.unwrap();
-                    // placeholder until the above RPC call is implemented
-                    let bh = vec![
-                    (UNIX_EPOCH, Amount::from(2500), Sign::In, Amount::from(2500)),
-                    (UNIX_EPOCH+Duration::from_secs(60*60*24*365*20), Amount::from(1500), Sign::Out, Amount::from(1000)),
-                    (UNIX_EPOCH+Duration::from_secs(60*60*24*365*25), Amount::from(500), Sign::Out, Amount::from(500)),];
-                    *balance_updates.lock().unwrap() = bh;
+                    let bh = rpc_client.get_history(context::current()).await.unwrap();
+                    let mut history_builder = Vec::with_capacity(bh.len());
+                    let mut balance = Amount::zero();
+                    for (timestamp, amount, sign) in bh.iter() {
+                        match sign {
+                            Sign::NonNegative => { balance = balance + *amount; }
+                            Sign::Negative => {
+                                    balance = match balance.checked_sub(amount) {
+                                    Some(b) => b,
+                                    None => Amount::zero(),
+                                };
+                            }
+                        }
+                        history_builder.push((*timestamp, *amount, *sign, balance));
+                    }
+                    *balance_updates.lock().unwrap() = history_builder;
                     reset_poller!(balance_history, Duration::from_secs(10));
                 }
             }
@@ -158,8 +166,8 @@ impl Widget for HistoryScreen {
             .rev()
             .map(|bu| {
                 vec![
-                    DateTime::<Utc>::from(bu.0).to_string(),
-                    if bu.2 == Sign::In {
+                    DateTime::<Utc>::from(UNIX_EPOCH + bu.0).to_string(),
+                    if bu.2 == Sign::NonNegative {
                         "↘".to_string()
                     } else {
                         "↗".to_string()
