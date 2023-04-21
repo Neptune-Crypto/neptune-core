@@ -1,10 +1,6 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 
 use rusty_leveldb::{WriteBatch, DB};
-use serde::{Deserialize, Serialize};
 use twenty_first::{
     shared_math::tip5::Digest,
     util_types::storage_schema::{
@@ -13,34 +9,7 @@ use twenty_first::{
     },
 };
 
-use crate::models::blockchain::transaction::amount::{Amount, Sign};
-
 use super::monitored_utxo::MonitoredUtxo;
-
-#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
-pub struct BalanceUpdate {
-    pub block: Digest,
-
-    // use only for display
-    pub timestamp: Duration,
-
-    pub amount: Amount,
-
-    pub sign: Sign,
-}
-
-impl From<RustyValue> for BalanceUpdate {
-    fn from(value: RustyValue) -> Self {
-        bincode::deserialize(&value.0)
-            .expect("Could not deserialize balance update from database; database seems corrupted.")
-    }
-}
-
-impl From<BalanceUpdate> for RustyValue {
-    fn from(value: BalanceUpdate) -> Self {
-        RustyValue(bincode::serialize(&value).expect("Totally nonsensical for serialize to return Result type because it cannot fail, but that is how the interface has been defined."))
-    }
-}
 
 pub struct RustyWalletDatabase {
     // pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
@@ -50,8 +19,6 @@ pub struct RustyWalletDatabase {
 
     // active_window_storage: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
     pub monitored_utxos: Arc<Mutex<DbtVec<RustyKey, RustyValue, u64, MonitoredUtxo>>>,
-
-    pub balance_updates: Arc<Mutex<DbtVec<RustyKey, RustyValue, u64, BalanceUpdate>>>,
 
     // records which block the database is synced to
     sync_label: Arc<Mutex<DbtSingleton<RustyKey, RustyValue, Digest>>>,
@@ -73,7 +40,6 @@ impl RustyWalletDatabase {
         };
 
         let monitored_utxos_storage = schema.new_vec::<u64, MonitoredUtxo>("monitored_utxos");
-        let balance_updates_storage = schema.new_vec::<u64, BalanceUpdate>("balance_updates");
         let sync_label_storage = schema.new_singleton::<Digest>(RustyKey("sync_label".into()));
         let counter_storage = schema.new_singleton::<u64>(RustyKey("counter".into()));
 
@@ -81,7 +47,6 @@ impl RustyWalletDatabase {
             schema,
             db: db_pointer,
             monitored_utxos: monitored_utxos_storage,
-            balance_updates: balance_updates_storage,
             sync_label: sync_label_storage,
             counter: counter_storage,
         }

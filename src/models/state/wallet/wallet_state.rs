@@ -26,11 +26,9 @@ use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::WalletSecret;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::rusty_wallet_database::BalanceUpdate;
 use crate::Hash;
 
 /// A wallet indexes its input and output UTXOs after blockhashes
@@ -144,27 +142,6 @@ impl WalletState {
             && wallet_db_lock.monitored_utxos.is_empty()
         {
             return Ok(());
-        }
-
-        println!("continuing in update_wallet_state_with_new_block...");
-        println!("own output utxos: {:?}", output_utxos_commitment_randomness);
-        let block_timestamp = Duration::from_millis(block.header.timestamp.value());
-        for input_utxo in own_input_utxos.iter() {
-            wallet_db_lock.balance_updates.push(BalanceUpdate {
-                block: block.hash,
-                timestamp: block_timestamp,
-                amount: input_utxo.amount,
-                sign: Sign::NonNegative,
-            });
-        }
-
-        for (utxo, _ms_randomness) in output_utxos_commitment_randomness.iter() {
-            wallet_db_lock.balance_updates.push(BalanceUpdate {
-                block: block.hash,
-                timestamp: block_timestamp,
-                amount: utxo.amount,
-                sign: Sign::Negative,
-            });
         }
 
         // Find the membership proofs that were valid at the previous tip, as these all have
