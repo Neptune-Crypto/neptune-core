@@ -205,7 +205,7 @@ impl WalletState {
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
-        for (mut addition_record, (utxo, commitment_randomness)) in block
+        for (addition_record, (utxo, commitment_randomness)) in block
             .body
             .mutator_set_update
             .additions
@@ -225,7 +225,7 @@ impl WalletState {
                             .map(|(mp, _index)| mp)
                             .collect_vec(),
                         &utxo_digests,
-                        &mut msa_state.set_commitment,
+                        &msa_state.kernel,
                         &addition_record,
                     );
                 match res {
@@ -237,11 +237,8 @@ impl WalletState {
             }
 
             // Batch update removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(
-                &mut removal_records,
-                &mut msa_state.set_commitment,
-            )
-            .expect("MS removal record update from add must succeed in wallet handler");
+            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel)
+                .expect("MS removal record update from add must succeed in wallet handler");
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
@@ -278,7 +275,7 @@ impl WalletState {
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
-            msa_state.add(&mut addition_record);
+            msa_state.add(&addition_record);
         }
 
         // sanity checks
@@ -432,20 +429,20 @@ impl WalletState {
                 aocl_index: _,
             },
             (updated_ms_mp, own_utxo_index),
-        ) in valid_membership_proofs_and_own_utxo_count
+        ) in valid_membership_proofs_and_own_utxo_count.iter()
         {
-            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(own_utxo_index);
+            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(*own_utxo_index);
             monitored_utxo.add_membership_proof_for_tip(block.hash, updated_ms_mp.to_owned());
 
             // Sanity check that membership proofs of non-spent transactions are still valid
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || msa_state.verify(&utxo_digest, &updated_ms_mp)
+                    || msa_state.verify(utxo_digest, updated_ms_mp)
             );
 
             wallet_db_lock
                 .monitored_utxos
-                .set(own_utxo_index, monitored_utxo);
+                .set(*own_utxo_index, monitored_utxo);
 
             // TODO: What if a newly added transaction replaces a transaction that was in another fork?
             // How do we ensure that this transaction is not counted twice?
@@ -457,6 +454,28 @@ impl WalletState {
         wallet_db_lock.persist();
 
         Ok(())
+    }
+
+    pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
+        let db_sync_digest = self.wallet_db.lock().await.get_sync_label();
+        if db_sync_digest != tip_hash {
+            return false;
+        }
+        let wallet_db_lock = self.wallet_db.lock().await;
+        let monitored_utxos = &wallet_db_lock.monitored_utxos;
+        for i in 0..monitored_utxos.len() {
+            let monitored_utxo = monitored_utxos.get(i);
+            let has_current_mp = monitored_utxo
+                .get_membership_proof_for_block(&tip_hash)
+                .is_some();
+            // We assume that the membership proof can only be stored
+            // if it is valid for the given block hash, so there is
+            // no need to test validity here.
+            if !has_current_mp {
+                return false;
+            }
+        }
+        true
     }
 
     pub async fn get_balance(&self) -> Amount {

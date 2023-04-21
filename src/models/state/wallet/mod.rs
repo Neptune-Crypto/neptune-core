@@ -332,7 +332,7 @@ mod wallet_tests {
         );
 
         let genesis_block = Block::genesis_block();
-        let mut block_1 = make_mock_block(&genesis_block, None, wallet.get_public_key());
+        let block_1 = make_mock_block(&genesis_block, None, wallet.get_public_key());
         wallet_state.update_wallet_state_with_new_block(
             &block_1,
             &mut wallet_state.wallet_db.lock().await,
@@ -361,7 +361,7 @@ mod wallet_tests {
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
         let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
-        let mut block_3 = make_mock_block(&block_2, None, other_wallet.get_public_key());
+        let block_3 = make_mock_block(&block_2, None, other_wallet.get_public_key());
         monitored_utxos = get_monitored_utxos(&wallet_state).await;
         {
             let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
@@ -699,7 +699,7 @@ mod wallet_tests {
             )?;
         }
 
-        let mut block_18 = next_block;
+        let block_18 = next_block;
         monitored_utxos = get_monitored_utxos(&non_premine_wallet_state).await;
         assert_eq!(
             4 + 17,
@@ -751,7 +751,7 @@ mod wallet_tests {
         );
 
         // verify that membership proofs are valid after forks
-        let mut block_2_b =
+        let block_2_b =
             make_mock_block(&block_1, Some(100.into()), premine_wallet.get_public_key());
         non_premine_wallet_state.update_wallet_state_with_new_block(
             &block_2_b,
@@ -783,7 +783,7 @@ mod wallet_tests {
 
         // Fork back again to the long chain and verify that the membership proofs
         // all work again
-        let mut block_19 =
+        let block_19 =
             make_mock_block(&block_18, Some(100.into()), premine_wallet.get_public_key());
         non_premine_wallet_state.update_wallet_state_with_new_block(
             &block_19,

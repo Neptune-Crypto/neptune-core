@@ -52,17 +52,17 @@ impl MutatorSetUpdate {
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
-        while let Some(mut addition_record) = addition_records.pop() {
+        while let Some(addition_record) = addition_records.pop() {
             let update_res = RemovalRecord::batch_update_from_addition(
                 &mut removal_records,
-                &mut ms_accumulator.set_commitment,
+                &mut ms_accumulator.kernel,
             );
 
             if update_res.is_err() {
                 bail!("Failed to update removal records with addition record");
             }
 
-            ms_accumulator.add(&mut addition_record);
+            ms_accumulator.add(&addition_record);
         }
 
         while let Some(removal_record) = removal_records.pop() {

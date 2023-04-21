@@ -155,12 +155,12 @@ impl Transaction {
             block_removal_records.iter_mut().collect::<Vec<_>>();
 
         // Apply all addition records in the block
-        for mut block_addition_record in block_addition_records {
+        for block_addition_record in block_addition_records {
             // Update all transaction's membership proofs with addition records from block
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut transaction_membership_proofs,
                 &transaction_items,
-                &mut msa_state.set_commitment,
+                &msa_state.kernel,
                 &block_addition_record,
             );
             if let Err(err) = res {
@@ -171,18 +171,18 @@ impl Transaction {
             // Batch update block's removal records to keep them valid after next addition
             RemovalRecord::batch_update_from_addition(
                 &mut block_removal_records,
-                &mut msa_state.set_commitment,
+                &mut msa_state.kernel,
             )
             .expect("MS removal record update from add must succeed in wallet handler");
 
             // Batch update transaction's removal records
             RemovalRecord::batch_update_from_addition(
                 &mut transaction_removal_records,
-                &mut msa_state.set_commitment,
+                &mut msa_state.kernel,
             )
             .expect("MS removal record update from add must succeed in wallet handler");
 
-            msa_state.add(&mut block_addition_record);
+            msa_state.add(&block_addition_record);
         }
 
         while let Some(removal_record) = block_removal_records.pop() {

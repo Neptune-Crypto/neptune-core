@@ -652,13 +652,13 @@ pub fn make_mock_block(
     let previous_ms = new_ms.clone();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
-    let mut coinbase_addition_record: AdditionRecord =
+    let coinbase_addition_record: AdditionRecord =
         new_ms.commit(&coinbase_digest, &output_randomness);
     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
         removals: vec![],
         additions: vec![coinbase_addition_record.clone()],
     };
-    new_ms.add(&mut coinbase_addition_record);
+    new_ms.add(&coinbase_addition_record);
 
     let block_body: BlockBody = BlockBody {
         transaction,
