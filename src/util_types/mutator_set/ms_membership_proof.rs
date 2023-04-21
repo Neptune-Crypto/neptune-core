@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
+use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -12,10 +13,14 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
 use super::chunk_dictionary::ChunkDictionary;
+use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel};
 use super::removal_record::AbsoluteIndexSet;
 use super::removal_record::RemovalRecord;
-use super::shared::{get_batch_mutation_argument_for_removal_record, BATCH_SIZE, CHUNK_SIZE};
+use super::shared::{
+    get_batch_mutation_argument_for_removal_record,
+    prepare_authenticated_batch_modification_for_removal_record_reversion, BATCH_SIZE, CHUNK_SIZE,
+};
 use super::transfer_ms_membership_proof::TransferMsMembershipProof;
 
 impl Error for MembershipProofError {}
@@ -31,6 +36,7 @@ pub enum MembershipProofError {
     AlreadyExistingChunk(u64),
     MissingChunkOnUpdateFromAdd(u64),
     MissingChunkOnUpdateFromRemove(u64),
+    MissingChunkOnRevertUpdateFromAdd(u64),
 }
 
 // In order to store this structure in the database, it needs to be serializable. But it should not be
@@ -95,7 +101,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
         own_items: &[Digest],
-        mutator_set: &mut MutatorSetKernel<H, MMR>,
+        mutator_set: &MutatorSetKernel<H, MMR>,
         addition_record: &AdditionRecord,
     ) -> Result<Vec<usize>, Box<dyn Error>> {
         assert!(
@@ -267,29 +273,29 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
      * update_from_addition
      * Updates a membership proof in anticipation of an addition to the set.
      */
-    pub fn update_from_addition<MMR: Mmr<H>>(
+    pub fn update_from_addition(
         &mut self,
         own_item: &Digest,
-        mutator_set: &mut MutatorSetKernel<H, MMR>,
+        mutator_set: &MutatorSetAccumulator<H>,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
-        assert!(self.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves());
-        let new_item_index = mutator_set.aocl.count_leaves();
+        assert!(self.auth_path_aocl.leaf_index < mutator_set.kernel.aocl.count_leaves());
+        let new_item_index = mutator_set.kernel.aocl.count_leaves();
 
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
-            mutator_set.aocl.count_leaves(),
+            mutator_set.kernel.aocl.count_leaves(),
             &addition_record.canonical_commitment,
-            &mutator_set.aocl.get_peaks(),
+            &mutator_set.kernel.aocl.get_peaks(),
         );
 
         // if window does not slide, we are done
-        if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
+        if !MutatorSetKernel::<H, MmrAccumulator<H>>::window_slides(new_item_index) {
             return Ok(aocl_mp_updated);
         }
 
         // window does slide
-        let new_chunk = mutator_set.swbf_active.slid_chunk();
+        let new_chunk = mutator_set.kernel.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
 
         // Get indices from either the cached indices, or by recalculating them. Notice
@@ -312,7 +318,7 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
+        let mut mmra: MmrAccumulator<H> = mutator_set.kernel.swbf_inactive.to_accumulator();
         let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
             mmra.append(new_chunk_digest);
 
@@ -335,9 +341,9 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
                     Some((m, _chnk)) => m,
                 };
                 let swbf_chunk_dict_updated_local: bool = mp.update_from_append(
-                    mutator_set.swbf_inactive.count_leaves(),
+                    mutator_set.kernel.swbf_inactive.count_leaves(),
                     &new_chunk_digest,
-                    &mutator_set.swbf_inactive.get_peaks(),
+                    &mutator_set.kernel.swbf_inactive.get_peaks(),
                 );
                 swbf_chunk_dictionary_updated =
                     swbf_chunk_dictionary_updated || swbf_chunk_dict_updated_local;
@@ -368,6 +374,46 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         }
 
         Ok(swbf_chunk_dictionary_updated || aocl_mp_updated)
+    }
+
+    /// Resets a membership proof to its state prior to updating it
+    /// with one or many addition records, given only
+    /// the state of the mutator set kernel prior to adding them.
+    pub fn revert_update_from_batch_addition(
+        &mut self,
+        previous_mutator_set: &MutatorSetAccumulator<H>,
+    ) {
+        // calculate AOCL MMR MP length
+        let previous_leaf_count = previous_mutator_set.kernel.aocl.count_leaves();
+        assert!(
+            previous_leaf_count > self.auth_path_aocl.leaf_index,
+            "Cannot revert a membership proof for an item to back its state before the item was added to the mutator set."
+        );
+        let aocl_discrepancies = self.auth_path_aocl.leaf_index ^ previous_leaf_count;
+        let aocl_mt_height = log_2_floor(aocl_discrepancies as u128);
+
+        // trim to length
+        while self.auth_path_aocl.authentication_path.len() > aocl_mt_height as usize {
+            self.auth_path_aocl.authentication_path.pop();
+        }
+
+        // remove chunks from unslid windows
+        let swbfi_leaf_count = previous_mutator_set.kernel.swbf_inactive.count_leaves();
+        self.target_chunks
+            .dictionary
+            .retain(|k, _v| *k < swbfi_leaf_count);
+
+        // iterate over all retained chunk authentication paths
+        for (k, (mp, _chnk)) in self.target_chunks.dictionary.iter_mut() {
+            // calculate length
+            let chunk_discrepancies = swbfi_leaf_count ^ k;
+            let chunk_mt_height = log_2_floor(chunk_discrepancies as u128);
+
+            // trim to length
+            while mp.authentication_path.len() > chunk_mt_height as usize {
+                mp.authentication_path.pop();
+            }
+        }
     }
 
     /// Update multiple membership proofs from one remove operation. Returns the indices of the membership proofs
@@ -423,6 +469,11 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         &mut self,
         removal_record: &RemovalRecord<H>,
     ) -> Result<bool, Box<dyn Error>> {
+        // Removing items does not slide the active window. We only
+        // need to take into account new indices in the sparse Bloom
+        // filter, and only in the inactive part. Specifically: we
+        // need to update the chunks and their membership proofs.
+
         // Set all chunk values to the new values and calculate the mutation argument
         // for the batch updating of the MMR membership proofs.
         let mut chunk_dictionaries = vec![&mut self.target_chunks];
@@ -451,16 +502,61 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
 
         Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
     }
+
+    /// Resets a membership proof to its state prior to updating it
+    /// with a removal record.
+    pub fn revert_update_from_remove(
+        &mut self,
+        removal_record: &RemovalRecord<H>,
+    ) -> Result<bool, Box<dyn Error>> {
+        // The logic here is essentially the same as in
+        // `update_from_remove` but with the new and old chunks
+        // swapped.
+
+        // Set all chunk values to the old values and prepare
+        // for batch updating of the MMR membership proofs.
+        let mut chunk_dictionaries = vec![&mut self.target_chunks];
+        let (mutated_chunk_dictionary_index, batch_membership) =
+            prepare_authenticated_batch_modification_for_removal_record_reversion(
+                removal_record,
+                &mut chunk_dictionaries,
+            );
+
+        // update MMR membership proofs
+        // Note that *all* MMR membership proofs must be updated. It's not sufficient to update
+        // those whose leaf has changed, since an authentication path changes if *any* leaf
+        // in the same Merkle tree (under the same MMR peak) changes.
+        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<H>> = self
+            .target_chunks
+            .dictionary
+            .iter_mut()
+            .map(|(_, (mmr_mp, _))| mmr_mp)
+            .collect();
+
+        let mutated_mmr_mp_indices: Vec<usize> =
+            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+                &mut chunk_mmr_mps,
+                batch_membership,
+            );
+
+        Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
+    }
 }
 
 #[cfg(test)]
 mod ms_proof_tests {
+
     use super::*;
-    use crate::test_shared::mutator_set::make_item_and_randomness;
+    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
+    use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
+    use itertools::Either;
     use num_traits::Zero;
+    use rand::rngs::StdRng;
+    use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -471,7 +567,7 @@ mod ms_proof_tests {
 
         let mut accumulator = MutatorSetAccumulator::<H>::default();
         let (item, randomness) = make_item_and_randomness();
-        let mut mp = accumulator.set_commitment.prove(&item, &randomness, false);
+        let mut mp = accumulator.kernel.prove(&item, &randomness, false);
 
         // Verify that indices are not cached, then cache them with the helper function
         assert!(mp.cached_indices.is_none());
@@ -480,8 +576,7 @@ mod ms_proof_tests {
 
         // Verify that cached indices are the same as those generated from a new membership proof
         // made with the `cache_indices` argument set to true.
-        let mp_generated_with_cached_indices =
-            accumulator.set_commitment.prove(&item, &randomness, true);
+        let mp_generated_with_cached_indices = accumulator.kernel.prove(&item, &randomness, true);
         assert_eq!(
             mp_generated_with_cached_indices.cached_indices,
             mp.cached_indices
@@ -565,7 +660,7 @@ mod ms_proof_tests {
         for _ in 0..10 {
             let (item, randomness) = make_item_and_randomness();
 
-            let mp_with_cached_indices = accumulator.set_commitment.prove(&item, &randomness, true);
+            let mp_with_cached_indices = accumulator.kernel.prove(&item, &randomness, true);
             assert!(mp_with_cached_indices.cached_indices.is_some());
 
             let json_cached: String = serde_json::to_string(&mp_with_cached_indices).unwrap();
@@ -587,7 +682,7 @@ mod ms_proof_tests {
                 mp_with_cached_indices.target_chunks
             );
 
-            let mp_no_cached_indices = accumulator.set_commitment.prove(&item, &randomness, false);
+            let mp_no_cached_indices = accumulator.kernel.prove(&item, &randomness, false);
             assert!(mp_no_cached_indices.cached_indices.is_none());
 
             let json_no_cached: String = serde_json::to_string(&mp_no_cached_indices).unwrap();
@@ -602,6 +697,550 @@ mod ms_proof_tests {
                 s_back_no_cached.target_chunks,
                 mp_no_cached_indices.target_chunks
             );
+        }
+    }
+
+    #[test]
+    fn revert_update_from_remove_test() {
+        type H = Tip5;
+        let n = 100;
+        let mut rng = thread_rng();
+
+        let own_index = rng.next_u32() as usize % n;
+        let mut own_membership_proof = None;
+        let mut own_item = None;
+
+        // set up mutator set
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams();
+        let mut membership_proofs: Vec<(Digest, MsMembershipProof<Tip5>)> = vec![];
+
+        // add items
+        for i in 0..n {
+            let item: Digest = random();
+            let randomness: Digest = random();
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
+
+            for (oi, mp) in membership_proofs.iter_mut() {
+                mp.update_from_addition(oi, &archival_mutator_set.accumulator(), &addition_record)
+                    .expect("Could not update membership proof from addition.");
+            }
+
+            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+            if i == own_index {
+                own_membership_proof = Some(membership_proof);
+                own_item = Some(item);
+            } else {
+                membership_proofs.push((item, membership_proof));
+                if i > own_index {
+                    own_membership_proof
+                        .as_mut()
+                        .unwrap()
+                        .update_from_addition(
+                            own_item.as_ref().unwrap(),
+                            &archival_mutator_set.accumulator(),
+                            &addition_record,
+                        )
+                        .expect("Could not update membership proof from addition record.");
+                }
+            }
+
+            archival_mutator_set.add(&addition_record);
+        }
+        println!("Added {n} items.");
+
+        // assert that own mp is valid
+        assert!(
+            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+        );
+
+        // Assert that all other mps are valid
+        for (itm, mp) in membership_proofs.iter() {
+            assert!(archival_mutator_set.verify(itm, mp));
+        }
+
+        // generate some removal records
+        let mut removal_records = vec![];
+        for (item, membership_proof) in membership_proofs.into_iter() {
+            if rng.next_u32() % 2 == 1 {
+                let removal_record = archival_mutator_set.drop(&item, &membership_proof);
+                removal_records.push(removal_record);
+            }
+        }
+        let cutoff_point = 1 + (rng.next_u32() as usize % (removal_records.len() - 1));
+        let mut membership_proof_snapshot = None;
+
+        // apply removal records
+        for i in 0..removal_records.len() {
+            let (immutable_records, mutable_records) = removal_records.split_at_mut(i + 1);
+            let applied_removal_record = immutable_records.last().unwrap();
+
+            RemovalRecord::batch_update_from_remove(
+                &mut mutable_records.iter_mut().collect::<Vec<_>>(),
+                applied_removal_record,
+            )
+            .expect("Could not apply removal record.");
+
+            own_membership_proof
+                .as_mut()
+                .unwrap()
+                .update_from_remove(applied_removal_record)
+                .expect("Could not update membership proof from removal record");
+
+            archival_mutator_set.remove(applied_removal_record);
+
+            if i + 1 == cutoff_point {
+                membership_proof_snapshot = Some(own_membership_proof.as_ref().unwrap().clone());
+            }
+        }
+
+        println!("Removed {} items.", removal_records.len());
+
+        // assert valid
+        assert!(
+            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+        );
+
+        // revert some removal records
+        let mut reversions = removal_records[cutoff_point..].to_vec();
+        reversions.reverse();
+        for revert_removal_record in reversions.iter() {
+            own_membership_proof
+                .as_mut()
+                .unwrap()
+                .revert_update_from_remove(revert_removal_record)
+                .expect("Could not revert update from removal record.");
+
+            archival_mutator_set.revert_remove(revert_removal_record);
+
+            // keep other removal records up-to-date?
+            // - nah, we don't need them for anything anymore
+        }
+
+        println!("Reverted {} removals.", reversions.len());
+
+        // assert valid
+        assert!(
+            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+        );
+
+        // assert same as snapshot before application-and-reversion
+        assert_eq!(
+            own_membership_proof.unwrap(),
+            membership_proof_snapshot.unwrap()
+        );
+    }
+
+    #[test]
+    fn revert_update_from_addition_simple_test() {
+        type H = Tip5;
+
+        let mut msa: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
+
+        let mut rng = thread_rng();
+        for _ in 0..10 {
+            let init_size = rng.gen_range(0..200);
+            let first_batch_size = rng.gen_range(0..200);
+            let last_batch_size = rng.gen_range(0..200);
+
+            // Add `init_size` items to MSA
+            for _ in 0..init_size {
+                let item: Digest = random();
+                let randomness: Digest = random();
+                let addition_record = msa.commit(&item, &randomness);
+                msa.add(&addition_record);
+            }
+
+            // Add own item with associated membership proof that we want to keep updated
+            let own_item: Digest = random();
+            let own_randomness: Digest = random();
+            let own_addition_record = msa.commit(&own_item, &own_randomness);
+            let mut own_mp = msa.prove(&own_item, &own_randomness, true);
+            msa.add(&own_addition_record);
+            let msa_after_own_add = msa.clone();
+
+            // Apply 1st batch of additions
+            for _ in 0..first_batch_size {
+                let item: Digest = random();
+                let randomness: Digest = random();
+                let addition_record = msa.commit(&item, &randomness);
+                own_mp
+                    .update_from_addition(&own_item, &msa, &addition_record)
+                    .unwrap();
+                msa.add(&addition_record);
+                assert!(
+                    msa.verify(&own_item, &own_mp),
+                    "Own mp must be valid after update"
+                );
+            }
+
+            let msa_after_first_batch = msa.clone();
+
+            // Apply 2nd batch of additions
+            for _ in 0..last_batch_size {
+                let item: Digest = random();
+                let randomness: Digest = random();
+                let addition_record = msa.commit(&item, &randomness);
+                own_mp
+                    .update_from_addition(&own_item, &msa, &addition_record)
+                    .unwrap();
+                msa.add(&addition_record);
+                assert!(
+                    msa.verify(&own_item, &own_mp),
+                    "Own mp must be valid after update"
+                );
+            }
+
+            // revert last batch
+            own_mp.revert_update_from_batch_addition(&msa_after_first_batch);
+            assert!(msa_after_first_batch.verify(&own_item, &own_mp));
+
+            // revert first batch
+            own_mp.revert_update_from_batch_addition(&msa_after_own_add);
+            assert!(msa_after_own_add.verify(&own_item, &own_mp));
+        }
+    }
+
+    #[test]
+    fn revert_update_from_addition_test() {
+        type H = Tip5;
+        let mut rng = thread_rng();
+        let n = rng.next_u32() as usize % 100 + 1;
+        // let n = 55;
+
+        let own_index = rng.next_u32() as usize % n;
+        // let own_index = 8;
+        let mut own_membership_proof = None;
+        let mut own_item = None;
+
+        // set up mutator set
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams::<H>();
+
+        // add items
+        let mut addition_records = vec![];
+        for i in 0..n {
+            let item: Digest = random();
+            let randomness: Digest = random();
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
+            addition_records.push(addition_record.clone());
+
+            let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
+            match i.cmp(&own_index) {
+                std::cmp::Ordering::Less => {}
+                std::cmp::Ordering::Equal => {
+                    own_membership_proof = Some(membership_proof);
+                    own_item = Some(item);
+                }
+                std::cmp::Ordering::Greater => {
+                    assert!(archival_mutator_set.verify(
+                        own_item.as_ref().unwrap(),
+                        own_membership_proof.as_ref().unwrap()
+                    ));
+                    assert!(archival_mutator_set.accumulator().verify(
+                        own_item.as_ref().unwrap(),
+                        own_membership_proof.as_ref().unwrap()
+                    ));
+                    own_membership_proof
+                        .as_mut()
+                        .unwrap()
+                        .update_from_addition(
+                            own_item.as_ref().unwrap(),
+                            &archival_mutator_set.accumulator(),
+                            &addition_record,
+                        )
+                        .expect("Could not update membership proof from addition record.");
+                }
+            }
+
+            let mutator_set_before = archival_mutator_set.accumulator();
+            archival_mutator_set.add(&addition_record);
+
+            if i > own_index {
+                let own_item = own_item.as_ref().unwrap().to_owned();
+                assert!(archival_mutator_set
+                    .kernel
+                    .verify(&own_item, own_membership_proof.as_ref().unwrap(),));
+
+                let mut memproof = own_membership_proof.as_ref().unwrap().clone();
+
+                assert!(archival_mutator_set.kernel.verify(&own_item, &memproof,));
+
+                memproof.revert_update_from_batch_addition(&mutator_set_before);
+
+                assert!(mutator_set_before.verify(&own_item, &memproof));
+                // assert!(previous_mutator_set.set_commitment.verify(own_item, self));
+            }
+        }
+        println!("Added {n} items.");
+
+        // revert additions
+        let (_petrified, revertible) = addition_records.split_at(own_index + 1);
+        for addition_record in revertible.iter().rev() {
+            archival_mutator_set.revert_add(addition_record);
+            own_membership_proof
+                .as_mut()
+                .unwrap()
+                .revert_update_from_batch_addition(&archival_mutator_set.accumulator());
+
+            assert!(archival_mutator_set.verify(
+                own_item.as_ref().unwrap(),
+                own_membership_proof.as_ref().unwrap()
+            ));
+        }
+    }
+
+    #[test]
+    fn revert_updates_mixed_test() {
+        type H = Tip5;
+        let mut rng = thread_rng();
+        // let seed_integer = rng.next_u32();
+        let error_tuple: (usize, u32) = (10 + rng.next_u32() as usize % 100, rng.next_u32());
+        let n = error_tuple.0;
+        let seed_integer = error_tuple.1;
+        let margin = n / 5;
+        println!("*********************** seed: {seed_integer} ***********************");
+        let seed = seed_integer.to_be_bytes();
+        let mut seed_as_bytes = [0u8; 32];
+        for i in 0..32 {
+            seed_as_bytes[i] = seed[i % 4];
+        }
+
+        let mut rng = StdRng::from_seed(seed_as_bytes);
+
+        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
+            empty_rustyleveldbvec_ams::<H>();
+
+        let own_index = rng.next_u32() as usize % 10;
+        let mut own_item = Digest::default();
+        let mut track_index = 0;
+
+        let mut rates = HashMap::<String, f64>::new();
+        rates.insert("additions".to_owned(), 0.7);
+        rates.insert("removals".to_owned(), 0.95);
+
+        let mut tracked_items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>)> = vec![];
+        let mut removed_items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>, usize)> =
+            vec![];
+        let mut records: Vec<Either<AdditionRecord, RemovalRecord<H>>> = vec![];
+
+        for i in 0..2000 {
+            let sample: f64 = rng.gen();
+
+            // addition
+            if sample <= rates["additions"] || i == own_index {
+                println!(
+                    "{i}. (set size {}) addition",
+                    tracked_items_and_membership_proofs.len()
+                );
+
+                // generate item and randomness
+                let item: Digest = rng.gen();
+                let randomness: Digest = rng.gen();
+
+                // generate addition record
+                let addition_record = archival_mutator_set.commit(&item, &randomness);
+
+                // record membership proof
+                let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+
+                // update existing membership proof
+                for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {
+                    mp.update_from_addition(
+                        it,
+                        &archival_mutator_set.accumulator(),
+                        &addition_record,
+                    )
+                    .expect("Could not update membership proof from addition.");
+                }
+
+                // apply record
+                archival_mutator_set.add(&addition_record);
+
+                // record record
+                records.push(Either::Left(addition_record));
+
+                // if own record, set iamp index and own item
+                if i == own_index {
+                    track_index = tracked_items_and_membership_proofs.len();
+                    own_item = item;
+                    println!("own item index: {track_index}");
+                }
+
+                // record item, membership proof pair
+                tracked_items_and_membership_proofs.push((item, membership_proof));
+
+                // if too many items are in the mutator set, revise rates
+                if tracked_items_and_membership_proofs.len() > n + margin && i > n {
+                    *rates.get_mut("additions").unwrap() = 0.3;
+                    *rates.get_mut("removals").unwrap() = 0.8;
+                }
+            }
+            // removal
+            else if sample > rates["additions"]
+                && sample <= rates["removals"]
+                && tracked_items_and_membership_proofs.len() > 1
+            {
+                println!(
+                    "{i}. (set size {}) removal",
+                    tracked_items_and_membership_proofs.len()
+                );
+
+                // sample index of item and membership proof to remove,
+                // but not the index of the own item
+                let mut index = track_index;
+                while index == track_index {
+                    index = rng.next_u32() as usize % tracked_items_and_membership_proofs.len()
+                }
+
+                // remove the indicated item and membership proof from the track list
+                let (item, membership_proof) = tracked_items_and_membership_proofs.remove(index);
+                if track_index > index {
+                    track_index -= 1;
+                }
+
+                // generate a removal record
+                let removal_record = archival_mutator_set.drop(&item, &membership_proof);
+
+                // update the other membership proofs with the removal record
+                for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
+                    mp.update_from_remove(&removal_record)
+                        .expect("Could not update from remove.");
+                }
+
+                // don't lose track of the removed item
+                assert!(
+                    archival_mutator_set.verify(&item, &membership_proof),
+                    "track index: {track_index}\nitem index: {index}",
+                );
+                removed_items_and_membership_proofs.push((item, membership_proof.clone(), index));
+
+                // remove the item from the mutator set
+                archival_mutator_set.remove(&removal_record);
+
+                // record record
+                records.push(Either::Right(removal_record));
+
+                // if there are too few items in the mutator set, revise rates
+                if tracked_items_and_membership_proofs.len() < n - margin && i > n {
+                    *rates.get_mut("additions").unwrap() = 0.5;
+                    *rates.get_mut("removals").unwrap() = 0.8;
+                }
+            }
+            // reversion
+            else if tracked_items_and_membership_proofs.len() > 1 {
+                // sample reversion depth
+                let max_reversions = tracked_items_and_membership_proofs.len() - track_index;
+                if max_reversions > 0 {
+                    let num_reversions = rng.next_u32() as usize % max_reversions;
+                    if num_reversions > 0 {
+                        let set_size_was = tracked_items_and_membership_proofs.len();
+
+                        // test if all records to be reverted are additions
+                        let mut all_reversions_are_additions = true;
+                        for j in 0..num_reversions {
+                            if !matches!(records[records.len() - 1 - j], Either::Left(_)) {
+                                all_reversions_are_additions = false;
+                            }
+                        }
+
+                        // if they are, revert via batch
+                        if all_reversions_are_additions && num_reversions > 1 {
+                            println!(
+                                "{i}. (set size {}) reversion [{}]",
+                                tracked_items_and_membership_proofs.len(),
+                                vec!["a"; num_reversions].join("")
+                            );
+                            for _ in 0..num_reversions {
+                                if let Some(Either::Left(addition_record)) = records.pop() {
+                                    archival_mutator_set.revert_add(&addition_record);
+                                }
+                                tracked_items_and_membership_proofs.pop();
+                            }
+                            for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
+                                mp.revert_update_from_batch_addition(
+                                    &archival_mutator_set.accumulator(),
+                                );
+                            }
+                        }
+                        // otherwise, revert individually
+                        else {
+                            let mut records_abbreviation = "".to_string();
+                            for _ in 0..num_reversions {
+                                if let Some(record) = records.pop() {
+                                    match record {
+                                        Either::Left(addition_record) => {
+                                            records_abbreviation =
+                                                format!("{records_abbreviation}a");
+
+                                            // revert update to mutator set
+                                            archival_mutator_set.revert_add(&addition_record);
+                                            tracked_items_and_membership_proofs.pop();
+                                            for (_, mp) in
+                                                tracked_items_and_membership_proofs.iter_mut()
+                                            {
+                                                mp.revert_update_from_batch_addition(
+                                                    &archival_mutator_set.accumulator(),
+                                                );
+                                            }
+                                        }
+                                        Either::Right(removal_record) => {
+                                            let mut _report_index = 0;
+
+                                            // start reverting removal record
+                                            records_abbreviation =
+                                                format!("{records_abbreviation}r");
+
+                                            // revert update to mutator set
+                                            archival_mutator_set.revert_remove(&removal_record);
+
+                                            // assert valid proofs
+                                            for (_, (_, mp)) in tracked_items_and_membership_proofs
+                                                .iter_mut()
+                                                .enumerate()
+                                            {
+                                                mp.revert_update_from_remove(&removal_record)
+                                                    .expect("Could not revert remove.");
+                                            }
+
+                                            match removed_items_and_membership_proofs.pop() {
+                                                Some((item, membership_proof, index)) => {
+                                                    assert!(archival_mutator_set
+                                                        .verify(&item, &membership_proof));
+                                                    tracked_items_and_membership_proofs
+                                                        .insert(index, (item, membership_proof));
+                                                    _report_index = index;
+                                                    if index <= track_index {
+                                                        track_index += 1;
+                                                    }
+                                                }
+                                                None => {
+                                                    panic!("No entries in removed_items_and_membership_proofs to pop!");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            println!(
+                                "{i}. (set size {}) reversion ({})",
+                                set_size_was, records_abbreviation
+                            );
+                        }
+                    }
+                }
+            }
+
+            if i > own_index {
+                assert_eq!(own_item, tracked_items_and_membership_proofs[track_index].0);
+                assert!(
+                    archival_mutator_set.verify(
+                        &own_item,
+                        &tracked_items_and_membership_proofs[track_index].1
+                    ),
+                    "seed: {seed_integer} / n: {n}",
+                );
+            }
         }
     }
 }

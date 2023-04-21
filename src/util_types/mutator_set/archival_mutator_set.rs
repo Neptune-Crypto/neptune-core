@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use twenty_first::shared_math::tip5::Digest;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -13,6 +14,7 @@ use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;
+use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKernelError};
 use super::mutator_set_trait::MutatorSet;
 use super::removal_record::{AbsoluteIndexSet, RemovalRecord};
@@ -43,7 +45,7 @@ where
         self.kernel.prove(item, randomness, cache_indices)
     }
 
-    fn verify(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.kernel.verify(item, membership_proof)
     }
 
@@ -55,7 +57,7 @@ where
         self.kernel.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &mut AdditionRecord) {
+    fn add(&mut self, addition_record: &AdditionRecord) {
         let new_chunk: Option<(u64, Chunk)> = self.kernel.add_helper(addition_record);
         match new_chunk {
             None => (),
@@ -240,12 +242,11 @@ where
         })
     }
 
-    /// Revert the `RemovalRecord`s in a block by removing the indices that
-    /// were inserted by the removal record. These live in either the active window, or
+    /// Revert the `RemovalRecord` by removing the indices that
+    /// were inserted by it. These live in either the active window, or
     /// in a relevant chunk.
-    ///
-    /// Fails if attempting to remove an index that wasn't set.
-    pub fn revert_remove(&mut self, removal_record_indices: Vec<u128>) {
+    pub fn revert_remove(&mut self, removal_record: &RemovalRecord<H>) {
+        let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
         let batch_index = self.kernel.get_batch_index();
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
         let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
@@ -338,13 +339,22 @@ where
         }
     }
 
-    // /// Flush the databases. Does not persist the active window as this lives in memory. The caller
-    // /// must persist the active window seperately.
-    // pub fn flush(&mut self) {
-    //     self.chunks.flush();
-    //     self.set_commitment.aocl.flush();
-    //     self.set_commitment.swbf_inactive.flush();
-    // }
+    pub fn accumulator(&self) -> MutatorSetAccumulator<H> {
+        let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
+            aocl: MmrAccumulator::init(
+                self.kernel.aocl.get_peaks(),
+                self.kernel.aocl.count_leaves(),
+            ),
+            swbf_inactive: MmrAccumulator::init(
+                self.kernel.swbf_inactive.get_peaks(),
+                self.kernel.swbf_inactive.count_leaves(),
+            ),
+            swbf_active: self.kernel.swbf_active.clone(),
+        };
+        MutatorSetAccumulator {
+            kernel: set_commitment,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -354,7 +364,7 @@ mod archival_mutator_set_tests {
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
-    use crate::util_types::mutator_set::shared::BATCH_SIZE;
+    use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
 
     use super::*;
 
@@ -372,18 +382,18 @@ mod archival_mutator_set_tests {
         for i in 0..num_additions {
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut archival_mutator_set.kernel,
+                &archival_mutator_set.kernel,
                 &addition_record,
             );
             assert!(res.is_ok());
 
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
 
             // Verify that we can just read out the same membership proofs from the
@@ -424,11 +434,11 @@ mod archival_mutator_set_tests {
         // This does not reach the sliding window, and the MutatorSet reverts back
         // to being empty on every iteration.
         for _ in 0..2 * BATCH_SIZE {
-            let (item, mut addition_record, membership_proof) =
+            let (item, addition_record, membership_proof) =
                 prepare_random_addition(&mut archival_mutator_set);
 
             let commitment_before_add = archival_mutator_set.hash();
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
 
             archival_mutator_set.revert_add(&addition_record);
@@ -444,10 +454,10 @@ mod archival_mutator_set_tests {
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
             let record = prepare_random_addition(&mut archival_mutator_set);
-            let (item, mut addition_record, membership_proof) = record.clone();
+            let (item, addition_record, membership_proof) = record.clone();
             records.push(record);
             commitments_before.push(archival_mutator_set.hash());
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
         }
 
@@ -478,33 +488,40 @@ mod archival_mutator_set_tests {
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
         let record = prepare_random_addition(&mut archival_mutator_set);
-        let (item, mut addition_record, membership_proof) = record;
-        archival_mutator_set.add(&mut addition_record);
+        let (item, addition_record, membership_proof) = record;
+        archival_mutator_set.add(&addition_record);
 
         let removal_record = archival_mutator_set.drop(&item, &membership_proof);
 
         // This next line should panic, as we're attempting to remove an index that is not present
         // in the active window
-        archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
+        archival_mutator_set.revert_remove(&removal_record);
     }
 
     #[should_panic(expected = "Attempted to remove index that was not present in chunk.")]
     #[test]
-    fn revert_remove_from_inactive_bloom_filter_panic() {
+    fn revert_remove_invalid_panic() {
         type H = blake3::Hasher;
 
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
 
         for _ in 0..2 * BATCH_SIZE {
-            let (_item, mut addition_record, _membership_proof) =
+            let (_item, addition_record, _membership_proof) =
                 prepare_random_addition(&mut archival_mutator_set);
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
         }
+
+        let mut fake_indices = [2u128; NUM_TRIALS as usize];
+        fake_indices[0] = 0;
+        let fake_removal_record = RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new(&fake_indices),
+            target_chunks: ChunkDictionary::default(),
+        };
 
         // This next line should panic, as we're attempting to remove an index that is not present
         // in the inactive part of the Bloom filter
-        archival_mutator_set.revert_remove(vec![0, 2]);
+        archival_mutator_set.revert_remove(&fake_removal_record);
     }
 
     #[test]
@@ -520,9 +537,9 @@ mod archival_mutator_set_tests {
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
             let record = prepare_random_addition(&mut archival_mutator_set);
-            let (item, mut addition_record, membership_proof) = record.clone();
+            let (item, addition_record, membership_proof) = record.clone();
             records.push(record);
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
             assert!(archival_mutator_set.verify(&item, &membership_proof));
         }
 
@@ -544,7 +561,7 @@ mod archival_mutator_set_tests {
             archival_mutator_set.remove(&removal_record);
             assert!(!archival_mutator_set.verify(&item, &restored_membership_proof));
 
-            archival_mutator_set.revert_remove(removal_record.absolute_indices.to_vec());
+            archival_mutator_set.revert_remove(&removal_record);
             let commitment_after_revert = archival_mutator_set.hash();
             assert_eq!(commitment_before_remove, commitment_after_revert);
             assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
@@ -565,18 +582,18 @@ mod archival_mutator_set_tests {
         for _ in 0..num_additions {
             let (item, randomness) = make_item_and_randomness();
 
-            let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+            let addition_record = archival_mutator_set.commit(&item, &randomness);
             let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
-                &mut archival_mutator_set.kernel,
+                &archival_mutator_set.kernel,
                 &addition_record,
             )
             .expect("MS membership update must work");
 
-            archival_mutator_set.add(&mut addition_record);
+            archival_mutator_set.add(&addition_record);
 
             membership_proofs.push(membership_proof);
             items.push(item);
@@ -610,18 +627,18 @@ mod archival_mutator_set_tests {
             for _ in 0..num_additions {
                 let (item, randomness) = make_item_and_randomness();
 
-                let mut addition_record = archival_mutator_set.commit(&item, &randomness);
+                let addition_record = archival_mutator_set.commit(&item, &randomness);
                 let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
-                    &mut archival_mutator_set.kernel,
+                    &archival_mutator_set.kernel,
                     &addition_record,
                 )
                 .expect("MS membership update must work");
 
-                archival_mutator_set.add(&mut addition_record);
+                archival_mutator_set.add(&addition_record);
 
                 membership_proofs.push(membership_proof);
                 items.push(item);
@@ -658,11 +675,9 @@ mod archival_mutator_set_tests {
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
-            let all_removal_record_indices = removal_records
-                .iter()
-                .map(|x| x.absolute_indices.to_vec())
-                .concat();
-            archival_mutator_set.revert_remove(all_removal_record_indices);
+            for removal_record in removal_records.iter() {
+                archival_mutator_set.revert_remove(removal_record);
+            }
 
             // Verify that mutator set before and after removal are the same
             assert_eq!(commitment_prior_to_removal, archival_mutator_set.hash(), "After reverting the removes, mutator set's commitment must equal the one before elements were removed.");

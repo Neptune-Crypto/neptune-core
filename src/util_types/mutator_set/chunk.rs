@@ -32,22 +32,22 @@ impl Chunk {
         self.relative_indices.sort();
     }
 
-    pub fn remove(&mut self, index: u32) {
+    pub fn remove_once(&mut self, index: u32) {
         assert!(
             index < CHUNK_SIZE,
             "index cannot exceed chunk size in `remove`. CHUNK_SIZE = {}, got index = {}",
             CHUNK_SIZE,
             index
         );
-        let mut drops = vec![];
+        let mut drop = None;
         for i in 0..self.relative_indices.len() {
             if self.relative_indices[i] == index {
-                drops.push(i);
+                drop = Some(i);
             }
         }
 
-        for d in drops.iter().rev() {
-            self.relative_indices.remove(*d);
+        if let Some(d) = drop {
+            self.relative_indices.remove(d);
         }
     }
 
@@ -152,6 +152,27 @@ mod chunk_tests {
     use super::*;
 
     #[test]
+    fn chunk_is_reversible_bloom_filter() {
+        let mut aw = Chunk::empty_chunk();
+
+        // Insert an index twice, remove it once and the verify that
+        // it is still there
+        let index = 7;
+        assert!(!aw.contains(index));
+        aw.insert(index);
+        assert!(aw.contains(index));
+        aw.insert(index);
+        assert!(aw.contains(index));
+        aw.remove_once(index);
+        assert!(aw.contains(index));
+        aw.remove_once(index);
+        assert!(!aw.contains(index));
+
+        // Verify that we can remove once without index being present, without crashing
+        aw.remove_once(index);
+    }
+
+    #[test]
     fn insert_remove_contains_pbt() {
         let mut aw = Chunk::empty_chunk();
         for i in 0..CHUNK_SIZE {
@@ -164,11 +185,11 @@ mod chunk_tests {
             let set = prng.next_u32() % 2 == 0;
             if set {
                 aw.insert(index);
-            } else {
-                aw.remove(index);
             }
 
             assert_eq!(set, aw.contains(index));
+
+            aw.remove_once(index);
         }
 
         // Set all indices, then check that they are present

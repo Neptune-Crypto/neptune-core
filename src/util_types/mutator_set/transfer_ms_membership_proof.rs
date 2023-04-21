@@ -33,7 +33,7 @@ mod transfer_ms_membership_proof_tests {
         type H = Tip5;
         type Mmr = MmrAccumulator<H>;
         type Ms = MutatorSetKernel<H, Mmr>;
-        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().set_commitment;
+        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().kernel;
 
         let (mp, item) = insert_item(&mut mutator_set);
 
