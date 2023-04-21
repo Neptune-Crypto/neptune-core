@@ -1210,13 +1210,14 @@ dependencies = [
 [[package]]
 name = "mutator-set-tf"
 version = "0.8.0"
+source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git#669f66d0b1a584d7b56705a0b739f4e9dc519f82"
 dependencies = [
  "bincode",
  "blake3",
  "itertools",
  "num-traits",
  "rand 0.8.5",
- "rand_core 0.6.4",
+ "rand_core 0.5.1",
  "rayon",
  "rusty-leveldb",
  "serde",

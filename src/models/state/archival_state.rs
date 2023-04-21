@@ -55,6 +55,17 @@ pub struct ArchivalState {
     pub archival_mutator_set: Arc<TokioMutex<RustyArchivalMutatorSet<Hash>>>,
 }
 
+// FIXME: The `Debug` for `ArchivalState` does not contain `archival_mutator_set` or `ms_block_sync_db`. Is this intentional?
+impl core::fmt::Debug for ArchivalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArchivalState")
+            .field("data_dir", &self.data_dir)
+            .field("block_index_db", &self.block_index_db)
+            .field("genesis_block", &self.genesis_block)
+            .finish()
+    }
+}
+
 impl ArchivalState {
     /// Create databases for block persistence
     pub fn initialize_block_index_database(
@@ -157,20 +168,7 @@ impl ArchivalState {
 
         (leaving, luca, arriving)
     }
-}
 
-// FIXME: The `Debug` for `ArchivalState` does not contain `archival_mutator_set` or `ms_block_sync_db`. Is this intentional?
-impl core::fmt::Debug for ArchivalState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArchivalState")
-            .field("data_dir", &self.data_dir)
-            .field("block_index_db", &self.block_index_db)
-            .field("genesis_block", &self.genesis_block)
-            .finish()
-    }
-}
-
-impl ArchivalState {
     pub async fn new(
         data_dir: DataDirectory,
         block_index_db: Arc<TokioMutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
@@ -527,87 +525,43 @@ impl ArchivalState {
         block_header: &BlockHeader,
         tip_header: &BlockHeader,
     ) -> bool {
-        let mut block_height: BlockHeight = block_header.height;
-        // If only one block at this height is known and block height is less than or equal
-        // to that of the tip, then this block must belong to the canonical chain
-        if self.block_height_to_block_count(block_height).await == 1
-            && tip_header.height >= block_height
+        let block_header_digest = Hash::hash(block_header);
+        let tip_header_digest = Hash::hash(tip_header);
+
+        // If block is tip or parent to tip, then block belongs to canonical chain
+        if tip_header_digest == block_header_digest
+            || tip_header.prev_block_digest == block_header_digest
         {
+            return true;
+        }
+
+        // If block is genesis block, it belongs to the canonical chain
+        if block_header_digest == self.genesis_block.hash {
             return true;
         }
 
         // If tip header height is less than this block, or the same but with a different hash,
-        // then it cannot belong to the canonical chain
-        let tip_header_digest = Hash::hash(tip_header);
-        if tip_header.height < block_height
-            || tip_header.height == block_height && tip_header_digest != Hash::hash(block_header)
-        {
+        // then it cannot belong to the canonical chain. Note that we already checked if digest
+        // was that of tip, so it's sufficient to check if tip height is less than or equal to
+        // block height.
+        if tip_header.height <= block_header.height {
             return false;
         }
 
-        // If multiple blocks at this height is known, check all children blocks until we have one or zero blocks at a specific height
-        let mut previous_generation_blocks: Vec<BlockHeader> = vec![block_header.clone()];
-        let mut offspring_of_generation_x: Vec<BlockHeader> =
-            self.get_children_blocks(block_header).await;
-        block_height = block_height.next();
-        while offspring_of_generation_x.len() > 1 && block_height < tip_header.height {
-            previous_generation_blocks = offspring_of_generation_x.clone();
-            let mut next_generation_offspring: Vec<BlockHeader> = vec![];
-            for offspring in offspring_of_generation_x.iter() {
-                next_generation_offspring.append(&mut self.get_children_blocks(offspring).await);
-            }
-            offspring_of_generation_x = next_generation_offspring;
-            block_height = block_height.next();
-        }
-
-        if previous_generation_blocks
-            .iter()
-            .any(|prev_block_header| tip_header_digest == Hash::hash(prev_block_header))
+        // If only one block at this height is known and block height is less than or equal
+        // to that of the tip, then this block must belong to the canonical chain
+        if self.block_height_to_block_count(block_header.height).await == 1
+            && tip_header.height >= block_header.height
         {
             return true;
         }
 
-        if offspring_of_generation_x
-            .iter()
-            .any(|offspring_block_header| tip_header_digest == Hash::hash(offspring_block_header))
-        {
-            return true;
-        }
+        // Find the path from block to tip and check if this involves stepping back
+        let (backwards, _, _) = self
+            .find_path(&block_header_digest, &tip_header_digest)
+            .await;
 
-        if block_height == tip_header.height {
-            return false;
-        }
-
-        if offspring_of_generation_x.is_empty() {
-            return false;
-        }
-
-        if offspring_of_generation_x.len() == 1 {
-            let offspring_candidate: BlockHeader = offspring_of_generation_x[0].clone();
-            let number_of_blocks_with_height = self
-                .block_height_to_block_count(offspring_candidate.height)
-                .await;
-            if number_of_blocks_with_height == 1 {
-                return true;
-            } else {
-                // Track backwards from tip and check if we find offspring candidate
-                let mut tip_ancestor = tip_header.to_owned();
-                while tip_ancestor != offspring_candidate
-                    && tip_ancestor.height > offspring_candidate.height
-                {
-                    tip_ancestor = self
-                        .get_block_header(tip_ancestor.prev_block_digest)
-                        .await
-                        .unwrap();
-                }
-
-                return Hash::hash(&tip_ancestor) == Hash::hash(&offspring_candidate);
-            }
-        }
-
-        // This should never be hit as we above this have checked both reasons as to why the
-        // while loop could stop.
-        panic!("This should never happen");
+        backwards.is_empty()
     }
 
     /// Return a list of digests of the ancestors to the requested digest. Does not include the input
@@ -1519,6 +1473,13 @@ mod archival_state_tests {
             );
         }
 
+        assert!(
+            archival_state
+                .block_belongs_to_canonical_chain(&genesis.header, &mock_block_4_a.header)
+                .await,
+            "Genesis block is always part of the canonical chain, block height is four"
+        );
+
         // Make a tree and verify that the correct parts of the tree are identified as
         // belonging to the canonical chain
         let mock_block_2_b = make_mock_block(&mock_block_1.clone(), None, public_key);
@@ -1578,12 +1539,12 @@ mod archival_state_tests {
         //                    /
         //                   /---3a<----4a<----5a
         //                  /
-        //   gen<----1<----2a<---3d<----4d<----5d<-----6d
+        //   gen<----1<----2a<---3d<----4d<----5d<-----6d (tip now)
         //            \            \
         //             \            \---4e<----5e
         //              \
         //               \
-        //                \2b<---3b<----4b<----5b ((<--6b)) (added in test later)
+        //                \2b<---3b<----4b<----5b ((<--6b)) (added in test later, tip later)
         //
         // Note that in the later test, 6b becomes the tip.
 
