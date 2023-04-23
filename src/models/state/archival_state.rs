@@ -776,7 +776,7 @@ mod archival_state_tests {
             add_block_to_archival_state(&archival_state0, block_1.clone())
                 .await
                 .unwrap();
-            let c = archival_state0
+            let _c = archival_state0
                 .get_block(block_1.hash)
                 .await
                 .unwrap()
@@ -1435,17 +1435,20 @@ mod archival_state_tests {
         let genesis = *archival_state.genesis_block.clone();
 
         // Test that `find_path` returns the correct result
-        let (mut backwards, mut luca, mut forwards) =
+        let (backwards_0, luca_0, forwards_0) =
             archival_state.find_path(&genesis.hash, &genesis.hash).await;
         assert!(
-            backwards.is_empty(),
+            backwards_0.is_empty(),
             "Backwards path from genesis to genesis is empty"
         );
         assert!(
-            forwards.is_empty(),
+            forwards_0.is_empty(),
             "Forward path from genesis to genesis is empty"
         );
-        assert_eq!(genesis.hash, luca, "Luca of genesis and genesis is genesis");
+        assert_eq!(
+            genesis.hash, luca_0,
+            "Luca of genesis and genesis is genesis"
+        );
 
         // Add a fork with genesis as LUCA and verify that correct results are returned
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
@@ -1457,50 +1460,50 @@ mod archival_state_tests {
         add_block_to_archival_state(&archival_state, mock_block_1_b.clone()).await?;
 
         // Test 1a
-        (backwards, luca, forwards) = archival_state
+        let (backwards_1, luca_1, forwards_1) = archival_state
             .find_path(&genesis.hash, &mock_block_1_a.hash)
             .await;
         assert!(
-            backwards.is_empty(),
+            backwards_1.is_empty(),
             "Backwards path from genesis to 1a is empty"
         );
         assert_eq!(
             vec![mock_block_1_a.hash],
-            forwards,
+            forwards_1,
             "Forwards from genesis to block 1a is block 1a"
         );
-        assert_eq!(genesis.hash, luca, "Luca of genesis and 1a is genesis");
+        assert_eq!(genesis.hash, luca_1, "Luca of genesis and 1a is genesis");
 
         // Test 1b
-        (backwards, luca, forwards) = archival_state
+        let (backwards_2, luca_2, forwards_2) = archival_state
             .find_path(&genesis.hash, &mock_block_1_b.hash)
             .await;
         assert!(
-            backwards.is_empty(),
+            backwards_2.is_empty(),
             "Backwards path from genesis to 1b is empty"
         );
         assert_eq!(
             vec![mock_block_1_b.hash],
-            forwards,
+            forwards_2,
             "Forwards from genesis to block 1b is block 1a"
         );
-        assert_eq!(genesis.hash, luca, "Luca of genesis and 1b is genesis");
+        assert_eq!(genesis.hash, luca_2, "Luca of genesis and 1b is genesis");
 
         // Test 1a to 1b
-        (backwards, luca, forwards) = archival_state
+        let (backwards_3, luca_3, forwards_3) = archival_state
             .find_path(&mock_block_1_a.hash, &mock_block_1_b.hash)
             .await;
         assert_eq!(
             vec![mock_block_1_a.hash],
-            backwards,
+            backwards_3,
             "Backwards path from 1a to 1b is 1a"
         );
         assert_eq!(
             vec![mock_block_1_b.hash],
-            forwards,
+            forwards_3,
             "Forwards from 1a to block 1b is block 1b"
         );
-        assert_eq!(genesis.hash, luca, "Luca of 1a and 1b is genesis");
+        assert_eq!(genesis.hash, luca_3, "Luca of 1a and 1b is genesis");
 
         Ok(())
     }
@@ -2209,14 +2212,14 @@ mod archival_state_tests {
 
         // Test `get_block_header_with_lock`
         {
-            let mut db_lock = archival_state.block_index_db.lock().await;
+            let mut db_lock_local = archival_state.block_index_db.lock().await;
             let block_header_2_from_lock_method = archival_state
-                .get_block_header_with_lock(&mut db_lock, mock_block_2.hash)
+                .get_block_header_with_lock(&mut db_lock_local, mock_block_2.hash)
                 .unwrap();
             assert_eq!(mock_block_2.header, block_header_2_from_lock_method);
 
             let genesis_header_from_lock_method = archival_state
-                .get_block_header_with_lock(&mut db_lock, genesis.hash)
+                .get_block_header_with_lock(&mut db_lock_local, genesis.hash)
                 .unwrap();
             assert_eq!(genesis.header, genesis_header_from_lock_method);
         }
