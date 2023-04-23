@@ -833,13 +833,93 @@ mod ms_proof_tests {
     }
 
     #[test]
+    fn revert_update_single_remove_test() {
+        type H = Tip5;
+        let (mut ams, _): (ArchivalMutatorSet<H, _, _>, _) = empty_rustyleveldbvec_ams();
+        let mut mps = vec![];
+        let mut items = vec![];
+        let mut addition_records = vec![];
+        let ms_size = 30;
+        for _ in 0..ms_size {
+            let item: Digest = random();
+            let randomness: Digest = random();
+            let addition_record = ams.commit(&item, &randomness);
+            MsMembershipProof::batch_update_from_addition(
+                &mut mps.iter_mut().collect_vec(),
+                &items,
+                &ams.accumulator().kernel,
+                &addition_record,
+            )
+            .unwrap();
+            mps.push(ams.prove(&item, &randomness, true));
+            items.push(item);
+            ams.add(&addition_record);
+            addition_records.push(addition_record);
+        }
+
+        // Verify that all MPs are valid
+        for i in 0..ms_size {
+            assert!(ams.verify(&items[i], &mps[i]));
+        }
+
+        // Remove all `ms_size` elements from the MS
+        let mut removal_records = vec![];
+        for i in 0..ms_size {
+            let removal_record = ams.drop(&items[i], &mps[i]);
+            ams.remove(&removal_record);
+            MsMembershipProof::batch_update_from_remove(
+                &mut mps.iter_mut().collect_vec(),
+                &removal_record,
+            )
+            .unwrap();
+            removal_records.push(removal_record);
+
+            // Verify that the rest of the MPs are still valid
+            for j in 0..ms_size {
+                if j > i {
+                    assert!(ams.verify(&items[j], &mps[j]));
+                } else {
+                    assert!(!ams.verify(&items[j], &mps[j]));
+                }
+            }
+        }
+
+        // Verify that all MPs are invalid since their items were removed
+        for i in 0..ms_size {
+            assert!(!ams.verify(&items[i], &mps[i]));
+        }
+
+        // Revert all removals in opposite order and verify that the MPs become valid again
+        for i in (0..ms_size).rev() {
+            ams.revert_remove(&removal_records[i]);
+            for j in 0..ms_size {
+                mps[j]
+                    .revert_update_from_remove(&removal_records[i])
+                    .unwrap();
+            }
+            for j in 0..ms_size {
+                if j < i {
+                    assert!(!ams.verify(&items[j], &mps[j]));
+                } else {
+                    assert!(ams.verify(&items[j], &mps[j]));
+                }
+            }
+        }
+
+        // Verify all MPs after reverting all removals
+        for i in 0..ms_size {
+            ams.verify(&items[i], &mps[i]);
+        }
+    }
+
+    #[test]
     fn revert_update_single_addition_test() {
         type H = Tip5;
 
         for j in 2..30 {
             let (mut ams, _): (ArchivalMutatorSet<H, _, _>, _) = empty_rustyleveldbvec_ams();
 
-            // Add `init_size` items to MSA
+            // Add `j` items to MSA
             let mut mps = vec![];
             let mut items = vec![];
             let mut addition_records = vec![];
