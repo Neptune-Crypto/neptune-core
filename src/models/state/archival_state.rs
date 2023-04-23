@@ -1414,7 +1414,146 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn block_belongs_to_canonical_chain_test() -> Result<()> {
+    async fn find_path_simple_test() -> Result<()> {
+        let archival_state = make_test_archival_state(Network::Main).await;
+        let genesis = *archival_state.genesis_block.clone();
+
+        // Test that `find_path` returns the correct result
+        let (mut backwards, mut luca, mut forwards) =
+            archival_state.find_path(&genesis.hash, &genesis.hash).await;
+        assert!(
+            backwards.is_empty(),
+            "Backwards path from genesis to genesis is empty"
+        );
+        assert!(
+            forwards.is_empty(),
+            "Forward path from genesis to genesis is empty"
+        );
+        assert_eq!(genesis.hash, luca, "Luca of genesis and genesis is genesis");
+
+        // Add a fork with genesis as LUCA and verify that correct results are returned
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let mock_block_1_a = make_mock_block(&genesis.clone(), None, public_key);
+        add_block_to_archival_state(&archival_state, mock_block_1_a.clone()).await?;
+
+        let mock_block_1_b = make_mock_block(&genesis.clone(), None, public_key);
+        add_block_to_archival_state(&archival_state, mock_block_1_b.clone()).await?;
+
+        // Test 1a
+        (backwards, luca, forwards) = archival_state
+            .find_path(&genesis.hash, &mock_block_1_a.hash)
+            .await;
+        assert!(
+            backwards.is_empty(),
+            "Backwards path from genesis to 1a is empty"
+        );
+        assert_eq!(
+            vec![mock_block_1_a.hash],
+            forwards,
+            "Forwards from genesis to block 1a is block 1a"
+        );
+        assert_eq!(genesis.hash, luca, "Luca of genesis and 1a is genesis");
+
+        // Test 1b
+        (backwards, luca, forwards) = archival_state
+            .find_path(&genesis.hash, &mock_block_1_b.hash)
+            .await;
+        assert!(
+            backwards.is_empty(),
+            "Backwards path from genesis to 1b is empty"
+        );
+        assert_eq!(
+            vec![mock_block_1_b.hash],
+            forwards,
+            "Forwards from genesis to block 1b is block 1a"
+        );
+        assert_eq!(genesis.hash, luca, "Luca of genesis and 1b is genesis");
+
+        // Test 1a to 1b
+        (backwards, luca, forwards) = archival_state
+            .find_path(&mock_block_1_a.hash, &mock_block_1_b.hash)
+            .await;
+        assert_eq!(
+            vec![mock_block_1_a.hash],
+            backwards,
+            "Backwards path from 1a to 1b is 1a"
+        );
+        assert_eq!(
+            vec![mock_block_1_b.hash],
+            forwards,
+            "Forwards from 1a to block 1b is block 1b"
+        );
+        assert_eq!(genesis.hash, luca, "Luca of 1a and 1b is genesis");
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn fork_path_finding_test() -> Result<()> {
+        // Test behavior of fork-resolution functions such as `find_path` and checking if block
+        // belongs to canonical chain.
+
+        /// Assert that the `find_path` result agrees with the result from `get_ancestor_block_digests`
+        async fn dag_walker_leash(start: &Digest, stop: &Digest, archival_state: &ArchivalState) {
+            let (mut backwards, luca, mut forwards) = archival_state.find_path(start, stop).await;
+
+            if let Some(last_forward) = forwards.pop() {
+                assert_eq!(
+                    *stop, last_forward,
+                    "Last forward digest must be `stop` digest"
+                );
+
+                // Verify that 1st element has luca as parent
+                let first_forward = if let Some(first) = forwards.first() {
+                    *first
+                } else {
+                    last_forward
+                };
+
+                let first_forwards_block_header = archival_state
+                    .get_block_header(first_forward)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    first_forwards_block_header.prev_block_digest, luca,
+                    "Luca must be parent of 1st forwards element"
+                );
+            }
+
+            if let Some(last_backwards) = backwards.last() {
+                // Verify that `luca` matches ancestor of the last element of `backwards`
+                let last_backwards_block_header = archival_state
+                    .get_block_header(*last_backwards)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    luca, last_backwards_block_header.prev_block_digest,
+                    "Luca must be parent of last backwards element"
+                );
+
+                // Verify that "first backwards" is `start`, and remove it, since the `get_ancestor_block_digests`
+                // does not return the starting point
+                let first_backwards = backwards.remove(0);
+                assert_eq!(
+                    *start, first_backwards,
+                    "First backwards must be `start` digest"
+                );
+            }
+
+            let backwards_expected = archival_state
+                .get_ancestor_block_digests(start.to_owned(), backwards.len())
+                .await;
+            assert_eq!(backwards_expected, backwards, "\n\nbackwards digests must match expected value. Got:\n {backwards:?}\n\n, Expected from helper function:\n {backwards_expected:?}\n");
+
+            let mut forwards_expected = archival_state
+                .get_ancestor_block_digests(stop.to_owned(), forwards.len())
+                .await;
+            forwards_expected.reverse();
+            assert_eq!(forwards_expected, forwards, "\n\nforwards digests must match expected value. Got:\n {forwards:?}\n\n, Expected from helper function:\n{forwards_expected:?}\n");
+        }
+
         let archival_state = make_test_archival_state(Network::Main).await;
 
         let genesis = *archival_state.genesis_block.clone();
@@ -1471,6 +1610,8 @@ mod archival_state_tests {
                 "only chain {} is canonical",
                 i
             );
+            dag_walker_leash(&block.hash, &mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash(&mock_block_4_a.hash, &block.hash, &archival_state).await;
         }
 
         assert!(
@@ -1511,6 +1652,8 @@ mod archival_state_tests {
                 "canonical chain {} is canonical",
                 i
             );
+            dag_walker_leash(&block.hash, &mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash(&mock_block_4_a.hash, &block.hash, &archival_state).await;
         }
 
         // These blocks do not belong to the canonical chain since block 4_a has a higher PoW family
@@ -1531,6 +1674,8 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
+            dag_walker_leash(&block.hash, &mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash(&mock_block_4_a.hash, &block.hash, &archival_state).await;
         }
 
         // Make a complicated tree and verify that the function identifies the correct blocks as part
@@ -1596,7 +1741,7 @@ mod archival_state_tests {
         );
         add_block_to_archival_state(&archival_state, mock_block_4_e.clone()).await?;
         let mock_block_5_e = make_mock_block(
-            &mock_block_3_d.clone(),
+            &mock_block_4_e.clone(),
             Some(U32s::new([2002, 0, 0, 0, 0])),
             public_key,
         );
@@ -1621,6 +1766,8 @@ mod archival_state_tests {
                 "canonical chain {} is canonical, complicated",
                 i
             );
+            dag_walker_leash(&mock_block_6_d.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_d.hash, &archival_state).await;
         }
 
         for (i, block) in [
@@ -1650,6 +1797,8 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
+            dag_walker_leash(&mock_block_6_d.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_d.hash, &archival_state).await;
         }
 
         // Make a new block, 6b, canonical and verify that all checks work
@@ -1687,18 +1836,20 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
+            dag_walker_leash(&mock_block_6_b.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_b.hash, &archival_state).await;
         }
 
         for (i, block) in [
-            genesis,
-            mock_block_1,
-            mock_block_2_b,
-            mock_block_3_b,
-            mock_block_4_b,
-            mock_block_5_b,
-            mock_block_6_b.clone(),
+            &genesis,
+            &mock_block_1,
+            &mock_block_2_b,
+            &mock_block_3_b,
+            &mock_block_4_b,
+            &mock_block_5_b,
+            &mock_block_6_b.clone(),
         ]
-        .iter()
+        .into_iter()
         .enumerate()
         {
             assert!(
@@ -1708,7 +1859,48 @@ mod archival_state_tests {
                 "canonical chain {} is canonical, complicated",
                 i
             );
+            dag_walker_leash(&mock_block_6_b.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_b.hash, &archival_state).await;
         }
+
+        // An explicit test of `find_path`
+        //                     /-3c<----4c<----5c<-----6c<---7c<---8c
+        //                    /
+        //                   /---3a<----4a<----5a
+        //                  /
+        //   gen<----1<----2a<---3d<----4d<----5d<-----6d
+        //            \            \
+        //             \            \---4e<----5e
+        //              \
+        //               \
+        //                \2b<---3b<----4b<----5b<---6b
+        //
+        // Note that in the later test, 6b becomes the tip.
+        let (backwards, luca, forwards) = archival_state
+            .find_path(&mock_block_5_e.hash, &mock_block_6_b.hash)
+            .await;
+        assert_eq!(
+            vec![
+                mock_block_2_b.hash,
+                mock_block_3_b.hash,
+                mock_block_4_b.hash,
+                mock_block_5_b.hash,
+                mock_block_6_b.hash,
+            ],
+            forwards,
+            "find_path forwards return value must match expected value"
+        );
+        assert_eq!(
+            vec![
+                mock_block_5_e.hash,
+                mock_block_4_e.hash,
+                mock_block_3_d.hash,
+                mock_block_2_a.hash
+            ],
+            backwards,
+            "find_path backwards return value must match expected value"
+        );
+        assert_eq!(mock_block_1.hash, luca, "Luca must be block 1");
 
         Ok(())
     }
