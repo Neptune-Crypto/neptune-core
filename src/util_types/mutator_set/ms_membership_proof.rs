@@ -554,7 +554,7 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use crate::util_types::mutator_set::shared::NUM_TRIALS;
-    use itertools::Either;
+    use itertools::{Either, Itertools};
     use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
@@ -833,7 +833,55 @@ mod ms_proof_tests {
     }
 
     #[test]
-    fn revert_update_from_addition_simple_test() {
+    fn revert_update_single_addition_test() {
+        type H = Tip5;
+
+        for j in 2..30 {
+            let (mut ams, _): (ArchivalMutatorSet<H, _, _>, _) = empty_rustyleveldbvec_ams();
+
+            // Add `init_size` items to MSA
+            let mut mps = vec![];
+            let mut items = vec![];
+            let mut addition_records = vec![];
+            for _ in 0..j {
+                let item: Digest = random();
+                let randomness: Digest = random();
+                let addition_record = ams.commit(&item, &randomness);
+                MsMembershipProof::batch_update_from_addition(
+                    &mut mps.iter_mut().collect_vec(),
+                    &items,
+                    &ams.accumulator().kernel,
+                    &addition_record,
+                )
+                .unwrap();
+                mps.push(ams.prove(&item, &randomness, true));
+                items.push(item);
+                ams.add(&addition_record);
+                addition_records.push(addition_record);
+            }
+
+            // Revert all adds but the first one, and keep the 1st MP updated
+            for i in (1..j).rev() {
+                ams.revert_add(&addition_records[i]);
+                mps[0].revert_update_from_batch_addition(&ams.accumulator());
+                assert!(
+                    ams.verify(&items[0], &mps[0]),
+                    "MP should be valid after reversion"
+                );
+                if i != 1 {
+                    // We also check the 2nd MP for good measure, as long as its item is still in the MS
+                    mps[1].revert_update_from_batch_addition(&ams.accumulator());
+                    assert!(
+                        ams.verify(&items[1], &mps[1]),
+                        "MP should be valid after reversion"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn revert_update_from_addition_batches_test() {
         type H = Tip5;
 
         let mut msa: MutatorSetAccumulator<H> = MutatorSetAccumulator::new();
