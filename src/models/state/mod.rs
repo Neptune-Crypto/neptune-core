@@ -4,6 +4,8 @@ use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::debug;
+use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -215,6 +217,11 @@ impl GlobalState {
                 continue;
             }
 
+            debug!(
+                "Resyncing monitored UTXO number {i}, with hash {}",
+                Hash::hash(&monitored_utxo.utxo)
+            );
+
             // If the UTXO was not confirmed yet, there is no
             // point in synchronizing its membership proof.
             let confirming_block = match monitored_utxo.confirmed_in_block {
@@ -260,7 +267,7 @@ impl GlobalState {
                     .unwrap();
 
                 // revert removals
-                let removal_records = revert_block.body.mutator_set_update.removals;
+                let removal_records = revert_block.body.mutator_set_update.removals.clone();
                 for removal_record in removal_records.iter().rev() {
                     // membership_proof.revert_update_from_removal(&removal);
                     membership_proof
@@ -269,12 +276,13 @@ impl GlobalState {
                 }
 
                 // revert additions
-                let previous_mutator_set = revert_block.body.previous_mutator_set_accumulator;
+                let previous_mutator_set =
+                    revert_block.body.previous_mutator_set_accumulator.clone();
                 membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
 
                 // assert valid
                 assert!(previous_mutator_set
-                    .verify(&Hash::hash(&monitored_utxo.utxo), &membership_proof));
+                    .verify(&Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
             }
 
             // walk forwards, applying
@@ -327,12 +335,13 @@ impl GlobalState {
             monitored_utxos.set(i, monitored_utxo);
         }
 
-        // mark as synced
+        // Update sync label and persist
         self.wallet_state
             .wallet_db
             .lock()
             .await
             .set_sync_label(tip_hash);
+        self.wallet_state.wallet_db.lock().await.persist();
 
         Ok(())
     }
