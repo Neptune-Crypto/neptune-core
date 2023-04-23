@@ -589,7 +589,6 @@ mod transaction_tests {
         let mut next_block = block_2.clone();
         let mut _previous_block = next_block.clone();
         for i in 0..12 {
-            println!("i = {i}");
             _previous_block = next_block.clone();
             let utxo_a = Utxo {
                 amount: (3 * i).into(),

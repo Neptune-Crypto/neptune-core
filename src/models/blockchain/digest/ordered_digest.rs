@@ -133,7 +133,6 @@ mod ordered_digest_tests {
         let some_threshold_actual: OrderedDigest =
             OrderedDigest::to_digest_threshold(some_difficulty);
 
-        println!("{:?}", some_threshold_actual);
         let bfe_max_elem = BFieldElement::new(BFieldElement::MAX);
         let some_threshold_expected = OrderedDigest::new([
             bfe_max_elem,

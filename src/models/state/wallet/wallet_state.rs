@@ -499,8 +499,7 @@ impl WalletState {
         let mut unsynced_spent = vec![];
         for i in 0..num_monitored_utxos {
             let mutxo = lock.monitored_utxos.get(i);
-            // println!("mutxo:\n{mutxo:?}");
-            println!(
+            debug!(
                 "mutxo. Synced to: {}",
                 mutxo
                     .get_latest_membership_proof_entry()

@@ -980,10 +980,10 @@ mod wallet_tests {
     #[test]
     fn get_authority_spending_public_key() {
         // Helper function/test to print the public key associated with the authority signatures
-        let authority_wallet = WalletSecret::devnet_authority_wallet();
-        println!(
-            "authority_wallet pub key: {}",
-            authority_wallet.get_public_key()
-        );
+        let _authority_wallet = WalletSecret::devnet_authority_wallet();
+        // println!(
+        //     "_authority_wallet pub key: {}",
+        //     _authority_wallet.get_public_key()
+        // );
     }
 }

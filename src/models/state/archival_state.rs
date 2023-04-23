@@ -762,7 +762,6 @@ mod archival_state_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            println!("genesis digest = {}", c.hash);
             drop(lock0);
         })
         .await?;
@@ -1383,13 +1382,11 @@ mod archival_state_tests {
         );
         add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
         let fetched2 = archival_state.get_block(mock_block_2.hash).await?.unwrap();
-        println!("\n\nheight2: {}\n\n", fetched2.header.height);
         assert_eq!(
             mock_block_2, fetched2,
             "Returned block must match the one inserted"
         );
         let fetched1 = archival_state.get_block(mock_block_1.hash).await?.unwrap();
-        println!("\n\nheight1: {}\n\n", fetched1.header.height);
         assert_eq!(
             mock_block_1, fetched1,
             "Returned block must match the one inserted"
