@@ -120,27 +120,31 @@ impl ArchivalState {
         let mut leaving = vec![*start];
         let mut arriving = vec![*stop];
 
+        // Get DB lock and hold it until this function call is completed.
+        // This is done to avoid having to take and release the lock a lot of times.
+        let mut block_db_lock = self.block_index_db.lock().await;
         let mut leaving_deepest_block_header = self
-            .get_block_header(*leaving.last().unwrap())
-            .await
+            .get_block_header_with_lock(&mut block_db_lock, *leaving.last().unwrap())
             .unwrap();
         let mut arriving_deepest_block_header = self
-            .get_block_header(*arriving.last().unwrap())
-            .await
+            .get_block_header_with_lock(&mut block_db_lock, *arriving.last().unwrap())
             .unwrap();
-        // let mut db_lock = self.block_index_db.lock().await;
         while leaving_deepest_block_header.height != arriving_deepest_block_header.height {
             if leaving_deepest_block_header.height < arriving_deepest_block_header.height {
                 arriving.push(arriving_deepest_block_header.prev_block_digest);
                 arriving_deepest_block_header = self
-                    .get_block_header(arriving_deepest_block_header.prev_block_digest)
-                    .await
+                    .get_block_header_with_lock(
+                        &mut block_db_lock,
+                        arriving_deepest_block_header.prev_block_digest,
+                    )
                     .unwrap();
             } else {
                 leaving.push(leaving_deepest_block_header.prev_block_digest);
                 leaving_deepest_block_header = self
-                    .get_block_header(leaving_deepest_block_header.prev_block_digest)
-                    .await
+                    .get_block_header_with_lock(
+                        &mut block_db_lock,
+                        leaving_deepest_block_header.prev_block_digest,
+                    )
                     .unwrap();
             }
         }
@@ -148,14 +152,12 @@ impl ArchivalState {
         // Extend both lists until their deepest blocks match.
         while leaving.last().unwrap() != arriving.last().unwrap() {
             let leaving_predecessor = self
-                .get_block_header(*leaving.last().unwrap())
-                .await
+                .get_block_header_with_lock(&mut block_db_lock, *leaving.last().unwrap())
                 .unwrap()
                 .prev_block_digest;
             leaving.push(leaving_predecessor);
             let arriving_predecessor = self
-                .get_block_header(*arriving.last().unwrap())
-                .await
+                .get_block_header_with_lock(&mut block_db_lock, *arriving.last().unwrap())
                 .unwrap()
                 .prev_block_digest;
             arriving.push(arriving_predecessor);
@@ -383,6 +385,23 @@ impl ArchivalState {
             None => *self.genesis_block.clone(),
             Some(block) => block,
         }
+    }
+
+    fn get_block_header_with_lock(
+        &self,
+        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
+        block_digest: Digest,
+    ) -> Option<BlockHeader> {
+        let mut ret = block_db_lock
+            .get(BlockIndexKey::Block(block_digest))
+            .map(|x| x.as_block_record().block_header);
+
+        // If no block was found, check if digest is genesis digest
+        if ret.is_none() && block_digest == self.genesis_block.hash {
+            ret = Some(self.genesis_block.header.clone());
+        }
+
+        ret
     }
 
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
@@ -2187,6 +2206,20 @@ mod archival_state_tests {
             .await
             .unwrap();
         assert_eq!(mock_block_2.header, block_header_2);
+
+        // Test `get_block_header_with_lock`
+        {
+            let mut db_lock = archival_state.block_index_db.lock().await;
+            let block_header_2_from_lock_method = archival_state
+                .get_block_header_with_lock(&mut db_lock, mock_block_2.hash)
+                .unwrap();
+            assert_eq!(mock_block_2.header, block_header_2_from_lock_method);
+
+            let genesis_header_from_lock_method = archival_state
+                .get_block_header_with_lock(&mut db_lock, genesis.hash)
+                .unwrap();
+            assert_eq!(genesis.header, genesis_header_from_lock_method);
+        }
 
         // Test `block_height_to_block_headers`
         let block_headers_of_height_2 =
