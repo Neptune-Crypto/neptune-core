@@ -580,12 +580,12 @@ impl ArchivalState {
         let mut parent_digest = input_block_header.prev_block_digest;
         let mut ret = vec![];
         while let Some(parent) = self.get_block_header(parent_digest).await {
-            ret.push(Hash::hash(&parent));
-            parent_digest = parent.prev_block_digest;
-            count -= 1;
             if count == 0 {
                 break;
             }
+            ret.push(Hash::hash(&parent));
+            parent_digest = parent.prev_block_digest;
+            count -= 1;
         }
 
         ret
@@ -1739,6 +1739,10 @@ mod archival_state_tests {
             .get_ancestor_block_digests(genesis.hash, 1)
             .await
             .is_empty());
+        assert!(archival_state
+            .get_ancestor_block_digests(genesis.hash, 0)
+            .await
+            .is_empty());
 
         // Insert blocks and verify that the same result is returned
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
@@ -1760,6 +1764,10 @@ mod archival_state_tests {
             .get_ancestor_block_digests(genesis.hash, 1)
             .await
             .is_empty());
+        assert!(archival_state
+            .get_ancestor_block_digests(genesis.hash, 0)
+            .await
+            .is_empty());
 
         // Check that ancestors of block 1 and 2 return the right values
         let ancestors_of_1 = archival_state
@@ -1767,6 +1775,10 @@ mod archival_state_tests {
             .await;
         assert_eq!(1, ancestors_of_1.len());
         assert_eq!(genesis.hash, ancestors_of_1[0]);
+        assert!(archival_state
+            .get_ancestor_block_digests(mock_block_1.hash, 0)
+            .await
+            .is_empty());
 
         let ancestors_of_2 = archival_state
             .get_ancestor_block_digests(mock_block_2.hash, 10)
@@ -1774,6 +1786,10 @@ mod archival_state_tests {
         assert_eq!(2, ancestors_of_2.len());
         assert_eq!(mock_block_1.hash, ancestors_of_2[0]);
         assert_eq!(genesis.hash, ancestors_of_2[1]);
+        assert!(archival_state
+            .get_ancestor_block_digests(mock_block_2.hash, 0)
+            .await
+            .is_empty());
 
         // Verify that max length is respected
         let ancestors_of_4_long = archival_state
@@ -1790,6 +1806,10 @@ mod archival_state_tests {
         assert_eq!(2, ancestors_of_4_short.len());
         assert_eq!(mock_block_3.hash, ancestors_of_4_short[0]);
         assert_eq!(mock_block_2.hash, ancestors_of_4_short[1]);
+        assert!(archival_state
+            .get_ancestor_block_digests(mock_block_4.hash, 0)
+            .await
+            .is_empty());
 
         Ok(())
     }
