@@ -70,7 +70,6 @@ impl StdHash for Utxo {
 #[cfg(test)]
 mod utxo_tests {
     use tracing_test::traced_test;
-    use twenty_first::util_types::emojihash_trait::Emojihash;
 
     use crate::tests::shared::new_random_wallet;
 
@@ -82,9 +81,7 @@ mod utxo_tests {
         let amount = Amount::from(42);
         let public_key = wallet.get_public_key();
         let output = Utxo { amount, public_key };
-        let digest = Hash::hash(&output);
-
-        println!("{}", digest.emojihash());
+        let _digest = Hash::hash(&output);
     }
 
     #[traced_test]
@@ -96,7 +93,6 @@ mod utxo_tests {
             amount,
             "0399bb06fa556962201e1647a7c5b231af6ff6dd6d1c1a8599309caa126526422e",
         );
-        let serialized: String = serde_json::to_string(&utxo).unwrap();
-        println!("serialized:\n{serialized}");
+        let _serialized: String = serde_json::to_string(&utxo).unwrap();
     }
 }

@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
-use crate::Hash;
+use crate::{models::state::archival_state::ArchivalState, Hash};
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 use twenty_first::{shared_math::tip5::Digest, util_types::storage_schema::RustyValue};
@@ -36,9 +36,7 @@ impl MonitoredUtxo {
 
     // determine whether the attached membership proof is synced to the given block
     pub fn is_synced_to(&self, block_hash: &Digest) -> bool {
-        self.blockhash_to_membership_proof
-            .iter()
-            .any(|(hash, _mp)| hash == block_hash)
+        self.get_membership_proof_for_block(block_hash).is_some()
     }
 
     pub fn add_membership_proof_for_tip(
@@ -66,6 +64,21 @@ impl MonitoredUtxo {
 
     pub fn get_latest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof<Hash>)> {
         self.blockhash_to_membership_proof.iter().next().cloned()
+    }
+
+    /// Returns true if the MUTXO was abandoned
+    pub async fn was_abandoned(
+        &self,
+        current_tip: &Digest,
+        archival_state: &ArchivalState,
+    ) -> bool {
+        match self.confirmed_in_block {
+            Some((confirm_block, _)) => {
+                let (backwards, _, _) = archival_state.find_path(&confirm_block, current_tip).await;
+                !backwards.is_empty()
+            }
+            None => false,
+        }
     }
 }
 

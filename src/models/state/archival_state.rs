@@ -55,6 +55,17 @@ pub struct ArchivalState {
     pub archival_mutator_set: Arc<TokioMutex<RustyArchivalMutatorSet<Hash>>>,
 }
 
+// FIXME: The `Debug` for `ArchivalState` does not contain `archival_mutator_set` or `ms_block_sync_db`. Is this intentional?
+impl core::fmt::Debug for ArchivalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArchivalState")
+            .field("data_dir", &self.data_dir)
+            .field("block_index_db", &self.block_index_db)
+            .field("genesis_block", &self.genesis_block)
+            .finish()
+    }
+}
+
 impl ArchivalState {
     /// Create databases for block persistence
     pub fn initialize_block_index_database(
@@ -109,27 +120,31 @@ impl ArchivalState {
         let mut leaving = vec![*start];
         let mut arriving = vec![*stop];
 
+        // Get DB lock and hold it until this function call is completed.
+        // This is done to avoid having to take and release the lock a lot of times.
+        let mut block_db_lock = self.block_index_db.lock().await;
         let mut leaving_deepest_block_header = self
-            .get_block_header(*leaving.last().unwrap())
-            .await
+            .get_block_header_with_lock(&mut block_db_lock, *leaving.last().unwrap())
             .unwrap();
         let mut arriving_deepest_block_header = self
-            .get_block_header(*arriving.last().unwrap())
-            .await
+            .get_block_header_with_lock(&mut block_db_lock, *arriving.last().unwrap())
             .unwrap();
-        // let mut db_lock = self.block_index_db.lock().await;
         while leaving_deepest_block_header.height != arriving_deepest_block_header.height {
             if leaving_deepest_block_header.height < arriving_deepest_block_header.height {
                 arriving.push(arriving_deepest_block_header.prev_block_digest);
                 arriving_deepest_block_header = self
-                    .get_block_header(arriving_deepest_block_header.prev_block_digest)
-                    .await
+                    .get_block_header_with_lock(
+                        &mut block_db_lock,
+                        arriving_deepest_block_header.prev_block_digest,
+                    )
                     .unwrap();
             } else {
                 leaving.push(leaving_deepest_block_header.prev_block_digest);
                 leaving_deepest_block_header = self
-                    .get_block_header(leaving_deepest_block_header.prev_block_digest)
-                    .await
+                    .get_block_header_with_lock(
+                        &mut block_db_lock,
+                        leaving_deepest_block_header.prev_block_digest,
+                    )
                     .unwrap();
             }
         }
@@ -137,14 +152,12 @@ impl ArchivalState {
         // Extend both lists until their deepest blocks match.
         while leaving.last().unwrap() != arriving.last().unwrap() {
             let leaving_predecessor = self
-                .get_block_header(*leaving.last().unwrap())
-                .await
+                .get_block_header_with_lock(&mut block_db_lock, *leaving.last().unwrap())
                 .unwrap()
                 .prev_block_digest;
             leaving.push(leaving_predecessor);
             let arriving_predecessor = self
-                .get_block_header(*arriving.last().unwrap())
-                .await
+                .get_block_header_with_lock(&mut block_db_lock, *arriving.last().unwrap())
                 .unwrap()
                 .prev_block_digest;
             arriving.push(arriving_predecessor);
@@ -157,20 +170,7 @@ impl ArchivalState {
 
         (leaving, luca, arriving)
     }
-}
 
-// FIXME: The `Debug` for `ArchivalState` does not contain `archival_mutator_set` or `ms_block_sync_db`. Is this intentional?
-impl core::fmt::Debug for ArchivalState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArchivalState")
-            .field("data_dir", &self.data_dir)
-            .field("block_index_db", &self.block_index_db)
-            .field("genesis_block", &self.genesis_block)
-            .finish()
-    }
-}
-
-impl ArchivalState {
     pub async fn new(
         data_dir: DataDirectory,
         block_index_db: Arc<TokioMutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
@@ -387,6 +387,23 @@ impl ArchivalState {
         }
     }
 
+    fn get_block_header_with_lock(
+        &self,
+        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
+        block_digest: Digest,
+    ) -> Option<BlockHeader> {
+        let mut ret = block_db_lock
+            .get(BlockIndexKey::Block(block_digest))
+            .map(|x| x.as_block_record().block_header);
+
+        // If no block was found, check if digest is genesis digest
+        if ret.is_none() && block_digest == self.genesis_block.hash {
+            ret = Some(self.genesis_block.header.clone());
+        }
+
+        ret
+    }
+
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
         let mut ret = self
             .block_index_db
@@ -527,87 +544,43 @@ impl ArchivalState {
         block_header: &BlockHeader,
         tip_header: &BlockHeader,
     ) -> bool {
-        let mut block_height: BlockHeight = block_header.height;
-        // If only one block at this height is known and block height is less than or equal
-        // to that of the tip, then this block must belong to the canonical chain
-        if self.block_height_to_block_count(block_height).await == 1
-            && tip_header.height >= block_height
+        let block_header_digest = Hash::hash(block_header);
+        let tip_header_digest = Hash::hash(tip_header);
+
+        // If block is tip or parent to tip, then block belongs to canonical chain
+        if tip_header_digest == block_header_digest
+            || tip_header.prev_block_digest == block_header_digest
         {
+            return true;
+        }
+
+        // If block is genesis block, it belongs to the canonical chain
+        if block_header_digest == self.genesis_block.hash {
             return true;
         }
 
         // If tip header height is less than this block, or the same but with a different hash,
-        // then it cannot belong to the canonical chain
-        let tip_header_digest = Hash::hash(tip_header);
-        if tip_header.height < block_height
-            || tip_header.height == block_height && tip_header_digest != Hash::hash(block_header)
-        {
+        // then it cannot belong to the canonical chain. Note that we already checked if digest
+        // was that of tip, so it's sufficient to check if tip height is less than or equal to
+        // block height.
+        if tip_header.height <= block_header.height {
             return false;
         }
 
-        // If multiple blocks at this height is known, check all children blocks until we have one or zero blocks at a specific height
-        let mut previous_generation_blocks: Vec<BlockHeader> = vec![block_header.clone()];
-        let mut offspring_of_generation_x: Vec<BlockHeader> =
-            self.get_children_blocks(block_header).await;
-        block_height = block_height.next();
-        while offspring_of_generation_x.len() > 1 && block_height < tip_header.height {
-            previous_generation_blocks = offspring_of_generation_x.clone();
-            let mut next_generation_offspring: Vec<BlockHeader> = vec![];
-            for offspring in offspring_of_generation_x.iter() {
-                next_generation_offspring.append(&mut self.get_children_blocks(offspring).await);
-            }
-            offspring_of_generation_x = next_generation_offspring;
-            block_height = block_height.next();
-        }
-
-        if previous_generation_blocks
-            .iter()
-            .any(|prev_block_header| tip_header_digest == Hash::hash(prev_block_header))
+        // If only one block at this height is known and block height is less than or equal
+        // to that of the tip, then this block must belong to the canonical chain
+        if self.block_height_to_block_count(block_header.height).await == 1
+            && tip_header.height >= block_header.height
         {
             return true;
         }
 
-        if offspring_of_generation_x
-            .iter()
-            .any(|offspring_block_header| tip_header_digest == Hash::hash(offspring_block_header))
-        {
-            return true;
-        }
+        // Find the path from block to tip and check if this involves stepping back
+        let (backwards, _, _) = self
+            .find_path(&block_header_digest, &tip_header_digest)
+            .await;
 
-        if block_height == tip_header.height {
-            return false;
-        }
-
-        if offspring_of_generation_x.is_empty() {
-            return false;
-        }
-
-        if offspring_of_generation_x.len() == 1 {
-            let offspring_candidate: BlockHeader = offspring_of_generation_x[0].clone();
-            let number_of_blocks_with_height = self
-                .block_height_to_block_count(offspring_candidate.height)
-                .await;
-            if number_of_blocks_with_height == 1 {
-                return true;
-            } else {
-                // Track backwards from tip and check if we find offspring candidate
-                let mut tip_ancestor = tip_header.to_owned();
-                while tip_ancestor != offspring_candidate
-                    && tip_ancestor.height > offspring_candidate.height
-                {
-                    tip_ancestor = self
-                        .get_block_header(tip_ancestor.prev_block_digest)
-                        .await
-                        .unwrap();
-                }
-
-                return Hash::hash(&tip_ancestor) == Hash::hash(&offspring_candidate);
-            }
-        }
-
-        // This should never be hit as we above this have checked both reasons as to why the
-        // while loop could stop.
-        panic!("This should never happen");
+        backwards.is_empty()
     }
 
     /// Return a list of digests of the ancestors to the requested digest. Does not include the input
@@ -626,12 +599,12 @@ impl ArchivalState {
         let mut parent_digest = input_block_header.prev_block_digest;
         let mut ret = vec![];
         while let Some(parent) = self.get_block_header(parent_digest).await {
-            ret.push(Hash::hash(&parent));
-            parent_digest = parent.prev_block_digest;
-            count -= 1;
             if count == 0 {
                 break;
             }
+            ret.push(Hash::hash(&parent));
+            parent_digest = parent.prev_block_digest;
+            count -= 1;
         }
 
         ret
@@ -803,12 +776,11 @@ mod archival_state_tests {
             add_block_to_archival_state(&archival_state0, block_1.clone())
                 .await
                 .unwrap();
-            let c = archival_state0
+            let _c = archival_state0
                 .get_block(block_1.hash)
                 .await
                 .unwrap()
                 .unwrap();
-            println!("genesis digest = {}", c.hash);
             drop(lock0);
         })
         .await?;
@@ -1429,13 +1401,11 @@ mod archival_state_tests {
         );
         add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
         let fetched2 = archival_state.get_block(mock_block_2.hash).await?.unwrap();
-        println!("\n\nheight2: {}\n\n", fetched2.header.height);
         assert_eq!(
             mock_block_2, fetched2,
             "Returned block must match the one inserted"
         );
         let fetched1 = archival_state.get_block(mock_block_1.hash).await?.unwrap();
-        println!("\n\nheight1: {}\n\n", fetched1.header.height);
         assert_eq!(
             mock_block_1, fetched1,
             "Returned block must match the one inserted"
@@ -1460,7 +1430,149 @@ mod archival_state_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn block_belongs_to_canonical_chain_test() -> Result<()> {
+    async fn find_path_simple_test() -> Result<()> {
+        let archival_state = make_test_archival_state(Network::Main).await;
+        let genesis = *archival_state.genesis_block.clone();
+
+        // Test that `find_path` returns the correct result
+        let (backwards_0, luca_0, forwards_0) =
+            archival_state.find_path(&genesis.hash, &genesis.hash).await;
+        assert!(
+            backwards_0.is_empty(),
+            "Backwards path from genesis to genesis is empty"
+        );
+        assert!(
+            forwards_0.is_empty(),
+            "Forward path from genesis to genesis is empty"
+        );
+        assert_eq!(
+            genesis.hash, luca_0,
+            "Luca of genesis and genesis is genesis"
+        );
+
+        // Add a fork with genesis as LUCA and verify that correct results are returned
+        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
+            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let mock_block_1_a = make_mock_block(&genesis.clone(), None, public_key);
+        add_block_to_archival_state(&archival_state, mock_block_1_a.clone()).await?;
+
+        let mock_block_1_b = make_mock_block(&genesis.clone(), None, public_key);
+        add_block_to_archival_state(&archival_state, mock_block_1_b.clone()).await?;
+
+        // Test 1a
+        let (backwards_1, luca_1, forwards_1) = archival_state
+            .find_path(&genesis.hash, &mock_block_1_a.hash)
+            .await;
+        assert!(
+            backwards_1.is_empty(),
+            "Backwards path from genesis to 1a is empty"
+        );
+        assert_eq!(
+            vec![mock_block_1_a.hash],
+            forwards_1,
+            "Forwards from genesis to block 1a is block 1a"
+        );
+        assert_eq!(genesis.hash, luca_1, "Luca of genesis and 1a is genesis");
+
+        // Test 1b
+        let (backwards_2, luca_2, forwards_2) = archival_state
+            .find_path(&genesis.hash, &mock_block_1_b.hash)
+            .await;
+        assert!(
+            backwards_2.is_empty(),
+            "Backwards path from genesis to 1b is empty"
+        );
+        assert_eq!(
+            vec![mock_block_1_b.hash],
+            forwards_2,
+            "Forwards from genesis to block 1b is block 1a"
+        );
+        assert_eq!(genesis.hash, luca_2, "Luca of genesis and 1b is genesis");
+
+        // Test 1a to 1b
+        let (backwards_3, luca_3, forwards_3) = archival_state
+            .find_path(&mock_block_1_a.hash, &mock_block_1_b.hash)
+            .await;
+        assert_eq!(
+            vec![mock_block_1_a.hash],
+            backwards_3,
+            "Backwards path from 1a to 1b is 1a"
+        );
+        assert_eq!(
+            vec![mock_block_1_b.hash],
+            forwards_3,
+            "Forwards from 1a to block 1b is block 1b"
+        );
+        assert_eq!(genesis.hash, luca_3, "Luca of 1a and 1b is genesis");
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn fork_path_finding_test() -> Result<()> {
+        // Test behavior of fork-resolution functions such as `find_path` and checking if block
+        // belongs to canonical chain.
+
+        /// Assert that the `find_path` result agrees with the result from `get_ancestor_block_digests`
+        async fn dag_walker_leash(start: &Digest, stop: &Digest, archival_state: &ArchivalState) {
+            let (mut backwards, luca, mut forwards) = archival_state.find_path(start, stop).await;
+
+            if let Some(last_forward) = forwards.pop() {
+                assert_eq!(
+                    *stop, last_forward,
+                    "Last forward digest must be `stop` digest"
+                );
+
+                // Verify that 1st element has luca as parent
+                let first_forward = if let Some(first) = forwards.first() {
+                    *first
+                } else {
+                    last_forward
+                };
+
+                let first_forwards_block_header = archival_state
+                    .get_block_header(first_forward)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    first_forwards_block_header.prev_block_digest, luca,
+                    "Luca must be parent of 1st forwards element"
+                );
+            }
+
+            if let Some(last_backwards) = backwards.last() {
+                // Verify that `luca` matches ancestor of the last element of `backwards`
+                let last_backwards_block_header = archival_state
+                    .get_block_header(*last_backwards)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    luca, last_backwards_block_header.prev_block_digest,
+                    "Luca must be parent of last backwards element"
+                );
+
+                // Verify that "first backwards" is `start`, and remove it, since the `get_ancestor_block_digests`
+                // does not return the starting point
+                let first_backwards = backwards.remove(0);
+                assert_eq!(
+                    *start, first_backwards,
+                    "First backwards must be `start` digest"
+                );
+            }
+
+            let backwards_expected = archival_state
+                .get_ancestor_block_digests(start.to_owned(), backwards.len())
+                .await;
+            assert_eq!(backwards_expected, backwards, "\n\nbackwards digests must match expected value. Got:\n {backwards:?}\n\n, Expected from helper function:\n {backwards_expected:?}\n");
+
+            let mut forwards_expected = archival_state
+                .get_ancestor_block_digests(stop.to_owned(), forwards.len())
+                .await;
+            forwards_expected.reverse();
+            assert_eq!(forwards_expected, forwards, "\n\nforwards digests must match expected value. Got:\n {forwards:?}\n\n, Expected from helper function:\n{forwards_expected:?}\n");
+        }
+
         let archival_state = make_test_archival_state(Network::Main).await;
 
         let genesis = *archival_state.genesis_block.clone();
@@ -1517,7 +1629,16 @@ mod archival_state_tests {
                 "only chain {} is canonical",
                 i
             );
+            dag_walker_leash(&block.hash, &mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash(&mock_block_4_a.hash, &block.hash, &archival_state).await;
         }
+
+        assert!(
+            archival_state
+                .block_belongs_to_canonical_chain(&genesis.header, &mock_block_4_a.header)
+                .await,
+            "Genesis block is always part of the canonical chain, block height is four"
+        );
 
         // Make a tree and verify that the correct parts of the tree are identified as
         // belonging to the canonical chain
@@ -1550,6 +1671,8 @@ mod archival_state_tests {
                 "canonical chain {} is canonical",
                 i
             );
+            dag_walker_leash(&block.hash, &mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash(&mock_block_4_a.hash, &block.hash, &archival_state).await;
         }
 
         // These blocks do not belong to the canonical chain since block 4_a has a higher PoW family
@@ -1570,6 +1693,8 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
+            dag_walker_leash(&block.hash, &mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash(&mock_block_4_a.hash, &block.hash, &archival_state).await;
         }
 
         // Make a complicated tree and verify that the function identifies the correct blocks as part
@@ -1578,12 +1703,12 @@ mod archival_state_tests {
         //                    /
         //                   /---3a<----4a<----5a
         //                  /
-        //   gen<----1<----2a<---3d<----4d<----5d<-----6d
+        //   gen<----1<----2a<---3d<----4d<----5d<-----6d (tip now)
         //            \            \
         //             \            \---4e<----5e
         //              \
         //               \
-        //                \2b<---3b<----4b<----5b ((<--6b)) (added in test later)
+        //                \2b<---3b<----4b<----5b ((<--6b)) (added in test later, tip later)
         //
         // Note that in the later test, 6b becomes the tip.
 
@@ -1635,7 +1760,7 @@ mod archival_state_tests {
         );
         add_block_to_archival_state(&archival_state, mock_block_4_e.clone()).await?;
         let mock_block_5_e = make_mock_block(
-            &mock_block_3_d.clone(),
+            &mock_block_4_e.clone(),
             Some(U32s::new([2002, 0, 0, 0, 0])),
             public_key,
         );
@@ -1660,6 +1785,8 @@ mod archival_state_tests {
                 "canonical chain {} is canonical, complicated",
                 i
             );
+            dag_walker_leash(&mock_block_6_d.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_d.hash, &archival_state).await;
         }
 
         for (i, block) in [
@@ -1689,6 +1816,8 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
+            dag_walker_leash(&mock_block_6_d.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_d.hash, &archival_state).await;
         }
 
         // Make a new block, 6b, canonical and verify that all checks work
@@ -1726,18 +1855,20 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
+            dag_walker_leash(&mock_block_6_b.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_b.hash, &archival_state).await;
         }
 
         for (i, block) in [
-            genesis,
-            mock_block_1,
-            mock_block_2_b,
-            mock_block_3_b,
-            mock_block_4_b,
-            mock_block_5_b,
-            mock_block_6_b.clone(),
+            &genesis,
+            &mock_block_1,
+            &mock_block_2_b,
+            &mock_block_3_b,
+            &mock_block_4_b,
+            &mock_block_5_b,
+            &mock_block_6_b.clone(),
         ]
-        .iter()
+        .into_iter()
         .enumerate()
         {
             assert!(
@@ -1747,7 +1878,48 @@ mod archival_state_tests {
                 "canonical chain {} is canonical, complicated",
                 i
             );
+            dag_walker_leash(&mock_block_6_b.hash, &block.hash, &archival_state).await;
+            dag_walker_leash(&block.hash, &mock_block_6_b.hash, &archival_state).await;
         }
+
+        // An explicit test of `find_path`
+        //                     /-3c<----4c<----5c<-----6c<---7c<---8c
+        //                    /
+        //                   /---3a<----4a<----5a
+        //                  /
+        //   gen<----1<----2a<---3d<----4d<----5d<-----6d
+        //            \            \
+        //             \            \---4e<----5e
+        //              \
+        //               \
+        //                \2b<---3b<----4b<----5b<---6b
+        //
+        // Note that in the later test, 6b becomes the tip.
+        let (backwards, luca, forwards) = archival_state
+            .find_path(&mock_block_5_e.hash, &mock_block_6_b.hash)
+            .await;
+        assert_eq!(
+            vec![
+                mock_block_2_b.hash,
+                mock_block_3_b.hash,
+                mock_block_4_b.hash,
+                mock_block_5_b.hash,
+                mock_block_6_b.hash,
+            ],
+            forwards,
+            "find_path forwards return value must match expected value"
+        );
+        assert_eq!(
+            vec![
+                mock_block_5_e.hash,
+                mock_block_4_e.hash,
+                mock_block_3_d.hash,
+                mock_block_2_a.hash
+            ],
+            backwards,
+            "find_path backwards return value must match expected value"
+        );
+        assert_eq!(mock_block_1.hash, luca, "Luca must be block 1");
 
         Ok(())
     }
@@ -1778,6 +1950,10 @@ mod archival_state_tests {
             .get_ancestor_block_digests(genesis.hash, 1)
             .await
             .is_empty());
+        assert!(archival_state
+            .get_ancestor_block_digests(genesis.hash, 0)
+            .await
+            .is_empty());
 
         // Insert blocks and verify that the same result is returned
         let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
@@ -1799,6 +1975,10 @@ mod archival_state_tests {
             .get_ancestor_block_digests(genesis.hash, 1)
             .await
             .is_empty());
+        assert!(archival_state
+            .get_ancestor_block_digests(genesis.hash, 0)
+            .await
+            .is_empty());
 
         // Check that ancestors of block 1 and 2 return the right values
         let ancestors_of_1 = archival_state
@@ -1806,6 +1986,10 @@ mod archival_state_tests {
             .await;
         assert_eq!(1, ancestors_of_1.len());
         assert_eq!(genesis.hash, ancestors_of_1[0]);
+        assert!(archival_state
+            .get_ancestor_block_digests(mock_block_1.hash, 0)
+            .await
+            .is_empty());
 
         let ancestors_of_2 = archival_state
             .get_ancestor_block_digests(mock_block_2.hash, 10)
@@ -1813,6 +1997,10 @@ mod archival_state_tests {
         assert_eq!(2, ancestors_of_2.len());
         assert_eq!(mock_block_1.hash, ancestors_of_2[0]);
         assert_eq!(genesis.hash, ancestors_of_2[1]);
+        assert!(archival_state
+            .get_ancestor_block_digests(mock_block_2.hash, 0)
+            .await
+            .is_empty());
 
         // Verify that max length is respected
         let ancestors_of_4_long = archival_state
@@ -1829,6 +2017,10 @@ mod archival_state_tests {
         assert_eq!(2, ancestors_of_4_short.len());
         assert_eq!(mock_block_3.hash, ancestors_of_4_short[0]);
         assert_eq!(mock_block_2.hash, ancestors_of_4_short[1]);
+        assert!(archival_state
+            .get_ancestor_block_digests(mock_block_4.hash, 0)
+            .await
+            .is_empty());
 
         Ok(())
     }
@@ -2017,6 +2209,20 @@ mod archival_state_tests {
             .await
             .unwrap();
         assert_eq!(mock_block_2.header, block_header_2);
+
+        // Test `get_block_header_with_lock`
+        {
+            let mut db_lock_local = archival_state.block_index_db.lock().await;
+            let block_header_2_from_lock_method = archival_state
+                .get_block_header_with_lock(&mut db_lock_local, mock_block_2.hash)
+                .unwrap();
+            assert_eq!(mock_block_2.header, block_header_2_from_lock_method);
+
+            let genesis_header_from_lock_method = archival_state
+                .get_block_header_with_lock(&mut db_lock_local, genesis.hash)
+                .unwrap();
+            assert_eq!(genesis.header, genesis_header_from_lock_method);
+        }
 
         // Test `block_height_to_block_headers`
         let block_headers_of_height_2 =

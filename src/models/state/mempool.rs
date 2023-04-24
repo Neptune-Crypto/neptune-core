@@ -544,7 +544,6 @@ mod tests {
             );
             mempool.insert(&t);
         }
-        println!("Mempool size: {}", mempool.len());
         mempool
     }
 
@@ -557,7 +556,6 @@ mod tests {
         let mut prev_fee_density = max_fee_density;
         for curr_transaction in mempool.get_transactions_for_block(SIZE_1MB_IN_BYTES) {
             let curr_fee_density = curr_transaction.fee_density();
-            println!("curr:{} <= prev: {}", curr_fee_density, prev_fee_density);
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
         }
@@ -598,7 +596,6 @@ mod tests {
             );
             mempool.insert(&t);
         }
-        println!("Mempool size: {}", mempool.len());
         assert_eq!(mempool.len(), 10);
         mempool.prune_stale_transactions();
         assert_eq!(mempool.len(), 5)
@@ -797,7 +794,6 @@ mod tests {
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
         for (_transaction_id, curr_fee_density) in mempool.get_sorted_iter() {
-            println!("curr:{} <= prev: {}", curr_fee_density, prev_fee_density);
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
         }
@@ -814,7 +810,6 @@ mod tests {
             bincode::serialize(&mempool_small.internal.read().unwrap().tx_dictionary)
                 .unwrap()
                 .len();
-        println!("size_gs_small = {}", size_gs_small);
         assert!(size_gs_small >= size_serialized_small);
 
         let mempool_big = setup(100).await;
@@ -823,7 +818,6 @@ mod tests {
             bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
                 .unwrap()
                 .len();
-        println!("size_gs_big = {}", size_gs_big);
         assert!(size_gs_big >= size_serialized_big);
         assert!(size_gs_big >= 5 * size_gs_small);
     }

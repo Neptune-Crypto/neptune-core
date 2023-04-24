@@ -926,7 +926,7 @@ impl MainLoopHandler {
 
                 // Handle membership proof resynchronization
                 _ = &mut mp_resync_timer => {
-                    debug!("Running membproof resync job");
+                    debug!("Running Membership proof resync job");
                     self.resync_membership_proofs().await?;
 
                     mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_timer_interval);
@@ -955,6 +955,7 @@ impl MainLoopHandler {
             .is_synced_to(current_tip_digest)
             .await
         {
+            debug!("Membership proof syncing not needed");
             return Ok(());
         }
 
