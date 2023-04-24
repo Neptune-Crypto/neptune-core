@@ -74,8 +74,14 @@ impl MonitoredUtxo {
     ) -> bool {
         match self.confirmed_in_block {
             Some((confirm_block, _)) => {
-                let (backwards, _, _) = archival_state.find_path(&confirm_block, current_tip).await;
-                !backwards.is_empty()
+                let confirm_block_header = archival_state
+                    .get_block_header(confirm_block)
+                    .await
+                    .unwrap();
+                let tip_header = archival_state.get_block_header(*current_tip).await.unwrap();
+                !archival_state
+                    .block_belongs_to_canonical_chain(&confirm_block_header, &tip_header)
+                    .await
             }
             None => false,
         }
