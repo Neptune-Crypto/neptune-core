@@ -313,7 +313,7 @@ mod removal_record_tests {
     use rand::{thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::test_shared::mutator_set::make_item_and_randomness;
+    use crate::test_shared::mutator_set::make_item_and_randomnesses;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -327,8 +327,9 @@ mod removal_record_tests {
     fn get_mp_and_removal_record() -> (MsMembershipProof<Tip5>, RemovalRecord<Tip5>) {
         type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness();
-        let mp: MsMembershipProof<H> = accumulator.prove(&item, &randomness, true);
+        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let mp: MsMembershipProof<H> =
+            accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         (mp, removal_record)
     }
@@ -418,9 +419,9 @@ mod removal_record_tests {
         // Verify that a single element can be added to and removed from the mutator set
         type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (item, randomness) = make_item_and_randomness();
-        let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
-        let mp = accumulator.prove(&item, &randomness, true);
+        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let addition_record: AdditionRecord = accumulator.commit(&item, &sender_randomness);
+        let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 
         assert!(
             !accumulator.verify(&item, &mp),
@@ -451,10 +452,10 @@ mod removal_record_tests {
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
-                let (item, randomness) = make_item_and_randomness();
+                let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
-                let mp = accumulator.prove(&item, &randomness, true);
+                let addition_record: AdditionRecord = accumulator.commit(&item, &sender_randomness);
+                let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 
                 // Update all removal records from addition, then add the element
                 let update_res_rr = RemovalRecord::batch_update_from_addition(
@@ -520,10 +521,10 @@ mod removal_record_tests {
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
-            let mp = accumulator.prove(&item, &randomness, true);
+            let addition_record: AdditionRecord = accumulator.commit(&item, &sender_randomness);
+            let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 
             // Update all removal records from addition, then add the element
             let update_res_rr = RemovalRecord::batch_update_from_addition(

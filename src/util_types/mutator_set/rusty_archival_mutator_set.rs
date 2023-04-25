@@ -223,7 +223,7 @@ mod tests {
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::{
-        test_shared::mutator_set::make_item_and_randomness,
+        test_shared::mutator_set::make_item_and_randomnesses,
         util_types::mutator_set::{ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE},
     };
     use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -256,9 +256,17 @@ mod tests {
         );
 
         for _ in 0..num_additions {
-            let (item, randomness) = make_item_and_randomness();
-            let addition_record = rusty_mutator_set.ams.kernel.commit(&item, &randomness);
-            let mp = rusty_mutator_set.ams.kernel.prove(&item, &randomness, true);
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+            let addition_record = rusty_mutator_set
+                .ams
+                .kernel
+                .commit(&item, &sender_randomness);
+            let mp = rusty_mutator_set.ams.kernel.prove(
+                &item,
+                &sender_randomness,
+                &receiver_preimage,
+                true,
+            );
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),

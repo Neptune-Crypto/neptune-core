@@ -48,10 +48,12 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
     fn prove(
         &mut self,
         item: &Digest,
-        randomness: &Digest,
+        sender_randomness: &Digest,
+        receiver_preimage: &Digest,
         store_indices: bool,
     ) -> MsMembershipProof<H> {
-        self.kernel.prove(item, randomness, store_indices)
+        self.kernel
+            .prove(item, sender_randomness, receiver_preimage, store_indices)
     }
 
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -100,7 +102,7 @@ mod ms_accumulator_tests {
     use itertools::Itertools;
     use proptest::prelude::Rng;
 
-    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
+    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses};
 
     use super::*;
 
@@ -115,10 +117,11 @@ mod ms_accumulator_tests {
         // Add N elements to the MS
         let num_additions = 44;
         for _ in 0..num_additions {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = accumulator.commit(&item, &randomness);
-            let membership_proof = accumulator.prove(&item, &randomness, false);
+            let addition_record = accumulator.commit(&item, &sender_randomness);
+            let membership_proof =
+                accumulator.prove(&item, &sender_randomness, &receiver_preimage, false);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -193,7 +196,7 @@ mod ms_accumulator_tests {
             let mut membership_proofs_batch: Vec<MsMembershipProof<H>> = vec![];
             let mut membership_proofs_sequential: Vec<MsMembershipProof<H>> = vec![];
             let mut items: Vec<Digest> = vec![];
-            let mut rands: Vec<Digest> = vec![];
+            let mut rands: Vec<(Digest, Digest)> = vec![];
             let mut last_ms_commitment: Option<Digest> = None;
             for i in 0..number_of_interactions {
                 // Verify that commitment to both the accumulator and archival data structure agree
@@ -214,10 +217,12 @@ mod ms_accumulator_tests {
 
                 if rng.gen_range(0u8..2) == 0 || start_fill && i < number_of_interactions / 2 {
                     // Add a new item to the mutator set and update all membership proofs
-                    let (item, randomness) = make_item_and_randomness();
+                    let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                    let addition_record: AdditionRecord = accumulator.commit(&item, &randomness);
-                    let membership_proof_acc = accumulator.prove(&item, &randomness, true);
+                    let addition_record: AdditionRecord =
+                        accumulator.commit(&item, &sender_randomness);
+                    let membership_proof_acc =
+                        accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 
                     // Update all membership proofs
                     // Uppdate membership proofs in batch
@@ -269,7 +274,7 @@ mod ms_accumulator_tests {
                     membership_proofs_batch.push(membership_proof_acc.clone());
                     membership_proofs_sequential.push(membership_proof_acc);
                     items.push(item);
-                    rands.push(randomness);
+                    rands.push((sender_randomness, receiver_preimage));
                 } else {
                     // Remove an item from the mutator set and update all membership proofs
                     if membership_proofs_batch.is_empty() {
@@ -372,17 +377,23 @@ mod ms_accumulator_tests {
 
                 // Verify that all membership proofs are valid after these additions and removals
                 // Also verify that batch-update and sequential update of membership proofs agree.
-                for (((mp_batch, mp_seq), item), rand) in membership_proofs_batch
-                    .iter()
-                    .zip(membership_proofs_sequential.iter())
-                    .zip(items.iter())
-                    .zip(rands.iter())
+                for (((mp_batch, mp_seq), item), (sender_randomness, receiver_preimage)) in
+                    membership_proofs_batch
+                        .iter()
+                        .zip(membership_proofs_sequential.iter())
+                        .zip(items.iter())
+                        .zip(rands.iter())
                 {
                     assert!(accumulator.verify(item, mp_batch));
 
                     // Verify that the membership proof can be restored from an archival instance
                     let arch_mp = archival_after_remove
-                        .restore_membership_proof(item, rand, mp_batch.auth_path_aocl.leaf_index)
+                        .restore_membership_proof(
+                            item,
+                            sender_randomness,
+                            receiver_preimage,
+                            mp_batch.auth_path_aocl.leaf_index,
+                        )
                         .unwrap();
                     assert_eq!(arch_mp, *mp_batch);
 

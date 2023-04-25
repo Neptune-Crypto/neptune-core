@@ -41,11 +41,12 @@ pub fn get_all_indices_with_duplicates<
     ret
 }
 
-pub fn make_item_and_randomness() -> (Digest, Digest) {
+pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
     let mut rng = rand::thread_rng();
     let item: Digest = rng.gen();
-    let randomness: Digest = rng.gen();
-    (item, randomness)
+    let sender_randomness: Digest = rng.gen();
+    let receiver_preimage: Digest = rng.gen();
+    (item, sender_randomness, receiver_preimage)
 }
 
 #[allow(clippy::type_complexity)]
@@ -70,19 +71,20 @@ pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher>() -> (
     (ArchivalMutatorSet { kernel, chunks }, db)
 }
 
-pub fn insert_item<H: AlgebraicHasher, M: Mmr<H>>(
+pub fn insert_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
     mutator_set: &mut MutatorSetKernel<H, M>,
 ) -> (MsMembershipProof<H>, Digest) {
-    let (new_item, randomness) = make_item_and_randomness();
+    let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-    let addition_record = mutator_set.commit(&new_item, &randomness);
-    let membership_proof = mutator_set.prove(&new_item, &randomness, true);
+    let addition_record = mutator_set.commit(&new_item, &sender_randomness);
+    let membership_proof =
+        mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage, true);
     mutator_set.add_helper(&addition_record);
 
     (membership_proof, new_item)
 }
 
-pub fn remove_item<H: AlgebraicHasher, M: Mmr<H>>(
+pub fn remove_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
     mutator_set: &mut MutatorSetKernel<H, M>,
     item: &Digest,
     mp: &MsMembershipProof<H>,

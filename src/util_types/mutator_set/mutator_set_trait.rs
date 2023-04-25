@@ -6,15 +6,13 @@ use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::RemovalRecord;
 
 pub trait MutatorSet<H: AlgebraicHasher> {
-    /**
-     * prove
-     * Generates a membership proof that will be valid when the item
-     * is added to the mutator set.
-     */
+    /// Generates a membership proof that will be valid when the item
+    /// is added to the mutator set.
     fn prove(
         &mut self,
         item: &Digest,
-        randomness: &Digest,
+        sender_randomness: &Digest,
+        receiver_preimage: &Digest,
         cache_indices: bool,
     ) -> MsMembershipProof<H>;
 

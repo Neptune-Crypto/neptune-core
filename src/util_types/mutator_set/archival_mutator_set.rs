@@ -39,10 +39,12 @@ where
     fn prove(
         &mut self,
         item: &Digest,
-        randomness: &Digest,
+        sender_randomness: &Digest,
+        receiver_preimage: &Digest,
         cache_indices: bool,
     ) -> MsMembershipProof<H> {
-        self.kernel.prove(item, randomness, cache_indices)
+        self.kernel
+            .prove(item, sender_randomness, receiver_preimage, cache_indices)
     }
 
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -202,7 +204,8 @@ where
     pub fn restore_membership_proof(
         &mut self,
         item: &Digest,
-        randomness: &Digest,
+        sender_randomness: &Digest,
+        receiver_preimage: &Digest,
         aocl_index: u64,
     ) -> Result<MsMembershipProof<H>, Box<dyn Error>> {
         if self.kernel.aocl.is_empty() {
@@ -210,7 +213,8 @@ where
         }
 
         let auth_path_aocl = self.get_aocl_authentication_path(aocl_index)?;
-        let swbf_indices = get_swbf_indices::<H>(item, randomness, aocl_index);
+        let swbf_indices =
+            get_swbf_indices::<H>(item, sender_randomness, receiver_preimage, aocl_index);
 
         let batch_index = self.kernel.get_batch_index();
         let window_start = batch_index as u128 * CHUNK_SIZE as u128;
@@ -236,7 +240,8 @@ where
 
         Ok(MsMembershipProof {
             auth_path_aocl,
-            randomness: randomness.to_owned(),
+            sender_randomness: sender_randomness.to_owned(),
+            receiver_preimage: receiver_preimage.to_owned(),
             target_chunks,
             cached_indices: Some(AbsoluteIndexSet::new(&swbf_indices)),
         })
@@ -364,7 +369,7 @@ mod archival_mutator_set_tests {
     use rand::{Rng, SeedableRng};
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomness};
+    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses};
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
 
     use super::*;
@@ -381,10 +386,11 @@ mod archival_mutator_set_tests {
         let mut items: Vec<Digest> = vec![];
 
         for i in 0..num_additions {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = archival_mutator_set.commit(&item, &randomness);
-            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+            let addition_record = archival_mutator_set.commit(&item, &sender_randomness);
+            let membership_proof =
+                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, false);
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -399,14 +405,18 @@ mod archival_mutator_set_tests {
 
             // Verify that we can just read out the same membership proofs from the
             // archival MMR as those we get through the membership proof book keeping.
-            let archival_membership_proof =
-                match archival_mutator_set.restore_membership_proof(&item, &randomness, i) {
-                    Err(err) => panic!(
-                        "Failed to get membership proof from archival mutator set: {}",
-                        err
-                    ),
-                    Ok(mp) => mp,
-                };
+            let archival_membership_proof = match archival_mutator_set.restore_membership_proof(
+                &item,
+                &sender_randomness,
+                &receiver_preimage,
+                i,
+            ) {
+                Err(err) => panic!(
+                    "Failed to get membership proof from archival mutator set: {}",
+                    err
+                ),
+                Ok(mp) => mp,
+            };
             assert_eq!(
                 archival_membership_proof, membership_proof,
                 "Membership proof from archive and accumulator must agree"
@@ -718,7 +728,8 @@ mod archival_mutator_set_tests {
             let restored_membership_proof = archival_mutator_set
                 .restore_membership_proof(
                     &item,
-                    &expired_membership_proof.randomness,
+                    &expired_membership_proof.sender_randomness,
+                    &expired_membership_proof.receiver_preimage,
                     expired_membership_proof.auth_path_aocl.leaf_index,
                 )
                 .unwrap();
@@ -748,10 +759,11 @@ mod archival_mutator_set_tests {
         let mut items: Vec<Digest> = vec![];
 
         for _ in 0..num_additions {
-            let (item, randomness) = make_item_and_randomness();
+            let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = archival_mutator_set.commit(&item, &randomness);
-            let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+            let addition_record = archival_mutator_set.commit(&item, &sender_randomness);
+            let membership_proof =
+                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, false);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -793,10 +805,15 @@ mod archival_mutator_set_tests {
             let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
             let mut items: Vec<Digest> = vec![];
             for _ in 0..num_additions {
-                let (item, randomness) = make_item_and_randomness();
+                let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                let addition_record = archival_mutator_set.commit(&item, &randomness);
-                let membership_proof = archival_mutator_set.prove(&item, &randomness, false);
+                let addition_record = archival_mutator_set.commit(&item, &sender_randomness);
+                let membership_proof = archival_mutator_set.prove(
+                    &item,
+                    &sender_randomness,
+                    &receiver_preimage,
+                    false,
+                );
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -861,9 +878,13 @@ mod archival_mutator_set_tests {
         rng: &mut StdRng,
     ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
         let item: Digest = rng.gen();
-        let randomness: Digest = rng.gen();
-        let addition_record = archival_mutator_set.kernel.commit(&item, &randomness);
-        let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
+        let sender_randomness: Digest = rng.gen();
+        let receiver_preimage: Digest = rng.gen();
+        let addition_record = archival_mutator_set
+            .kernel
+            .commit(&item, &sender_randomness);
+        let membership_proof =
+            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, true);
 
         (item, addition_record, membership_proof)
     }
@@ -875,9 +896,12 @@ mod archival_mutator_set_tests {
     >(
         archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
     ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
-        let (item, randomness) = make_item_and_randomness();
-        let addition_record = archival_mutator_set.kernel.commit(&item, &randomness);
-        let membership_proof = archival_mutator_set.prove(&item, &randomness, true);
+        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
+        let addition_record = archival_mutator_set
+            .kernel
+            .commit(&item, &sender_randomness);
+        let membership_proof =
+            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, true);
 
         (item, addition_record, membership_proof)
     }
