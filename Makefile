@@ -42,7 +42,7 @@ install:
 	cp target/$(target)/$(prog) ~/bin/$(prog)$(extension)
 
 lint:
-	cargo clippy
+	cargo clippy --all-targets
 
 # Get a stack trace upon kernel panic (may slow down implementation)
 run: export RUST_BACKTRACE = 1

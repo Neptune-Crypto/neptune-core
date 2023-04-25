@@ -519,7 +519,7 @@ mod archival_mutator_set_tests {
             )
             .unwrap();
 
-            items.push(item.clone());
+            items.push(item);
             mps.push(membership_proof.clone());
 
             archival_mutator_set.add(&addition_record);

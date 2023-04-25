@@ -892,10 +892,8 @@ mod ms_proof_tests {
         // Revert all removals in opposite order and verify that the MPs become valid again
         for i in (0..ms_size).rev() {
             ams.revert_remove(&removal_records[i]);
-            for j in 0..ms_size {
-                mps[j]
-                    .revert_update_from_remove(&removal_records[i])
-                    .unwrap();
+            for mp in mps.iter_mut().take(ms_size) {
+                mp.revert_update_from_remove(&removal_records[i]).unwrap();
             }
             for j in 0..ms_size {
                 if j < i {
