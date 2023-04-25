@@ -8,6 +8,8 @@ use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
+use rand::thread_rng;
+use rand::Rng;
 use rusty_leveldb;
 use rusty_leveldb::DB;
 use secp256k1::ecdsa;
@@ -530,16 +532,18 @@ pub fn new_random_wallet() -> WalletSecret {
 ///
 /// This mock currently contains a lot of things that don't pass block validation.
 pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &WalletSecret) -> DevNetInput {
+    let mut rng = thread_rng();
     let mock_mmr_membership_proof = MmrMembershipProof::new(0, vec![]);
-    let randomness = Digest::default();
+    let sender_randomness: Digest = rng.gen();
+    let receiver_preimage: Digest = rng.gen();
     let mock_ms_membership_proof = MsMembershipProof {
-        randomness,
+        sender_randomness,
+        receiver_preimage,
         auth_path_aocl: mock_mmr_membership_proof,
         target_chunks: ChunkDictionary::default(),
-        cached_indices: None,
     };
     let mut mock_ms_acc = MutatorSetAccumulator::default();
-    let mock_removal_record = mock_ms_acc.drop(&randomness, &mock_ms_membership_proof);
+    let mock_removal_record = mock_ms_acc.drop(&sender_randomness, &mock_ms_membership_proof);
 
     let utxo = Utxo {
         amount,

@@ -6,6 +6,7 @@ pub mod utxo;
 use anyhow::{bail, Result};
 use get_size::GetSize;
 use itertools::Itertools;
+use mutator_set_tf::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
 use num_traits::Zero;
@@ -28,6 +29,7 @@ use self::amount::Amount;
 use self::devnet_input::DevNetInput;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
+use super::address::generation_address;
 use super::block::Block;
 use super::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
 use super::shared::Hash;
@@ -37,8 +39,8 @@ use crate::models::state::wallet::WalletSecret;
 pub struct Transaction {
     pub inputs: Vec<DevNetInput>,
 
-    // In `outputs`, element 0 is the UTXO, element 1 is the randomness that goes into the mutator set
-    pub outputs: Vec<(Utxo, Digest)>,
+    // `outputs` contains the commitments that go into the AOCL
+    pub outputs: Vec<Digest>,
     pub public_scripts: Vec<Vec<BFieldElement>>,
     pub fee: Amount,
     pub timestamp: BFieldElement,
@@ -67,10 +69,7 @@ impl Hashable for Transaction {
             .iter()
             .flat_map(|input| input.utxo.to_sequence());
 
-        let outputs_preimage = self
-            .outputs
-            .iter()
-            .flat_map(|output| output.0.to_sequence());
+        let outputs_preimage = self.outputs.iter().flat_map(|output| output.to_sequence());
 
         // If public scripts are not padded or end with a specific instruction, then it might
         // be possible to find a collission for this digest. If that's the case, each public script
@@ -112,12 +111,43 @@ impl Transaction {
             .collect()
     }
 
-    pub fn get_own_output_utxos_and_comrands(&self, pub_key: PublicKey) -> Vec<(Utxo, Digest)> {
-        self.outputs
-            .iter()
-            .filter(|(utxo, _randomness)| utxo.public_key == pub_key)
-            .copied()
-            .collect::<Vec<(Utxo, Digest)>>()
+    pub fn get_received_utxos_with_randomnesses(
+        &self,
+        spending_keys: &[generation_address::SpendingKey],
+    ) -> Vec<(Utxo, Digest, Digest)> {
+        let mut received_utxos_with_randomnesses = vec![];
+
+        // for all own addresses
+        for spending_key in spending_keys {
+            // for all public scripts that contain a ciphertext for me,
+            for matching_script in self
+                .public_scripts
+                .iter()
+                .filter(|ps| generation_address::public_script_is_marked(ps))
+                .filter(|ps| {
+                    generation_address::receiver_identifier_from_public_script(ps)
+                        == spending_key.receiver_identifier
+                })
+            {
+                // decrypt it to obtain the utxo and sender randomness
+                let (utxo, sender_randomness) =
+                    spending_key.decrypt(generation_address::decrypt(matching_script));
+
+                // and join those with the receiver digest to get a commitment
+                // Note: the commitment is computed in the same way as in the mutator set.
+                let receiver_preimage = spending_key.receiver_preimage.clone();
+                let receiver_digest = Hash::hash(receiver_preimage);
+                let canonical_commitment = Hash::hash_pair(
+                    &Hash::hash_pair(&Hash::hash(utxo), sender_randomness),
+                    &receiver_digest,
+                );
+
+                // push to list
+                received_utxos_with_randomnesses.push((utxo, sender_randomness, receiver_preimage));
+            }
+        }
+
+        received_utxos_with_randomnesses
     }
 
     /// Update mutator set data for a transaction to update its validity for a new block

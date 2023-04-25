@@ -133,7 +133,7 @@ impl WalletState {
         let own_input_utxos: Vec<Utxo> = transaction.get_own_input_utxos(my_pub_key);
 
         let output_utxos_commitment_randomness: Vec<(Utxo, Digest)> =
-            transaction.get_own_output_utxos_and_comrands(my_pub_key);
+            transaction.get_received_utxos_with_randomnesses(my_pub_key);
 
         // Derive the membership proofs for new input UTXOs, *and* in the process update existing membership
         // proofs with updates from this block
@@ -230,7 +230,7 @@ impl WalletState {
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =
-                    msa_state.prove(&utxo_digest, &commitment_randomness, true);
+                    msa_state.prove(&utxo_digest, &commitment_randomness);
 
                 valid_membership_proofs_and_own_utxo_count.insert(
                     StrongUtxoKey::new(
