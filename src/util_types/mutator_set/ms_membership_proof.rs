@@ -21,8 +21,6 @@ use super::shared::{
     get_batch_mutation_argument_for_removal_record,
     prepare_authenticated_batch_modification_for_removal_record_reversion, BATCH_SIZE, CHUNK_SIZE,
 };
-use super::transfer_ms_membership_proof::TransferMsMembershipProof;
-
 impl Error for MembershipProofError {}
 
 impl fmt::Display for MembershipProofError {
@@ -49,35 +47,7 @@ pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub target_chunks: ChunkDictionary<H>,
 }
 
-/// Convert a transfer version of the membership proof to one for internal use.
-/// The important thing here is that `cached_indices` is not shared between peers.
-impl<H: AlgebraicHasher> From<TransferMsMembershipProof<H>> for MsMembershipProof<H> {
-    fn from(transfer: TransferMsMembershipProof<H>) -> Self {
-        Self {
-            sender_randomness: transfer.sender_randomness,
-            receiver_preimage: transfer.receiver_preimage,
-            auth_path_aocl: transfer.auth_path_aocl,
-            target_chunks: transfer.target_chunks,
-        }
-    }
-}
-
-// This conversion is kept here to avoid circular dependencies -- not sure if we have
-// to avoid that, though.
-impl<H: AlgebraicHasher> From<MsMembershipProof<H>> for TransferMsMembershipProof<H> {
-    fn from(mp: MsMembershipProof<H>) -> Self {
-        Self {
-            sender_randomness: mp.sender_randomness,
-            receiver_preimage: mp.receiver_preimage,
-            auth_path_aocl: mp.auth_path_aocl,
-            target_chunks: mp.target_chunks,
-        }
-    }
-}
-
 impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
-    // Equality for a membership proof does not look at cached indices, as they are just cached data
-    // Whether they are set or not, does not change the membership proof.
     fn eq(&self, other: &Self) -> bool {
         self.sender_randomness == other.sender_randomness
             && self.receiver_preimage == other.receiver_preimage

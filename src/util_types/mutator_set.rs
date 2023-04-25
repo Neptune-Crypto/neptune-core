@@ -11,4 +11,3 @@ pub mod mutator_set_trait;
 pub mod removal_record;
 pub mod rusty_archival_mutator_set;
 pub mod shared;
-pub mod transfer_ms_membership_proof;

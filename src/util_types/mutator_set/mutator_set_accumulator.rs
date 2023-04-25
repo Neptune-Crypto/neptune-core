@@ -400,7 +400,7 @@ mod ms_accumulator_tests {
                             mp_batch.auth_path_aocl.leaf_index,
                         )
                         .unwrap();
-                    assert_eq!(arch_mp, *mp_batch);
+                    assert_eq!(arch_mp, mp_batch.to_owned());
 
                     // Verify that sequential and batch update produces the same membership proofs
                     assert_eq!(mp_batch, mp_seq);
