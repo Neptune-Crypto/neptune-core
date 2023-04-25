@@ -257,10 +257,11 @@ mod tests {
 
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record = rusty_mutator_set
-                .ams
-                .kernel
-                .commit(&item, &sender_randomness);
+            let addition_record = rusty_mutator_set.ams.kernel.commit(
+                &item,
+                &sender_randomness,
+                &H::hash(&receiver_preimage),
+            );
             let mp = rusty_mutator_set.ams.kernel.prove(
                 &item,
                 &sender_randomness,

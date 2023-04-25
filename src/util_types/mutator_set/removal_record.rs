@@ -420,7 +420,8 @@ mod removal_record_tests {
         type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let addition_record: AdditionRecord = accumulator.commit(&item, &sender_randomness);
+        let addition_record: AdditionRecord =
+            accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
         let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 
         assert!(
@@ -454,7 +455,8 @@ mod removal_record_tests {
             for i in 0..2 * BATCH_SIZE + 4 {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                let addition_record: AdditionRecord = accumulator.commit(&item, &sender_randomness);
+                let addition_record: AdditionRecord =
+                    accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
                 let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 
                 // Update all removal records from addition, then add the element
@@ -523,7 +525,8 @@ mod removal_record_tests {
         for i in 0..12 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record: AdditionRecord = accumulator.commit(&item, &sender_randomness);
+            let addition_record: AdditionRecord =
+                accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
             let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 
             // Update all removal records from addition, then add the element

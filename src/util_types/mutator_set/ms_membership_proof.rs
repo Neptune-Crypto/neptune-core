@@ -765,7 +765,11 @@ mod ms_proof_tests {
             let item: Digest = random();
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
-            let addition_record = archival_mutator_set.commit(&item, &sender_randomness);
+            let addition_record = archival_mutator_set.commit(
+                &item,
+                &sender_randomness,
+                &H::hash(&receiver_preimage),
+            );
 
             for (oi, mp) in membership_proofs.iter_mut() {
                 mp.update_from_addition(oi, &archival_mutator_set.accumulator(), &addition_record)
@@ -890,7 +894,8 @@ mod ms_proof_tests {
             let item: Digest = random();
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
-            let addition_record = ams.commit(&item, &sender_randomness);
+            let addition_record =
+                ams.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
@@ -972,7 +977,8 @@ mod ms_proof_tests {
                 let item: Digest = random();
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
-                let addition_record = ams.commit(&item, &sender_randomness);
+                let addition_record =
+                    ams.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
                 MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect_vec(),
                     &items,
@@ -1021,8 +1027,10 @@ mod ms_proof_tests {
             // Add `init_size` items to MSA
             for _ in 0..init_size {
                 let item: Digest = random();
-                let randomness: Digest = random();
-                let addition_record = msa.commit(&item, &randomness);
+                let sender_randomness: Digest = random();
+                let receiver_preimage: Digest = random();
+                let addition_record =
+                    msa.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
                 msa.add(&addition_record);
             }
 
@@ -1030,7 +1038,11 @@ mod ms_proof_tests {
             let own_item: Digest = random();
             let own_sender_randomness: Digest = random();
             let own_receiver_preimage: Digest = random();
-            let own_addition_record = msa.commit(&own_item, &own_sender_randomness);
+            let own_addition_record = msa.commit(
+                &own_item,
+                &own_sender_randomness,
+                &H::hash(&own_receiver_preimage),
+            );
             let mut own_mp = msa.prove(
                 &own_item,
                 &own_sender_randomness,
@@ -1043,8 +1055,10 @@ mod ms_proof_tests {
             // Apply 1st batch of additions
             for _ in 0..first_batch_size {
                 let item: Digest = random();
-                let randomness: Digest = random();
-                let addition_record = msa.commit(&item, &randomness);
+                let sender_randomness: Digest = random();
+                let receiver_preimage: Digest = random();
+                let addition_record =
+                    msa.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
                 own_mp
                     .update_from_addition(&own_item, &msa, &addition_record)
                     .unwrap();
@@ -1060,8 +1074,10 @@ mod ms_proof_tests {
             // Apply 2nd batch of additions
             for _ in 0..last_batch_size {
                 let item: Digest = random();
-                let randomness: Digest = random();
-                let addition_record = msa.commit(&item, &randomness);
+                let sender_randomness: Digest = random();
+                let receiver_preimage: Digest = random();
+                let addition_record =
+                    msa.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
                 own_mp
                     .update_from_addition(&own_item, &msa, &addition_record)
                     .unwrap();
@@ -1104,7 +1120,11 @@ mod ms_proof_tests {
             let item: Digest = random();
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
-            let addition_record = archival_mutator_set.commit(&item, &sender_randomness);
+            let addition_record = archival_mutator_set.commit(
+                &item,
+                &sender_randomness,
+                &H::hash(&receiver_preimage),
+            );
             addition_records.push(addition_record.clone());
 
             let membership_proof =
@@ -1223,7 +1243,11 @@ mod ms_proof_tests {
                 let receiver_preimage: Digest = rng.gen();
 
                 // generate addition record
-                let addition_record = archival_mutator_set.commit(&item, &sender_randomness);
+                let addition_record = archival_mutator_set.commit(
+                    &item,
+                    &sender_randomness,
+                    &H::hash(&receiver_preimage),
+                );
 
                 // record membership proof
                 let membership_proof = archival_mutator_set.prove(

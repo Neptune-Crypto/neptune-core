@@ -60,8 +60,14 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         self.kernel.verify(item, membership_proof)
     }
 
-    fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord {
-        self.kernel.commit(item, randomness)
+    fn commit(
+        &mut self,
+        item: &Digest,
+        sender_randomness: &Digest,
+        receiver_preimage: &Digest,
+    ) -> AdditionRecord {
+        self.kernel
+            .commit(item, sender_randomness, receiver_preimage)
     }
 
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
@@ -119,7 +125,8 @@ mod ms_accumulator_tests {
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = accumulator.commit(&item, &sender_randomness);
+            let addition_record =
+                accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
             let membership_proof =
                 accumulator.prove(&item, &sender_randomness, &receiver_preimage, false);
 
@@ -220,7 +227,7 @@ mod ms_accumulator_tests {
                     let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
-                        accumulator.commit(&item, &sender_randomness);
+                        accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
                     let membership_proof_acc =
                         accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
 

@@ -22,7 +22,12 @@ pub trait MutatorSet<H: AlgebraicHasher> {
     /// ness. The addition record is itself a commitment to the item,
     /// but tailored to adding the item to the mutator set in its
     /// current state.
-    fn commit(&mut self, item: &Digest, randomness: &Digest) -> AdditionRecord;
+    fn commit(
+        &mut self,
+        item: &Digest,
+        sender_randomness: &Digest,
+        receiver_digest: &Digest,
+    ) -> AdditionRecord;
 
     /// Generates a removal record with which to update the set commitment.
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
