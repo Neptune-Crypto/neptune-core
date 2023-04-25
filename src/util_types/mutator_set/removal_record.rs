@@ -324,21 +324,21 @@ mod removal_record_tests {
 
     use super::*;
 
-    fn get_mp_and_removal_record() -> (MsMembershipProof<Tip5>, RemovalRecord<Tip5>) {
+    fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof<Tip5>, RemovalRecord<Tip5>) {
         type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let mp: MsMembershipProof<H> =
-            accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
+            accumulator.prove(&item, &sender_randomness, &receiver_preimage);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
-        (mp, removal_record)
+        (item, mp, removal_record)
     }
 
     #[test]
     fn verify_that_removal_records_and_mp_indices_agree() {
-        let (mp, removal_record) = get_mp_and_removal_record();
+        let (item, mp, removal_record) = get_item_mp_and_removal_record();
 
-        let mut mp_indices = mp.cached_indices.unwrap().0;
+        let mut mp_indices = mp.compute_indices(&item).0;
         mp_indices.sort_unstable();
         let mut removal_rec_indices = removal_record.absolute_indices.0;
         removal_rec_indices.sort_unstable();
@@ -353,7 +353,7 @@ mod removal_record_tests {
     fn hash_test() {
         type H = Tip5;
 
-        let (_mp, removal_record) = get_mp_and_removal_record();
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
 
         let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
         assert_eq!(
@@ -377,14 +377,14 @@ mod removal_record_tests {
 
     #[test]
     fn get_chunkidx_to_indices_test() {
-        let (mp, removal_record) = get_mp_and_removal_record();
+        let (item, mp, removal_record) = get_item_mp_and_removal_record();
 
         let chunks2indices = removal_record.get_chunkidx_to_indices_dict();
 
         // Verify that no indices are repeated in the hash map
         let mut all_indices: Vec<u128> = chunks2indices.clone().into_values().concat();
         all_indices.sort_unstable();
-        let mut cached_indices = mp.cached_indices.unwrap();
+        let mut cached_indices = mp.compute_indices(&item).0;
         cached_indices.sort_unstable();
         assert_eq!(cached_indices.to_vec(), all_indices);
         assert!(has_unique_elements(all_indices.clone()));
@@ -406,7 +406,7 @@ mod removal_record_tests {
         // to me so far.
         type H = Tip5;
 
-        let (_mp, removal_record) = get_mp_and_removal_record();
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
@@ -422,7 +422,7 @@ mod removal_record_tests {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
             accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
-        let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
+        let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
         assert!(
             !accumulator.verify(&item, &mp),
@@ -457,7 +457,7 @@ mod removal_record_tests {
 
                 let addition_record: AdditionRecord =
                     accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
-                let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
+                let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
                 // Update all removal records from addition, then add the element
                 let update_res_rr = RemovalRecord::batch_update_from_addition(
@@ -527,7 +527,7 @@ mod removal_record_tests {
 
             let addition_record: AdditionRecord =
                 accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
-            let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
+            let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             // Update all removal records from addition, then add the element
             let update_res_rr = RemovalRecord::batch_update_from_addition(

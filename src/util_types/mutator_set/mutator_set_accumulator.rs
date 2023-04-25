@@ -50,10 +50,9 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         item: &Digest,
         sender_randomness: &Digest,
         receiver_preimage: &Digest,
-        store_indices: bool,
     ) -> MsMembershipProof<H> {
         self.kernel
-            .prove(item, sender_randomness, receiver_preimage, store_indices)
+            .prove(item, sender_randomness, receiver_preimage)
     }
 
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -127,8 +126,7 @@ mod ms_accumulator_tests {
 
             let addition_record =
                 accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
-            let membership_proof =
-                accumulator.prove(&item, &sender_randomness, &receiver_preimage, false);
+            let membership_proof = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -229,7 +227,7 @@ mod ms_accumulator_tests {
                     let addition_record: AdditionRecord =
                         accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
                     let membership_proof_acc =
-                        accumulator.prove(&item, &sender_randomness, &receiver_preimage, true);
+                        accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
                     // Update all membership proofs
                     // Uppdate membership proofs in batch
@@ -403,10 +401,6 @@ mod ms_accumulator_tests {
                         )
                         .unwrap();
                     assert_eq!(arch_mp, *mp_batch);
-
-                    // Also verify that cached indices are set for both proofs and that they agree
-                    assert!(arch_mp.cached_indices.is_some());
-                    assert_eq!(arch_mp.cached_indices, mp_batch.cached_indices);
 
                     // Verify that sequential and batch update produces the same membership proofs
                     assert_eq!(mp_batch, mp_seq);

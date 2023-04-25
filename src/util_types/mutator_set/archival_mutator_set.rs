@@ -17,7 +17,7 @@ use super::ms_membership_proof::MsMembershipProof;
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKernelError};
 use super::mutator_set_trait::MutatorSet;
-use super::removal_record::{AbsoluteIndexSet, RemovalRecord};
+use super::removal_record::RemovalRecord;
 use super::shared::CHUNK_SIZE;
 
 pub struct ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
@@ -41,10 +41,9 @@ where
         item: &Digest,
         sender_randomness: &Digest,
         receiver_preimage: &Digest,
-        cache_indices: bool,
     ) -> MsMembershipProof<H> {
         self.kernel
-            .prove(item, sender_randomness, receiver_preimage, cache_indices)
+            .prove(item, sender_randomness, receiver_preimage)
     }
 
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
@@ -248,7 +247,6 @@ where
             sender_randomness: sender_randomness.to_owned(),
             receiver_preimage: receiver_preimage.to_owned(),
             target_chunks,
-            cached_indices: Some(AbsoluteIndexSet::new(&swbf_indices)),
         })
     }
 
@@ -375,6 +373,7 @@ mod archival_mutator_set_tests {
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses};
+    use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
 
     use super::*;
@@ -399,7 +398,7 @@ mod archival_mutator_set_tests {
                 &H::hash(&receiver_preimage),
             );
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, false);
+                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -544,7 +543,9 @@ mod archival_mutator_set_tests {
             archival_mutator_set.add(&addition_record);
             msa.add(&addition_record);
 
-            for index in membership_proof.cached_indices.unwrap().to_vec() {
+            let indices = membership_proof.compute_indices(&item).to_vec();
+
+            for index in indices {
                 let seen_before = all_indices.insert(index, current_item);
                 if let Some(colliding_item) = seen_before {
                     saw_collission_at = Some(((colliding_item, current_item), index))
@@ -776,7 +777,7 @@ mod archival_mutator_set_tests {
                 &H::hash(&receiver_preimage),
             );
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, false);
+                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -825,12 +826,8 @@ mod archival_mutator_set_tests {
                     &sender_randomness,
                     &H::hash(&receiver_preimage),
                 );
-                let membership_proof = archival_mutator_set.prove(
-                    &item,
-                    &sender_randomness,
-                    &receiver_preimage,
-                    false,
-                );
+                let membership_proof =
+                    archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -903,7 +900,7 @@ mod archival_mutator_set_tests {
             &H::hash(&receiver_preimage),
         );
         let membership_proof =
-            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, true);
+            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
         (item, addition_record, membership_proof)
     }
@@ -922,7 +919,7 @@ mod archival_mutator_set_tests {
             &H::hash(&receiver_preimage),
         );
         let membership_proof =
-            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, true);
+            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
         (item, addition_record, membership_proof)
     }

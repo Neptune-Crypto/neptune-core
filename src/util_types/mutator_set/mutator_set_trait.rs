@@ -13,7 +13,6 @@ pub trait MutatorSet<H: AlgebraicHasher> {
         item: &Digest,
         sender_randomness: &Digest,
         receiver_preimage: &Digest,
-        cache_indices: bool,
     ) -> MsMembershipProof<H>;
 
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool;

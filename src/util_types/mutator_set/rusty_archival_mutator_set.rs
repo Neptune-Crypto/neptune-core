@@ -262,12 +262,11 @@ mod tests {
                 &sender_randomness,
                 &H::hash(&receiver_preimage),
             );
-            let mp = rusty_mutator_set.ams.kernel.prove(
-                &item,
-                &sender_randomness,
-                &receiver_preimage,
-                true,
-            );
+            let mp =
+                rusty_mutator_set
+                    .ams
+                    .kernel
+                    .prove(&item, &sender_randomness, &receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),

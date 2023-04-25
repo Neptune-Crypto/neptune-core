@@ -50,6 +50,5 @@ mod transfer_ms_membership_proof_tests {
         assert_eq!(mp.sender_randomness, transfer_mp.sender_randomness);
         assert_eq!(mp.auth_path_aocl, transfer_mp.auth_path_aocl);
         assert_eq!(mp.target_chunks, transfer_mp.target_chunks);
-        assert!(reconstructed_mp.cached_indices.is_none());
     }
 }

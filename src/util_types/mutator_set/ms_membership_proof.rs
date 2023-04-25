@@ -47,14 +47,6 @@ pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub receiver_preimage: Digest,
     pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
-
-    // Cached indices are optional to store, but will prevent a lot of hashing in
-    // later bookkeeping, such as updating the membership proof.
-    // Warning: These indices should not be trusted and should only be calculated
-    // locally. If they are trusted the soundness of the mutator set is compromised,
-    // and if they are leaked the privacy is compromised.
-    // #[serde(with = "CompositeBigArray")]
-    pub cached_indices: Option<AbsoluteIndexSet>,
 }
 
 /// Convert a transfer version of the membership proof to one for internal use.
@@ -66,7 +58,6 @@ impl<H: AlgebraicHasher> From<TransferMsMembershipProof<H>> for MsMembershipProo
             receiver_preimage: transfer.receiver_preimage,
             auth_path_aocl: transfer.auth_path_aocl,
             target_chunks: transfer.target_chunks,
-            cached_indices: None,
         }
     }
 }
@@ -96,15 +87,14 @@ impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
 }
 
 impl<H: AlgebraicHasher> MsMembershipProof<H> {
-    /// Helper function to cache the indices so they don't have to be recalculated multiple times
-    pub fn cache_indices(&mut self, item: &Digest) {
-        let indices = get_swbf_indices::<H>(
+    /// Compute the indices that will be added to the SWBF if this item is removed.
+    pub fn compute_indices(&self, item: &Digest) -> AbsoluteIndexSet {
+        AbsoluteIndexSet::new(&get_swbf_indices::<H>(
             item,
             &self.sender_randomness,
             &self.receiver_preimage,
             self.auth_path_aocl.leaf_index,
-        );
-        self.cached_indices = Some(AbsoluteIndexSet::new(&indices));
+        ))
     }
 
     /// Update a list of membership proofs in anticipation of an addition
@@ -170,19 +160,12 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             .zip(own_items.iter())
             .enumerate()
             .for_each(|(i, (mp, item))| {
-                let indices = match &mp.cached_indices {
-                    Some(bs) => bs.to_owned(),
-                    None => {
-                        let leaf_index = mp.auth_path_aocl.leaf_index;
-                        let indices = get_swbf_indices::<H>(
-                            item,
-                            &mp.sender_randomness,
-                            &mp.receiver_preimage,
-                            leaf_index,
-                        );
-                        AbsoluteIndexSet::new(&indices)
-                    }
-                };
+                let indices = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
+                    item,
+                    &mp.sender_randomness,
+                    &mp.receiver_preimage,
+                    mp.auth_path_aocl.leaf_index,
+                ));
                 let chunks_set: HashSet<u64> = indices
                     .to_array()
                     .iter()
@@ -313,17 +296,13 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
         let new_chunk = mutator_set.kernel.swbf_active.slid_chunk();
         let new_chunk_digest: Digest = H::hash(&new_chunk);
 
-        // Get indices from either the cached indices, or by recalculating them. Notice
-        // that the latter is an expensive operation.
-        let all_indices = match &self.cached_indices {
-            Some(indices) => indices.to_array(),
-            None => get_swbf_indices::<H>(
-                own_item,
-                &self.sender_randomness,
-                &self.receiver_preimage,
-                self.auth_path_aocl.leaf_index,
-            ),
-        };
+        // Get indices by recalculating them. (We do not cache indices any more.)
+        let all_indices = get_swbf_indices::<H>(
+            own_item,
+            &self.sender_randomness,
+            &self.receiver_preimage,
+            self.auth_path_aocl.leaf_index,
+        );
         let chunk_indices_set: HashSet<u64> = all_indices
             .into_iter()
             .map(|bi| (bi / CHUNK_SIZE as u128) as u64)
@@ -570,41 +549,12 @@ mod ms_proof_tests {
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
-    use crate::util_types::mutator_set::shared::NUM_TRIALS;
     use itertools::{Either, Itertools};
-    use num_traits::Zero;
     use rand::rngs::StdRng;
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-
-    #[test]
-    fn mp_cache_indices_test() {
-        type H = Tip5;
-
-        let accumulator = MutatorSetAccumulator::<H>::default();
-        let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let mut mp = accumulator
-            .kernel
-            .prove(&item, &sender_randomness, &receiver_preimage, false);
-
-        // Verify that indices are not cached, then cache them with the helper function
-        assert!(mp.cached_indices.is_none());
-        mp.cache_indices(&item);
-        assert!(mp.cached_indices.is_some());
-
-        // Verify that cached indices are the same as those generated from a new membership proof
-        // made with the `cache_indices` argument set to true.
-        let mp_generated_with_cached_indices =
-            accumulator
-                .kernel
-                .prove(&item, &sender_randomness, &receiver_preimage, true);
-        assert_eq!(
-            mp_generated_with_cached_indices.cached_indices,
-            mp.cached_indices
-        );
-    }
 
     #[test]
     fn mp_equality_test() {
@@ -613,20 +563,11 @@ mod ms_proof_tests {
 
         let (_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-        let mp_with_cached_indices = MsMembershipProof::<H> {
+        let base_mp = MsMembershipProof::<H> {
             sender_randomness,
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_indices: Some(AbsoluteIndexSet::new(&[1u128; NUM_TRIALS as usize])),
-        };
-
-        let mp_without_cached_indices = MsMembershipProof::<H> {
-            sender_randomness,
-            receiver_preimage,
-            auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
-            target_chunks: ChunkDictionary::default(),
-            cached_indices: None,
         };
 
         let mp_with_different_leaf_index = MsMembershipProof::<H> {
@@ -634,7 +575,6 @@ mod ms_proof_tests {
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::<H>::new(100073, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_indices: None,
         };
 
         let mp_with_different_sender_randomness = MsMembershipProof::<H> {
@@ -642,7 +582,6 @@ mod ms_proof_tests {
             receiver_preimage,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_indices: None,
         };
 
         let mp_with_different_receiver_preimage = MsMembershipProof::<H> {
@@ -650,20 +589,16 @@ mod ms_proof_tests {
             sender_randomness,
             auth_path_aocl: MmrMembershipProof::<H>::new(0, vec![]),
             target_chunks: ChunkDictionary::default(),
-            cached_indices: None,
         };
 
-        // Verify that the caching of indices does not change the equality value of a membership proof
-        assert_eq!(mp_with_cached_indices, mp_without_cached_indices);
-
         // Verify that a different data index (a different auth path) is a different MP
-        assert_ne!(mp_with_different_leaf_index, mp_with_cached_indices);
+        assert_ne!(mp_with_different_leaf_index, base_mp);
 
         // Verify that different sender randomness is a different MP
-        assert_ne!(mp_with_different_sender_randomness, mp_with_cached_indices);
+        assert_ne!(mp_with_different_sender_randomness, base_mp);
 
         // Verify that different receiver preimage is a different MP
-        assert_ne!(mp_with_different_receiver_preimage, mp_with_cached_indices);
+        assert_ne!(mp_with_different_receiver_preimage, base_mp);
 
         // Test that a different chunk dictionary results in a different MP
         // For this test to be performed, we first need an MMR membership proof and a chunk.
@@ -681,13 +616,12 @@ mod ms_proof_tests {
 
         // Create a new mutator set membership proof with a non-empty chunk dictionary
         // and verify that it is considered a different membership proof
-        let mut mp_mutated: MsMembershipProof<H> = mp_with_cached_indices.clone();
+        let mut mp_mutated: MsMembershipProof<H> = base_mp.clone();
         mp_mutated
             .target_chunks
             .dictionary
             .insert(0, (mmr_mp, zero_chunk));
-        assert_ne!(mp_mutated, mp_with_cached_indices);
-        assert_ne!(mp_mutated, mp_without_cached_indices);
+        assert_ne!(mp_mutated, base_mp);
     }
 
     #[test]
@@ -699,49 +633,15 @@ mod ms_proof_tests {
         for _ in 0..10 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let mp_with_cached_indices =
-                accumulator
-                    .kernel
-                    .prove(&item, &sender_randomness, &receiver_preimage, true);
-            assert!(mp_with_cached_indices.cached_indices.is_some());
+            let base_mp = accumulator
+                .kernel
+                .prove(&item, &sender_randomness, &receiver_preimage);
 
-            let json_cached: String = serde_json::to_string(&mp_with_cached_indices).unwrap();
-            let s_back_cached = serde_json::from_str::<MsMembershipProof<H>>(&json_cached).unwrap();
-            assert!(s_back_cached.cached_indices.is_some());
-            assert!(!s_back_cached
-                .cached_indices
-                .as_ref()
-                .unwrap()
-                .to_array()
-                .iter()
-                .all(|x| x.is_zero()));
-            assert_eq!(
-                s_back_cached.cached_indices,
-                mp_with_cached_indices.cached_indices
-            );
-            assert_eq!(
-                s_back_cached.target_chunks,
-                mp_with_cached_indices.target_chunks
-            );
+            let json_cached: String = serde_json::to_string(&base_mp).unwrap();
+            let s_back = serde_json::from_str::<MsMembershipProof<H>>(&json_cached).unwrap();
 
-            let mp_no_cached_indices =
-                accumulator
-                    .kernel
-                    .prove(&item, &sender_randomness, &receiver_preimage, false);
-            assert!(mp_no_cached_indices.cached_indices.is_none());
-
-            let json_no_cached: String = serde_json::to_string(&mp_no_cached_indices).unwrap();
-            let s_back_no_cached =
-                serde_json::from_str::<MsMembershipProof<H>>(&json_no_cached).unwrap();
-            assert!(s_back_no_cached.cached_indices.is_none());
-            assert_eq!(
-                s_back_no_cached.cached_indices,
-                mp_no_cached_indices.cached_indices
-            );
-            assert_eq!(
-                s_back_no_cached.target_chunks,
-                mp_no_cached_indices.target_chunks
-            );
+            assert_eq!(s_back.target_chunks, base_mp.target_chunks);
+            assert_eq!(s_back, base_mp);
         }
     }
 
@@ -777,7 +677,7 @@ mod ms_proof_tests {
             }
 
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, false);
+                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
             if i == own_index {
                 own_membership_proof = Some(membership_proof);
                 own_item = Some(item);
@@ -903,7 +803,7 @@ mod ms_proof_tests {
                 &addition_record,
             )
             .unwrap();
-            mps.push(ams.prove(&item, &sender_randomness, &receiver_preimage, true));
+            mps.push(ams.prove(&item, &sender_randomness, &receiver_preimage));
             items.push(item);
             ams.add(&addition_record);
             addition_records.push(addition_record);
@@ -986,7 +886,7 @@ mod ms_proof_tests {
                     &addition_record,
                 )
                 .unwrap();
-                mps.push(ams.prove(&item, &sender_randomness, &receiver_preimage, true));
+                mps.push(ams.prove(&item, &sender_randomness, &receiver_preimage));
                 items.push(item);
                 ams.add(&addition_record);
                 addition_records.push(addition_record);
@@ -1043,12 +943,7 @@ mod ms_proof_tests {
                 &own_sender_randomness,
                 &H::hash(&own_receiver_preimage),
             );
-            let mut own_mp = msa.prove(
-                &own_item,
-                &own_sender_randomness,
-                &own_receiver_preimage,
-                true,
-            );
+            let mut own_mp = msa.prove(&own_item, &own_sender_randomness, &own_receiver_preimage);
             msa.add(&own_addition_record);
             let msa_after_own_add = msa.clone();
 
@@ -1128,7 +1023,7 @@ mod ms_proof_tests {
             addition_records.push(addition_record.clone());
 
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage, true);
+                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
             match i.cmp(&own_index) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
@@ -1250,12 +1145,8 @@ mod ms_proof_tests {
                 );
 
                 // record membership proof
-                let membership_proof = archival_mutator_set.prove(
-                    &item,
-                    &sender_randomness,
-                    &receiver_preimage,
-                    false,
-                );
+                let membership_proof =
+                    archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
                 // update existing membership proof
                 for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {
