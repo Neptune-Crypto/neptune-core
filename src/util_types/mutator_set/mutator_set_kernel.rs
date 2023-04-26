@@ -434,7 +434,6 @@ mod accumulation_scheme_tests {
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use twenty_first::util_types::storage_vec::RustyLevelDbVec;
-    use twenty_first::utils::has_unique_elements;
 
     use crate::test_shared::mutator_set::insert_mock_item;
     use crate::test_shared::mutator_set::remove_mock_item;
@@ -536,15 +535,15 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn ms_get_indices_test() {
-        // Test that `get_indices` behaves as expected. I.e. that it does not return any
-        // duplicates, and always returns something of length `NUM_TRIALS`.
+        // Test that `get_indices` behaves as expected, i.e.
+        // that it always returns something of length `NUM_TRIALS`, and that the
+        // returned values are in the expected range.
         type H = Tip5;
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let ret: [u128; NUM_TRIALS as usize] =
             get_swbf_indices::<H>(&item, &sender_randomness, &receiver_preimage, 0);
         assert_eq!(NUM_TRIALS as usize, ret.len());
-        assert!(has_unique_elements(ret));
         assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
     }
 

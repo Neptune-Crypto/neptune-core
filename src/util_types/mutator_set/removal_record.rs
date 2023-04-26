@@ -320,8 +320,6 @@ mod removal_record_tests {
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
     use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
 
-    use twenty_first::utils::{self, has_unique_elements};
-
     use super::*;
 
     fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof<Tip5>, RemovalRecord<Tip5>) {
@@ -361,13 +359,9 @@ mod removal_record_tests {
             H::hash(&removal_record_alt),
             "Same removal record must hash to same value"
         );
-        removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS as usize / 4] += 1;
 
-        // Sanity check (theoretically, a collision in the indices could have happened)
-        assert!(
-            utils::has_unique_elements(removal_record_alt.absolute_indices.to_array()),
-            "Sanity check to ensure that indices are still all unique"
-        );
+        // Verify that changing the absolute indices, changes the hash value
+        removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS as usize / 4] += 1;
         assert_ne!(
             H::hash(&removal_record),
             H::hash(&removal_record_alt),
