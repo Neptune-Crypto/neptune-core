@@ -261,7 +261,7 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
         let current_batch_index: u64 = self.get_batch_index();
         let window_start = current_batch_index as u128 * CHUNK_SIZE as u128;
 
-        // We use the cached indices if we have them, otherwise they are recalculated
+        // Get all bloom filter indices
         let all_indices = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
             item,
             &membership_proof.sender_randomness,

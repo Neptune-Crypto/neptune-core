@@ -37,8 +37,7 @@ pub enum MembershipProofError {
     MissingChunkOnRevertUpdateFromAdd(u64),
 }
 
-// In order to store this structure in the database, it needs to be serializable. But it should not be
-// transferred between peers as the `cached_indices` fields cannot be trusted and must be calculated by each peer
+// In order to store this structure in the database, it needs to be serializable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub sender_randomness: Digest,
@@ -605,15 +604,15 @@ mod ms_proof_tests {
         for _ in 0..10 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let base_mp = accumulator
+            let mp = accumulator
                 .kernel
                 .prove(&item, &sender_randomness, &receiver_preimage);
 
-            let json_cached: String = serde_json::to_string(&base_mp).unwrap();
-            let s_back = serde_json::from_str::<MsMembershipProof<H>>(&json_cached).unwrap();
+            let json: String = serde_json::to_string(&mp).unwrap();
+            let mp_again = serde_json::from_str::<MsMembershipProof<H>>(&json).unwrap();
 
-            assert_eq!(s_back.target_chunks, base_mp.target_chunks);
-            assert_eq!(s_back, base_mp);
+            assert_eq!(mp_again.target_chunks, mp.target_chunks);
+            assert_eq!(mp_again, mp);
         }
     }
 

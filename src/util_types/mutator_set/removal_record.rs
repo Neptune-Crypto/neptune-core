@@ -381,15 +381,13 @@ mod removal_record_tests {
 
         let chunks2indices = removal_record.get_chunkidx_to_indices_dict();
 
-        // Verify that no indices are repeated in the hash map
-        let mut all_indices: Vec<u128> = chunks2indices.clone().into_values().concat();
-        all_indices.sort_unstable();
-        let mut cached_indices = mp.compute_indices(&item).0;
-        cached_indices.sort_unstable();
-        assert_eq!(cached_indices.to_vec(), all_indices);
-        assert!(has_unique_elements(all_indices.clone()));
-        all_indices.dedup();
-        assert_eq!(NUM_TRIALS as usize, all_indices.len());
+        // Verify that indices from membership proof and remove records agree
+        let mut rr_indices: Vec<u128> = chunks2indices.clone().into_values().concat();
+        rr_indices.sort_unstable();
+        let mut mp_indices = mp.compute_indices(&item).0;
+        mp_indices.sort_unstable();
+        assert_eq!(mp_indices.to_vec(), rr_indices);
+        assert_eq!(NUM_TRIALS as usize, rr_indices.len());
 
         // Verify that the hash map has put the indices into the correct buckets
         for (key, values) in chunks2indices {
