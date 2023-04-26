@@ -132,8 +132,23 @@ impl WalletState {
 
         let own_input_utxos: Vec<Utxo> = transaction.get_own_input_utxos(my_pub_key);
 
-        let output_utxos_commitment_randomness: Vec<(Utxo, Digest)> =
-            transaction.get_received_utxos_with_randomnesses(my_pub_key);
+        // TODO: Add real generation addresses here, probably read from DB
+        let output_utxos_commitment_randomness: Vec<(Utxo, Digest, Digest)> =
+            transaction.get_received_utxos_with_randomnesses(&[]);
+        let utxo_digest_to_utxo_info: HashMap<Digest, (Utxo, Digest, Digest)> =
+            output_utxos_commitment_randomness
+                .into_iter()
+                .map(|(utxo, send_rand, rec_premi)| {
+                    (
+                        mutator_set_kernel.commit(
+                            &Hash::hash(utxo),
+                            &send_rand,
+                            &Hash::hash(&rec_premi),
+                        ),
+                        (utxo, send_rand, rec_premi),
+                    )
+                })
+                .collect();
 
         // Derive the membership proofs for new input UTXOs, *and* in the process update existing membership
         // proofs with updates from this block
@@ -183,7 +198,7 @@ impl WalletState {
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
-        for (addition_record, (utxo, commitment_randomness)) in block
+        for (addition_record, utxo_commitment) in block
             .body
             .mutator_set_update
             .additions
@@ -220,7 +235,8 @@ impl WalletState {
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
-            if utxo.matches_pubkey(my_pub_key) {
+            // if utxo.matches_pubkey(my_pub_key) {
+            if utxo_digest_to_utxo_info.contains_key(&utxo_commitment) {
                 // TODO: Change this logging to use `Display` for `Amount` once functionality is merged from t-f
                 info!(
                     "Received UTXO in block {}, height {}: value = {}",

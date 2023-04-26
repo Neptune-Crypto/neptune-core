@@ -6,7 +6,6 @@ pub mod utxo;
 use anyhow::{bail, Result};
 use get_size::GetSize;
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
 use num_traits::Zero;
@@ -125,13 +124,28 @@ impl Transaction {
                 .iter()
                 .filter(|ps| generation_address::public_script_is_marked(ps))
                 .filter(|ps| {
-                    generation_address::receiver_identifier_from_public_script(ps)
-                        == spending_key.receiver_identifier
+                    let receiver_id =
+                        generation_address::receiver_identifier_from_public_script(ps);
+                    match receiver_id {
+                        Ok(recid) => recid == spending_key.receiver_identifier,
+                        Err(_) => false,
+                    }
                 })
             {
                 // decrypt it to obtain the utxo and sender randomness
-                let (utxo, sender_randomness) =
-                    spending_key.decrypt(generation_address::decrypt(matching_script));
+                let ciphertext = generation_address::ciphertext_from_public_script(matching_script);
+                let decryption_result = match ciphertext {
+                    Ok(ctxt) => spending_key.decrypt(),
+                    _ => {
+                        continue;
+                    }
+                };
+                let (utxo, randomness) = match decryption_result {
+                    Ok(tuple) => tuple,
+                    _ => {
+                        continue;
+                    }
+                };
 
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.
