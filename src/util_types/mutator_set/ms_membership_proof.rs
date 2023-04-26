@@ -56,6 +56,8 @@ impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
     }
 }
 
+impl<H: AlgebraicHasher> Eq for MsMembershipProof<H> {}
+
 impl<H: AlgebraicHasher> MsMembershipProof<H> {
     /// Compute the indices that will be added to the SWBF if this item is removed.
     pub fn compute_indices(&self, item: &Digest) -> AbsoluteIndexSet {
@@ -984,7 +986,7 @@ mod ms_proof_tests {
             let receiver_preimage: Digest = random();
             let addition_record =
                 commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
-            addition_records.push(addition_record.clone());
+            addition_records.push(addition_record);
 
             let membership_proof =
                 archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
