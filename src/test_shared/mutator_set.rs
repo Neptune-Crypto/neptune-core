@@ -14,6 +14,7 @@ use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
+use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
@@ -76,8 +77,7 @@ pub fn insert_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
 ) -> (MsMembershipProof<H>, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-    let addition_record =
-        mutator_set.commit(&new_item, &sender_randomness, &H::hash(&receiver_preimage));
+    let addition_record = commit::<H>(&new_item, &sender_randomness, &H::hash(&receiver_preimage));
     let membership_proof = mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);
     mutator_set.add_helper(&addition_record);
 

@@ -59,16 +59,6 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
         self.kernel.verify(item, membership_proof)
     }
 
-    fn commit(
-        &mut self,
-        item: &Digest,
-        sender_randomness: &Digest,
-        receiver_preimage: &Digest,
-    ) -> AdditionRecord {
-        self.kernel
-            .commit(item, sender_randomness, receiver_preimage)
-    }
-
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         self.kernel.drop(item, membership_proof)
     }
@@ -107,7 +97,10 @@ mod ms_accumulator_tests {
     use itertools::Itertools;
     use proptest::prelude::Rng;
 
-    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses};
+    use crate::{
+        test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses},
+        util_types::mutator_set::mutator_set_trait::commit,
+    };
 
     use super::*;
 
@@ -125,7 +118,7 @@ mod ms_accumulator_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
             let membership_proof = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
@@ -225,7 +218,7 @@ mod ms_accumulator_tests {
                     let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
-                        accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                        commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
                     let membership_proof_acc =
                         accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 

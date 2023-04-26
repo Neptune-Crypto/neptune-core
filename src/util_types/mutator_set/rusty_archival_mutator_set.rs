@@ -217,7 +217,7 @@ impl<H: AlgebraicHasher> StorageWriter<RustyKey, RustyMSValue> for RustyArchival
 
 #[cfg(test)]
 mod tests {
-    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
     use itertools::Itertools;
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
@@ -257,11 +257,8 @@ mod tests {
 
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record = rusty_mutator_set.ams.kernel.commit(
-                &item,
-                &sender_randomness,
-                &H::hash(&receiver_preimage),
-            );
+            let addition_record =
+                commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
             let mp =
                 rusty_mutator_set
                     .ams

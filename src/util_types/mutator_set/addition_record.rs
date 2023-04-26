@@ -25,7 +25,7 @@ impl Hashable for AdditionRecord {
 
 #[cfg(test)]
 mod addition_record_tests {
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+    use crate::util_types::mutator_set::mutator_set_trait::commit;
 
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -36,15 +36,13 @@ mod addition_record_tests {
     fn hash_identity_test() {
         type H = Tip5;
 
-        let msa0: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let addition_record_0: AdditionRecord = msa0.kernel.commit(
+        let addition_record_0: AdditionRecord = commit::<H>(
             &H::hash(&1492u128),
             &H::hash(&1522u128),
             &H::hash(&1521u128),
         );
 
-        let msa1: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let addition_record_1: AdditionRecord = msa1.kernel.commit(
+        let addition_record_1: AdditionRecord = commit::<H>(
             &H::hash(&1492u128),
             &H::hash(&1522u128),
             &H::hash(&1521u128),
@@ -56,8 +54,7 @@ mod addition_record_tests {
             "Two addition records with same commitments and same MMR AOCLs must agree."
         );
 
-        let msa3: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let addition_record_1: AdditionRecord = msa3.kernel.commit(
+        let addition_record_1: AdditionRecord = commit::<H>(
             &H::hash(&1451u128),
             &H::hash(&1480u128),
             &H::hash(&1481u128),
@@ -75,13 +72,11 @@ mod addition_record_tests {
     fn serialization_test() {
         type H = Tip5;
 
-        let msa: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let item = H::hash(&1492u128);
         let sender_randomness = H::hash(&1522u128);
         let receiver_digest = H::hash(&1583u128);
         let addition_record: AdditionRecord =
-            msa.kernel
-                .commit(&item, &sender_randomness, &receiver_digest);
+            commit::<H>(&item, &sender_randomness, &receiver_digest);
         let json = serde_json::to_string(&addition_record).unwrap();
         let s_back = serde_json::from_str::<AdditionRecord>(&json).unwrap();
         assert_eq!(

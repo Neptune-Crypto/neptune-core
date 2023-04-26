@@ -5,6 +5,19 @@ use super::addition_record::AdditionRecord;
 use super::ms_membership_proof::MsMembershipProof;
 use super::removal_record::RemovalRecord;
 
+/// Generates an addition record from an item and explicit random-
+/// ness. The addition record is itself a commitment to the item.
+pub fn commit<H: AlgebraicHasher>(
+    item: &Digest,
+    sender_randomness: &Digest,
+    receiver_digest: &Digest,
+) -> AdditionRecord {
+    let canonical_commitment =
+        H::hash_pair(&H::hash_pair(item, sender_randomness), receiver_digest);
+
+    AdditionRecord::new(canonical_commitment)
+}
+
 pub trait MutatorSet<H: AlgebraicHasher> {
     /// Generates a membership proof that will be valid when the item
     /// is added to the mutator set.
@@ -16,17 +29,6 @@ pub trait MutatorSet<H: AlgebraicHasher> {
     ) -> MsMembershipProof<H>;
 
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool;
-
-    /// Generates an addition record from an item and explicit random-
-    /// ness. The addition record is itself a commitment to the item,
-    /// but tailored to adding the item to the mutator set in its
-    /// current state.
-    fn commit(
-        &mut self,
-        item: &Digest,
-        sender_randomness: &Digest,
-        receiver_digest: &Digest,
-    ) -> AdditionRecord;
 
     /// Generates a removal record with which to update the set commitment.
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;

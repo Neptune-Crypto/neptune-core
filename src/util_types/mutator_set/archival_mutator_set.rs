@@ -50,15 +50,6 @@ where
         self.kernel.verify(item, membership_proof)
     }
 
-    fn commit(
-        &mut self,
-        item: &Digest,
-        sender_randomness: &Digest,
-        receiver_digest: &Digest,
-    ) -> AdditionRecord {
-        self.kernel.commit(item, sender_randomness, receiver_digest)
-    }
-
     fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         self.kernel.drop(item, membership_proof)
     }
@@ -373,6 +364,7 @@ mod archival_mutator_set_tests {
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses};
+    use crate::util_types::mutator_set::mutator_set_trait::commit;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
 
@@ -392,11 +384,8 @@ mod archival_mutator_set_tests {
         for i in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = archival_mutator_set.commit(
-                &item,
-                &sender_randomness,
-                &H::hash(&receiver_preimage),
-            );
+            let addition_record =
+                commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
             let membership_proof =
                 archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -771,11 +760,8 @@ mod archival_mutator_set_tests {
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = archival_mutator_set.commit(
-                &item,
-                &sender_randomness,
-                &H::hash(&receiver_preimage),
-            );
+            let addition_record =
+                commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
             let membership_proof =
                 archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -821,11 +807,8 @@ mod archival_mutator_set_tests {
             for _ in 0..num_additions {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                let addition_record = archival_mutator_set.commit(
-                    &item,
-                    &sender_randomness,
-                    &H::hash(&receiver_preimage),
-                );
+                let addition_record =
+                    commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
                 let membership_proof =
                     archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -894,11 +877,7 @@ mod archival_mutator_set_tests {
         let item: Digest = rng.gen();
         let sender_randomness: Digest = rng.gen();
         let receiver_preimage: Digest = rng.gen();
-        let addition_record = archival_mutator_set.kernel.commit(
-            &item,
-            &sender_randomness,
-            &H::hash(&receiver_preimage),
-        );
+        let addition_record = commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
         let membership_proof =
             archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -913,11 +892,7 @@ mod archival_mutator_set_tests {
         archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
     ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let addition_record = archival_mutator_set.kernel.commit(
-            &item,
-            &sender_randomness,
-            &H::hash(&receiver_preimage),
-        );
+        let addition_record = commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
         let membership_proof =
             archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 

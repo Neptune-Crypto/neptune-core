@@ -317,7 +317,7 @@ mod removal_record_tests {
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
     use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
 
     use twenty_first::utils::{self, has_unique_elements};
@@ -421,7 +421,7 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
+            commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
         let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
         assert!(
@@ -456,7 +456,7 @@ mod removal_record_tests {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
-                    accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                    commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
                 let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
                 // Update all removal records from addition, then add the element
@@ -526,7 +526,7 @@ mod removal_record_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                accumulator.commit(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
             let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             // Update all removal records from addition, then add the element
