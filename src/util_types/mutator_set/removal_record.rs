@@ -272,7 +272,7 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
     }
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate<M>(&self, mutator_set: &mut MutatorSetKernel<H, M>) -> bool
+    pub fn validate<M>(&self, mutator_set: &MutatorSetKernel<H, M>) -> bool
     where
         M: Mmr<H>,
     {
@@ -481,7 +481,7 @@ mod removal_record_tests {
 
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
-                        removal_record.validate(&mut accumulator.kernel),
+                        removal_record.validate(&accumulator.kernel),
                         "removal records must validate, i = {}",
                         i
                     );
@@ -551,7 +551,7 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator.kernel),
+                    removal_record.validate(&accumulator.kernel),
                     "removal records must validate, i = {}",
                     i
                 );
@@ -584,7 +584,7 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&mut accumulator.kernel),
+                    removal_record.validate(&accumulator.kernel),
                     "removal records must validate, i = {}",
                     i
                 );

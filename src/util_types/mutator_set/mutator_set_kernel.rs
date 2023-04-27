@@ -424,6 +424,41 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
 
         chunkidx_to_chunk_difference_dict
     }
+
+    pub fn can_remove(&self, removal_record: &RemovalRecord<H>) -> bool {
+        let mut have_absent_index = false;
+        if !removal_record.validate(self) {
+            return false;
+        }
+
+        for inserted_index in removal_record.absolute_indices.to_vec().into_iter() {
+            // determine if inserted index lives in active window
+            let active_window_start =
+                (self.aocl.count_leaves() / BATCH_SIZE as u64) as u128 * CHUNK_SIZE as u128;
+            if inserted_index < active_window_start {
+                let inserted_index_chunkidx = (inserted_index / CHUNK_SIZE as u128) as u64;
+                if let Some((_mmr_mp, chunk)) = removal_record
+                    .target_chunks
+                    .dictionary
+                    .get(&inserted_index_chunkidx)
+                {
+                    let relative_index = (inserted_index % CHUNK_SIZE as u128) as u32;
+                    if !chunk.contains(relative_index) {
+                        have_absent_index = true;
+                        break;
+                    }
+                }
+            } else {
+                let relative_index = (inserted_index - active_window_start) as u32;
+                if !self.swbf_active.contains(relative_index) {
+                    have_absent_index = true;
+                    break;
+                }
+            }
+        }
+
+        have_absent_index
+    }
 }
 
 #[cfg(test)]
@@ -829,7 +864,7 @@ mod accumulation_scheme_tests {
 
                 // generate removal record
                 let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
-                assert!(removal_record.validate(&mut mutator_set.kernel));
+                assert!(removal_record.validate(&mutator_set.kernel));
 
                 // update membership proofs
                 let res = MsMembershipProof::batch_update_from_remove(
@@ -912,7 +947,7 @@ mod accumulation_scheme_tests {
 
             // generate removal record
             let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
-            assert!(removal_record.validate(&mut mutator_set.kernel));
+            assert!(removal_record.validate(&mutator_set.kernel));
             (i..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[k].0,
@@ -926,12 +961,12 @@ mod accumulation_scheme_tests {
                     &items_and_membership_proofs[j].0,
                     &items_and_membership_proofs[j].1
                 ));
-                assert!(removal_record.validate(&mut mutator_set.kernel));
+                assert!(removal_record.validate(&mutator_set.kernel));
                 let update_res = items_and_membership_proofs[j]
                     .1
                     .update_from_remove(&removal_record.clone());
                 assert!(update_res.is_ok());
-                assert!(removal_record.validate(&mut mutator_set.kernel));
+                assert!(removal_record.validate(&mutator_set.kernel));
             });
 
             // remove item from set

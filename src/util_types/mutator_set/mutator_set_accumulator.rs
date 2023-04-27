@@ -292,7 +292,7 @@ mod ms_accumulator_tests {
                     // generate removal record
                     let removal_record: RemovalRecord<H> =
                         accumulator.drop(&removal_item, &removal_mp);
-                    assert!(removal_record.validate(&mut accumulator.kernel));
+                    assert!(removal_record.validate(&accumulator.kernel));
 
                     // update membership proofs
                     // Uppdate membership proofs in batch
