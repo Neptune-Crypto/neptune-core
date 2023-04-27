@@ -179,7 +179,7 @@ fn make_coinbase_transaction(
         public_scripts: vec![],
         fee: Amount::zero(),
         timestamp,
-        authority_proof: None,
+        proof: None,
     }
 }
 

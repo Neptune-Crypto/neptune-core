@@ -1,15 +1,25 @@
 use itertools::Itertools;
+use mutator_set_tf::util_types::mutator_set::{
+    addition_record::AdditionRecord, removal_record::RemovalRecord,
+};
+use serde::{Deserialize, Serialize};
 use twenty_first::{
     shared_math::b_field_element::BFieldElement, util_types::algebraic_hasher::Hashable,
 };
 
-use super::{utxo::Utxo, Amount};
+use super::{utxo::Utxo, Amount, PubScript};
+use crate::Hash;
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionKernel {
-    pub input_utxos: Vec<Utxo>,
-    pub output_utxos: Vec<Utxo>,
-    pub public_scripts: Vec<Vec<BFieldElement>>,
+    pub inputs: Vec<RemovalRecord<Hash>>,
+
+    // `outputs` contains the commitments that go into the AOCL
+    pub outputs: Vec<AdditionRecord>,
+    pub public_scripts: Vec<PubScript>,
     pub fee: Amount,
+
+    // number of milliseconds since unix epoch
     pub timestamp: BFieldElement,
 }
 

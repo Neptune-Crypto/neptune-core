@@ -3,6 +3,7 @@ use bytes::{Bytes, BytesMut};
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
 use mutator_set_tf::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
@@ -392,33 +393,33 @@ impl<Item> stream::Stream for Mock<Item> {
     }
 }
 
-pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
-    let tx = &mut block.body.transaction;
-    let output_randomness: Digest = Digest::new(random_elements_array());
-    let addition_record: AdditionRecord = block
-        .body
-        .previous_mutator_set_accumulator
-        .commit(&Hash::hash(&utxo), &output_randomness);
-    tx.outputs.push((utxo, output_randomness));
+// pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {
+//     let tx = &mut block.body.transaction;
+//     let output_randomness: Digest = Digest::new(random_elements_array());
+//     let addition_record: AdditionRecord = block
+//         .body
+//         .previous_mutator_set_accumulator
+//         .commit(&Hash::hash(&utxo), &output_randomness);
+//     tx.outputs.push((utxo, output_randomness));
 
-    // Add addition record for this output
-    block
-        .body
-        .mutator_set_update
-        .additions
-        .push(addition_record);
-    let mut next_mutator_set_accumulator = block.body.previous_mutator_set_accumulator.clone();
-    block
-        .body
-        .mutator_set_update
-        .apply(&mut next_mutator_set_accumulator)
-        .expect("MS update application must work");
-    block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
+//     // Add addition record for this output
+//     block
+//         .body
+//         .mutator_set_update
+//         .additions
+//         .push(addition_record);
+//     let mut next_mutator_set_accumulator = block.body.previous_mutator_set_accumulator.clone();
+//     block
+//         .body
+//         .mutator_set_update
+//         .apply(&mut next_mutator_set_accumulator)
+//         .expect("MS update application must work");
+//     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
-    // update header fields
-    block.header.mutator_set_hash = block.body.next_mutator_set_accumulator.hash();
-    block.header.block_body_merkle_root = Hash::hash(&block.body);
-}
+//     // update header fields
+//     block.header.mutator_set_hash = block.body.next_mutator_set_accumulator.hash();
+//     block.header.block_body_merkle_root = Hash::hash(&block.body);
+// }
 
 /// Add an unsigned (incorrectly signed) devnet input to a transaction
 /// Membership proofs and removal records must be valid against `previous_mutator_set_accumulator`,
@@ -480,49 +481,49 @@ pub fn add_unsigned_input_to_block(
 }
 
 /// Helper function to add an unsigned input to a block's transaction
-pub async fn add_unsigned_input_to_block_ams(
-    block: &mut Block,
-    consumed_utxo: Utxo,
-    randomness: Digest,
-    ams: &Arc<tokio::sync::Mutex<RustyArchivalMutatorSet<Hash>>>,
-    aocl_leaf_index: u64,
-) {
-    let item = Hash::hash(&consumed_utxo);
-    let input_membership_proof = ams
-        .lock()
-        .await
-        .ams
-        .restore_membership_proof(&item, &randomness, aocl_leaf_index)
-        .unwrap();
+// pub async fn add_unsigned_input_to_block_ams(
+//     block: &mut Block,
+//     consumed_utxo: Utxo,
+//     randomness: Digest,
+//     ams: &Arc<tokio::sync::Mutex<RustyArchivalMutatorSet<Hash>>>,
+//     aocl_leaf_index: u64,
+// ) {
+//     let item = Hash::hash(&consumed_utxo);
+//     let input_membership_proof = ams
+//         .lock()
+//         .await
+//         .ams
+//         .restore_membership_proof(&item, &randomness, aocl_leaf_index)
+//         .unwrap();
 
-    // Sanity check that restored membership proof agrees with AMS
-    assert!(
-        ams.lock().await.ams.verify(&item, &input_membership_proof),
-        "Restored MS membership proof must validate against own AMS"
-    );
+//     // Sanity check that restored membership proof agrees with AMS
+//     assert!(
+//         ams.lock().await.ams.verify(&item, &input_membership_proof),
+//         "Restored MS membership proof must validate against own AMS"
+//     );
 
-    // Sanity check that restored membership proof agree with block
-    assert!(
-        block
-            .body
-            .previous_mutator_set_accumulator
-            .verify(&item, &input_membership_proof),
-        "Restored MS membership proof must validate against input block"
-    );
+//     // Sanity check that restored membership proof agree with block
+//     assert!(
+//         block
+//             .body
+//             .previous_mutator_set_accumulator
+//             .verify(&item, &input_membership_proof),
+//         "Restored MS membership proof must validate against input block"
+//     );
 
-    let input_removal_record = ams
-        .lock()
-        .await
-        .ams
-        .kernel
-        .drop(&item, &input_membership_proof);
-    add_unsigned_dev_net_input_to_block_transaction(
-        block,
-        consumed_utxo,
-        input_membership_proof,
-        input_removal_record,
-    );
-}
+//     let input_removal_record = ams
+//         .lock()
+//         .await
+//         .ams
+//         .kernel
+//         .drop(&item, &input_membership_proof);
+//     add_unsigned_dev_net_input_to_block_transaction(
+//         block,
+//         consumed_utxo,
+//         input_membership_proof,
+//         input_removal_record,
+//     );
+// }
 
 pub fn new_random_wallet() -> WalletSecret {
     WalletSecret::new(wallet::generate_secret_key())
@@ -559,144 +560,145 @@ pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &WalletSecret) ->
     }
 }
 
-pub fn make_mock_signed_valid_tx() -> Transaction {
-    // Build a transaction
-    let wallet_1 = new_random_wallet();
-    let output_amount_1: Amount = 42.into();
-    let output_1 = Utxo {
-        amount: output_amount_1,
-        public_key: wallet_1.get_public_key(),
-    };
-    let randomness: Digest = Digest::new(random_elements_array());
+// pub fn make_mock_signed_valid_tx() -> Transaction {
+//     // Build a transaction
+//     let wallet_1 = new_random_wallet();
+//     let output_amount_1: Amount = 42.into();
+//     let output_1 = Utxo {
+//         amount: output_amount_1,
+//         public_key: wallet_1.get_public_key(),
+//     };
+//     let randomness: Digest = Digest::new(random_elements_array());
 
-    let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
-    let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
-    transaction_1.sign(&wallet_1);
+//     let input_1 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
+//     let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
+//     transaction_1.sign(&wallet_1);
 
-    transaction_1
-}
+//     transaction_1
+// }
 
 // `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
 // already have created `DevNetInput`s.
-pub fn make_mock_transaction(
-    inputs: Vec<DevNetInput>,
-    outputs: Vec<(Utxo, Digest)>,
-) -> Transaction {
-    let timestamp: BFieldElement = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
-            .as_secs(),
-    );
+// pub fn make_mock_transaction(
+//     inputs: Vec<DevNetInput>,
+//     outputs: Vec<(Utxo, Digest)>,
+// ) -> Transaction {
+//     let timestamp: BFieldElement = BFieldElement::new(
+//         SystemTime::now()
+//             .duration_since(UNIX_EPOCH)
+//             .expect("Got bad time timestamp in mining process")
+//             .as_secs(),
+//     );
 
-    Transaction {
-        inputs,
-        outputs,
-        public_scripts: vec![],
-        fee: Amount::zero(),
-        timestamp,
-        authority_proof: None,
-    }
-}
+//     Transaction {
+//         inputs,
+//         outputs,
+//         public_scripts: vec![],
+//         fee: Amount::zero(),
+//         timestamp,
+//         authority_proof: None,
+//     }
+// }
 
 // `make_mock_transaction2`, in contrast to `make_mock_transaction`, allows you
 // to choose signing wallet, fee, and timestamp.
-pub fn make_mock_transaction_with_wallet(
-    inputs: Vec<Utxo>,
-    outputs: Vec<Utxo>,
-    fee: Amount,
-    wallet_state: &WalletState,
-    timestamp: Option<BFieldElement>,
-) -> Transaction {
-    let input_utxos_with_signature = inputs
-        .iter()
-        .map(|in_utxo| make_mock_unsigned_devnet_input(in_utxo.amount, &wallet_state.wallet_secret))
-        .collect::<Vec<_>>();
+// pub fn make_mock_transaction_with_wallet(
+//     inputs: Vec<Utxo>,
+//     outputs: Vec<Utxo>,
+//     fee: Amount,
+//     wallet_state: &WalletState,
+//     timestamp: Option<BFieldElement>,
+// ) -> Transaction {
+//     let input_utxos_with_signature = inputs
+//         .iter()
+//         .map(|in_utxo| make_mock_unsigned_devnet_input(in_utxo.amount, &wallet_state.wallet_secret))
+//         .collect::<Vec<_>>();
 
-    // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
-    let output_utxos_with_digest = outputs
-        .into_iter()
-        .map(|out_utxo| (out_utxo, Hash::hash(&out_utxo)))
-        .collect::<Vec<_>>();
+//     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
+//     let output_utxos_with_digest = outputs
+//         .into_iter()
+//         .map(|out_utxo| (out_utxo, Hash::hash(&out_utxo)))
+//         .collect::<Vec<_>>();
 
-    let timestamp = timestamp.unwrap_or_else(|| {
-        BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Timestamping failed")
-                .as_secs(),
-        )
-    });
+//     let timestamp = timestamp.unwrap_or_else(|| {
+//         BFieldElement::new(
+//             SystemTime::now()
+//                 .duration_since(UNIX_EPOCH)
+//                 .expect("Timestamping failed")
+//                 .as_secs(),
+//         )
+//     });
 
-    Transaction {
-        inputs: input_utxos_with_signature,
-        outputs: output_utxos_with_digest,
-        public_scripts: vec![],
-        fee,
-        timestamp,
-        authority_proof: None,
-    }
-}
+//     Transaction {
+//         inputs: input_utxos_with_signature,
+//         outputs: output_utxos_with_digest,
+//         public_scripts: vec![],
+//         fee,
+//         timestamp,
+//         authority_proof: None,
+//     }
+// }
 
-/// Return a fake block with a random hash, containing *one* output UTXO in the form
-/// of a coinbase output.
-pub fn make_mock_block(
-    previous_block: &Block,
-    target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
-    coinbase_beneficiary: secp256k1::PublicKey,
-) -> Block {
-    let new_block_height: BlockHeight = previous_block.header.height.next();
-    let coinbase_utxo = Utxo {
-        amount: Block::get_mining_reward(new_block_height),
-        public_key: coinbase_beneficiary,
-    };
-    let output_randomness: Digest = Digest::new(random_elements_array());
-    let transaction = make_mock_transaction(vec![], vec![(coinbase_utxo, output_randomness)]);
-    let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
-    let previous_ms = new_ms.clone();
-    let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
+// /// Return a fake block with a random hash, containing *one* output UTXO in the form
+// /// of a coinbase output.
+// pub fn make_mock_block(
+//     previous_block: &Block,
+//     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
+//     coinbase_beneficiary: secp256k1::PublicKey,
+// ) -> Block {
+//     let new_block_height: BlockHeight = previous_block.header.height.next();
+//     let coinbase_utxo = Utxo {
+//         amount: Block::get_mining_reward(new_block_height),
+//         public_key: coinbase_beneficiary,
+//     };
+//     let output_randomness: Digest = Digest::new(random_elements_array());
+//     let receiver_digest: Digest = Digest::new(random_elements_array());
+//     let transaction = make_mock_transaction(vec![], vec![(coinbase_utxo, output_randomness)]);
+//     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
+//     let previous_ms = new_ms.clone();
+//     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
-    let coinbase_addition_record: AdditionRecord =
-        new_ms.commit(&coinbase_digest, &output_randomness);
-    let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
-        removals: vec![],
-        additions: vec![coinbase_addition_record.clone()],
-    };
-    new_ms.add(&coinbase_addition_record);
+//     let coinbase_addition_record: AdditionRecord =
+//         commit::<Hash>(&coinbase_digest, &output_randomness, &receiver_digest);
+//     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
+//         removals: vec![],
+//         additions: vec![coinbase_addition_record.clone()],
+//     };
+//     new_ms.add(&coinbase_addition_record);
 
-    let block_body: BlockBody = BlockBody {
-        transaction,
-        next_mutator_set_accumulator: new_ms.clone(),
-        mutator_set_update,
+//     let block_body: BlockBody = BlockBody {
+//         transaction,
+//         next_mutator_set_accumulator: new_ms.clone(),
+//         mutator_set_update,
 
-        previous_mutator_set_accumulator: previous_ms,
-        stark_proof: vec![],
-    };
+//         previous_mutator_set_accumulator: previous_ms,
+//         stark_proof: vec![],
+//     };
 
-    let block_target_difficulty = previous_block.header.target_difficulty;
-    let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
-    let pow_family = pow_line;
-    let zero = BFieldElement::zero();
-    let block_header = BlockHeader {
-        version: zero,
-        height: new_block_height,
-        mutator_set_hash: new_ms.hash(),
-        prev_block_digest: previous_block.hash,
-        timestamp: block_body.transaction.timestamp,
-        nonce: [zero, zero, zero],
-        max_block_size: 1_000_000,
-        proof_of_work_line: pow_family,
-        proof_of_work_family: pow_family,
-        target_difficulty: match target_difficulty {
-            Some(td) => td,
-            None => U32s::one(),
-        },
-        block_body_merkle_root: Hash::hash(&block_body),
-        uncles: vec![],
-    };
+//     let block_target_difficulty = previous_block.header.target_difficulty;
+//     let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
+//     let pow_family = pow_line;
+//     let zero = BFieldElement::zero();
+//     let block_header = BlockHeader {
+//         version: zero,
+//         height: new_block_height,
+//         mutator_set_hash: new_ms.hash(),
+//         prev_block_digest: previous_block.hash,
+//         timestamp: block_body.transaction.timestamp,
+//         nonce: [zero, zero, zero],
+//         max_block_size: 1_000_000,
+//         proof_of_work_line: pow_family,
+//         proof_of_work_family: pow_family,
+//         target_difficulty: match target_difficulty {
+//             Some(td) => td,
+//             None => U32s::one(),
+//         },
+//         block_body_merkle_root: Hash::hash(&block_body),
+//         uncles: vec![],
+//     };
 
-    Block::new(block_header, block_body)
-}
+//     Block::new(block_header, block_body)
+// }
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.

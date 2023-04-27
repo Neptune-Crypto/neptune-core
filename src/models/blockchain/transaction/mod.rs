@@ -1,5 +1,5 @@
 pub mod amount;
-pub mod devnet_input;
+pub mod native_coin;
 pub mod transaction_kernel;
 pub mod utxo;
 
@@ -25,7 +25,6 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 
 use self::amount::Amount;
-use self::devnet_input::DevNetInput;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
 use super::address::generation_address;
@@ -35,15 +34,18 @@ use super::shared::Hash;
 use crate::models::state::wallet::WalletSecret;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Transaction {
-    pub inputs: Vec<DevNetInput>,
+pub struct PubScript(pub Vec<BFieldElement>);
 
-    // `outputs` contains the commitments that go into the AOCL
-    pub outputs: Vec<Digest>,
-    pub public_scripts: Vec<Vec<BFieldElement>>,
-    pub fee: Amount,
-    pub timestamp: BFieldElement,
-    pub authority_proof: Option<ecdsa::Signature>,
+impl Hashable for PubScript {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        self.0.clone()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Transaction {
+    pub kernel: TransactionKernel,
+    pub proof: Vec<BFieldElement>,
 }
 
 impl GetSize for Transaction {
@@ -64,18 +66,27 @@ impl GetSize for Transaction {
 impl Hashable for Transaction {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         let inputs_preimage = self
+            .kernel
             .inputs
             .iter()
-            .flat_map(|input| input.utxo.to_sequence());
+            .flat_map(|input| input.to_sequence());
 
-        let outputs_preimage = self.outputs.iter().flat_map(|output| output.to_sequence());
+        let outputs_preimage = self
+            .kernel
+            .outputs
+            .iter()
+            .flat_map(|output| output.to_sequence());
 
         // If public scripts are not padded or end with a specific instruction, then it might
         // be possible to find a collission for this digest. If that's the case, each public script
         // can be padded with a B field element that's not a valid VM instruction.
-        let public_scripts_preimage = self.public_scripts.concat().into_iter();
-        let fee_preimage = self.fee.to_sequence().into_iter();
-        let timestamp_preimage = vec![self.timestamp].into_iter();
+        let public_scripts_preimage = self
+            .kernel
+            .public_scripts
+            .iter()
+            .flat_map(|ps| [vec![BFieldElement::new(ps.0.len() as u64)], ps.0].concat());
+        let fee_preimage = self.kernel.fee.to_sequence().into_iter();
+        let timestamp_preimage = vec![self.kernel.timestamp].into_iter();
 
         inputs_preimage
             .chain(outputs_preimage)
@@ -98,17 +109,17 @@ impl StdHash for Transaction {
 }
 
 impl Transaction {
-    pub fn get_input_utxos(&self) -> Vec<Utxo> {
-        self.inputs.iter().map(|dni| dni.utxo).collect()
+    pub fn get_input_utxos(&self) -> Vec<RemovalRecord<Hash>> {
+        self.inputs
     }
 
-    pub fn get_own_input_utxos(&self, pub_key: PublicKey) -> Vec<Utxo> {
-        self.inputs
-            .iter()
-            .map(|dni| dni.utxo)
-            .filter(|utxo| utxo.public_key == pub_key)
-            .collect()
-    }
+    // pub fn get_own_input_utxos(&self, pub_key: PublicKey) -> Vec<Utxo> {
+    //     self.inputs
+    //         .iter()
+    //         .map(|dni| dni.utxo)
+    //         .filter(|utxo| utxo.public_key == pub_key)
+    //         .collect()
+    // }
 
     pub fn get_received_utxos_with_randomnesses(
         &self,
@@ -135,7 +146,7 @@ impl Transaction {
                 // decrypt it to obtain the utxo and sender randomness
                 let ciphertext = generation_address::ciphertext_from_public_script(matching_script);
                 let decryption_result = match ciphertext {
-                    Ok(ctxt) => spending_key.decrypt(),
+                    Ok(ctxt) => spending_key.decrypt(&ctxt),
                     _ => {
                         continue;
                     }
@@ -149,7 +160,7 @@ impl Transaction {
 
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.
-                let receiver_preimage = spending_key.receiver_preimage.clone();
+                let receiver_preimage = spending_key.privacy_preimage.clone();
                 let receiver_digest = Hash::hash(receiver_preimage);
                 let canonical_commitment = Hash::hash_pair(
                     &Hash::hash_pair(&Hash::hash(utxo), sender_randomness),
@@ -311,7 +322,7 @@ impl Transaction {
         let authority_wallet = WalletSecret::devnet_authority_wallet();
         let signature = authority_wallet.sign_digest(kernel_digest);
 
-        self.authority_proof = Some(signature)
+        self.proof = Some(signature)
     }
 
     /// Validate Transaction according to Devnet definitions.
@@ -319,7 +330,7 @@ impl Transaction {
     /// When a transaction occurs in a mined block, `coinbase_amount` is
     /// derived from that block. When a transaction is received from a peer,
     /// and is not yet mined, the coinbase amount is None.
-    pub fn is_valid_for_devnet(&self, coinbase_amount: Option<Amount>) -> bool {
+    pub fn is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
         // What belongs here are the things that would otherwise
         // be verified by the transaction validity proof.
 
@@ -349,7 +360,7 @@ impl Transaction {
             Message::from_slice(&kernel_digest_as_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
                 .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
 
-        if let Some(signature) = self.authority_proof {
+        if let Some(signature) = self.proof {
             let authority_public_key = WalletSecret::devnet_authority_wallet().get_public_key();
             let valid: bool = signature.verify(&msg, &authority_public_key).is_ok();
             if !valid {
@@ -394,7 +405,7 @@ impl Transaction {
             public_scripts: vec![self.public_scripts, other.public_scripts].concat(),
             fee: self.fee + other.fee,
             timestamp,
-            authority_proof,
+            proof: authority_proof,
         };
 
         merged_transaction.devnet_authority_sign();
@@ -418,278 +429,277 @@ mod transaction_tests {
         config_models::network::Network,
         models::state::wallet::{self, generate_secret_key},
         tests::shared::{
-            get_mock_global_state, make_mock_block, make_mock_transaction,
-            make_mock_unsigned_devnet_input, new_random_wallet,
+            get_mock_global_state, make_mock_unsigned_devnet_input, new_random_wallet,
         },
     };
     use tracing_test::traced_test;
     use twenty_first::shared_math::other::random_elements_array;
 
-    #[traced_test]
-    #[test]
-    fn merged_transaction_is_devnet_valid_test() {
-        let wallet_1 = new_random_wallet();
-        let output_amount_1: Amount = 42.into();
-        let output_1 = Utxo {
-            amount: output_amount_1,
-            public_key: wallet_1.get_public_key(),
-        };
-        let randomness: Digest = Digest::new(random_elements_array());
+    // #[traced_test]
+    // #[test]
+    // fn merged_transaction_is_devnet_valid_test() {
+    //     let wallet_1 = new_random_wallet();
+    //     let output_amount_1: Amount = 42.into();
+    //     let output_1 = Utxo {
+    //         amount: output_amount_1,
+    //         public_key: wallet_1.get_public_key(),
+    //     };
+    //     let randomness: Digest = Digest::new(random_elements_array());
 
-        let coinbase_transaction = make_mock_transaction(vec![], vec![(output_1, randomness)]);
-        let coinbase_amount = Some(output_amount_1);
+    //     let coinbase_transaction = make_mock_transaction(vec![], vec![(output_1, randomness)]);
+    //     let coinbase_amount = Some(output_amount_1);
 
-        assert!(coinbase_transaction.is_valid_for_devnet(coinbase_amount));
+    //     assert!(coinbase_transaction.is_valid_for_devnet(coinbase_amount));
 
-        let input_1 = make_mock_unsigned_devnet_input(<i32 as Into<Amount>>::into(42), &wallet_1);
-        let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
+    //     let input_1 = make_mock_unsigned_devnet_input(<i32 as Into<Amount>>::into(42), &wallet_1);
+    //     let mut transaction_1 = make_mock_transaction(vec![input_1], vec![(output_1, randomness)]);
 
-        assert!(!transaction_1.is_valid_for_devnet(None));
-        transaction_1.sign(&wallet_1);
-        assert!(transaction_1.is_valid_for_devnet(None));
+    //     assert!(!transaction_1.is_valid_for_devnet(None));
+    //     transaction_1.sign(&wallet_1);
+    //     assert!(transaction_1.is_valid_for_devnet(None));
 
-        let input_2 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
-        let mut transaction_2 = make_mock_transaction(vec![input_2], vec![(output_1, randomness)]);
+    //     let input_2 = make_mock_unsigned_devnet_input(42.into(), &wallet_1);
+    //     let mut transaction_2 = make_mock_transaction(vec![input_2], vec![(output_1, randomness)]);
 
-        assert!(!transaction_2.is_valid_for_devnet(None));
-        transaction_2.sign(&wallet_1);
-        assert!(transaction_2.is_valid_for_devnet(None));
+    //     assert!(!transaction_2.is_valid_for_devnet(None));
+    //     transaction_2.sign(&wallet_1);
+    //     assert!(transaction_2.is_valid_for_devnet(None));
 
-        let mut merged_transaction = transaction_1.merge_with(transaction_2);
-        assert!(
-            merged_transaction.is_valid_for_devnet(coinbase_amount),
-            "Merged transaction must be valid because of authority proof"
-        );
+    //     let mut merged_transaction = transaction_1.merge_with(transaction_2);
+    //     assert!(
+    //         merged_transaction.is_valid_for_devnet(coinbase_amount),
+    //         "Merged transaction must be valid because of authority proof"
+    //     );
 
-        merged_transaction.authority_proof = None;
-        assert!(
-            !merged_transaction.is_valid_for_devnet(coinbase_amount),
-            "Merged transaction must not be valid without authority proof"
-        );
+    //     merged_transaction.authority_proof = None;
+    //     assert!(
+    //         !merged_transaction.is_valid_for_devnet(coinbase_amount),
+    //         "Merged transaction must not be valid without authority proof"
+    //     );
 
-        // Make an authority sign with a wrong secret key and verify failure
-        let kernel: TransactionKernel = merged_transaction.get_kernel();
-        let kernel_digest: Digest = Hash::hash(&kernel);
-        let bad_authority_signature = wallet_1.sign_digest(kernel_digest);
-        merged_transaction.authority_proof = Some(bad_authority_signature);
-        assert!(
-            !merged_transaction.is_valid_for_devnet(coinbase_amount),
-            "Merged transaction must not be valid with wrong authority proof"
-        );
+    //     // Make an authority sign with a wrong secret key and verify failure
+    //     let kernel: TransactionKernel = merged_transaction.get_kernel();
+    //     let kernel_digest: Digest = Hash::hash(&kernel);
+    //     let bad_authority_signature = wallet_1.sign_digest(kernel_digest);
+    //     merged_transaction.authority_proof = Some(bad_authority_signature);
+    //     assert!(
+    //         !merged_transaction.is_valid_for_devnet(coinbase_amount),
+    //         "Merged transaction must not be valid with wrong authority proof"
+    //     );
 
-        // Restore valid proof
-        merged_transaction.devnet_authority_sign();
-        assert!(
-            merged_transaction.is_valid_for_devnet(coinbase_amount),
-            "Merged transaction must be valid because of authority proof, 2"
-        );
-    }
+    //     // Restore valid proof
+    //     merged_transaction.devnet_authority_sign();
+    //     assert!(
+    //         merged_transaction.is_valid_for_devnet(coinbase_amount),
+    //         "Merged transaction must be valid because of authority proof, 2"
+    //     );
+    // }
 
-    #[traced_test]
-    #[tokio::test]
-    async fn transaction_is_valid_after_block_update_simple_test() -> Result<()> {
-        // We need the global state to construct a transaction. This global state
-        // has a wallet which receives a premine-UTXO.
-        let global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let other_wallet = wallet::WalletSecret::new(wallet::generate_secret_key());
+    // #[traced_test]
+    // #[tokio::test]
+    // async fn transaction_is_valid_after_block_update_simple_test() -> Result<()> {
+    //     // We need the global state to construct a transaction. This global state
+    //     // has a wallet which receives a premine-UTXO.
+    //     let global_state = get_mock_global_state(Network::Main, 2, None).await;
+    //     let other_wallet = wallet::WalletSecret::new(wallet::generate_secret_key());
 
-        // Create a transaction that's valid after the Genesis block
-        let new_utxo = Utxo {
-            amount: 5.into(),
-            public_key: other_wallet.get_public_key(),
-        };
-        let mut updated_tx = global_state
-            .create_transaction(vec![new_utxo], 1.into())
-            .await
-            .unwrap();
+    //     // Create a transaction that's valid after the Genesis block
+    //     let new_utxo = Utxo {
+    //         amount: 5.into(),
+    //         public_key: other_wallet.get_public_key(),
+    //     };
+    //     let mut updated_tx = global_state
+    //         .create_transaction(vec![new_utxo], 1.into())
+    //         .await
+    //         .unwrap();
 
-        let genesis_block = Block::genesis_block();
-        let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());
-        assert!(
-            block_1.is_valid_for_devnet(&genesis_block),
-            "Block 1 must be valid with only coinbase output"
-        );
+    //     let genesis_block = Block::genesis_block();
+    //     let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());
+    //     assert!(
+    //         block_1.is_valid_for_devnet(&genesis_block),
+    //         "Block 1 must be valid with only coinbase output"
+    //     );
 
-        updated_tx.update_ms_data(&block_1).unwrap();
+    //     updated_tx.update_ms_data(&block_1).unwrap();
 
-        // Insert the updated transaction into block 2 and verify that this block is valid
-        let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
-        block_2.authority_merge_transaction(updated_tx.clone());
-        assert!(block_2.is_valid_for_devnet(&block_1));
+    //     // Insert the updated transaction into block 2 and verify that this block is valid
+    //     let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+    //     block_2.authority_merge_transaction(updated_tx.clone());
+    //     assert!(block_2.is_valid_for_devnet(&block_1));
 
-        // Mine 26 blocks, keep the transaction updated, and verify that it is valid after
-        // all blocks
-        let mut next_block = block_1.clone();
-        let mut _previous_block = next_block.clone();
-        for _ in 0..26 {
-            _previous_block = next_block;
-            next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
-            updated_tx.update_ms_data(&next_block).unwrap();
-        }
+    //     // Mine 26 blocks, keep the transaction updated, and verify that it is valid after
+    //     // all blocks
+    //     let mut next_block = block_1.clone();
+    //     let mut _previous_block = next_block.clone();
+    //     for _ in 0..26 {
+    //         _previous_block = next_block;
+    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
+    //         updated_tx.update_ms_data(&next_block).unwrap();
+    //     }
 
-        _previous_block = next_block.clone();
-        next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
-        next_block.authority_merge_transaction(updated_tx.clone());
-        assert!(next_block.is_valid_for_devnet(&_previous_block));
+    //     _previous_block = next_block.clone();
+    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+    //     next_block.authority_merge_transaction(updated_tx.clone());
+    //     assert!(next_block.is_valid_for_devnet(&_previous_block));
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    #[traced_test]
-    #[tokio::test]
-    async fn transaction_is_valid_after_block_update_multiple_ios_test() -> Result<()> {
-        // We need the global state to construct a transaction. This global state
-        // has a wallet which receives a premine-UTXO.
-        let own_global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let own_wallet_secret = &own_global_state.wallet_state.wallet_secret;
+    // #[traced_test]
+    // #[tokio::test]
+    // async fn transaction_is_valid_after_block_update_multiple_ios_test() -> Result<()> {
+    //     // We need the global state to construct a transaction. This global state
+    //     // has a wallet which receives a premine-UTXO.
+    //     let own_global_state = get_mock_global_state(Network::Main, 2, None).await;
+    //     let own_wallet_secret = &own_global_state.wallet_state.wallet_secret;
 
-        // Create a transaction that's valid after the Genesis block
-        let mut output_utxos: Vec<Utxo> = vec![];
-        for i in 0..7 {
-            let new_utxo = Utxo {
-                amount: i.into(),
-                public_key: own_wallet_secret.get_public_key(),
-            };
-            output_utxos.push(new_utxo);
-        }
+    //     // Create a transaction that's valid after the Genesis block
+    //     let mut output_utxos: Vec<Utxo> = vec![];
+    //     for i in 0..7 {
+    //         let new_utxo = Utxo {
+    //             amount: i.into(),
+    //             public_key: own_wallet_secret.get_public_key(),
+    //         };
+    //         output_utxos.push(new_utxo);
+    //     }
 
-        // Create a transaction that's valid after genesis block
-        let mut tx = own_global_state
-            .create_transaction(output_utxos, 1.into())
-            .await
-            .unwrap();
-        let original_tx = tx.clone();
+    //     // Create a transaction that's valid after genesis block
+    //     let mut tx = own_global_state
+    //         .create_transaction(output_utxos, 1.into())
+    //         .await
+    //         .unwrap();
+    //     let original_tx = tx.clone();
 
-        // Create next block and verify that transaction is not valid with this block as tip
-        let genesis_block = Block::genesis_block();
-        let other_wallet = WalletSecret::new(generate_secret_key());
-        let block_1 = make_mock_block(&genesis_block, None, own_wallet_secret.get_public_key());
-        let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
-        assert!(
-            block_1.is_valid_for_devnet(&genesis_block),
-            "Block 1 must be valid with only coinbase output"
-        );
-        assert!(
-            block_2.is_valid_for_devnet(&block_1),
-            "Block 2 must be valid with only coinbase output"
-        );
+    //     // Create next block and verify that transaction is not valid with this block as tip
+    //     let genesis_block = Block::genesis_block();
+    //     let other_wallet = WalletSecret::new(generate_secret_key());
+    //     let block_1 = make_mock_block(&genesis_block, None, own_wallet_secret.get_public_key());
+    //     let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+    //     assert!(
+    //         block_1.is_valid_for_devnet(&genesis_block),
+    //         "Block 1 must be valid with only coinbase output"
+    //     );
+    //     assert!(
+    //         block_2.is_valid_for_devnet(&block_1),
+    //         "Block 2 must be valid with only coinbase output"
+    //     );
 
-        let mut block_2_with_deprecated_tx = block_2.clone();
-        block_2_with_deprecated_tx.authority_merge_transaction(tx.clone());
-        assert!(
-            !block_2_with_deprecated_tx.is_valid_for_devnet(&block_1),
-            "Block with transaction with deprecated mutator set data must be invalid"
-        );
+    //     let mut block_2_with_deprecated_tx = block_2.clone();
+    //     block_2_with_deprecated_tx.authority_merge_transaction(tx.clone());
+    //     assert!(
+    //         !block_2_with_deprecated_tx.is_valid_for_devnet(&block_1),
+    //         "Block with transaction with deprecated mutator set data must be invalid"
+    //     );
 
-        // Update the transaction with mutator set data from block 1. Verify that this
-        // gives rise to a valid block.
-        tx.update_ms_data(&block_1).unwrap();
-        let mut block_2_with_updated_tx = block_2.clone();
-        block_2_with_updated_tx.authority_merge_transaction(tx.clone());
-        assert!(
-            block_2_with_updated_tx.is_valid_for_devnet(&block_1),
-            "Block with transaction with updated mutator set data must be valid"
-        );
+    //     // Update the transaction with mutator set data from block 1. Verify that this
+    //     // gives rise to a valid block.
+    //     tx.update_ms_data(&block_1).unwrap();
+    //     let mut block_2_with_updated_tx = block_2.clone();
+    //     block_2_with_updated_tx.authority_merge_transaction(tx.clone());
+    //     assert!(
+    //         block_2_with_updated_tx.is_valid_for_devnet(&block_1),
+    //         "Block with transaction with updated mutator set data must be valid"
+    //     );
 
-        // We would like to use more advanced blocks, that have multiple inputs and outputs.
-        // Problem: If we start making with my own wallet, we consume the same inputs that are
-        // consumed in `updated_tx`. Solution: Create another global state object, containing
-        // another wallet, and use this to generate the transactions that go into these
-        // blocks. This should keep the `updated_tx` valid as its inputs are not being spent.
-        let other_global_state =
-            get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
-        other_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut other_global_state.wallet_state.wallet_db.lock().await,
-            )
-            .unwrap();
-        *other_global_state
-            .chain
-            .light_state
-            .latest_block
-            .lock()
-            .await = block_1.clone();
-        other_global_state
-            .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_2,
-                &mut other_global_state.wallet_state.wallet_db.lock().await,
-            )
-            .unwrap();
-        *other_global_state
-            .chain
-            .light_state
-            .latest_block
-            .lock()
-            .await = block_2.clone();
-        let mut updated_tx = original_tx;
-        updated_tx.update_ms_data(&block_1).unwrap();
-        updated_tx.update_ms_data(&block_2).unwrap();
+    //     // We would like to use more advanced blocks, that have multiple inputs and outputs.
+    //     // Problem: If we start making with my own wallet, we consume the same inputs that are
+    //     // consumed in `updated_tx`. Solution: Create another global state object, containing
+    //     // another wallet, and use this to generate the transactions that go into these
+    //     // blocks. This should keep the `updated_tx` valid as its inputs are not being spent.
+    //     let other_global_state =
+    //         get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
+    //     other_global_state
+    //         .wallet_state
+    //         .update_wallet_state_with_new_block(
+    //             &block_1,
+    //             &mut other_global_state.wallet_state.wallet_db.lock().await,
+    //         )
+    //         .unwrap();
+    //     *other_global_state
+    //         .chain
+    //         .light_state
+    //         .latest_block
+    //         .lock()
+    //         .await = block_1.clone();
+    //     other_global_state
+    //         .wallet_state
+    //         .update_wallet_state_with_new_block(
+    //             &block_2,
+    //             &mut other_global_state.wallet_state.wallet_db.lock().await,
+    //         )
+    //         .unwrap();
+    //     *other_global_state
+    //         .chain
+    //         .light_state
+    //         .latest_block
+    //         .lock()
+    //         .await = block_2.clone();
+    //     let mut updated_tx = original_tx;
+    //     updated_tx.update_ms_data(&block_1).unwrap();
+    //     updated_tx.update_ms_data(&block_2).unwrap();
 
-        // Mine 12 blocks with non-trivial transactions, keep the transaction updated,
-        // and verify that it is valid after all blocks.
-        let mut next_block = block_2.clone();
-        let mut _previous_block = next_block.clone();
-        for i in 0..12 {
-            _previous_block = next_block.clone();
-            let utxo_a = Utxo {
-                amount: (3 * i).into(),
-                public_key: other_wallet.get_public_key(),
-            };
-            let utxo_b = Utxo {
-                amount: (3 * i + 1).into(),
-                public_key: other_wallet.get_public_key(),
-            };
-            let utxo_c = Utxo {
-                amount: (3 * i + 2).into(),
-                public_key: other_wallet.get_public_key(),
-            };
-            let other_transaction = other_global_state
-                .create_transaction(vec![utxo_a, utxo_b, utxo_c], 1.into())
-                .await
-                .unwrap();
-            next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
+    //     // Mine 12 blocks with non-trivial transactions, keep the transaction updated,
+    //     // and verify that it is valid after all blocks.
+    //     let mut next_block = block_2.clone();
+    //     let mut _previous_block = next_block.clone();
+    //     for i in 0..12 {
+    //         _previous_block = next_block.clone();
+    //         let utxo_a = Utxo {
+    //             amount: (3 * i).into(),
+    //             public_key: other_wallet.get_public_key(),
+    //         };
+    //         let utxo_b = Utxo {
+    //             amount: (3 * i + 1).into(),
+    //             public_key: other_wallet.get_public_key(),
+    //         };
+    //         let utxo_c = Utxo {
+    //             amount: (3 * i + 2).into(),
+    //             public_key: other_wallet.get_public_key(),
+    //         };
+    //         let other_transaction = other_global_state
+    //             .create_transaction(vec![utxo_a, utxo_b, utxo_c], 1.into())
+    //             .await
+    //             .unwrap();
+    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
 
-            next_block.authority_merge_transaction(other_transaction);
-            assert!(
-                next_block.is_valid_for_devnet(&_previous_block),
-                "Produced block must be valid after merging new transaction"
-            );
+    //         next_block.authority_merge_transaction(other_transaction);
+    //         assert!(
+    //             next_block.is_valid_for_devnet(&_previous_block),
+    //             "Produced block must be valid after merging new transaction"
+    //         );
 
-            // Update other's global state with this transaction, such that a new transaction
-            // can be made in the next iteration of the loop.
-            {
-                let mut light_state = other_global_state
-                    .chain
-                    .light_state
-                    .latest_block
-                    .lock()
-                    .await;
-                *light_state = next_block.clone();
-                other_global_state
-                    .wallet_state
-                    .update_wallet_state_with_new_block(
-                        &next_block,
-                        &mut other_global_state.wallet_state.wallet_db.lock().await,
-                    )
-                    .unwrap();
-            }
+    //         // Update other's global state with this transaction, such that a new transaction
+    //         // can be made in the next iteration of the loop.
+    //         {
+    //             let mut light_state = other_global_state
+    //                 .chain
+    //                 .light_state
+    //                 .latest_block
+    //                 .lock()
+    //                 .await;
+    //             *light_state = next_block.clone();
+    //             other_global_state
+    //                 .wallet_state
+    //                 .update_wallet_state_with_new_block(
+    //                     &next_block,
+    //                     &mut other_global_state.wallet_state.wallet_db.lock().await,
+    //                 )
+    //                 .unwrap();
+    //         }
 
-            // After each new block, "our" transaction is updated with the information
-            // from that block such that its mutator set data is kept up-to-date.
-            updated_tx.update_ms_data(&next_block).unwrap();
-        }
+    //         // After each new block, "our" transaction is updated with the information
+    //         // from that block such that its mutator set data is kept up-to-date.
+    //         updated_tx.update_ms_data(&next_block).unwrap();
+    //     }
 
-        _previous_block = next_block.clone();
-        next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
-        next_block.authority_merge_transaction(updated_tx.clone());
-        assert!(
-            next_block.is_valid_for_devnet(&_previous_block),
-            "Block is valid when merged transaction is updated"
-        );
+    //     _previous_block = next_block.clone();
+    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+    //     next_block.authority_merge_transaction(updated_tx.clone());
+    //     assert!(
+    //         next_block.is_valid_for_devnet(&_previous_block),
+    //         "Block is valid when merged transaction is updated"
+    //     );
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }

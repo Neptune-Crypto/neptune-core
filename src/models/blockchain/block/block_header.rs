@@ -19,6 +19,7 @@ pub struct BlockHeader {
     pub prev_block_digest: Digest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
+    // number of milliseconds since unix epoch
     pub timestamp: BFieldElement,
 
     // TODO: Consider making a type for `nonce`

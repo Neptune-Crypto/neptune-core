@@ -4,37 +4,41 @@ use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
 use anyhow::Result;
-use num_traits::One;
 use num_traits::Zero;
 use rand::thread_rng;
 use rand::Rng;
 use twenty_first::shared_math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
+use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, fips202::shake256, lattice, tip5::Digest},
     util_types::algebraic_hasher::{AlgebraicHasher, Hashable},
 };
 
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PubScript;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 
 pub struct SpendingKey {
     pub receiver_identifier: BFieldElement,
-    decryption_key: lattice::kem::SecretKey,
-    receiver_preimage: Digest,
+    pub decryption_key: lattice::kem::SecretKey,
+    pub privacy_preimage: Digest,
+    pub spending_preimage: Digest,
 }
 
 pub struct ReceivingAddress {
     pub receiver_identifier: BFieldElement,
-    encryption_key: lattice::kem::PublicKey,
-    receiver_digest: Digest,
+    pub encryption_key: lattice::kem::PublicKey,
+    pub privacy_digest: Digest,
+    pub spending_digest: Digest,
 }
 
-pub fn public_script_is_marked(public_script: &[BFieldElement]) -> bool {
+pub fn public_script_is_marked(public_script: &PubScript) -> bool {
     const OPCODE_FOR_HALT: BFieldElement = BFieldElement::zero();
-    match public_script.get(0) {
-        Some(&OPCODE_FOR_HALT) => match public_script.get(1) {
+    match public_script.0.get(0) {
+        Some(&OPCODE_FOR_HALT) => match public_script.0.get(1) {
             Some(&GENERATION_FLAG) => true,
             Some(_) => false,
             None => false,
@@ -44,22 +48,18 @@ pub fn public_script_is_marked(public_script: &[BFieldElement]) -> bool {
     }
 }
 
-pub fn receiver_identifier_from_public_script(
-    public_script: &[BFieldElement],
-) -> Result<BFieldElement> {
-    match public_script.get(2) {
+pub fn receiver_identifier_from_public_script(public_script: &PubScript) -> Result<BFieldElement> {
+    match public_script.0.get(2) {
         Some(id) => Ok(*id),
         None => bail!("Public script does not contain receiver ID"),
     }
 }
 
-pub fn ciphertext_from_public_script(
-    public_script: &[BFieldElement],
-) -> Result<Vec<BFieldElement>> {
-    if public_script.len() <= 3 {
+pub fn ciphertext_from_public_script(public_script: &PubScript) -> Result<Vec<BFieldElement>> {
+    if public_script.0.len() <= 3 {
         bail!("Public script does not contain ciphertext.");
     }
-    return Ok(public_script[3..].to_vec());
+    return Ok(public_script.0[3..].to_vec());
 }
 
 /// Encodes a slice of bytes to a vec of BFieldElements. This
@@ -110,20 +110,23 @@ pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Vec<u8> {
 
 impl SpendingKey {
     pub fn derive_from_seed(seed: &Digest) -> Self {
-        let receiver_preimage =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::zero()]].concat());
+        let privacy_preimage =
+            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(0)]].concat());
+        let spending_preimage =
+            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat());
         let randomness: [u8; 32] = shake256(&bincode::serialize(seed).unwrap(), 32)
             .try_into()
             .unwrap();
         let (sk, pk) = lattice::kem::keygen(randomness);
         let receiver_identifier =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::one()]].concat()).values()
+            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(2)]].concat()).values()
                 [0];
 
         Self {
             receiver_identifier,
             decryption_key: sk,
-            receiver_preimage,
+            privacy_preimage,
+            spending_preimage,
         }
     }
 
@@ -160,21 +163,28 @@ impl SpendingKey {
 
 impl ReceivingAddress {
     pub fn derive_from_seed(seed: &Digest) -> Self {
-        let receiver_preimage =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::zero()]].concat());
-        let receiver_digest = Hash::hash(&receiver_preimage);
+        let privacy_preimage =
+            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(0)]].concat());
+        let privacy_digest = Hash::hash_pair(
+            &privacy_preimage,
+            &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+        );
+        let spending_preimage =
+            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat());
+        let spending_digest = Hash::hash(&spending_preimage);
         let randomness: [u8; 32] = shake256(&bincode::serialize(seed).unwrap(), 32)
             .try_into()
             .unwrap();
         let (sk, pk) = lattice::kem::keygen(randomness);
         let receiver_identifier =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::one()]].concat()).values()
+            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat()).values()
                 [0];
 
         Self {
             receiver_identifier,
             encryption_key: pk,
-            receiver_digest,
+            privacy_digest,
+            spending_digest,
         }
     }
 
@@ -207,6 +217,28 @@ impl ReceivingAddress {
             ciphertext_bfes,
         ]
         .concat())
+    }
+
+    pub fn lock_script(&self) -> LockScript {
+        const DIVINE: BFieldElement = BFieldElement::new(8);
+        const HASH: BFieldElement = BFieldElement::new(48);
+        const POP: BFieldElement = BFieldElement::new(2);
+        const PUSH: BFieldElement = BFieldElement::new(1);
+        const ASSERT_VECTOR: BFieldElement = BFieldElement::new(64);
+        let mut push_digest = vec![];
+        for elem in self.spending_digest.values().iter().rev() {
+            push_digest.append(&mut vec![PUSH, *elem]);
+        }
+        let instrs = vec![
+            vec![
+                DIVINE, DIVINE, DIVINE, DIVINE, DIVINE, HASH, POP, POP, POP, POP, POP,
+            ],
+            push_digest,
+            vec![ASSERT_VECTOR],
+        ]
+        .concat();
+
+        LockScript(instrs)
     }
 }
 

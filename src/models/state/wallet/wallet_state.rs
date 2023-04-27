@@ -140,11 +140,7 @@ impl WalletState {
                 .into_iter()
                 .map(|(utxo, send_rand, rec_premi)| {
                     (
-                        mutator_set_kernel.commit(
-                            &Hash::hash(utxo),
-                            &send_rand,
-                            &Hash::hash(&rec_premi),
-                        ),
+                        commit(&Hash::hash(utxo), &send_rand, &Hash::hash(&rec_premi)),
                         (utxo, send_rand, rec_premi),
                     )
                 })
