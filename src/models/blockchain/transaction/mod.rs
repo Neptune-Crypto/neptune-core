@@ -109,10 +109,6 @@ impl StdHash for Transaction {
 }
 
 impl Transaction {
-    pub fn get_input_utxos(&self) -> Vec<RemovalRecord<Hash>> {
-        self.inputs
-    }
-
     // pub fn get_own_input_utxos(&self, pub_key: PublicKey) -> Vec<Utxo> {
     //     self.inputs
     //         .iter()
@@ -131,6 +127,7 @@ impl Transaction {
         for spending_key in spending_keys {
             // for all public scripts that contain a ciphertext for me,
             for matching_script in self
+                .kernel
                 .public_scripts
                 .iter()
                 .filter(|ps| generation_address::public_script_is_marked(ps))
@@ -151,7 +148,7 @@ impl Transaction {
                         continue;
                     }
                 };
-                let (utxo, randomness) = match decryption_result {
+                let (utxo, sender_randomness) = match decryption_result {
                     Ok(tuple) => tuple,
                     _ => {
                         continue;
@@ -161,9 +158,9 @@ impl Transaction {
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.
                 let receiver_preimage = spending_key.privacy_preimage.clone();
-                let receiver_digest = Hash::hash(receiver_preimage);
+                let receiver_digest = Hash::hash(&receiver_preimage);
                 let canonical_commitment = Hash::hash_pair(
-                    &Hash::hash_pair(&Hash::hash(utxo), sender_randomness),
+                    &Hash::hash_pair(&Hash::hash(&utxo), &sender_randomness),
                     &receiver_digest,
                 );
 
@@ -175,54 +172,24 @@ impl Transaction {
         received_utxos_with_randomnesses
     }
 
-    /// Update mutator set data for a transaction to update its validity for a new block
-    /// Note that this will invalidate the signature, meaning that the authority signatures
-    /// have to be updated. This is true as long as the membership proofs and removal records
-    /// are part of the transaction signature preimage
+    /// Update mutator set data in a transaction to update its
+    /// compatibility with a new block. Note that this will
+    /// invalidate the proof, requiring an update.
     pub fn update_ms_data(&mut self, block: &Block) -> Result<()> {
-        let mut transaction_membership_proofs: Vec<MsMembershipProof<Hash>> = self
-            .inputs
-            .iter()
-            .map(|x| x.membership_proof.clone().into())
-            .collect();
-        let mut transaction_membership_proofs: Vec<&mut MsMembershipProof<Hash>> =
-            transaction_membership_proofs.iter_mut().collect();
-        let transaction_items: Vec<_> = self
-            .inputs
-            .iter()
-            .map(|input| Hash::hash(&input.utxo))
-            .collect();
-
         let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
         let block_addition_records: Vec<AdditionRecord> =
-            block.body.mutator_set_update.additions.clone();
-        let mut transaction_removal_records: Vec<RemovalRecord<Hash>> = self
-            .inputs
-            .iter()
-            .map(|x| x.removal_record.clone())
-            .collect();
+            block.body.transaction.kernel.outputs.clone();
+        let mut transaction_removal_records: Vec<RemovalRecord<Hash>> = self.kernel.inputs.clone();
         let mut transaction_removal_records: Vec<&mut RemovalRecord<Hash>> =
             transaction_removal_records.iter_mut().collect();
-        let mut block_removal_records = block.body.mutator_set_update.removals.clone();
+        let mut block_removal_records = block.body.transaction.kernel.inputs.clone();
         block_removal_records.reverse();
         let mut block_removal_records: Vec<&mut RemovalRecord<Hash>> =
             block_removal_records.iter_mut().collect::<Vec<_>>();
 
         // Apply all addition records in the block
         for block_addition_record in block_addition_records {
-            // Update all transaction's membership proofs with addition records from block
-            let res = MsMembershipProof::batch_update_from_addition(
-                &mut transaction_membership_proofs,
-                &transaction_items,
-                &msa_state.kernel,
-                &block_addition_record,
-            );
-            if let Err(err) = res {
-                error!("{}", err);
-                bail!("Failed to update membership proof with addition record");
-            };
-
             // Batch update block's removal records to keep them valid after next addition
             RemovalRecord::batch_update_from_addition(
                 &mut block_removal_records,
@@ -241,15 +208,6 @@ impl Transaction {
         }
 
         while let Some(removal_record) = block_removal_records.pop() {
-            let res = MsMembershipProof::batch_update_from_remove(
-                &mut transaction_membership_proofs,
-                removal_record,
-            );
-            if let Err(err) = res {
-                error!("{}", err);
-                bail!("Failed to update transaction membership proof with removal record");
-            };
-
             // Batch update block's removal records to keep them valid after next removal
             RemovalRecord::batch_update_from_remove(&mut block_removal_records, removal_record)
                 .expect("MS removal record update from remove must succeed in wallet handler");
@@ -273,32 +231,16 @@ impl Transaction {
         );
 
         // Write all transaction's membership proofs and removal records back
-        for ((tx_input, new_mp), new_rr) in self
+        for (tx_input, new_rr) in self
+            .kernel
             .inputs
             .iter_mut()
-            .zip_eq(transaction_membership_proofs.into_iter())
             .zip_eq(transaction_removal_records.into_iter())
         {
-            tx_input.membership_proof = new_mp.to_owned().into();
-            tx_input.removal_record = new_rr.to_owned();
+            *tx_input = new_rr.to_owned();
         }
 
         Ok(())
-    }
-
-    fn get_kernel(&self) -> TransactionKernel {
-        TransactionKernel {
-            fee: self.fee,
-            input_utxos: self.inputs.iter().map(|inp| inp.utxo.to_owned()).collect(),
-            output_utxos: self
-                .outputs
-                .clone()
-                .into_iter()
-                .map(|(utxo, _)| utxo)
-                .collect(),
-            public_scripts: self.public_scripts.clone(),
-            timestamp: self.timestamp,
-        }
     }
 
     /// Sign all transaction inputs with the same signature
@@ -325,7 +267,10 @@ impl Transaction {
         self.proof = Some(signature)
     }
 
-    /// Validate Transaction according to Devnet definitions.
+    /// Validate Transaction
+    ///
+    /// This method tests the transaction's internal consistency in
+    /// isolation, without the context of the canonical chain.
     ///
     /// When a transaction occurs in a mined block, `coinbase_amount` is
     /// derived from that block. When a transaction is received from a peer,
