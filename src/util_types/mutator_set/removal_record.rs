@@ -310,7 +310,7 @@ impl<H: AlgebraicHasher> Hashable for RemovalRecord<H> {
 mod removal_record_tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
-    use rand::{thread_rng, RngCore};
+    use rand::{thread_rng, Rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::test_shared::mutator_set::make_item_and_randomnesses;
@@ -437,10 +437,10 @@ mod removal_record_tests {
     fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
         type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let test_iterations = 10;
         for _ in 0..test_iterations {
+            let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
             let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
             let mut items = vec![];
             let mut mps = vec![];
@@ -485,6 +485,11 @@ mod removal_record_tests {
                         "removal records must validate, i = {}",
                         i
                     );
+                    assert!(
+                        accumulator.kernel.can_remove(removal_record),
+                        "removal records must return true on `can_remove`, i = {}",
+                        i
+                    );
                 }
 
                 let rr = accumulator.drop(&item, &mp);
@@ -500,8 +505,21 @@ mod removal_record_tests {
             let (chosen_index, random_removal_record) =
                 removal_records.choose(&mut rand::thread_rng()).unwrap();
             assert!(accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
+            assert!(
+                accumulator.kernel.can_remove(random_removal_record),
+                "removal records must return true on `can_remove`",
+            );
+            assert!(
+                random_removal_record.validate(&accumulator.kernel),
+                "removal record must have valid MMR MPs"
+            );
             accumulator.remove(random_removal_record);
             assert!(!accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
+
+            assert!(
+                !accumulator.kernel.can_remove(random_removal_record),
+                "removal records must return false on `can_remove` after removal",
+            );
         }
     }
 
@@ -512,6 +530,7 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
+        let mut original_first_removal_record = None;
         let mut items = vec![];
         let mut mps = vec![];
         for i in 0..12 * BATCH_SIZE + 4 {
@@ -555,18 +574,25 @@ mod removal_record_tests {
                     "removal records must validate, i = {}",
                     i
                 );
+                assert!(
+                    accumulator.kernel.can_remove(removal_record),
+                    "removal records must return true on `can_remove`, i = {}",
+                    i
+                );
             }
 
             let rr = accumulator.drop(&item, &mp);
+            if original_first_removal_record.is_none() {
+                original_first_removal_record = Some(rr.clone());
+            };
+
             removal_records.push((i as usize, rr));
         }
 
         // Now apply all removal records one at a time and batch update the remaining removal records
         for i in 0..12 * BATCH_SIZE + 4 {
-            let (_chosen_index, random_removal_record) = removal_records
-                .choose(&mut rand::thread_rng())
-                .unwrap()
-                .clone();
+            let remove_idx = rand::thread_rng().gen_range(0..removal_records.len());
+            let random_removal_record = removal_records.remove(remove_idx).1;
             let update_res_rr = RemovalRecord::batch_update_from_remove(
                 &mut removal_records
                     .iter_mut()
@@ -588,8 +614,19 @@ mod removal_record_tests {
                     "removal records must validate, i = {}",
                     i
                 );
+                assert!(accumulator.kernel.can_remove(removal_record));
             }
         }
+
+        // Verify that the original removal record is no longer valid since its
+        // MMR MPs are deprecated
+        assert!(original_first_removal_record
+            .as_ref()
+            .unwrap()
+            .validate(&accumulator.kernel));
+        assert!(!accumulator
+            .kernel
+            .can_remove(&original_first_removal_record.unwrap()));
     }
 
     #[test]

@@ -425,6 +425,8 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
         chunkidx_to_chunk_difference_dict
     }
 
+    /// Check if a removal record can be applied to a mutator set. Returns false if either
+    /// the MMR membership proofs are unsynced, or if all its indices are already set.
     pub fn can_remove(&self, removal_record: &RemovalRecord<H>) -> bool {
         let mut have_absent_index = false;
         if !removal_record.validate(self) {
@@ -865,6 +867,7 @@ mod accumulation_scheme_tests {
                 // generate removal record
                 let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
                 assert!(removal_record.validate(&mutator_set.kernel));
+                assert!(mutator_set.kernel.can_remove(&removal_record));
 
                 // update membership proofs
                 let res = MsMembershipProof::batch_update_from_remove(
@@ -948,6 +951,7 @@ mod accumulation_scheme_tests {
             // generate removal record
             let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
             assert!(removal_record.validate(&mutator_set.kernel));
+            assert!(mutator_set.kernel.can_remove(&removal_record));
             (i..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
                     &items_and_membership_proofs[k].0,
@@ -961,12 +965,10 @@ mod accumulation_scheme_tests {
                     &items_and_membership_proofs[j].0,
                     &items_and_membership_proofs[j].1
                 ));
-                assert!(removal_record.validate(&mutator_set.kernel));
                 let update_res = items_and_membership_proofs[j]
                     .1
                     .update_from_remove(&removal_record.clone());
                 assert!(update_res.is_ok());
-                assert!(removal_record.validate(&mutator_set.kernel));
             });
 
             // remove item from set
