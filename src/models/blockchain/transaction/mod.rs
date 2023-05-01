@@ -11,6 +11,7 @@ use num_rational::BigRational;
 use num_traits::Zero;
 use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
@@ -34,18 +35,60 @@ use super::shared::Hash;
 use crate::models::state::wallet::WalletSecret;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PubScript(pub Vec<BFieldElement>);
+struct Proof(pub Vec<BFieldElement>);
 
-impl Hashable for PubScript {
+impl Hashable for Proof {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         self.0.clone()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PubScript(pub Proof);
+
+impl Hashable for PubScript {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        self.0.to_sequence()
+    }
+}
+
+/// Not for broadcasting because not secure
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RawWitness {
+    lock_scripts_and_witnesses: Vec<(Vec<BFieldElement>, Vec<BFieldElement>)>,
+    input_membership_proofs: Vec<MsMembershipProof<Hash>>,
+    type_script_set: HashSet<Vec<BFieldElement>>,
+    type_script_witnesses: Vec<Vec<BFieldElement>>,
+    pubscript_witnesses: Vec<Vec<BFieldElement>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LinkedProofs {
+    lock_script_proofs: Vec<Proof>,
+    lock_script_hashes: Vec<Digest>,
+    index_proofs: Vec<Proof>,
+    type_script_proofs: Vec<Proof>,
+    type_script_hashes: Vec<Digest>,
+    lock_script_extraction_proof: Proof,
+    type_script_extraction_proof: Proof,
+    pubscript_proofs: Vec<Proof>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SingleProof(pub Proof);
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Witness {
+    RawWitness(RawWitness),
+    LinkedProofs(LinkedProofs),
+    SingleProof(SingleProof),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
-    pub proof: Vec<BFieldElement>,
+
+    pub witness: Witness,
 }
 
 impl GetSize for Transaction {
@@ -84,7 +127,7 @@ impl Hashable for Transaction {
             .kernel
             .public_scripts
             .iter()
-            .flat_map(|ps| [vec![BFieldElement::new(ps.0.len() as u64)], ps.0].concat());
+            .flat_map(|ps| [vec![BFieldElement::new(ps.0 .0.len() as u64)], ps.0 .0].concat());
         let fee_preimage = self.kernel.fee.to_sequence().into_iter();
         let timestamp_preimage = vec![self.kernel.timestamp].into_iter();
 
@@ -243,30 +286,6 @@ impl Transaction {
         Ok(())
     }
 
-    /// Sign all transaction inputs with the same signature
-    pub fn sign(&mut self, wallet: &WalletSecret) {
-        let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = Hash::hash(&kernel);
-        let signature = wallet.sign_digest(kernel_digest);
-        for input in self.inputs.iter_mut() {
-            input.signature = Some(signature);
-        }
-    }
-
-    /// Perform a devnet authority signature on a `Transaction`
-    ///
-    /// This is a placeholder for STARK proofs, since merged
-    /// transactions will have invalid input signatures with the
-    /// current signature scheme.
-    pub fn devnet_authority_sign(&mut self) {
-        let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = Hash::hash(&kernel);
-        let authority_wallet = WalletSecret::devnet_authority_wallet();
-        let signature = authority_wallet.sign_digest(kernel_digest);
-
-        self.proof = Some(signature)
-    }
-
     /// Validate Transaction
     ///
     /// This method tests the transaction's internal consistency in
@@ -276,16 +295,42 @@ impl Transaction {
     /// derived from that block. When a transaction is received from a peer,
     /// and is not yet mined, the coinbase amount is None.
     pub fn is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
-        // What belongs here are the things that would otherwise
-        // be verified by the transaction validity proof.
+        match self.witness {
+            Witness::RawWitness(raw_witness) => {
+                // verify lock scripts
+                for (program, secret_input) in raw_witness.lock_scripts_and_witnesses.iter() {
+                    let input = Hash::hash(&self.kernel);
+                    // verify (program, input, secret_input, output=[])
+                }
+
+                // verify removal records
+                for msmp in raw_witness.input_membership_proofs.iter() {
+                    // verify proof of correct index derivation
+                }
+
+                //
+            }
+            Witness::LinkedProofs(_) => todo!(),
+            Witness::SingleProof(_) => todo!(),
+        }
 
         // Membership proofs and removal records are checked by caller, don't check here.
 
-        // 1. Check that Transaction spends at most its input and coinbase
-        let sum_inputs: Amount = self.inputs.iter().map(|input| input.utxo.amount).sum();
-        let sum_outputs: Amount = self.outputs.iter().map(|(utxo, _)| utxo.amount).sum();
+        // 1. Check that all coins evolve according to their types
+        let sum_inputs: Amount = self
+            .kernel
+            .inputs
+            .iter()
+            .map(|input| input.utxo.amount)
+            .sum();
+        let sum_outputs: Amount = self
+            .kernel
+            .outputs
+            .iter()
+            .map(|(utxo, _)| utxo.amount)
+            .sum();
         let spendable_amount = sum_inputs + coinbase_amount.unwrap_or_else(Amount::zero);
-        let spent_amount = sum_outputs + self.fee;
+        let spent_amount = sum_outputs + self.kernel.fee;
         if spent_amount > spendable_amount {
             warn!(
                 "Invalid amount: Spent: {:?}, spendable: {:?}",
@@ -338,19 +383,22 @@ impl Transaction {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Timestamping failed")
-                .as_secs(),
+                .as_millis() as u64,
         );
 
         // Add this `Transaction`
-        let authority_proof = None;
+
+        let merged_kernel = TransactionKernel {
+            inputs: vec![self.kernel.inputs, other.kernel.inputs].concat(),
+            outputs: vec![self.kernel.outputs, other.kernel.outputs].concat(),
+            public_scripts: vec![self.kernel.public_scripts, other.kernel.public_scripts].concat(),
+            fee: self.kernel.fee + other.kernel.fee,
+            timestamp,
+        };
 
         let mut merged_transaction = Transaction {
-            inputs: vec![self.inputs, other.inputs].concat(),
-            outputs: vec![self.outputs, other.outputs].concat(),
-            public_scripts: vec![self.public_scripts, other.public_scripts].concat(),
-            fee: self.fee + other.fee,
-            timestamp,
-            proof: authority_proof,
+            kernel: merged_kernel,
+            witness: Witness::SingleProof(SingleProof(Proof(vec![]))),
         };
 
         merged_transaction.devnet_authority_sign();
@@ -362,7 +410,7 @@ impl Transaction {
     pub fn fee_density(&self) -> BigRational {
         let transaction_as_bytes = bincode::serialize(&self).unwrap();
         let transaction_size = BigInt::from(transaction_as_bytes.get_size());
-        let transaction_fee = BigInt::from(BigUint::from(self.fee.0));
+        let transaction_fee = BigInt::from(BigUint::from(self.kernel.fee.0));
         BigRational::new_raw(transaction_fee, transaction_size)
     }
 }

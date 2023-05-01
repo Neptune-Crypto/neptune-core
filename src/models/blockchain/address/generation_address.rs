@@ -4,6 +4,7 @@ use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
 use anyhow::Result;
+use itertools::Itertools;
 use num_traits::Zero;
 use rand::thread_rng;
 use rand::Rng;
@@ -25,20 +26,21 @@ pub struct SpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
     pub privacy_preimage: Digest,
-    pub spending_preimage: Digest,
+    pub unlock_key: Digest,
+    pub seed: Digest,
 }
 
 pub struct ReceivingAddress {
     pub receiver_identifier: BFieldElement,
     pub encryption_key: lattice::kem::PublicKey,
     pub privacy_digest: Digest,
-    pub spending_digest: Digest,
+    pub spending_lock: Digest,
 }
 
 pub fn public_script_is_marked(public_script: &PubScript) -> bool {
     const OPCODE_FOR_HALT: BFieldElement = BFieldElement::zero();
-    match public_script.0.get(0) {
-        Some(&OPCODE_FOR_HALT) => match public_script.0.get(1) {
+    match public_script.0 .0.get(0) {
+        Some(&OPCODE_FOR_HALT) => match public_script.0 .0.get(1) {
             Some(&GENERATION_FLAG) => true,
             Some(_) => false,
             None => false,
@@ -49,17 +51,17 @@ pub fn public_script_is_marked(public_script: &PubScript) -> bool {
 }
 
 pub fn receiver_identifier_from_public_script(public_script: &PubScript) -> Result<BFieldElement> {
-    match public_script.0.get(2) {
+    match public_script.0 .0.get(2) {
         Some(id) => Ok(*id),
         None => bail!("Public script does not contain receiver ID"),
     }
 }
 
 pub fn ciphertext_from_public_script(public_script: &PubScript) -> Result<Vec<BFieldElement>> {
-    if public_script.0.len() <= 3 {
+    if public_script.0 .0.len() <= 3 {
         bail!("Public script does not contain ciphertext.");
     }
-    return Ok(public_script.0[3..].to_vec());
+    return Ok(public_script.0 .0[3..].to_vec());
 }
 
 /// Encodes a slice of bytes to a vec of BFieldElements. This
@@ -112,7 +114,7 @@ impl SpendingKey {
     pub fn derive_from_seed(seed: &Digest) -> Self {
         let privacy_preimage =
             Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(0)]].concat());
-        let spending_preimage =
+        let unlock_key =
             Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat());
         let randomness: [u8; 32] = shake256(&bincode::serialize(seed).unwrap(), 32)
             .try_into()
@@ -126,7 +128,8 @@ impl SpendingKey {
             receiver_identifier,
             decryption_key: sk,
             privacy_preimage,
-            spending_preimage,
+            unlock_key,
+            seed: seed.to_owned(),
         }
     }
 
@@ -159,33 +162,77 @@ impl SpendingKey {
         // convert plaintext to utxo and digest
         Ok(bincode::deserialize(&plaintext)?)
     }
+
+    fn generate_lock_preimages(&self) -> [Digest; 512] {
+        let nth_preimage = |n: usize| {
+            Hash::hash_varlen(
+                &[
+                    self.unlock_key.to_sequence(),
+                    [BFieldElement::new(n.try_into().unwrap())].to_vec(),
+                ]
+                .concat(),
+            )
+        };
+        (0..512).map(nth_preimage).collect_vec().try_into().unwrap()
+    }
+
+    fn generate_spending_lock(&self) -> Digest {
+        let lock_preimages = self.generate_lock_preimages();
+        let mut nodes: [Digest; 512] = [Digest::default(); 512];
+        for i in 0..256 {
+            nodes[256 + i] = lock_preimages[i];
+        }
+        for i in 0..255 {
+            nodes[255 - i] = Hash::hash_pair(&nodes[510 - 2 * i], &nodes[511 - 2 * i]);
+        }
+        return nodes[1];
+    }
+
+    fn binding_unlock(&self, bind_to: &Digest) -> Vec<Digest> {
+        let lock_preimages = self.generate_lock_preimages();
+        let mut bind_bits = ReceivingAddress::bind_bits(bind_to);
+
+        let witness_data = bind_bits
+            .into_iter()
+            .zip(lock_preimages.into_iter())
+            .map(|(bit, preimage)| match bit {
+                0 => preimage,
+                1 => Hash::hash_pair(
+                    &preimage,
+                    &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+                ),
+            })
+            .collect_vec();
+
+        witness_data
+    }
 }
 
 impl ReceivingAddress {
-    pub fn derive_from_seed(seed: &Digest) -> Self {
-        let privacy_preimage =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(0)]].concat());
-        let privacy_digest = Hash::hash_pair(
-            &privacy_preimage,
-            &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
-        );
-        let spending_preimage =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat());
-        let spending_digest = Hash::hash(&spending_preimage);
-        let randomness: [u8; 32] = shake256(&bincode::serialize(seed).unwrap(), 32)
-            .try_into()
-            .unwrap();
-        let (sk, pk) = lattice::kem::keygen(randomness);
+    pub fn from_spending_key(spending_key: &SpendingKey) -> Self {
+        let seed = spending_key.seed;
         let receiver_identifier =
             Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat()).values()
                 [0];
-
+        let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
+            .try_into()
+            .unwrap();
+        let (sk, pk) = lattice::kem::keygen(randomness);
+        let privacy_digest = Hash::hash_pair(
+            &spending_key.privacy_preimage,
+            &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+        );
         Self {
             receiver_identifier,
             encryption_key: pk,
             privacy_digest,
-            spending_digest,
+            spending_lock: spending_key.generate_spending_lock(),
         }
+    }
+
+    pub fn derive_from_seed(seed: &Digest) -> Self {
+        let spending_key = SpendingKey::derive_from_seed(seed);
+        Self::from_spending_key(&spending_key)
     }
 
     pub fn encrypt(&self, utxo: Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
@@ -219,14 +266,53 @@ impl ReceivingAddress {
         .concat())
     }
 
+    /// Verify the UTXO owner's assent to the transaction.
+    /// This is the rust reference implementation, but the version of
+    /// this logic that is proven is `lock_script`. This function
+    /// crashes if it fails to verify; and returns nothing (but
+    /// gracefully) if it succeeds.
+    pub fn verify_unlock(&self, bind_to: &Digest, witness_data: &[Digest]) {
+        let bind_bits = Self::bind_bits(&bind_to);
+
+        let mut nodes: [Digest; 512] = [Digest::default(); 512];
+        for ((i, d), b) in witness_data.iter().enumerate().zip(bind_bits.iter()) {
+            nodes[256 + i] = match b {
+                0 => Hash::hash_pair(d, &Digest::new([BFieldElement::zero(); 5])),
+                1 => *d,
+            };
+        }
+        for i in 0..255 {
+            nodes[255 - i] = Hash::hash_pair(&nodes[510 - 2 * i], &nodes[511 - 2 * i]);
+        }
+        assert_eq!(self.spending_lock, nodes[1]);
+    }
+
+    pub fn bind_bits(bind_to: &Digest) -> Vec<usize> {
+        let mut bits: Vec<usize> = Vec::with_capacity(256);
+        for d in bind_to.values().into_iter().take(4) {
+            let value = d.value();
+            for j in 0..64 {
+                bits.push(((value >> j) & 1) as usize);
+            }
+        }
+
+        bits
+    }
+
+    /// Generate a lock script from the spending lock. Satisfaction
+    /// of this lock script establishes the UTXO owner's assent to
+    /// the transaction. The logic contained in here should be
+    /// identical to `verify_unlock`.
     pub fn lock_script(&self) -> LockScript {
+        // currently this script is just a placeholder
         const DIVINE: BFieldElement = BFieldElement::new(8);
         const HASH: BFieldElement = BFieldElement::new(48);
         const POP: BFieldElement = BFieldElement::new(2);
         const PUSH: BFieldElement = BFieldElement::new(1);
         const ASSERT_VECTOR: BFieldElement = BFieldElement::new(64);
+        const READ_IO: BFieldElement = BFieldElement::new(128);
         let mut push_digest = vec![];
-        for elem in self.spending_digest.values().iter().rev() {
+        for elem in self.spending_lock.values().iter().rev() {
             push_digest.append(&mut vec![PUSH, *elem]);
         }
         let instrs = vec![
@@ -235,6 +321,7 @@ impl ReceivingAddress {
             ],
             push_digest,
             vec![ASSERT_VECTOR],
+            vec![READ_IO, READ_IO, READ_IO, READ_IO, READ_IO],
         ]
         .concat();
 
@@ -242,11 +329,18 @@ impl ReceivingAddress {
     }
 }
 
+///
+/// Claim
+///  - (input: Hash(kernel), output: [], program: lock_script)
+
 #[cfg(test)]
-mod test_bytes_to_bfes {
+mod test_generation_addresses {
     use rand::{thread_rng, Rng, RngCore};
+    use twenty_first::shared_math::tip5::Digest;
 
     use crate::models::blockchain::address::generation_address::{bfes_to_bytes, bytes_to_bfes};
+
+    use super::{ReceivingAddress, SpendingKey};
 
     #[test]
     fn test_conversion_fixed_length() {
@@ -299,6 +393,17 @@ mod test_bytes_to_bfes {
 
             assert_eq!(test_case, bytes_again);
         }
-        // }
+    }
+
+    #[test]
+    fn test_keygen_sign_verify() {
+        let mut rng = thread_rng();
+        let seed: Digest = rng.gen();
+        let spending_key = SpendingKey::derive_from_seed(&seed);
+        let receiving_address = ReceivingAddress::derive_from_seed(&seed);
+
+        let msg: Digest = rng.gen();
+        let witness_data = spending_key.binding_unlock(&msg);
+        receiving_address.verify_unlock(&msg, &witness_data);
     }
 }

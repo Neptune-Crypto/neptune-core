@@ -132,8 +132,8 @@ impl GlobalState {
                     .as_secs(),
             ),
             proof: None,
+            witness: todo!(),
         };
-        transaction.sign(&self.wallet_state.wallet_secret);
 
         Ok(transaction)
     }

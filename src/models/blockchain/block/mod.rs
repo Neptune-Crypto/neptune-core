@@ -148,7 +148,7 @@ impl Block {
                     ga: ModuleElement::zero(),
                 },
                 privacy_digest: Hash::hash(&Digest::default()),
-                spending_digest: Hash::hash(&Digest::default()),
+                spending_lock: Hash::hash(&Digest::default()),
             },
             Amount::zero(),
         )]
