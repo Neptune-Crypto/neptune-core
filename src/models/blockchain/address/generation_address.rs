@@ -18,7 +18,7 @@ use twenty_first::{
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PubScript;
+use crate::models::blockchain::transaction::Transaction;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 
@@ -37,10 +37,10 @@ pub struct ReceivingAddress {
     pub spending_lock: Digest,
 }
 
-pub fn public_script_is_marked(public_script: &PubScript) -> bool {
+fn pubscript_input_is_marked(pubscript_input: &[BFieldElement]) -> bool {
     const OPCODE_FOR_HALT: BFieldElement = BFieldElement::zero();
-    match public_script.0 .0.get(0) {
-        Some(&OPCODE_FOR_HALT) => match public_script.0 .0.get(1) {
+    match pubscript_input.get(0) {
+        Some(&OPCODE_FOR_HALT) => match pubscript_input.get(1) {
             Some(&GENERATION_FLAG) => true,
             Some(_) => false,
             None => false,
@@ -50,18 +50,22 @@ pub fn public_script_is_marked(public_script: &PubScript) -> bool {
     }
 }
 
-pub fn receiver_identifier_from_public_script(public_script: &PubScript) -> Result<BFieldElement> {
-    match public_script.0 .0.get(2) {
+fn receiver_identifier_from_pubscript_input(
+    public_script: &[BFieldElement],
+) -> Result<BFieldElement> {
+    match public_script.get(2) {
         Some(id) => Ok(*id),
         None => bail!("Public script does not contain receiver ID"),
     }
 }
 
-pub fn ciphertext_from_public_script(public_script: &PubScript) -> Result<Vec<BFieldElement>> {
-    if public_script.0 .0.len() <= 3 {
+fn ciphertext_from_pubscript_input(
+    pubscript_input: &[BFieldElement],
+) -> Result<Vec<BFieldElement>> {
+    if pubscript_input.len() <= 3 {
         bail!("Public script does not contain ciphertext.");
     }
-    return Ok(public_script.0 .0[3..].to_vec());
+    return Ok(pubscript_input[3..].to_vec());
 }
 
 /// Encodes a slice of bytes to a vec of BFieldElements. This
@@ -111,12 +115,63 @@ pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Vec<u8> {
 }
 
 impl SpendingKey {
-    pub fn derive_from_seed(seed: &Digest) -> Self {
+    pub fn scan_for_received_utxos(
+        &self,
+        transaction: &Transaction,
+    ) -> Vec<(Utxo, Digest, Digest)> {
+        let mut received_utxos_with_randomnesses = vec![];
+
+        // for all public scripts that contain a ciphertext for me,
+        for matching_script in transaction
+            .kernel
+            .pubscript_hashes_and_inputs
+            .iter()
+            .filter(|(psh, psi)| pubscript_input_is_marked(psi))
+            .filter(|(psh, psi)| {
+                let receiver_id = receiver_identifier_from_pubscript_input(psi);
+                match receiver_id {
+                    Ok(recid) => recid == self.receiver_identifier,
+                    Err(_) => false,
+                }
+            })
+        {
+            // decrypt it to obtain the utxo and sender randomness
+            let ciphertext = ciphertext_from_pubscript_input(&matching_script.1);
+            let decryption_result = match ciphertext {
+                Ok(ctxt) => self.decrypt(&ctxt),
+                _ => {
+                    continue;
+                }
+            };
+            let (utxo, sender_randomness) = match decryption_result {
+                Ok(tuple) => tuple,
+                _ => {
+                    continue;
+                }
+            };
+
+            // and join those with the receiver digest to get a commitment
+            // Note: the commitment is computed in the same way as in the mutator set.
+            let receiver_preimage = self.privacy_preimage.clone();
+            let receiver_digest = Hash::hash(&receiver_preimage);
+            let canonical_commitment = Hash::hash_pair(
+                &Hash::hash_pair(&Hash::hash(&utxo), &sender_randomness),
+                &receiver_digest,
+            );
+
+            // push to list
+            received_utxos_with_randomnesses.push((utxo, sender_randomness, receiver_preimage));
+        }
+
+        received_utxos_with_randomnesses
+    }
+
+    pub fn derive_from_seed(seed: Digest) -> Self {
         let privacy_preimage =
             Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
             Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat());
-        let randomness: [u8; 32] = shake256(&bincode::serialize(seed).unwrap(), 32)
+        let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
             .try_into()
             .unwrap();
         let (sk, pk) = lattice::kem::keygen(randomness);
@@ -230,7 +285,7 @@ impl ReceivingAddress {
         }
     }
 
-    pub fn derive_from_seed(seed: &Digest) -> Self {
+    pub fn derive_from_seed(seed: Digest) -> Self {
         let spending_key = SpendingKey::derive_from_seed(seed);
         Self::from_spending_key(&spending_key)
     }
@@ -264,6 +319,24 @@ impl ReceivingAddress {
             ciphertext_bfes,
         ]
         .concat())
+    }
+
+    /// Generate a pubscript input, which is a ciphertext only the
+    /// recipient can decrypt, along with a pubscript that reads
+    /// some input of that length.
+    pub fn generate_pubscript_and_input(
+        &self,
+        utxo: Utxo,
+        sender_randomness: Digest,
+    ) -> Result<(Vec<BFieldElement>, Vec<BFieldElement>)> {
+        let ciphertext = self.encrypt(utxo, sender_randomness)?;
+        const READ_IO: BFieldElement = BFieldElement::new(128);
+        const HALT: BFieldElement = BFieldElement::new(0);
+
+        let mut pubscript = vec![READ_IO; ciphertext.len() + 1];
+        *pubscript.last_mut().unwrap() = HALT;
+
+        Ok((pubscript, ciphertext))
     }
 
     /// Verify the UTXO owner's assent to the transaction.
@@ -399,8 +472,8 @@ mod test_generation_addresses {
     fn test_keygen_sign_verify() {
         let mut rng = thread_rng();
         let seed: Digest = rng.gen();
-        let spending_key = SpendingKey::derive_from_seed(&seed);
-        let receiving_address = ReceivingAddress::derive_from_seed(&seed);
+        let spending_key = SpendingKey::derive_from_seed(seed.clone());
+        let receiving_address = ReceivingAddress::derive_from_seed(seed);
 
         let msg: Digest = rng.gen();
         let witness_data = spending_key.binding_unlock(&msg);

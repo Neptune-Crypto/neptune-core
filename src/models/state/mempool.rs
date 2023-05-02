@@ -452,7 +452,7 @@ impl MempoolInternal {
 
         // Update the remaining transactions so their mutator set data is still valid
         for tx in self.tx_dictionary.values_mut() {
-            tx.update_ms_data(block)
+            tx.update_mutator_set_data(block)
                 .expect("Updating mempool transaction must succeed");
         }
 

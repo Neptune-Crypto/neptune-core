@@ -4,19 +4,21 @@ use mutator_set_tf::util_types::mutator_set::{
 };
 use serde::{Deserialize, Serialize};
 use twenty_first::{
-    shared_math::b_field_element::BFieldElement, util_types::algebraic_hasher::Hashable,
+    shared_math::{b_field_element::BFieldElement, tip5::Digest},
+    util_types::algebraic_hasher::Hashable,
 };
 
-use super::{utxo::Utxo, Amount, PubScript};
+use super::Amount;
 use crate::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionKernel {
     pub inputs: Vec<RemovalRecord<Hash>>,
 
-    // `outputs` contains the commitments that go into the AOCL
+    // `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,
-    pub public_scripts: Vec<PubScript>,
+
+    pub pubscript_hashes_and_inputs: Vec<(Digest, Vec<BFieldElement>)>,
     pub fee: Amount,
 
     // number of milliseconds since unix epoch
@@ -26,16 +28,19 @@ pub struct TransactionKernel {
 impl Hashable for TransactionKernel {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         let inputs_preimage = self
-            .input_utxos
+            .inputs
             .iter()
             .flat_map(|input_utxo| input_utxo.to_sequence());
 
         let outputs_preimage = self
-            .output_utxos
+            .outputs
             .iter()
             .flat_map(|output_utxo| output_utxo.to_sequence());
 
-        let public_scripts_preimage = self.public_scripts.concat().into_iter();
+        let public_scripts_preimage = self
+            .pubscript_hashes_and_inputs
+            .into_iter()
+            .flat_map(|(psh, psi)| [psh.to_sequence(), psi.to_vec()].concat());
         let fee_preimage = self.fee.to_sequence().into_iter();
         let timestamp_preimage = vec![self.timestamp].into_iter();
 

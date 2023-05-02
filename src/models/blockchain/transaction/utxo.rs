@@ -5,6 +5,8 @@ use twenty_first::shared_math::tip5::Digest;
 
 use crate::models::blockchain::shared::Hash;
 
+use super::amount::AmountLike;
+use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use super::{native_coin, Amount};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
@@ -31,6 +33,14 @@ impl Utxo {
                 amount.to_sequence(),
             )],
         )
+    }
+
+    pub fn get_native_coin_amount(&self) -> Amount {
+        self.coins
+            .iter()
+            .filter(|(type_script_hash, state)| *type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+            .map(|(type_script_hash, state)| Amount::from_bfes(state))
+            .sum()
     }
 }
 

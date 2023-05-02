@@ -6,15 +6,16 @@ use std::{
 };
 
 use anyhow::bail;
+use itertools::Itertools;
 use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
     util_types::algebraic_hasher::Hashable,
 };
 
-pub trait AmountLike<'a>:
+pub trait AmountLike:
     Add
     + Sum
     + CheckedSub
@@ -28,10 +29,11 @@ pub trait AmountLike<'a>:
     + Display
     + Copy
     + Serialize
-    + Deserialize<'a>
+    + DeserializeOwned
     + From<i32>
     + Hashable
 {
+    fn from_bfes(bfes: &[BFieldElement]) -> Self;
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -44,6 +46,24 @@ pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq)]
 pub struct Amount(pub U32s<AMOUNT_SIZE_FOR_U32>);
+
+impl AmountLike for Amount {
+    fn from_bfes(bfes: &[BFieldElement]) -> Self {
+        let limbs: [u32; AMOUNT_SIZE_FOR_U32] = bfes
+            .iter()
+            .map(|b| b.value() as u32)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        Amount(U32s::new(limbs))
+    }
+}
+
+impl Ord for Amount {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
 
 impl Amount {
     /// Return the element that corresponds to 1. Use in tests only.

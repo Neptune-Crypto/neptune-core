@@ -1,14 +1,11 @@
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::shared::{BATCH_SIZE, CHUNK_SIZE};
 use num_traits::{One, Zero};
-use secp256k1::ecdsa;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 use twenty_first::shared_math::lattice::kem::PublicKey;
 use twenty_first::shared_math::lattice::ModuleElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
@@ -76,17 +73,16 @@ impl Block {
         let mut ms_update = MutatorSetUpdate::default();
         // This is just the UNIX timestamp when this code was written
         let timestamp: BFieldElement = BFieldElement::new(1655916990u64);
-        let authority_proof = vec![];
 
         let mut genesis_coinbase_tx = Transaction {
             kernel: TransactionKernel {
                 inputs: vec![],
                 outputs: vec![],
-                public_scripts: vec![],
                 fee: 0u32.into(),
                 timestamp,
+                pubscript_hashes_and_inputs: vec![],
             },
-            proof: authority_proof,
+            witness: super::transaction::Witness::Faith,
         };
 
         for (receiving_address, amount) in Self::premine_distribution() {

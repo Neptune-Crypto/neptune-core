@@ -3,26 +3,22 @@ pub mod native_coin;
 pub mod transaction_kernel;
 pub mod utxo;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
-use num_traits::Zero;
-use secp256k1::{ecdsa, Message, PublicKey};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{error, warn};
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::{self, RemovalRecord};
+use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 
@@ -31,25 +27,14 @@ use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
 use super::address::generation_address;
 use super::block::Block;
-use super::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
 use super::shared::Hash;
-use crate::models::state::wallet::WalletSecret;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-struct Proof(pub Vec<BFieldElement>);
+pub struct Proof(pub Vec<BFieldElement>);
 
 impl Hashable for Proof {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         self.0.clone()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PubScript(pub Proof);
-
-impl Hashable for PubScript {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.to_sequence()
     }
 }
 
@@ -64,7 +49,7 @@ pub struct RawWitness {
     output_utxos: Vec<Utxo>,
     type_scripts: Vec<(Digest, Vec<BFieldElement>)>,
     type_script_witnesses: Vec<Vec<BFieldElement>>,
-    pubscript_witnesses: Vec<Vec<BFieldElement>>,
+    pubscripts_and_witnesses: Vec<(Vec<BFieldElement>, Vec<BFieldElement>)>,
 }
 
 /// Linked proofs are one abstraction level above raw witness. They
@@ -97,6 +82,7 @@ pub enum Witness {
     RawWitness(RawWitness),
     LinkedProofs(LinkedProofs),
     SingleProof(SingleProof),
+    Faith,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -140,9 +126,9 @@ impl Hashable for Transaction {
         // can be padded with a B field element that's not a valid VM instruction.
         let public_scripts_preimage = self
             .kernel
-            .public_scripts
+            .pubscript_hashes_and_inputs
             .iter()
-            .flat_map(|ps| [vec![BFieldElement::new(ps.0 .0.len() as u64)], ps.0 .0].concat());
+            .flat_map(|(psh, psi)| [psh.to_sequence(), psi.to_vec()].concat());
         let fee_preimage = self.kernel.fee.to_sequence().into_iter();
         let timestamp_preimage = vec![self.kernel.timestamp].into_iter();
 
@@ -175,65 +161,10 @@ impl Transaction {
     //         .collect()
     // }
 
-    pub fn get_received_utxos_with_randomnesses(
-        &self,
-        spending_keys: &[generation_address::SpendingKey],
-    ) -> Vec<(Utxo, Digest, Digest)> {
-        let mut received_utxos_with_randomnesses = vec![];
-
-        // for all own addresses
-        for spending_key in spending_keys {
-            // for all public scripts that contain a ciphertext for me,
-            for matching_script in self
-                .kernel
-                .public_scripts
-                .iter()
-                .filter(|ps| generation_address::public_script_is_marked(ps))
-                .filter(|ps| {
-                    let receiver_id =
-                        generation_address::receiver_identifier_from_public_script(ps);
-                    match receiver_id {
-                        Ok(recid) => recid == spending_key.receiver_identifier,
-                        Err(_) => false,
-                    }
-                })
-            {
-                // decrypt it to obtain the utxo and sender randomness
-                let ciphertext = generation_address::ciphertext_from_public_script(matching_script);
-                let decryption_result = match ciphertext {
-                    Ok(ctxt) => spending_key.decrypt(&ctxt),
-                    _ => {
-                        continue;
-                    }
-                };
-                let (utxo, sender_randomness) = match decryption_result {
-                    Ok(tuple) => tuple,
-                    _ => {
-                        continue;
-                    }
-                };
-
-                // and join those with the receiver digest to get a commitment
-                // Note: the commitment is computed in the same way as in the mutator set.
-                let receiver_preimage = spending_key.privacy_preimage.clone();
-                let receiver_digest = Hash::hash(&receiver_preimage);
-                let canonical_commitment = Hash::hash_pair(
-                    &Hash::hash_pair(&Hash::hash(&utxo), &sender_randomness),
-                    &receiver_digest,
-                );
-
-                // push to list
-                received_utxos_with_randomnesses.push((utxo, sender_randomness, receiver_preimage));
-            }
-        }
-
-        received_utxos_with_randomnesses
-    }
-
     /// Update mutator set data in a transaction to update its
     /// compatibility with a new block. Note that this will
     /// invalidate the proof, requiring an update.
-    pub fn update_ms_data(&mut self, block: &Block) -> Result<()> {
+    pub fn update_mutator_set_data(&mut self, block: &Block) -> Result<()> {
         let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
         let block_addition_records: Vec<AdditionRecord> =
@@ -387,16 +318,35 @@ impl Transaction {
                         // (program, input, secret_input, output)
                     }
                 }
-            }
-            Witness::LinkedProofs(_) => todo!(),
-            Witness::SingleProof(_) => todo!(),
-        }
 
-        true
+                // verify pubscripts
+                for ((pubscript_hash, pubscript_input), (pubscript, pubscript_witness)) in self
+                    .kernel
+                    .pubscript_hashes_and_inputs
+                    .into_iter()
+                    .zip(raw_witness.pubscripts_and_witnesses.into_iter())
+                {
+                    if pubscript_hash != Hash::hash_varlen(&pubscript) {
+                        return false;
+                    }
+
+                    let program = pubscript;
+                    let input = pubscript_input;
+                    let secret_input = pubscript_witness;
+                    let output: Vec<BFieldElement> = vec![];
+                    // verify claim (program, standard input, secret_input, standard output)
+                }
+
+                true
+            }
+            Witness::LinkedProofs(_) => true,
+            Witness::SingleProof(_) => true,
+            Witness::Faith => true,
+        }
     }
 
-    /// Merge two transactions. Both input transactions must have valid mutator set data
-    /// for this to produce a valid transaction.
+    /// Merge two transactions. Both input transactions must have a
+    /// valid SingleProof witness for this operation to work.
     pub fn merge_with(self, other: Transaction) -> Transaction {
         let timestamp = BFieldElement::new(
             SystemTime::now()
@@ -405,12 +355,14 @@ impl Transaction {
                 .as_millis() as u64,
         );
 
-        // Add this `Transaction`
-
         let merged_kernel = TransactionKernel {
             inputs: vec![self.kernel.inputs, other.kernel.inputs].concat(),
             outputs: vec![self.kernel.outputs, other.kernel.outputs].concat(),
-            public_scripts: vec![self.kernel.public_scripts, other.kernel.public_scripts].concat(),
+            pubscript_hashes_and_inputs: vec![
+                self.kernel.pubscript_hashes_and_inputs,
+                other.kernel.pubscript_hashes_and_inputs,
+            ]
+            .concat(),
             fee: self.kernel.fee + other.kernel.fee,
             timestamp,
         };
@@ -420,7 +372,6 @@ impl Transaction {
             witness: Witness::SingleProof(SingleProof(Proof(vec![]))),
         };
 
-        merged_transaction.devnet_authority_sign();
         merged_transaction
     }
 

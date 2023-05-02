@@ -1,8 +1,9 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
+use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use mutator_set_tf::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use num_traits::Zero;
 use rusty_leveldb::DB;
 use std::collections::HashMap;
@@ -25,11 +26,13 @@ use super::rusty_wallet_database::RustyWalletDatabase;
 use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::WalletSecret;
 use crate::config_models::data_directory::DataDirectory;
+use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::amount::Sign;
+use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
+use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
-use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::monitored_utxo::{self, MonitoredUtxo};
 use crate::Hash;
 
 /// A wallet indexes its input and output UTXOs after blockhashes
@@ -119,38 +122,86 @@ impl WalletState {
 }
 
 impl WalletState {
+    fn scan_for_spent_utxos(
+        &self,
+        transaction: &Transaction,
+        wallet_db_lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
+    ) -> Vec<(Utxo, AbsoluteIndexSet, u64)> {
+        let confirmed_absolute_index_sets = transaction
+            .kernel
+            .inputs
+            .iter()
+            .map(|rr| rr.absolute_indices)
+            .collect_vec();
+
+        let mut spent_own_utxos = vec![];
+        for i in 0..wallet_db_lock.monitored_utxos.len() {
+            let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+            let utxo = monitored_utxo.utxo;
+            let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
+                Some(msmp) => msmp.1.compute_indices(&Hash::hash(&utxo)),
+                None => continue,
+            };
+
+            if confirmed_absolute_index_sets.contains(&abs_i) {
+                spent_own_utxos.push((utxo, abs_i, i));
+            }
+        }
+
+        spent_own_utxos
+    }
+
+    fn scan_for_received_utxos(
+        &self,
+        transaction: &Transaction,
+        wallet_db_lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
+    ) -> Vec<(Utxo, Digest, Digest)> {
+        let spending_keys = vec![generation_address::SpendingKey::derive_from_seed(
+            self.wallet_secret.secret_seed.clone(),
+        )];
+
+        spending_keys
+            .iter()
+            .map(|spending_key| spending_key.scan_for_received_utxos(transaction))
+            .collect_vec()
+            .concat()
+    }
+
+    /// Update wallet state with new block. Assumes the given block
+    /// is valid and that the wallet state is not up to date yet.
     pub fn update_wallet_state_with_new_block(
         &self,
         block: &Block,
         wallet_db_lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
     ) -> Result<()> {
-        // A transaction contains a set of input and output UTXOs,
-        // each of which contains an address (public key),
         let transaction: Transaction = block.body.transaction.clone();
 
-        let my_pub_key = self.wallet_secret.get_public_key();
+        let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
+            self.scan_for_spent_utxos(&transaction, wallet_db_lock);
 
-        let own_input_utxos: Vec<Utxo> = transaction.get_own_input_utxos(my_pub_key);
+        // utxo, sender randomness, receiver preimage, addition record
+        let received_outputs: Vec<(Utxo, Digest, Digest)> =
+            self.scan_for_received_utxos(&transaction, wallet_db_lock);
 
-        // TODO: Add real generation addresses here, probably read from DB
-        let output_utxos_commitment_randomness: Vec<(Utxo, Digest, Digest)> =
-            transaction.get_received_utxos_with_randomnesses(&[]);
-        let utxo_digest_to_utxo_info: HashMap<Digest, (Utxo, Digest, Digest)> =
-            output_utxos_commitment_randomness
+        let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =
+            received_outputs
                 .into_iter()
                 .map(|(utxo, send_rand, rec_premi)| {
                     (
-                        commit(&Hash::hash(utxo), &send_rand, &Hash::hash(&rec_premi)),
+                        commit::<Hash>(&Hash::hash(&utxo), &send_rand, &Hash::hash(&rec_premi)),
                         (utxo, send_rand, rec_premi),
                     )
                 })
                 .collect();
 
-        // Derive the membership proofs for new input UTXOs, *and* in the process update existing membership
-        // proofs with updates from this block
-        // return early if balance is zero and this block does not affect our balance
-        if own_input_utxos.is_empty()
-            && output_utxos_commitment_randomness.is_empty()
+        // Derive the membership proofs for received UTXOs, and in
+        // the process update existing membership proofs with
+        // updates from this block
+
+        // return early if there are no monitored utxos and this
+        // block does not affect our balance
+        if spent_inputs.is_empty()
+            && addition_record_to_utxo_info.is_empty()
             && wallet_db_lock.monitored_utxos.is_empty()
         {
             return Ok(());
@@ -190,23 +241,18 @@ impl WalletState {
         let mut changed_mps = vec![];
         let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
-        let mut removal_records = block.body.mutator_set_update.removals.clone();
+
+        let mut removal_records = transaction.kernel.inputs.clone();
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
-        for (addition_record, utxo_commitment) in block
-            .body
-            .mutator_set_update
-            .additions
-            .clone()
-            .into_iter()
-            .zip_eq(block.body.transaction.outputs.clone().into_iter())
-        {
+
+        let utxo_digests = valid_membership_proofs_and_own_utxo_count
+            .keys()
+            .map(|key| key.utxo_digest)
+            .collect_vec();
+        for addition_record in block.body.transaction.kernel.outputs.clone().into_iter() {
             {
-                let utxo_digests = valid_membership_proofs_and_own_utxo_count
-                    .keys()
-                    .map(|key| key.utxo_digest)
-                    .collect_vec();
                 let res: Result<Vec<usize>, Box<dyn Error>> =
                     MsMembershipProof::batch_update_from_addition(
                         &mut valid_membership_proofs_and_own_utxo_count
@@ -231,18 +277,25 @@ impl WalletState {
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
-            // if utxo.matches_pubkey(my_pub_key) {
-            if utxo_digest_to_utxo_info.contains_key(&utxo_commitment) {
+            if addition_record_to_utxo_info.contains_key(&addition_record) {
+                let utxo = addition_record_to_utxo_info[&addition_record].0;
+                let sender_randomness = addition_record_to_utxo_info[&addition_record].1;
+                let receiver_preimage = addition_record_to_utxo_info[&addition_record].2;
                 // TODO: Change this logging to use `Display` for `Amount` once functionality is merged from t-f
                 info!(
                     "Received UTXO in block {}, height {}: value = {}",
                     block.hash.emojihash(),
                     block.header.height,
-                    utxo.amount
+                    utxo.coins
+                        .iter()
+                        .filter(|(type_script_hash, state)| *type_script_hash
+                            == NATIVE_COIN_TYPESCRIPT_DIGEST)
+                        .map(|(type_script_hash, state)| Amount::from_bfes(state))
+                        .sum::<Amount>(),
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =
-                    msa_state.prove(&utxo_digest, &commitment_randomness);
+                    msa_state.prove(&utxo_digest, &sender_randomness, &receiver_preimage);
 
                 valid_membership_proofs_and_own_utxo_count.insert(
                     StrongUtxoKey::new(
@@ -284,11 +337,11 @@ impl WalletState {
             "Monitored UTXO count must match number of managed membership proofs"
         );
 
-        // Loop over all output UTXOs, applying all removal records
+        // apply all removal records
         debug!("Block has {} removal records", removal_records.len());
         debug!(
             "Transaction has {} inputs",
-            block.body.transaction.inputs.len()
+            block.body.transaction.kernel.inputs.len()
         );
         let mut i = 0;
         while let Some(removal_record) = removal_records.pop() {
@@ -312,75 +365,28 @@ impl WalletState {
             // how do we ensure that we can recover them in case of a fork? For now we maintain
             // them even if the are spent, and then, later, we can add logic to remove these
             // membership proofs of spent UTXOs once they have been spent for M blocks.
-            let input_utxo = block.body.transaction.inputs[i].utxo;
-            if input_utxo.matches_pubkey(my_pub_key) {
-                debug!(
-                    "Discovered own input at input {}, marking UTXO as spent.",
-                    i
-                );
+            // let input_utxo = block.body.transaction.kernel.inputs[i].utxo;
+            // if input_utxo.matches_pubkey(my_pub_key) {
+            match spent_inputs
+                .iter()
+                .find(|(_, abs_i, mutxo_list_index)| *abs_i == removal_record.absolute_indices)
+            {
+                None => (),
+                Some((spent_utxo, abs_i, mutxo_list_index)) => {
+                    debug!(
+                        "Discovered own input at input {}, marking UTXO as spent.",
+                        i
+                    );
 
-                let input_utxo_digest = Hash::hash(&input_utxo);
-                let mut matching_utxo_indices: Vec<u64> = vec![];
-                for j in 0..wallet_db_lock.monitored_utxos.len() {
-                    if Hash::hash(&wallet_db_lock.monitored_utxos.get(j).utxo) == input_utxo_digest
-                    {
-                        matching_utxo_indices.push(j);
-                    }
-                }
-                match matching_utxo_indices.len() {
-                    0 => panic!(
-                        "Discovered own input UTXO in block that did not match a monitored UTXO"
-                    ),
-                    1 => {
-                        let mut mutxo =
-                            wallet_db_lock.monitored_utxos.get(matching_utxo_indices[0]);
-                        mutxo.spent_in_block = Some((
-                            block.hash,
-                            Duration::from_millis(block.header.timestamp.value()),
-                        ));
-                        wallet_db_lock
-                            .monitored_utxos
-                            .set(matching_utxo_indices[0], mutxo);
-                    }
-                    _n => {
-                        // If we are monitoring multiple UTXOs with the same hash, we need another
-                        // method to mark the correct UTXO as spent. Since we have the removal record
-                        // we know the Bloom filter indices that this UTXO flips. So we can look for
-                        // a membership proof in our list of monitored transactions that match those
-                        // indices.
-                        // This case will probably not be hit on main net.
-                        warn!("We are monitoring multiple UTXOs with the same hash");
-                        let mut removal_record_indices = removal_record.absolute_indices.clone();
-                        removal_record_indices.sort_unstable();
-                        let removal_record_indices = removal_record_indices.to_vec();
-                        for matching_index in matching_utxo_indices {
-                            match wallet_db_lock
-                                .monitored_utxos
-                                .get(matching_index)
-                                .get_latest_membership_proof_entry()
-                                .map(|x| x.1.cached_indices)
-                            {
-                                Some(Some(mut indices)) => {
-                                        indices.sort_unstable();
-                                        if indices.to_vec() == removal_record_indices {
-                                            let mut mutxo =
-                                                wallet_db_lock.monitored_utxos.get(matching_index);
-                                            mutxo.spent_in_block = Some((
-                                                block.hash,
-                                                Duration::from_millis(
-                                                    block.header.timestamp.value(),
-                                                ),
-                                            ));
-                                            wallet_db_lock
-                                                .monitored_utxos
-                                                .set(matching_index, mutxo);
-                                            break;
-                                        }
-                                    }
-                                _ => panic!("Unable to mark monitored UTXO as spent, as I don't know which one to mark"),
-                            }
-                        }
-                    }
+                    let input_utxo_digest = Hash::hash(spent_utxo);
+                    let mut spent_mutxo = wallet_db_lock.monitored_utxos.get(*mutxo_list_index);
+                    spent_mutxo.spent_in_block = Some((
+                        block.hash,
+                        Duration::from_millis(block.header.timestamp.value()),
+                    ));
+                    wallet_db_lock
+                        .monitored_utxos
+                        .set(*mutxo_list_index, spent_mutxo);
                 }
             }
 
@@ -484,7 +490,7 @@ impl WalletState {
             for i in 0..num_monitored_utxos {
                 let monitored_utxo = lock.monitored_utxos.get(i);
                 if monitored_utxo.spent_in_block.is_none() {
-                    balance = balance + monitored_utxo.utxo.amount;
+                    balance = balance + monitored_utxo.utxo.get_native_coin_amount();
                 }
             }
             debug!(
@@ -543,13 +549,25 @@ impl WalletState {
             }
         }
         WalletStatus {
-            synced_unspent_amount: synced_unspent.iter().map(|x| x.0 .1.amount).sum(),
+            synced_unspent_amount: synced_unspent
+                .iter()
+                .map(|x| x.0 .1.get_native_coin_amount())
+                .sum(),
             synced_unspent,
-            unsynced_unspent_amount: unsynced_unspent.iter().map(|x| x.1.amount).sum(),
+            unsynced_unspent_amount: unsynced_unspent
+                .iter()
+                .map(|x| x.1.get_native_coin_amount())
+                .sum(),
             unsynced_unspent,
-            synced_spent_amount: synced_spent.iter().map(|x| x.1.amount).sum(),
+            synced_spent_amount: synced_spent
+                .iter()
+                .map(|x| x.1.get_native_coin_amount())
+                .sum(),
             synced_spent,
-            unsynced_spent_amount: unsynced_spent.iter().map(|x| x.1.amount).sum(),
+            unsynced_spent_amount: unsynced_spent
+                .iter()
+                .map(|x| x.1.get_native_coin_amount())
+                .sum(),
             unsynced_spent,
         }
     }
@@ -603,7 +621,7 @@ impl WalletState {
         let mut allocated_amount = Amount::zero();
         while allocated_amount < requested_amount {
             let next_elem = wallet_status.synced_unspent[ret.len()].clone();
-            allocated_amount = allocated_amount + next_elem.0 .1.amount;
+            allocated_amount = allocated_amount + next_elem.0 .1.get_native_coin_amount();
             ret.push((next_elem.0 .1, next_elem.1));
         }
 
@@ -631,7 +649,7 @@ impl WalletState {
             if let Some((confirming_block, confirmation_timestamp)) =
                 monitored_utxo.confirmed_in_block
             {
-                let amount = monitored_utxo.utxo.amount;
+                let amount = monitored_utxo.utxo.get_native_coin_amount();
                 history.push((
                     confirming_block,
                     confirmation_timestamp,

@@ -1,6 +1,5 @@
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
-pub mod wallet_block_utxos;
 pub mod wallet_state;
 pub mod wallet_status;
 
