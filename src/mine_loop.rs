@@ -36,26 +36,15 @@ fn make_devnet_block_template(
     previous_block: &Block,
     transaction: Transaction,
 ) -> (BlockHeader, BlockBody) {
-    let mut additions = Vec::with_capacity(transaction.outputs.len());
-    let mut removals = Vec::with_capacity(transaction.inputs.len());
+    let mut additions = transaction.kernel.outputs.clone();
+    let mut removals = transaction.kernel.inputs.clone();
     let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> =
         previous_block.body.next_mutator_set_accumulator.clone();
-
-    for (output_utxo, randomness) in transaction.outputs.iter() {
-        let addition_record =
-            next_mutator_set_accumulator.commit(&Hash::hash(output_utxo), randomness);
-        additions.push(addition_record);
-    }
-
-    for devnet_input in transaction.inputs.iter() {
-        removals.push(devnet_input.removal_record.clone());
-    }
-
-    let mutator_set_update = MutatorSetUpdate::new(removals, additions);
 
     // Apply the mutator set update to the mutator set accumulator
     // This function mutates the MS accumulator that is given as argument to
     // the function such that the next mutator set accumulator is calculated.
+    let mutator_set_update = MutatorSetUpdate::new(removals, additions);
     mutator_set_update
         .apply(&mut next_mutator_set_accumulator)
         .expect("Mutator set mutation must work");
@@ -63,7 +52,6 @@ fn make_devnet_block_template(
     let block_body: BlockBody = BlockBody {
         transaction,
         next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-        mutator_set_update,
         previous_mutator_set_accumulator: previous_block.body.next_mutator_set_accumulator.clone(),
         stark_proof: vec![],
     };

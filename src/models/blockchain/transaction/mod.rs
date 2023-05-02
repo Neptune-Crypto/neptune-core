@@ -391,9 +391,7 @@ mod transaction_tests {
     use crate::{
         config_models::network::Network,
         models::state::wallet::{self, generate_secret_key},
-        tests::shared::{
-            get_mock_global_state, make_mock_unsigned_devnet_input, new_random_wallet,
-        },
+        tests::shared::{get_mock_global_state, new_random_wallet},
     };
     use tracing_test::traced_test;
     use twenty_first::shared_math::other::random_elements_array;

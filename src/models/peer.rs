@@ -202,8 +202,8 @@ pub struct TransactionNotification {
 impl From<Transaction> for TransactionNotification {
     fn from(transaction: Transaction) -> Self {
         let transaction_digest = Hash::hash(&transaction);
-        let timestamp =
-            std::time::UNIX_EPOCH + std::time::Duration::from_secs(transaction.timestamp.value());
+        let timestamp = std::time::UNIX_EPOCH
+            + std::time::Duration::from_secs(transaction.kernel.timestamp.value());
         Self {
             transaction_digest,
             timestamp,

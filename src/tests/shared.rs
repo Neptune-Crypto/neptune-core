@@ -54,7 +54,6 @@ use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICU
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::transaction::amount::Amount;
-use crate::models::blockchain::transaction::devnet_input::DevNetInput;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
@@ -424,61 +423,61 @@ impl<Item> stream::Stream for Mock<Item> {
 /// Add an unsigned (incorrectly signed) devnet input to a transaction
 /// Membership proofs and removal records must be valid against `previous_mutator_set_accumulator`,
 /// not against `next_mutator_set_accumulator`.
-pub fn add_unsigned_dev_net_input_to_block_transaction(
-    block: &mut Block,
-    input_utxo: Utxo,
-    membership_proof: MsMembershipProof<Hash>,
-    removal_record: RemovalRecord<Hash>,
-) {
-    let mut tx = block.body.transaction.clone();
-    let new_devnet_input = DevNetInput {
-        utxo: input_utxo,
-        membership_proof: membership_proof.into(),
-        removal_record: removal_record.clone(),
-        // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
-        signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
-    };
-    tx.inputs.push(new_devnet_input);
-    block.body.transaction = tx;
+// pub fn add_unsigned_dev_net_input_to_block_transaction(
+//     block: &mut Block,
+//     input_utxo: Utxo,
+//     membership_proof: MsMembershipProof<Hash>,
+//     removal_record: RemovalRecord<Hash>,
+// ) {
+//     let mut tx = block.body.transaction.clone();
+//     let new_devnet_input = DevNetInput {
+//         utxo: input_utxo,
+//         membership_proof: membership_proof.into(),
+//         removal_record: removal_record.clone(),
+//         // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
+//         signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
+//     };
+//     tx.kernel.inputs.push(new_devnet_input);
+//     block.body.transaction = tx;
 
-    // add removal record for this spending
-    block.body.mutator_set_update.removals.push(removal_record);
+//     // add removal record for this spending
+//     block.body.mutator_set_update.removals.push(removal_record);
 
-    // Update block mutator set accumulator. We have to apply *all* elements in the `mutator_set_update`
-    // to the previous mutator set accumulator here, as the removal records need to be updated throughout
-    // this process. This means that the input membership proof and removal records are expected to be
-    // valid against `block.body.previous_mutator_set_accumulator`, not against
-    // `block.body.next_mutator_set_accumulator`
-    let mut next_mutator_set_accumulator = block.body.previous_mutator_set_accumulator.clone();
-    block
-        .body
-        .mutator_set_update
-        .apply(&mut next_mutator_set_accumulator)
-        .expect("MS update application must work");
-    block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
+//     // Update block mutator set accumulator. We have to apply *all* elements in the `mutator_set_update`
+//     // to the previous mutator set accumulator here, as the removal records need to be updated throughout
+//     // this process. This means that the input membership proof and removal records are expected to be
+//     // valid against `block.body.previous_mutator_set_accumulator`, not against
+//     // `block.body.next_mutator_set_accumulator`
+//     let mut next_mutator_set_accumulator = block.body.previous_mutator_set_accumulator.clone();
+//     block
+//         .body
+//         .mutator_set_update
+//         .apply(&mut next_mutator_set_accumulator)
+//         .expect("MS update application must work");
+//     block.body.next_mutator_set_accumulator = next_mutator_set_accumulator;
 
-    // update header fields
-    block.header.mutator_set_hash = block.body.next_mutator_set_accumulator.hash();
-    block.header.block_body_merkle_root = Hash::hash(&block.body);
-}
+//     // update header fields
+//     block.header.mutator_set_hash = block.body.next_mutator_set_accumulator.hash();
+//     block.header.block_body_merkle_root = Hash::hash(&block.body);
+// }
 
-pub fn add_unsigned_input_to_block(
-    block: &mut Block,
-    consumed_utxo: Utxo,
-    membership_proof: MsMembershipProof<Hash>,
-) {
-    let item = Hash::hash(&consumed_utxo);
-    let input_removal_record = block
-        .body
-        .previous_mutator_set_accumulator
-        .drop(&item, &membership_proof);
-    add_unsigned_dev_net_input_to_block_transaction(
-        block,
-        consumed_utxo,
-        membership_proof,
-        input_removal_record,
-    );
-}
+// pub fn add_unsigned_input_to_block(
+//     block: &mut Block,
+//     consumed_utxo: Utxo,
+//     membership_proof: MsMembershipProof<Hash>,
+// ) {
+//     let item = Hash::hash(&consumed_utxo);
+//     let input_removal_record = block
+//         .body
+//         .previous_mutator_set_accumulator
+//         .drop(&item, &membership_proof);
+//     add_unsigned_dev_net_input_to_block_transaction(
+//         block,
+//         consumed_utxo,
+//         membership_proof,
+//         input_removal_record,
+//     );
+// }
 
 /// Helper function to add an unsigned input to a block's transaction
 // pub async fn add_unsigned_input_to_block_ams(
@@ -529,36 +528,36 @@ pub fn new_random_wallet() -> WalletSecret {
     WalletSecret::new(wallet::generate_secret_key())
 }
 
-/// Create a mock `DevNetInput`
-///
-/// This mock currently contains a lot of things that don't pass block validation.
-pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &WalletSecret) -> DevNetInput {
-    let mut rng = thread_rng();
-    let mock_mmr_membership_proof = MmrMembershipProof::new(0, vec![]);
-    let sender_randomness: Digest = rng.gen();
-    let receiver_preimage: Digest = rng.gen();
-    let mock_ms_membership_proof = MsMembershipProof {
-        sender_randomness,
-        receiver_preimage,
-        auth_path_aocl: mock_mmr_membership_proof,
-        target_chunks: ChunkDictionary::default(),
-    };
-    let mut mock_ms_acc = MutatorSetAccumulator::default();
-    let mock_removal_record = mock_ms_acc.drop(&sender_randomness, &mock_ms_membership_proof);
+// /// Create a mock `DevNetInput`
+// ///
+// /// This mock currently contains a lot of things that don't pass block validation.
+// pub fn make_mock_unsigned_devnet_input(amount: Amount, wallet: &WalletSecret) -> DevNetInput {
+//     let mut rng = thread_rng();
+//     let mock_mmr_membership_proof = MmrMembershipProof::new(0, vec![]);
+//     let sender_randomness: Digest = rng.gen();
+//     let receiver_preimage: Digest = rng.gen();
+//     let mock_ms_membership_proof = MsMembershipProof {
+//         sender_randomness,
+//         receiver_preimage,
+//         auth_path_aocl: mock_mmr_membership_proof,
+//         target_chunks: ChunkDictionary::default(),
+//     };
+//     let mut mock_ms_acc = MutatorSetAccumulator::default();
+//     let mock_removal_record = mock_ms_acc.drop(&sender_randomness, &mock_ms_membership_proof);
 
-    let utxo = Utxo {
-        amount,
-        public_key: wallet.get_public_key(),
-    };
+//     let utxo = Utxo {
+//         amount,
+//         public_key: wallet.get_public_key(),
+//     };
 
-    DevNetInput {
-        utxo,
-        membership_proof: mock_ms_membership_proof.into(),
-        removal_record: mock_removal_record,
-        // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
-        signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
-    }
-}
+//     DevNetInput {
+//         utxo,
+//         membership_proof: mock_ms_membership_proof.into(),
+//         removal_record: mock_removal_record,
+//         // We're just using a dummy signature here to type-check. The caller should apply a correct signature to the transaction
+//         signature: Some(ecdsa::Signature::from_str("3044022012048b6ac38277642e24e012267cf91c22326c3b447d6b4056698f7c298fb36202201139039bb4090a7cfb63c57ecc60d0ec8b7483bf0461a468743022759dc50124").unwrap()),
+//     }
+// }
 
 // pub fn make_mock_signed_valid_tx() -> Transaction {
 //     // Build a transaction

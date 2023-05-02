@@ -16,7 +16,6 @@ use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
 use self::wallet::wallet_state::WalletState;
-use super::blockchain::transaction::devnet_input::DevNetInput;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::{amount::Amount, Transaction};
 use crate::config_models::cli_args;
@@ -73,7 +72,11 @@ impl GlobalState {
         let bc_tip = self.chain.light_state.latest_block.lock().await.to_owned();
 
         // Get the UTXOs required for this transaction
-        let total_spend: Amount = recipient_utxos.iter().map(|x| x.amount).sum::<Amount>() + fee;
+        let total_spend: Amount = recipient_utxos
+            .iter()
+            .map(|utxo| utxo.get_native_coin_amount())
+            .sum::<Amount>()
+            + fee;
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
             .wallet_state
             .allocate_sufficient_input_funds_from_lock(&mut wallet_db_lock, total_spend, &bc_tip)?;
@@ -84,7 +87,7 @@ impl GlobalState {
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, mp) in spendable_utxos_and_mps {
             let removal_record = msa_tip.kernel.drop(&Hash::hash(&spendable_utxo), &mp);
-            input_amount = input_amount + spendable_utxo.amount;
+            input_amount = input_amount + spendable_utxo.get_native_coin_amount();
             inputs.push(DevNetInput {
                 utxo: spendable_utxo,
                 membership_proof: mp.into(),

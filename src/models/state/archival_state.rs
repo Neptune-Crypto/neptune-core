@@ -184,19 +184,14 @@ impl ArchivalState {
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
         {
-            let mut synced_rldb_ams_lock = archival_mutator_set.lock().await;
-            let ams_is_empty = synced_rldb_ams_lock
-                .ams
-                .kernel
-                .aocl
-                .count_leaves()
-                .is_zero();
+            let mut rams_lock = archival_mutator_set.lock().await;
+            let ams_is_empty = rams_lock.ams.kernel.aocl.count_leaves().is_zero();
             if ams_is_empty {
-                for addition_record in genesis_block.body.mutator_set_update.additions.clone() {
-                    synced_rldb_ams_lock.ams.add(&addition_record);
+                for addition_record in genesis_block.body.transaction.kernel.outputs.iter() {
+                    rams_lock.ams.add(addition_record);
                 }
-                synced_rldb_ams_lock.set_sync_label(genesis_block.hash);
-                synced_rldb_ams_lock.persist();
+                rams_lock.set_sync_label(genesis_block.hash);
+                rams_lock.persist();
             }
         }
 
@@ -612,7 +607,8 @@ impl ArchivalState {
 
     /// Update the mutator set with a block after this block has been stored to the database.
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
-    /// rolled back are present in the DB. The input block is considered chain tip.
+    /// rolled back are present in the DB. The input block is considered chain tip. All blocks
+    /// stored in the database are assumed to be valid.
     pub fn update_mutator_set(
         &self,
         block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
@@ -627,15 +623,14 @@ impl ArchivalState {
         // reached the genesis block in which case, we cannot roll back further.
         let mut ms_block_rollback_digest = ms_block_sync_digest;
         while ms_block_rollback_digest != new_block.header.prev_block_digest {
-            // This should be impossible, but this function has crashed a lot, so we add this
-            // sanity check. This would indicate an invalid block, and previous validation
-            // should have caught that.
+            // The mutator set rollback digest should never be equal to the genesis block hash,
+            // but this function has crashed a lot, so we add this sanity check. This would
+            // indicate an invalid block, and previous validation should have caught that.
             if ms_block_rollback_digest == self.genesis_block.hash {
                 panic!("Attempted to roll back genesis block in archival mutator set");
             }
 
             // Roll back mutator set
-            // block_header_for_current_ms_state = get_current_ms_bh();
             let roll_back_block = self
                 .get_block_with_lock(block_db_lock, ms_block_rollback_digest)
                 .expect("Fetching block must succeed");
@@ -646,13 +641,7 @@ impl ArchivalState {
             );
 
             // Roll back all addition records contained in block
-            for addition_record in roll_back_block
-                .body
-                .mutator_set_update
-                .additions
-                .iter()
-                .rev()
-            {
+            for addition_record in roll_back_block.body.transaction.kernel.outputs.iter().rev() {
                 assert!(
                     ams_lock.ams.add_is_reversible(addition_record),
                     "Addition record must be in sync with block being rolled back."
@@ -661,7 +650,7 @@ impl ArchivalState {
             }
 
             // Roll back all removal records contained in block
-            for removal_record in roll_back_block.body.mutator_set_update.removals.iter() {
+            for removal_record in roll_back_block.body.transaction.kernel.inputs.iter() {
                 ams_lock.ams.revert_remove(removal_record);
             }
 
@@ -669,9 +658,9 @@ impl ArchivalState {
         }
 
         let mut addition_records: Vec<AdditionRecord> =
-            new_block.body.mutator_set_update.additions.clone();
+            new_block.body.transaction.kernel.outputs.clone();
         addition_records.reverse();
-        let mut removal_records = new_block.body.mutator_set_update.removals.clone();
+        let mut removal_records = new_block.body.transaction.kernel.inputs.clone();
         removal_records.reverse();
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
@@ -795,7 +784,7 @@ mod archival_state_tests {
         let archival_state = make_test_archival_state(Network::Main).await;
 
         assert_eq!(
-            Block::genesis_block().body.transaction.outputs.len() as u64,
+            Block::genesis_block().body.transaction.kernel.outputs.len() as u64,
             archival_state
                 .archival_mutator_set
                 .lock()
