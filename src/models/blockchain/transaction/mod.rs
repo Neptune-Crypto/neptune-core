@@ -6,6 +6,7 @@ pub mod utxo;
 use anyhow::{bail, Result};
 use get_size::GetSize;
 use itertools::Itertools;
+use mutator_set_tf::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
 use num_traits::Zero;
@@ -21,7 +22,7 @@ use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
+use mutator_set_tf::util_types::mutator_set::removal_record::{self, RemovalRecord};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 
@@ -52,16 +53,25 @@ impl Hashable for PubScript {
     }
 }
 
-/// Not for broadcasting because not secure
+/// The raw witness is the most primitive type of transaction witness.
+/// It exposes secret data and is therefore not for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RawWitness {
-    lock_scripts_and_witnesses: Vec<(Vec<BFieldElement>, Vec<BFieldElement>)>,
+    input_utxos: Vec<Utxo>,
+    lock_script_witnesses: Vec<Vec<BFieldElement>>,
+    input_removal_permutation: Vec<usize>,
     input_membership_proofs: Vec<MsMembershipProof<Hash>>,
-    type_script_set: HashSet<Vec<BFieldElement>>,
+    output_utxos: Vec<Utxo>,
+    type_scripts: Vec<(Digest, Vec<BFieldElement>)>,
     type_script_witnesses: Vec<Vec<BFieldElement>>,
     pubscript_witnesses: Vec<Vec<BFieldElement>>,
 }
 
+/// Linked proofs are one abstraction level above raw witness. They
+/// hide secrets and can therefore be broadcast securely. Some
+/// information is still leaked though, such as the number of inputs
+/// and outputs, and number of type scripts, but this information
+/// cannot be used to spend someone else's coins.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LinkedProofs {
     lock_script_proofs: Vec<Proof>,
@@ -74,6 +84,11 @@ pub struct LinkedProofs {
     pubscript_proofs: Vec<Proof>,
 }
 
+/// Single proofs are the final abstaction layer for transaction
+/// witnesses. It represents the merger of a set of linked proofs
+/// into one. It hides information that linked proofs expose, but
+/// the downside is that it requires multiple runs of the recursive
+/// prover to produce.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SingleProof(pub Proof);
 
@@ -298,79 +313,83 @@ impl Transaction {
         match self.witness {
             Witness::RawWitness(raw_witness) => {
                 // verify lock scripts
-                for (program, secret_input) in raw_witness.lock_scripts_and_witnesses.iter() {
-                    let input = Hash::hash(&self.kernel);
-                    // verify (program, input, secret_input, output=[])
+                for (input_utxo, secret_input) in raw_witness
+                    .input_utxos
+                    .iter()
+                    .zip(raw_witness.lock_script_witnesses.iter())
+                {
+                    let program = input_utxo.lock_script;
+                    let std_input = Hash::hash(&self.kernel).to_sequence();
+                    let std_output: Vec<BFieldElement> = vec![];
+                    // verify (program, std_input, secret_input, std_output)
+                }
+
+                // verify input-removal permutation
+                let mut visited = vec![false; raw_witness.input_removal_permutation.len()];
+                if raw_witness.input_removal_permutation.len() != raw_witness.input_utxos.len()
+                    || raw_witness.input_removal_permutation.len()
+                        != raw_witness.input_membership_proofs.len()
+                    || raw_witness.input_membership_proofs.len() != self.kernel.inputs.len()
+                {
+                    return false;
+                }
+                for p in raw_witness.input_removal_permutation {
+                    if visited[p] == true {
+                        return false;
+                    }
+                    visited[p] = true;
+                }
+                if visited != vec![true; raw_witness.input_removal_permutation.len()] {
+                    return false;
                 }
 
                 // verify removal records
-                for msmp in raw_witness.input_membership_proofs.iter() {
-                    // verify proof of correct index derivation
+                for (i, sigma_i) in raw_witness
+                    .input_removal_permutation
+                    .into_iter()
+                    .enumerate()
+                {
+                    let item = Hash::hash(&raw_witness.input_utxos[i]);
+                    let msmp = raw_witness.input_membership_proofs[sigma_i];
+                    let indices = get_swbf_indices::<Hash>(
+                        &item,
+                        &msmp.sender_randomness,
+                        &msmp.receiver_preimage,
+                        msmp.auth_path_aocl.leaf_index,
+                    );
+
+                    let removal_record = self.kernel.inputs[sigma_i];
+                    if removal_record.absolute_indices.to_array() != indices {
+                        return false;
+                    }
                 }
 
-                //
+                // verify type scripts
+                for (output_utxo, type_script_witness) in raw_witness
+                    .output_utxos
+                    .iter()
+                    .zip(raw_witness.type_script_witnesses.iter())
+                {
+                    for (type_script_hash, state) in output_utxo.coins {
+                        let type_script = raw_witness
+                            .type_scripts
+                            .iter()
+                            .find(|(h, ts)| *h == type_script_hash)
+                            .map(|(h, ts)| ts)
+                            .expect("Could not find type script");
+
+                        let program = type_script;
+                        let input = Hash::hash(&self.kernel);
+                        let output: Vec<BFieldElement> = vec![];
+                        let secret_input = type_script_witness;
+
+                        // verify
+                        // (program, input, secret_input, output)
+                    }
+                }
             }
             Witness::LinkedProofs(_) => todo!(),
             Witness::SingleProof(_) => todo!(),
-        }
-
-        // Membership proofs and removal records are checked by caller, don't check here.
-
-        // 1. Check that all coins evolve according to their types
-        let sum_inputs: Amount = self
-            .kernel
-            .inputs
-            .iter()
-            .map(|input| input.utxo.amount)
-            .sum();
-        let sum_outputs: Amount = self
-            .kernel
-            .outputs
-            .iter()
-            .map(|(utxo, _)| utxo.amount)
-            .sum();
-        let spendable_amount = sum_inputs + coinbase_amount.unwrap_or_else(Amount::zero);
-        let spent_amount = sum_outputs + self.kernel.fee;
-        if spent_amount > spendable_amount {
-            warn!(
-                "Invalid amount: Spent: {:?}, spendable: {:?}",
-                spent_amount, spendable_amount
-            );
-            return false;
-        }
-
-        // 2. signatures: either
-        //  - the presence of a devnet authority proof validates the transaction
-        //  - for all inputs
-        //    -- signature is valid: on kernel (= (input utxos, output utxos, public scripts, fee, timestamp)); under public key
-        let kernel: TransactionKernel = self.get_kernel();
-        let kernel_digest: Digest = Hash::hash(&kernel);
-        let kernel_digest_as_bytes: [u8; Digest::BYTES] = kernel_digest.into();
-        let msg: Message =
-            Message::from_slice(&kernel_digest_as_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
-                .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
-
-        if let Some(signature) = self.proof {
-            let authority_public_key = WalletSecret::devnet_authority_wallet().get_public_key();
-            let valid: bool = signature.verify(&msg, &authority_public_key).is_ok();
-            if !valid {
-                warn!("Invalid authority-merge-signature for transaction");
-            }
-
-            return valid;
-        }
-
-        for input in self.inputs.iter() {
-            if input.signature.is_some()
-                && input
-                    .signature
-                    .unwrap()
-                    .verify(&msg, &input.utxo.public_key)
-                    .is_err()
-            {
-                warn!("Invalid input-signature for transaction");
-                return false;
-            }
         }
 
         true
