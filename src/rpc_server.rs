@@ -10,6 +10,7 @@ use tokio::sync::mpsc::error::SendError;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::shared::Hash;
@@ -44,7 +45,11 @@ pub trait RPC {
     async fn clear_ip_standing(ip: IpAddr);
 
     /// Send coins
-    async fn send(amount: Amount, address: secp256k1::PublicKey, fee: Amount) -> Option<Digest>;
+    async fn send(
+        amount: Amount,
+        address: generation_address::ReceivingAddress,
+        fee: Amount,
+    ) -> Option<Digest>;
 
     /// Determine whether the user-supplied string is a valid address
     async fn validate_address(address: String) -> Option<secp256k1::PublicKey>;
@@ -179,7 +184,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         amount: Amount,
-        address: secp256k1::PublicKey,
+        address: generation_address::ReceivingAddress,
         fee: Amount,
     ) -> Self::SendFut {
         let span = tracing::debug_span!("Constructing transaction objects");
@@ -190,7 +195,8 @@ impl RPC for NeptuneRPCServer {
             self.state.wallet_state.wallet_secret.get_public_key()
         );
 
-        let recipient_utxos: Vec<Utxo> = [Utxo::new(amount, address)].to_vec();
+        let coins = amount.to_native_coins();
+        let recipient_utxos: Vec<Utxo> = [Utxo::new(address.lock_script(), coins)].to_vec();
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user

@@ -8,6 +8,8 @@ use itertools::Itertools;
 use num_traits::Zero;
 use rand::thread_rng;
 use rand::Rng;
+use serde_derive::Deserialize;
+use serde_derive::Serialize;
 use twenty_first::shared_math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::{
@@ -30,6 +32,7 @@ pub struct SpendingKey {
     pub seed: Digest,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceivingAddress {
     pub receiver_identifier: BFieldElement,
     pub encryption_key: lattice::kem::PublicKey,

@@ -39,7 +39,7 @@ pub struct WalletSecret {
 
     // For now we use `Digest` as secret key as it's consistent with STARK
     // proofs that we're transitioning to after DevNet.
-    secret_seed: Digest,
+    pub secret_seed: Digest,
     version: u8,
 }
 
@@ -218,9 +218,7 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::amount::Amount;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::tests::shared::{
-        add_unsigned_input_to_block, get_mock_wallet_state, make_unit_test_archival_state,
-    };
+    use crate::tests::shared::{get_mock_wallet_state, make_unit_test_archival_state};
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;

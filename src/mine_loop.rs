@@ -1,3 +1,4 @@
+use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -6,6 +7,7 @@ use crate::models::blockchain::block::*;
 use crate::models::blockchain::digest::ordered_digest::*;
 use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::amount::Amount;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
@@ -14,7 +16,7 @@ use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use num_traits::identities::Zero;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
@@ -25,6 +27,7 @@ use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -87,7 +90,7 @@ fn make_devnet_block_template(
 }
 
 /// Attempt to mine a valid block for the network
-async fn mine_devnet_block(
+async fn mine_block(
     mut block_header: BlockHeader,
     block_body: BlockBody,
     sender: oneshot::Sender<Block>,
@@ -95,7 +98,7 @@ async fn mine_devnet_block(
 ) {
     info!(
         "Mining on block with {} outputs",
-        block_body.transaction.outputs.len()
+        block_body.transaction.kernel.outputs.len()
     );
     // Mining takes place here
     while Into::<OrderedDigest>::into(Hash::hash(&block_header))
@@ -142,15 +145,22 @@ async fn mine_devnet_block(
 }
 
 fn make_coinbase_transaction(
-    public_key: secp256k1::PublicKey,
+    lock_script: &LockScript,
+    receiver_digest: &Digest,
     previous_block_header: &BlockHeader,
     total_transaction_fees: Amount,
 ) -> Transaction {
     let next_block_height: BlockHeight = previous_block_header.height.next();
+    let amount = Block::get_mining_reward(next_block_height) + total_transaction_fees;
     let coinbase_utxo = Utxo {
-        amount: Block::get_mining_reward(next_block_height) + total_transaction_fees,
-        public_key,
+        lock_script: lock_script.clone(),
+        coins: amount.to_native_coins(),
     };
+    let coinbase_addition_record = commit::<Hash>(
+        &Hash::hash(&coinbase_utxo),
+        &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+        &receiver_digest,
+    );
 
     let timestamp: BFieldElement = BFieldElement::new(
         SystemTime::now()
@@ -161,13 +171,17 @@ fn make_coinbase_transaction(
 
     let output_randomness: Digest = Digest::new(random_elements_array());
 
-    Transaction {
+    let kernel = TransactionKernel {
         inputs: vec![],
-        outputs: vec![(coinbase_utxo, output_randomness)],
-        public_scripts: vec![],
+        outputs: vec![coinbase_addition_record],
+        pubscript_hashes_and_inputs: vec![],
         fee: Amount::zero(),
         timestamp,
-        proof: None,
+    };
+
+    Transaction {
+        kernel,
+        witness: Witness::Faith,
     }
 }
 
@@ -184,9 +198,18 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
     // Build coinbase transaction
     let transaction_fees = transactions_to_include
         .iter()
-        .fold(Amount::zero(), |acc, x| acc + x.fee);
+        .fold(Amount::zero(), |acc, tx| acc + tx.kernel.fee);
+
+    let wallet_seed = state.wallet_state.wallet_secret.secret_seed;
+    let spending_key = generation_address::SpendingKey::derive_from_seed(wallet_seed);
+    let receiving_address = generation_address::ReceivingAddress::from_spending_key(&spending_key);
+    let lock_script = receiving_address.lock_script();
+    let receiver_preimage = spending_key.privacy_preimage;
+    let receiver_digest = Hash::hash(&receiver_preimage);
+
     let coinbase_transaction = make_coinbase_transaction(
-        state.wallet_state.wallet_secret.get_public_key(),
+        &lock_script,
+        &receiver_digest,
         &latest_block.header,
         transaction_fees,
     );
@@ -199,10 +222,7 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
         });
 
     // Then set fee to zero as we've already sent it all to ourself in the coinbase output
-    merged_transaction.fee = Amount::zero();
-
-    // Resign the transaction since we changed the fee
-    merged_transaction.devnet_authority_sign();
+    merged_transaction.kernel.fee = Amount::zero();
 
     merged_transaction
 }
@@ -222,7 +242,7 @@ pub async fn mock_regtest_mine(
             // Build the block template and spawn the worker thread to mine on it
             let transaction = create_block_transaction(&latest_block, &state);
             let (block_header, block_body) = make_devnet_block_template(&latest_block, transaction);
-            let miner_task = mine_devnet_block(block_header, block_body, sender, state.clone());
+            let miner_task = mine_block(block_header, block_body, sender, state.clone());
             Some(tokio::spawn(miner_task))
         };
 
@@ -313,11 +333,11 @@ mod mine_loop_tests {
             create_block_transaction(&genesis_block, &premine_receiver_global_state);
         assert_eq!(
             1,
-            transaction_empty_mempool.outputs.len(),
+            transaction_empty_mempool.kernel.outputs.len(),
             "Coinbase transaction with empty mempool must have exactly one output"
         );
         assert!(
-            transaction_empty_mempool.inputs.is_empty(),
+            transaction_empty_mempool.kernel.inputs.is_empty(),
             "Coinbase transaction with empty mempool must have zero inputs"
         );
         let (block_header_template_empty_mempool, block_body_empty_mempool) =
@@ -332,12 +352,10 @@ mod mine_loop_tests {
         );
 
         // Add a transaction to the mempool
+        let four_neptune_coins = Amount::from(4).to_native_coins();
         let tx_output = Utxo {
-            amount: 4.into(),
-            public_key: premine_receiver_global_state
-                .wallet_state
-                .wallet_secret
-                .get_public_key(),
+            coins: four_neptune_coins,
+            lock_script: LockScript(vec![]),
         };
         let tx_by_preminer = premine_receiver_global_state
             .create_transaction(vec![tx_output], 1.into())
@@ -352,10 +370,10 @@ mod mine_loop_tests {
             create_block_transaction(&genesis_block, &premine_receiver_global_state);
         assert_eq!(
             3,
-            transaction_non_empty_mempool.outputs.len(),
+            transaction_non_empty_mempool.kernel.outputs.len(),
             "Transaction for block with non-empty mempool must contain coinbase output, send output, and change output"
         );
-        assert_eq!(1, transaction_non_empty_mempool.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
+        assert_eq!(1, transaction_non_empty_mempool.kernel.inputs.len(), "Transaction for block with non-empty mempool must contain one input: the genesis UTXO being spent");
 
         // Build and verify block template
         let (block_header_template, block_body) =

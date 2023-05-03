@@ -723,6 +723,7 @@ pub async fn get_mock_wallet_state(wallet_secret: Option<WalletSecret>) -> Walle
         wallet_secret: wallet,
         // This number is set high since some tests depend on a high number here.
         number_of_mps_per_utxo: 30,
+        expected_utxos: vec![],
     };
 
     // Wallet state has to be initialized with the genesis block, otherwise the outputs

@@ -666,7 +666,7 @@ impl PeerLoopHandler {
 
                 // 2. Ignore if transaction is too old
                 let tx_timestamp: SystemTime = std::time::UNIX_EPOCH
-                    + std::time::Duration::from_secs(transaction.timestamp.value());
+                    + std::time::Duration::from_secs(transaction.kernel.timestamp.value());
                 if tx_timestamp
                     < SystemTime::now()
                         - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)

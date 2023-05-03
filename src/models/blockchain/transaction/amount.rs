@@ -11,9 +11,12 @@ use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
+    amount::u32s::U32s,
+    shared_math::{b_field_element::BFieldElement, tip5::Digest},
     util_types::algebraic_hasher::Hashable,
 };
+
+use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 
 pub trait AmountLike:
     Add
@@ -75,6 +78,12 @@ impl Amount {
 
     pub fn div_two(&mut self) {
         self.0.div_two();
+    }
+
+    pub fn to_native_coins(&self) -> Vec<(Digest, Vec<BFieldElement>)> {
+        let mut dictionary: Vec<(Digest, Vec<BFieldElement>)> = vec![];
+        dictionary.push((NATIVE_COIN_TYPESCRIPT_DIGEST, self.to_sequence()));
+        dictionary
     }
 }
 
@@ -202,9 +211,9 @@ mod amount_tests {
 
     use itertools::Itertools;
     use rand::{thread_rng, RngCore};
-    use twenty_first::amount::u32s::U32s;
+    use twenty_first::{amount::u32s::U32s, util_types::algebraic_hasher::Hashable};
 
-    use crate::models::blockchain::transaction::amount::Amount;
+    use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
 
     use super::AMOUNT_SIZE_FOR_U32;
 
@@ -222,6 +231,24 @@ mod amount_tests {
             let string = amount.to_string();
             let reconstructed_amount = Amount::from_str(&string)
                 .expect("Coult not parse as number a string generated from a number.");
+
+            assert_eq!(amount, reconstructed_amount);
+        }
+    }
+
+    #[test]
+    fn test_bfe_conversion() {
+        let mut rng = thread_rng();
+
+        for _ in 0..100 {
+            let limbs: [u32; AMOUNT_SIZE_FOR_U32] = (0..AMOUNT_SIZE_FOR_U32)
+                .map(|_| rng.next_u32())
+                .collect_vec()
+                .try_into()
+                .unwrap();
+            let amount = Amount(U32s::new(limbs));
+            let bfes = amount.to_sequence();
+            let reconstructed_amount = Amount::from_bfes(&bfes);
 
             assert_eq!(amount, reconstructed_amount);
         }
