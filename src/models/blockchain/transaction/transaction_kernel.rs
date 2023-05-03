@@ -39,7 +39,7 @@ impl Hashable for TransactionKernel {
 
         let public_scripts_preimage = self
             .pubscript_hashes_and_inputs
-            .into_iter()
+            .iter()
             .flat_map(|(psh, psi)| [psh.to_sequence(), psi.to_vec()].concat());
         let fee_preimage = self.fee.to_sequence().into_iter();
         let timestamp_preimage = vec![self.timestamp].into_iter();

@@ -1,12 +1,18 @@
 use std::{cmp::max, error::Error, sync::Arc, time::Duration};
 
+use crate::Config;
+
 use super::{
     dashboard_app::{ConsoleIO, DashboardEvent},
     overview_screen::VerticalRectifier,
     screen::Screen,
 };
 use crossterm::event::{Event, KeyCode};
-use neptune_core::{models::blockchain::transaction::amount::Amount, rpc_server::RPCClient};
+use neptune_core::{
+    config_models::network::Network,
+    models::blockchain::{address::generation_address, transaction::amount::Amount},
+    rpc_server::RPCClient,
+};
 
 use num_traits::Zero;
 use tarpc::context;
@@ -39,10 +45,11 @@ pub struct SendScreen {
     notice: Arc<Mutex<String>>,
     reset_me: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
+    args: Config,
 }
 
 impl SendScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, args: Config) -> Self {
         SendScreen {
             active: false,
             fg: Color::Gray,
@@ -55,6 +62,7 @@ impl SendScreen {
             notice: Arc::new(Mutex::new("".to_string())),
             reset_me: Arc::new(Mutex::new(false)),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
+            args,
         }
     }
 
@@ -65,11 +73,12 @@ impl SendScreen {
         notice_arc: Arc<Mutex<String>>,
         focus_arc: Arc<Mutex<SendScreenWidget>>,
         reset_me: Arc<Mutex<bool>>,
+        network: Network,
     ) {
         *focus_arc.lock().await = SendScreenWidget::Notice;
         *notice_arc.lock().await = "Validating input ...".to_string();
-        let maybe_valid_address = rpc_client
-            .validate_address(context::current(), address)
+        let maybe_valid_address: Option<generation_address::ReceivingAddress> = rpc_client
+            .validate_address(context::current(), address, network)
             .await
             .unwrap();
         let valid_address = match maybe_valid_address {
@@ -169,10 +178,12 @@ impl SendScreen {
                                     let notice = self.notice.clone();
                                     let focus = self.focus.clone();
                                     let reset_me = self.reset_me.clone();
+                                    let network = self.args.network.clone();
 
                                     tokio::spawn(async move {
                                         Self::check_and_pay_sequence(
                                             rpc_client, address, amount, notice, focus, reset_me,
+                                            network,
                                         )
                                         .await;
                                     });

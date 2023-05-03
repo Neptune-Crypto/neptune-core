@@ -14,7 +14,7 @@ use anyhow::{bail, Result};
 use clap::Parser;
 
 use dashboard_src::dashboard_app::DashboardApp;
-use neptune_core::rpc_server::RPCClient;
+use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
 use std::net::{Ipv4Addr, SocketAddr};
 use tarpc::{client, context};
 use tokio_serde::formats::Json;
@@ -23,10 +23,12 @@ pub mod dashboard_src;
 
 #[derive(Debug, Parser, Clone)]
 #[clap(name = "neptune-dashboard", about = "Terminal user interface")]
-struct Config {
+pub struct Config {
     /// Sets the server address to connect to.
     #[clap(long, default_value = "9799", value_name = "PORT")]
     port: u16,
+    #[structopt(long, short, default_value = "main")]
+    pub network: Network,
 }
 
 #[tokio::main]
@@ -55,7 +57,7 @@ async fn main() -> Result<()> {
     }
 
     // run app until quit
-    let res = DashboardApp::run(client).await;
+    let res = DashboardApp::run(client, args).await;
 
     match res {
         Err(err) => {

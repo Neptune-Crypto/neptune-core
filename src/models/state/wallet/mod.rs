@@ -234,23 +234,6 @@ mod wallet_tests {
         monitored_utxos
     }
 
-    #[tokio::test]
-    async fn output_digest_changes_test() {
-        // Verify that output randomness is not repeated
-        let wallet_state = get_mock_wallet_state(None).await;
-        let mut db_lock = wallet_state.wallet_db.lock().await;
-        let mut previous_digest = wallet_state.next_output_randomness_from_lock(&mut db_lock);
-        for _ in 0..12 {
-            let next_output_randomness =
-                wallet_state.next_output_randomness_from_lock(&mut db_lock);
-            assert_ne!(
-                previous_digest, next_output_randomness,
-                "Output randomness must not be repeated"
-            );
-            previous_digest = next_output_randomness;
-        }
-    }
-
     // #[tokio::test]
     // async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
     //     // This test is designed to verify that the genesis block is applied

@@ -26,6 +26,8 @@ use tui::{
     Frame, Terminal,
 };
 
+use crate::Config;
+
 use super::{
     history_screen::HistoryScreen, overview_screen::OverviewScreen, peers_screen::PeersScreen,
     receive_screen::ReceiveScreen, screen::Screen, send_screen::SendScreen,
@@ -118,7 +120,7 @@ pub struct DashboardApp {
 }
 
 impl DashboardApp {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, args: Config) -> Self {
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
 
         let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(rpc_server.clone())));
@@ -133,11 +135,14 @@ impl DashboardApp {
         let history_screen_dyn = Rc::clone(&history_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::History, Rc::clone(&history_screen_dyn));
 
-        let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(rpc_server.clone())));
+        let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(
+            rpc_server.clone(),
+            args.clone(),
+        )));
         let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
 
-        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server)));
+        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server, args)));
         let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
 
@@ -202,9 +207,9 @@ impl DashboardApp {
         self.screens.contains_key(&self.current_menu_item)
     }
 
-    pub async fn run(client: RPCClient) -> Result<String, Box<dyn Error>> {
+    pub async fn run(client: RPCClient, args: Config) -> Result<String, Box<dyn Error>> {
         // create app
-        let mut app = DashboardApp::new(Arc::new(client));
+        let mut app = DashboardApp::new(Arc::new(client), args);
 
         // setup terminal
         let mut terminal = Self::enable_raw_mode()?;

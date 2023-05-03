@@ -14,6 +14,7 @@ version = "1"
 [dependencies]
 aead = "0.5.2"
 aes-gcm = "0.10.1"
+bech32 = "0.9.1"
 # twenty-first = "0.20.0"
 twenty-first = { path = "../twenty-first/twenty-first" }
 # mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }

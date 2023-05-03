@@ -4,6 +4,9 @@ use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
 use anyhow::Result;
+use bech32::FromBase32;
+use bech32::ToBase32;
+use bech32::Variant;
 use itertools::Itertools;
 use num_traits::Zero;
 use rand::thread_rng;
@@ -17,6 +20,7 @@ use twenty_first::{
     util_types::algebraic_hasher::{AlgebraicHasher, Hashable},
 };
 
+use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -32,7 +36,7 @@ pub struct SpendingKey {
     pub seed: Digest,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReceivingAddress {
     pub receiver_identifier: BFieldElement,
     pub encryption_key: lattice::kem::PublicKey,
@@ -41,7 +45,7 @@ pub struct ReceivingAddress {
 }
 
 fn pubscript_input_is_marked(pubscript_input: &[BFieldElement]) -> bool {
-    const OPCODE_FOR_HALT: BFieldElement = BFieldElement::zero();
+    const OPCODE_FOR_HALT: BFieldElement = BFieldElement::new(0u64);
     match pubscript_input.get(0) {
         Some(&OPCODE_FOR_HALT) => match pubscript_input.get(1) {
             Some(&GENERATION_FLAG) => true,
@@ -201,16 +205,18 @@ impl SpendingKey {
         if remainder_ctxt.len() <= 1 {
             bail!("Ciphertext does not have payload.")
         }
-        let (nonce_ctxt, dem_ctxt) = remainder_ctxt.split_at(1);
+        let (nonce_ctxt, _dem_ctxt) = remainder_ctxt.split_at(1);
         let kem_ctxt_array: [BFieldElement; CIPHERTEXT_SIZE_IN_BFES] = kem_ctxt.try_into().unwrap();
 
         // decrypt
-        let shared_key = match lattice::kem::dec(self.decryption_key, kem_ctxt_array.into()) {
+        let shared_key = match lattice::kem::dec(self.decryption_key.clone(), kem_ctxt_array.into())
+        {
             Some(sk) => sk,
             None => bail!("Could not establish shared secret key."),
         };
         let cipher = Aes256Gcm::new(&shared_key.into());
-        let nonce = Nonce::from_slice(&nonce_ctxt[0].value().to_be_bytes()); // almost 64 bits; unique per message
+        let nonce_as_bytes = nonce_ctxt[0].value().to_be_bytes();
+        let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
         let ciphertext_bytes = bfes_to_bytes(&ciphertext);
         let plaintext = match cipher.decrypt(nonce, ciphertext_bytes.as_ref()) {
             Ok(ptxt) => ptxt,
@@ -259,6 +265,7 @@ impl SpendingKey {
                     &preimage,
                     &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
                 ),
+                _ => unreachable!(),
             })
             .collect_vec();
 
@@ -293,12 +300,12 @@ impl ReceivingAddress {
         Self::from_spending_key(&spending_key)
     }
 
-    pub fn encrypt(&self, utxo: Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
+    pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
         // derive shared key
         let mut randomness = [0u8; 32];
         let mut rng = thread_rng();
         rng.fill(&mut randomness);
-        let (shared_key, kem_ctxt) = lattice::kem::enc(self.encryption_key, randomness);
+        let (shared_key, kem_ctxt) = lattice::kem::enc(self.encryption_key.clone(), randomness);
 
         // sample nonce
         let nonce_bfe: BFieldElement = rng.gen();
@@ -308,7 +315,8 @@ impl ReceivingAddress {
 
         // generate symmetric ciphertext
         let cipher = Aes256Gcm::new(&shared_key.into());
-        let nonce = Nonce::from_slice(&nonce_bfe.value().to_be_bytes()); // almost 64 bits; unique per message
+        let nonce_as_bytes = nonce_bfe.value().to_be_bytes();
+        let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
         let ciphertext = match cipher.encrypt(nonce, plaintext.as_ref()) {
             Ok(ctxt) => ctxt,
             Err(_) => bail!("Could not encrypt payload."),
@@ -329,7 +337,7 @@ impl ReceivingAddress {
     /// some input of that length.
     pub fn generate_pubscript_and_input(
         &self,
-        utxo: Utxo,
+        utxo: &Utxo,
         sender_randomness: Digest,
     ) -> Result<(Vec<BFieldElement>, Vec<BFieldElement>)> {
         let ciphertext = self.encrypt(utxo, sender_randomness)?;
@@ -355,6 +363,7 @@ impl ReceivingAddress {
             nodes[256 + i] = match b {
                 0 => Hash::hash_pair(d, &Digest::new([BFieldElement::zero(); 5])),
                 1 => *d,
+                _ => unreachable!(),
             };
         }
         for i in 0..255 {
@@ -403,6 +412,46 @@ impl ReceivingAddress {
 
         LockScript(instrs)
     }
+
+    fn get_hrp(network: Network) -> String {
+        let mut hrp = "nga".to_string();
+        let network_byte: char = match network {
+            Network::Main => 'm',
+            Network::Testnet => 't',
+            Network::RegTest => 'r',
+        };
+        hrp.push(network_byte);
+        hrp
+    }
+
+    pub fn to_bech32m(&self, network: Network) -> Result<String> {
+        let hrp = Self::get_hrp(network);
+        let payload = bincode::serialize(self)?;
+        let variant = Variant::Bech32m;
+        match bech32::encode(&hrp, payload.to_base32(), variant) {
+            Ok(enc) => Ok(enc),
+            Err(e) => bail!("Could not encode generation address as bech32m because error: {e}"),
+        }
+    }
+
+    pub fn from_bech32m(encoded: String, network: Network) -> Result<Self> {
+        let (hrp, data, variant) = bech32::decode(&encoded)?;
+
+        if variant != Variant::Bech32m {
+            bail!("Can only decode bech32m addresses.");
+        }
+
+        if hrp[0..4] != Self::get_hrp(network) {
+            bail!("Could not decode bech32m address because of invalid prefix");
+        }
+
+        let payload = Vec::<u8>::from_base32(&data)?;
+
+        match bincode::deserialize(&payload) {
+            Ok(ra) => Ok(ra),
+            Err(e) => bail!("Could not decode bech32m address because of error: {e}"),
+        }
+    }
 }
 
 ///
@@ -414,7 +463,10 @@ mod test_generation_addresses {
     use rand::{thread_rng, Rng, RngCore};
     use twenty_first::shared_math::tip5::Digest;
 
-    use crate::models::blockchain::address::generation_address::{bfes_to_bytes, bytes_to_bfes};
+    use crate::{
+        config_models::network::Network,
+        models::blockchain::address::generation_address::{bfes_to_bytes, bytes_to_bfes},
+    };
 
     use super::{ReceivingAddress, SpendingKey};
 
@@ -481,5 +533,16 @@ mod test_generation_addresses {
         let msg: Digest = rng.gen();
         let witness_data = spending_key.binding_unlock(&msg);
         receiving_address.verify_unlock(&msg, &witness_data);
+    }
+
+    #[test]
+    fn test_bech32m_conversion() {
+        let seed: Digest = thread_rng().gen();
+        let receiving_address = ReceivingAddress::derive_from_seed(seed);
+        let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();
+        let receiving_address_again =
+            ReceivingAddress::from_bech32m(encoded, Network::Testnet).unwrap();
+
+        assert_eq!(receiving_address, receiving_address_again);
     }
 }

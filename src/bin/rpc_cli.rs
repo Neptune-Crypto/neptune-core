@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 
+use neptune_core::config_models::network::Network;
+use neptune_core::models::blockchain::address::generation_address;
 use neptune_core::models::blockchain::transaction::amount::Amount;
 use num_bigint::BigUint;
 use std::net::IpAddr;
@@ -48,6 +50,8 @@ struct Config {
     server_addr: SocketAddr,
     #[clap(subcommand)]
     command: Command,
+    #[structopt(long, short, default_value = "main")]
+    pub network: Network,
 }
 
 #[tokio::main]
@@ -102,10 +106,11 @@ async fn main() -> Result<()> {
             fee,
         } => {
             // Parse on client
-            let address = secp256k1::PublicKey::from_str(&address)?;
+            let receiving_address =
+                generation_address::ReceivingAddress::from_bech32m(address.clone(), args.network)?;
 
             client
-                .send(context::current(), amount, address, fee)
+                .send(context::current(), amount, receiving_address, fee)
                 .await?;
             println!("Send-command issues. Recipient: {address}; amount: {amount}");
         }

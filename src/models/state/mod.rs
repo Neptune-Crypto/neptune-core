@@ -1,6 +1,9 @@
 use anyhow::{bail, Result};
+use itertools::Itertools;
+use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,7 +19,11 @@ use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
 use self::wallet::wallet_state::WalletState;
+use super::blockchain::address::generation_address;
+use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::Utxo;
+use super::blockchain::transaction::Witness;
 use super::blockchain::transaction::{amount::Amount, Transaction};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
@@ -60,9 +67,12 @@ impl GlobalState {
     /// does not need to supply this. The caller must supply
     /// the fee that they are willing to spend to have this
     /// transaction mined.
+    ///
+    /// Returns the transaction and a vector containing the sender
+    /// randomness for each output UTXO.
     pub async fn create_transaction(
         &self,
-        recipient_utxos: Vec<Utxo>,
+        receiver_data: Vec<(Utxo, Digest, Digest, (Digest, Vec<BFieldElement>))>,
         fee: Amount,
     ) -> Result<Transaction> {
         // acquire a lock on `WalletState` to prevent it from being updated
@@ -72,9 +82,11 @@ impl GlobalState {
         let bc_tip = self.chain.light_state.latest_block.lock().await.to_owned();
 
         // Get the UTXOs required for this transaction
-        let total_spend: Amount = recipient_utxos
+        let total_spend: Amount = receiver_data
             .iter()
-            .map(|utxo| utxo.get_native_coin_amount())
+            .map(|(utxo, _sender_randomness, _receiver_digest, _pubscript)| {
+                utxo.get_native_coin_amount()
+            })
             .sum::<Amount>()
             + fee;
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
@@ -83,25 +95,20 @@ impl GlobalState {
 
         // Create all removal records. These must be relative to the block tip.
         let msa_tip = bc_tip.body.next_mutator_set_accumulator;
-        let mut inputs: Vec<DevNetInput> = vec![];
+        let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, mp) in spendable_utxos_and_mps {
             let removal_record = msa_tip.kernel.drop(&Hash::hash(&spendable_utxo), &mp);
+            inputs.push(removal_record);
+
             input_amount = input_amount + spendable_utxo.get_native_coin_amount();
-            inputs.push(DevNetInput {
-                utxo: spendable_utxo,
-                membership_proof: mp.into(),
-                removal_record,
-                signature: None,
-            });
         }
 
-        let mut outputs: Vec<(Utxo, Digest)> = vec![];
-        for output_utxo in recipient_utxos {
-            let output_randomness = self
-                .wallet_state
-                .next_output_randomness_from_lock(&mut wallet_db_lock);
-            outputs.push((output_utxo, output_randomness));
+        let mut outputs: Vec<AdditionRecord> = vec![];
+        for (utxo, sender_randomness, receiver_digest, pubscript) in receiver_data.iter() {
+            let addition_record =
+                commit::<Hash>(&Hash::hash(utxo), &sender_randomness, receiver_digest);
+            outputs.push(addition_record);
         }
 
         // Send remaining amount back to self
@@ -111,31 +118,51 @@ impl GlobalState {
                 bail!("Cannot create change UTXO with negative amount.");
             }
         };
+
+        // add change UTXO if necessary
         if input_amount > total_spend {
+            let own_receiving_address = generation_address::ReceivingAddress::derive_from_seed(
+                self.wallet_state.wallet_secret.secret_seed.clone(),
+            );
+            let lock_script = own_receiving_address.lock_script();
             let change_utxo = Utxo {
-                amount: change_amount,
-                public_key: self.wallet_state.wallet_secret.get_public_key(),
+                coins: change_amount.to_native_coins(),
+                lock_script,
             };
-            outputs.push((
-                change_utxo,
-                self.wallet_state
-                    .next_output_randomness_from_lock(&mut wallet_db_lock),
-            ));
+            let receiver_digest = own_receiving_address.privacy_digest;
+            let sender_randomness = self.wallet_state.get_sender_randomness(
+                &change_utxo,
+                &receiver_digest,
+                bc_tip.header.height,
+            );
+            let change_addition_record = commit::<Hash>(
+                &Hash::hash(&change_utxo),
+                &sender_randomness,
+                &receiver_digest,
+            );
+            outputs.push(change_addition_record);
         }
 
-        let mut transaction = Transaction {
+        let pubscript_hashes_and_inputs = receiver_data
+            .iter()
+            .map(|(_utxo, _sender_randomness, _receiver_digest, pubscript)| pubscript.to_owned())
+            .collect_vec();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+
+        let kernel = TransactionKernel {
             inputs,
             outputs,
-            public_scripts: vec![],
+            pubscript_hashes_and_inputs,
             fee,
-            timestamp: BFieldElement::new(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            ),
-            proof: None,
-            witness: todo!(),
+            timestamp: BFieldElement::new(timestamp as u64),
+        };
+
+        let transaction = Transaction {
+            kernel,
+            witness: Witness::Faith,
         };
 
         Ok(transaction)
@@ -270,7 +297,7 @@ impl GlobalState {
                     .unwrap();
 
                 // revert removals
-                let removal_records = revert_block.body.mutator_set_update.removals.clone();
+                let removal_records = revert_block.body.transaction.kernel.inputs.clone();
                 for removal_record in removal_records.iter().rev() {
                     // membership_proof.revert_update_from_removal(&removal);
                     membership_proof
@@ -306,8 +333,8 @@ impl GlobalState {
                     .get_block(apply_block_hash)
                     .await?
                     .unwrap();
-                let addition_records = apply_block.body.mutator_set_update.additions;
-                let removal_records = apply_block.body.mutator_set_update.removals;
+                let addition_records = apply_block.body.transaction.kernel.outputs;
+                let removal_records = apply_block.body.transaction.kernel.inputs;
                 let mut block_msa = apply_block.body.previous_mutator_set_accumulator.clone();
 
                 // apply additions
@@ -394,50 +421,85 @@ mod global_state_tests {
     async fn premine_recipient_can_spend_genesis_block_output() {
         let other_wallet = WalletSecret::new(wallet::generate_secret_key());
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let twenty_amount: Amount = 20.into();
+        let twenty_coins = twenty_amount.to_native_coins();
+        let recipient_address =
+            generation_address::ReceivingAddress::derive_from_seed(other_wallet.secret_seed);
+        let main_lock_script = recipient_address.lock_script();
         let output_utxo = Utxo {
-            amount: 20.into(),
-            public_key: other_wallet.get_public_key(),
+            coins: twenty_coins,
+            lock_script: main_lock_script,
         };
+        let sender_randomness = Digest::default();
+        let receiver_digest = recipient_address.privacy_digest;
+        let (pubscript, input) = recipient_address
+            .generate_pubscript_and_input(&output_utxo, sender_randomness)
+            .unwrap();
+        let pubscript_hash = Hash::hash_varlen(&pubscript);
+        let receiver_data = vec![(
+            output_utxo.clone(),
+            sender_randomness,
+            receiver_digest,
+            (pubscript_hash, input),
+        )];
         let tx: Transaction = global_state
-            .create_transaction(vec![output_utxo], 1.into())
+            .create_transaction(receiver_data, 1.into())
             .await
             .unwrap();
 
         assert!(tx.is_valid(None));
         assert_eq!(
             2,
-            tx.outputs.len(),
+            tx.kernel.outputs.len(),
             "tx must have a send output and a change output"
         );
         assert_eq!(
             1,
-            tx.inputs.len(),
+            tx.kernel.inputs.len(),
             "tx must have exactly one input, a genesis UTXO"
         );
 
         // Test with a transaction with three outputs and one (premine) input
+        let mut other_receiver_data = vec![];
         let mut output_utxos: Vec<Utxo> = vec![];
         for i in 2..5 {
+            let amount: Amount = i.into();
+            let that_many_coins = amount.to_native_coins();
+            let receiving_address =
+                generation_address::ReceivingAddress::derive_from_seed(other_wallet.secret_seed);
+            let lock_script = receiving_address.lock_script();
             let utxo = Utxo {
-                amount: i.into(),
-                public_key: other_wallet.get_public_key(),
+                coins: that_many_coins,
+                lock_script,
             };
-            output_utxos.push(utxo);
+            let other_sender_randomness = Digest::default();
+            let other_receiver_digest = receiving_address.privacy_digest;
+            let (other_pubscript, pubscript_input) = receiving_address
+                .generate_pubscript_and_input(&utxo, other_sender_randomness)
+                .unwrap();
+            let other_pubscript_hash = Hash::hash_varlen(&other_pubscript);
+            output_utxos.push(utxo.clone());
+            other_receiver_data.push((
+                utxo,
+                other_sender_randomness,
+                other_receiver_digest,
+                (other_pubscript_hash, pubscript_input),
+            ));
         }
 
         let new_tx: Transaction = global_state
-            .create_transaction(output_utxos, 1.into())
+            .create_transaction(other_receiver_data, 1.into())
             .await
             .unwrap();
         assert!(new_tx.is_valid(None));
         assert_eq!(
             4,
-            new_tx.outputs.len(),
+            new_tx.kernel.outputs.len(),
             "tx must have three send outputs and a change output"
         );
         assert_eq!(
             1,
-            new_tx.inputs.len(),
+            new_tx.kernel.inputs.len(),
             "tx must have exactly one input, a genesis UTXO"
         );
     }

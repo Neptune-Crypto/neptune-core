@@ -4,6 +4,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::Config;
+
 use super::{
     dashboard_app::{ConsoleIO, DashboardEvent},
     overview_screen::VerticalRectifier,
@@ -35,10 +37,11 @@ pub struct ReceiveScreen {
     server: Arc<RPCClient>,
     generating: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
+    args: Config,
 }
 
 impl ReceiveScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, args: Config) -> Self {
         ReceiveScreen {
             active: false,
             fg: Color::Gray,
@@ -48,6 +51,7 @@ impl ReceiveScreen {
             server: rpc_server,
             generating: Arc::new(Mutex::new(false)),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
+            args,
         }
     }
 

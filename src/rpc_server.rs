@@ -10,13 +10,14 @@ use tokio::sync::mpsc::error::SendError;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+use crate::config_models::network::Network;
 use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::wallet_status::WalletStatus;
@@ -52,7 +53,10 @@ pub trait RPC {
     ) -> Option<Digest>;
 
     /// Determine whether the user-supplied string is a valid address
-    async fn validate_address(address: String) -> Option<secp256k1::PublicKey>;
+    async fn validate_address(
+        address: String,
+        network: Network,
+    ) -> Option<generation_address::ReceivingAddress>;
 
     /// Determine whether the user-supplied string is a valid amount
     async fn validate_amount(amount: String) -> Option<Amount>;
@@ -93,7 +97,7 @@ impl RPC for NeptuneRPCServer {
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
     type SendFut = Ready<Option<Digest>>;
-    type ValidateAddressFut = Ready<Option<secp256k1::PublicKey>>;
+    type ValidateAddressFut = Ready<Option<generation_address::ReceivingAddress>>;
     type ValidateAmountFut = Ready<Option<Amount>>;
     type AmountLeqBalanceFut = Ready<bool>;
     type ShutdownFut = Ready<bool>;
@@ -196,15 +200,41 @@ impl RPC for NeptuneRPCServer {
         );
 
         let coins = amount.to_native_coins();
-        let recipient_utxos: Vec<Utxo> = [Utxo::new(address.lock_script(), coins)].to_vec();
+        let utxo = Utxo::new(address.lock_script(), coins);
+        let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
+            .header
+            .height;
+        let receiver_digest = address.privacy_digest;
+        let sender_randomness =
+            self.state
+                .wallet_state
+                .get_sender_randomness(&utxo, &receiver_digest, block_height);
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
         // to be in control of this. But we could add an endpoint to get recommended fee
         // density.
-        let transaction_res: Result<Transaction> =
-            executor::block_on(self.state.create_transaction(recipient_utxos, fee));
-        let transaction = match transaction_res {
+        let (pubscript, pubscript_input) =
+            match address.generate_pubscript_and_input(&utxo, sender_randomness) {
+                Ok((ps, inp)) => (ps, inp),
+                Err(_) => {
+                    tracing::error!(
+                        "Failed to generate transaction because could not encrypt to address."
+                    );
+                    return future::ready(None);
+                }
+            };
+        let pubscript_hash = Hash::hash_varlen(&pubscript);
+        let receiver_data = [(
+            utxo,
+            sender_randomness,
+            receiver_digest,
+            (pubscript_hash, pubscript_input),
+        )]
+        .to_vec();
+        let transaction_result =
+            executor::block_on(self.state.create_transaction(receiver_data, fee));
+        let transaction = match transaction_result {
             Ok(tx) => tx,
             Err(err) => panic!("Could not create transaction: {}", err),
         };
@@ -226,8 +256,11 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         address_string: String,
+        network: Network,
     ) -> Self::ValidateAddressFut {
-        let ret = if let Ok(address) = secp256k1::PublicKey::from_str(&address_string) {
+        let ret = if let Ok(address) =
+            generation_address::ReceivingAddress::from_bech32m(address_string.clone(), network)
+        {
             Some(address)
         } else {
             None

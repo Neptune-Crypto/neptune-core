@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex as TokioMutex, MutexGuard};
 use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
@@ -27,6 +27,7 @@ use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::WalletSecret;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::address::generation_address;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
@@ -40,11 +41,11 @@ pub struct WalletState {
     pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
-    expected_utxos: Vec<ExpectedUtxo>,
+    pub expected_utxos: Vec<ExpectedUtxo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct ExpectedUtxo {
+pub struct ExpectedUtxo {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
@@ -132,13 +133,13 @@ impl WalletState {
             .kernel
             .inputs
             .iter()
-            .map(|rr| rr.absolute_indices)
+            .map(|rr| rr.absolute_indices.clone())
             .collect_vec();
 
         let mut spent_own_utxos = vec![];
         for i in 0..wallet_db_lock.monitored_utxos.len() {
             let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
-            let utxo = monitored_utxo.utxo;
+            let utxo = monitored_utxo.utxo.clone();
             let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
                 Some(msmp) => msmp.1.compute_indices(&Hash::hash(&utxo)),
                 None => continue,
@@ -191,7 +192,7 @@ impl WalletState {
             .iter()
             .map(|expected_utxo| {
                 (
-                    expected_utxo.utxo,
+                    expected_utxo.utxo.clone(),
                     expected_utxo.sender_randomness,
                     expected_utxo.receiver_preimage,
                 )
@@ -344,7 +345,7 @@ impl WalletState {
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
             if addition_record_to_utxo_info.contains_key(&addition_record) {
-                let utxo = addition_record_to_utxo_info[&addition_record].0;
+                let utxo = addition_record_to_utxo_info[&addition_record].0.clone();
                 let sender_randomness = addition_record_to_utxo_info[&addition_record].1;
                 let receiver_preimage = addition_record_to_utxo_info[&addition_record].2;
                 // TODO: Change this logging to use `Display` for `Amount` once functionality is merged from t-f
@@ -592,7 +593,7 @@ impl WalletState {
                     .0
                     .emojihash()
             );
-            let utxo = mutxo.utxo;
+            let utxo = mutxo.utxo.clone();
             let spent = mutxo.spent_in_block.is_some();
             if let Some(mp) = mutxo.get_membership_proof_for_block(&block.hash) {
                 if spent {
@@ -638,29 +639,19 @@ impl WalletState {
         }
     }
 
-    /// Fetch the output counter from the database and increase the counter by one
-    fn next_output_counter_from_lock(&self, db_lock: &mut MutexGuard<RustyWalletDatabase>) -> u64 {
-        let current_counter: u64 = db_lock.get_counter();
-        db_lock.set_counter(current_counter + 1);
-
-        current_counter
-    }
-
-    /// Get the randomness for the next output UTXO and increment the output counter by one
-    pub fn next_output_randomness_from_lock(
+    /// The sender randomness is used for producing the addition record. We get it here pseudorandomly, from the arguments.
+    pub fn get_sender_randomness(
         &self,
-        db_lock: &mut MutexGuard<RustyWalletDatabase>,
+        utxo: &Utxo,
+        receiver_digest: &Digest,
+        block_height: BlockHeight,
     ) -> Digest {
-        let counter = self.next_output_counter_from_lock(db_lock);
-
-        // TODO: Ugly hack used to generate a `Digest` from a `u128` here.
-        // Once we've updated to twenty-first 0.2.0 or later use its `to_sequence` instead.
-        let mut counter_as_digest: Vec<BFieldElement> = vec![BFieldElement::zero(); DIGEST_LENGTH];
-        counter_as_digest[0] = BFieldElement::new(counter);
-        let counter_as_digest: Digest = counter_as_digest.try_into().unwrap();
-        let commitment_pseudo_randomness_seed = self.wallet_secret.get_commitment_randomness_seed();
-
-        Hash::hash_pair(&counter_as_digest, &commitment_pseudo_randomness_seed)
+        let mut right = [BFieldElement::zero(); DIGEST_LENGTH];
+        right[0] = block_height.into();
+        Hash::hash_pair(
+            &Hash::hash_pair(&Hash::hash(utxo), &self.wallet_secret.secret_seed),
+            &Hash::hash_pair(receiver_digest, &Digest::new(right)),
+        )
     }
 
     pub fn allocate_sufficient_input_funds_from_lock(
@@ -734,18 +725,4 @@ impl WalletState {
 #[cfg(test)]
 mod wallet_state_tests {
     use crate::tests::shared::get_mock_wallet_state;
-
-    #[tokio::test]
-    async fn increase_output_counter_test() {
-        // Verify that output counter is incremented when the counter value is fetched
-        let wallet_state = get_mock_wallet_state(None).await;
-        let mut db_lock = wallet_state.wallet_db.lock().await;
-        for i in 0..12 {
-            assert_eq!(
-                i,
-                wallet_state.next_output_counter_from_lock(&mut db_lock),
-                "Output counter must match number of calls"
-            );
-        }
-    }
 }

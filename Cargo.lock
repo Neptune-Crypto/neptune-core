@@ -190,6 +190,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
 
 [[package]]
+name = "bech32"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1321,6 +1327,7 @@ dependencies = [
  "aead",
  "aes-gcm",
  "anyhow",
+ "bech32",
  "bincode",
  "bytes",
  "bytesize",
@@ -2598,7 +2605,7 @@ dependencies = [
 
 [[package]]
 name = "twenty-first"
-version = "0.21.2"
+version = "0.21.3"
 dependencies = [
  "anyhow",
  "bincode",

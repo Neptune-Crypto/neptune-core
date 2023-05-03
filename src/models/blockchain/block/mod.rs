@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 use twenty_first::shared_math::lattice::kem::PublicKey;
-use twenty_first::shared_math::lattice::ModuleElement;
+use twenty_first::shared_math::lattice::{self, ModuleElement};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -136,18 +136,7 @@ impl Block {
 
     pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, Amount)> {
         // The premine UTXOs can be hardcoded here.
-        vec![(
-            generation_address::ReceivingAddress {
-                receiver_identifier: BFieldElement::new(1),
-                encryption_key: PublicKey {
-                    seed: [0u8; 32],
-                    ga: ModuleElement::zero(),
-                },
-                privacy_digest: Hash::hash(&Digest::default()),
-                spending_lock: Hash::hash(&Digest::default()),
-            },
-            Amount::zero(),
-        )]
+        vec![] // TODO: populate this
     }
 
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {

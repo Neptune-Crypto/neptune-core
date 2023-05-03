@@ -353,12 +353,24 @@ mod mine_loop_tests {
 
         // Add a transaction to the mempool
         let four_neptune_coins = Amount::from(4).to_native_coins();
+        let receiver_digest = Digest::default();
+        let sender_randomness = Digest::default();
+        let pubscript_hash = Digest::default();
+        let pubscript_input: Vec<BFieldElement> = vec![];
         let tx_output = Utxo {
             coins: four_neptune_coins,
             lock_script: LockScript(vec![]),
         };
         let tx_by_preminer = premine_receiver_global_state
-            .create_transaction(vec![tx_output], 1.into())
+            .create_transaction(
+                vec![(
+                    tx_output,
+                    sender_randomness,
+                    receiver_digest,
+                    (pubscript_hash, pubscript_input),
+                )],
+                1.into(),
+            )
             .await?;
         premine_receiver_global_state
             .mempool
