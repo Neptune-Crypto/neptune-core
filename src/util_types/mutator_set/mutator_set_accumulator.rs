@@ -118,7 +118,7 @@ mod ms_accumulator_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
             let membership_proof = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
@@ -218,7 +218,7 @@ mod ms_accumulator_tests {
                     let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
-                        commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                        commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
                     let membership_proof_acc =
                         accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 

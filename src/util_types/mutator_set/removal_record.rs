@@ -413,7 +413,7 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
+            commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
         let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
         assert!(
@@ -448,7 +448,7 @@ mod removal_record_tests {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
-                    commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
                 let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
                 // Update all removal records from addition, then add the element
@@ -537,7 +537,7 @@ mod removal_record_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit::<H>(&item, &sender_randomness, &H::hash(&receiver_preimage));
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
             let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             // Update all removal records from addition, then add the element

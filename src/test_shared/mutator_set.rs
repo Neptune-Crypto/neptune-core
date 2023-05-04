@@ -77,7 +77,11 @@ pub fn insert_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
 ) -> (MsMembershipProof<H>, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-    let addition_record = commit::<H>(&new_item, &sender_randomness, &H::hash(&receiver_preimage));
+    let addition_record = commit::<H>(
+        &new_item,
+        &sender_randomness,
+        &receiver_preimage.vmhash::<H>(),
+    );
     let membership_proof = mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);
     mutator_set.add_helper(&addition_record);
 
