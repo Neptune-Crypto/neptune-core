@@ -13,7 +13,7 @@ use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
@@ -21,10 +21,13 @@ use self::networking_state::NetworkingState;
 use self::wallet::wallet_state::WalletState;
 use super::blockchain::address::generation_address;
 use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::transaction::native_coin::{
+    native_coin_typescript, NATIVE_COIN_TYPESCRIPT_DIGEST,
+};
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::Utxo;
-use super::blockchain::transaction::Witness;
 use super::blockchain::transaction::{amount::Amount, Transaction};
+use super::blockchain::transaction::{PrimitiveWitness, Witness};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDBIterator;
@@ -72,7 +75,12 @@ impl GlobalState {
     /// randomness for each output UTXO.
     pub async fn create_transaction(
         &self,
-        receiver_data: Vec<(Utxo, Digest, Digest, (Digest, Vec<BFieldElement>))>,
+        receiver_data: Vec<(
+            Utxo,
+            Digest,
+            Digest,
+            (Vec<BFieldElement>, Vec<BFieldElement>),
+        )>,
         fee: Amount,
     ) -> Result<Transaction> {
         // acquire a lock on `WalletState` to prevent it from being updated
@@ -97,18 +105,20 @@ impl GlobalState {
         let msa_tip = bc_tip.body.next_mutator_set_accumulator;
         let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
         let mut input_amount: Amount = Amount::zero();
-        for (spendable_utxo, mp) in spendable_utxos_and_mps {
-            let removal_record = msa_tip.kernel.drop(&Hash::hash(&spendable_utxo), &mp);
+        for (spendable_utxo, mp) in spendable_utxos_and_mps.iter() {
+            let removal_record = msa_tip.kernel.drop(&Hash::hash(spendable_utxo), mp);
             inputs.push(removal_record);
 
             input_amount = input_amount + spendable_utxo.get_native_coin_amount();
         }
 
-        let mut outputs: Vec<AdditionRecord> = vec![];
+        let mut transaction_outputs: Vec<AdditionRecord> = vec![];
+        let mut output_utxos: Vec<Utxo> = vec![];
         for (utxo, sender_randomness, receiver_digest, pubscript) in receiver_data.iter() {
             let addition_record =
                 commit::<Hash>(&Hash::hash(utxo), &sender_randomness, receiver_digest);
-            outputs.push(addition_record);
+            transaction_outputs.push(addition_record);
+            output_utxos.push(utxo.clone());
         }
 
         // Send remaining amount back to self
@@ -140,12 +150,17 @@ impl GlobalState {
                 &sender_randomness,
                 &receiver_digest,
             );
-            outputs.push(change_addition_record);
+            transaction_outputs.push(change_addition_record);
+            output_utxos.push(change_utxo.to_owned());
         }
 
         let pubscript_hashes_and_inputs = receiver_data
             .iter()
-            .map(|(_utxo, _sender_randomness, _receiver_digest, pubscript)| pubscript.to_owned())
+            .map(
+                |(_utxo, _sender_randomness, _receiver_digest, (pubscript, pubscript_input))| {
+                    (Hash::hash_varlen(&pubscript), pubscript_input.clone())
+                },
+            )
             .collect_vec();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -154,15 +169,49 @@ impl GlobalState {
 
         let kernel = TransactionKernel {
             inputs,
-            outputs,
+            outputs: transaction_outputs,
             pubscript_hashes_and_inputs,
             fee,
             timestamp: BFieldElement::new(timestamp as u64),
         };
 
+        let spending_key = generation_address::SpendingKey::derive_from_seed(
+            self.wallet_state.wallet_secret.secret_seed,
+        );
+        let input_utxos = spendable_utxos_and_mps
+            .iter()
+            .map(|(utxo, _mp)| utxo)
+            .cloned()
+            .collect_vec();
+        let input_membership_proofs = spendable_utxos_and_mps
+            .iter()
+            .map(|(_utxo, mp)| mp)
+            .cloned()
+            .collect_vec();
+        let pubscripts = receiver_data
+            .iter()
+            .map(
+                |(_utxo, _sender_randomness, _receiver_digest, (pubscript, pubscript_witness))| {
+                    pubscript
+                },
+            )
+            .cloned()
+            .collect_vec();
+
+        let witness = PrimitiveWitness {
+            input_utxos: input_utxos.clone(),
+            lock_script_witnesses: vec![
+                spending_key.unlock_key.to_sequence();
+                spendable_utxos_and_mps.len()
+            ],
+            input_membership_proofs,
+            output_utxos: output_utxos.clone(),
+            pubscripts,
+        };
+
         let transaction = Transaction {
             kernel,
-            witness: Witness::Faith,
+            witness: Witness::Primitive(witness),
         };
 
         Ok(transaction)
@@ -435,12 +484,11 @@ mod global_state_tests {
         let (pubscript, input) = recipient_address
             .generate_pubscript_and_input(&output_utxo, sender_randomness)
             .unwrap();
-        let pubscript_hash = Hash::hash_varlen(&pubscript);
         let receiver_data = vec![(
             output_utxo.clone(),
             sender_randomness,
             receiver_digest,
-            (pubscript_hash, input),
+            (pubscript, input),
         )];
         let tx: Transaction = global_state
             .create_transaction(receiver_data, 1.into())
@@ -477,13 +525,12 @@ mod global_state_tests {
             let (other_pubscript, pubscript_input) = receiving_address
                 .generate_pubscript_and_input(&utxo, other_sender_randomness)
                 .unwrap();
-            let other_pubscript_hash = Hash::hash_varlen(&other_pubscript);
             output_utxos.push(utxo.clone());
             other_receiver_data.push((
                 utxo,
                 other_sender_randomness,
                 other_receiver_digest,
-                (other_pubscript_hash, pubscript_input),
+                (other_pubscript, pubscript_input),
             ));
         }
 

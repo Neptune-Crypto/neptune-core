@@ -8,4 +8,8 @@ pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
     BFieldElement::new(0xdeadbeefu64),
 ]);
 
+pub fn native_coin_typescript() -> Vec<BFieldElement> {
+    vec![]
+}
+
 // todo: insert inflation check logic here

@@ -23,6 +23,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::rescue_prime_digest::Digest;
 
 use self::amount::Amount;
+use self::native_coin::native_coin_typescript;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
 use super::address::generation_address;
@@ -41,15 +42,12 @@ impl Hashable for Proof {
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RawWitness {
-    input_utxos: Vec<Utxo>,
-    lock_script_witnesses: Vec<Vec<BFieldElement>>,
-    input_removal_permutation: Vec<usize>,
-    input_membership_proofs: Vec<MsMembershipProof<Hash>>,
-    output_utxos: Vec<Utxo>,
-    type_scripts: Vec<(Digest, Vec<BFieldElement>)>,
-    type_script_witnesses: Vec<Vec<BFieldElement>>,
-    pubscripts_and_witnesses: Vec<(Vec<BFieldElement>, Vec<BFieldElement>)>,
+pub struct PrimitiveWitness {
+    pub input_utxos: Vec<Utxo>,
+    pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
+    pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
+    pub output_utxos: Vec<Utxo>,
+    pub pubscripts: Vec<Vec<BFieldElement>>,
 }
 
 /// Linked proofs are one abstraction level above raw witness. They
@@ -79,7 +77,7 @@ pub struct SingleProof(pub Proof);
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Witness {
-    RawWitness(RawWitness),
+    Primitive(PrimitiveWitness),
     LinkedProofs(LinkedProofs),
     SingleProof(SingleProof),
     Faith,
@@ -242,12 +240,12 @@ impl Transaction {
     /// and is not yet mined, the coinbase amount is None.
     pub fn is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
         match &self.witness {
-            Witness::RawWitness(raw_witness) => {
+            Witness::Primitive(primitive_witness) => {
                 // verify lock scripts
-                for (input_utxo, secret_input) in raw_witness
+                for (input_utxo, secret_input) in primitive_witness
                     .input_utxos
                     .iter()
-                    .zip(raw_witness.lock_script_witnesses.iter())
+                    .zip(primitive_witness.lock_script_witnesses.iter())
                 {
                     let program = input_utxo.lock_script.clone();
                     let std_input = Hash::hash(&self.kernel).to_sequence();
@@ -255,29 +253,14 @@ impl Transaction {
                     // verify (program, std_input, secret_input, std_output)
                 }
 
-                // verify input-removal permutation
-                let mut visited = vec![false; raw_witness.input_removal_permutation.len()];
-                if raw_witness.input_removal_permutation.len() != raw_witness.input_utxos.len()
-                    || raw_witness.input_removal_permutation.len()
-                        != raw_witness.input_membership_proofs.len()
-                    || raw_witness.input_membership_proofs.len() != self.kernel.inputs.len()
-                {
-                    return false;
-                }
-                for p in raw_witness.input_removal_permutation.iter() {
-                    if visited[*p] == true {
-                        return false;
-                    }
-                    visited[*p] = true;
-                }
-                if visited != vec![true; raw_witness.input_removal_permutation.len()] {
-                    return false;
-                }
-
                 // verify removal records
-                for (i, sigma_i) in raw_witness.input_removal_permutation.iter().enumerate() {
-                    let item = Hash::hash(&raw_witness.input_utxos[i]);
-                    let msmp = &raw_witness.input_membership_proofs[*sigma_i];
+                for ((input_utxo, msmp), removal_record) in primitive_witness
+                    .input_utxos
+                    .iter()
+                    .zip(primitive_witness.input_membership_proofs.iter())
+                    .zip(self.kernel.inputs.iter())
+                {
+                    let item = Hash::hash(input_utxo);
                     let indices = get_swbf_indices::<Hash>(
                         &item,
                         &msmp.sender_randomness,
@@ -285,30 +268,27 @@ impl Transaction {
                         msmp.auth_path_aocl.leaf_index,
                     );
 
-                    let removal_record = &self.kernel.inputs[*sigma_i];
                     if removal_record.absolute_indices.to_array() != indices {
                         return false;
                     }
                 }
 
                 // verify type scripts
-                for (output_utxo, type_script_witness) in raw_witness
-                    .output_utxos
-                    .iter()
-                    .zip(raw_witness.type_script_witnesses.iter())
-                {
+                for output_utxo in primitive_witness.output_utxos.iter() {
                     for (type_script_hash, _state) in output_utxo.coins.iter() {
-                        let type_script = raw_witness
-                            .type_scripts
-                            .iter()
-                            .find(|(h, ts)| *h == *type_script_hash)
-                            .map(|(h, ts)| ts)
-                            .expect("Could not find type script");
+                        let type_script = native_coin_typescript();
+
+                        // verify H(type_script) == type_script_hash
 
                         let program = type_script;
                         let input = Hash::hash(&self.kernel);
                         let output: Vec<BFieldElement> = vec![];
-                        let secret_input = type_script_witness;
+                        let secret_input = output_utxo
+                            .coins
+                            .iter()
+                            .find(|(d, s)| *d == *type_script_hash)
+                            .unwrap()
+                            .to_owned();
 
                         // verify
                         // (program, input, secret_input, output)
@@ -316,11 +296,11 @@ impl Transaction {
                 }
 
                 // verify pubscripts
-                for ((pubscript_hash, pubscript_input), (pubscript, pubscript_witness)) in self
+                for ((pubscript_hash, pubscript_input), pubscript) in self
                     .kernel
                     .pubscript_hashes_and_inputs
                     .iter()
-                    .zip(raw_witness.pubscripts_and_witnesses.iter())
+                    .zip(primitive_witness.pubscripts.iter())
                 {
                     if *pubscript_hash != Hash::hash_varlen(&pubscript) {
                         return false;
@@ -328,7 +308,7 @@ impl Transaction {
 
                     let program = pubscript;
                     let input = pubscript_input;
-                    let secret_input = pubscript_witness;
+                    let secret_input: Vec<BFieldElement> = vec![];
                     let output: Vec<BFieldElement> = vec![];
                     // verify claim (program, standard input, secret_input, standard output)
                 }

@@ -224,12 +224,11 @@ impl RPC for NeptuneRPCServer {
                     return future::ready(None);
                 }
             };
-        let pubscript_hash = Hash::hash_varlen(&pubscript);
         let receiver_data = [(
             utxo,
             sender_randomness,
             receiver_digest,
-            (pubscript_hash, pubscript_input),
+            (pubscript, pubscript_input),
         )]
         .to_vec();
         let transaction_result =
