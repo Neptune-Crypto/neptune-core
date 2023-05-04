@@ -41,7 +41,7 @@ pub struct WalletState {
     pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
-    pub expected_utxos: Vec<ExpectedUtxo>,
+    expected_utxos: Vec<ExpectedUtxo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -76,15 +76,19 @@ impl Debug for WalletState {
 
 impl WalletState {
     pub async fn new_from_wallet_secret(
-        data_dir: &DataDirectory,
+        data_dir: Option<&DataDirectory>,
         wallet_secret: WalletSecret,
         number_of_mps_per_utxo: usize,
     ) -> Self {
         // Create or connect to wallet block DB
-        let wallet_db = DB::open(
-            data_dir.wallet_database_dir_path(),
-            rusty_leveldb::Options::default(),
-        );
+        let wallet_db = match data_dir {
+            Some(data_dir) => DB::open(
+                data_dir.wallet_database_dir_path(),
+                rusty_leveldb::Options::default(),
+            ),
+            // This case should only be hit when running unit-test
+            None => DB::open("in-memory DB", rusty_leveldb::in_memory()),
+        };
 
         let wallet_db = match wallet_db {
             Ok(wdb) => wdb,
@@ -99,7 +103,7 @@ impl WalletState {
 
         let rusty_wallet_database = Arc::new(TokioMutex::new(rusty_wallet_database));
 
-        let ret = Self {
+        let mut ret = Self {
             wallet_db: rusty_wallet_database.clone(),
             wallet_secret,
             number_of_mps_per_utxo,
@@ -111,6 +115,26 @@ impl WalletState {
         {
             let mut wallet_db_lock = rusty_wallet_database.lock().await;
             if wallet_db_lock.get_sync_label() == Digest::default() {
+                // Check if we are premine recipients
+                let own_spending_key = generation_address::SpendingKey::derive_from_seed(
+                    ret.wallet_secret.secret_seed,
+                );
+                let own_receiving_address =
+                    generation_address::ReceivingAddress::from_spending_key(&own_spending_key);
+                for (premine_receiving_address, amount) in Block::premine_distribution() {
+                    if premine_receiving_address == own_receiving_address {
+                        let coins = amount.to_native_coins();
+                        let lock_script = own_receiving_address.lock_script();
+                        let utxo = Utxo::new(lock_script, coins);
+
+                        ret.add_expected_utxo(
+                            utxo,
+                            Digest::default(),
+                            own_spending_key.privacy_preimage,
+                        );
+                    }
+                }
+
                 ret.update_wallet_state_with_new_block(
                     &Block::genesis_block(),
                     &mut wallet_db_lock,
@@ -169,11 +193,11 @@ impl WalletState {
     fn scan_for_expected_utxos(&self, transaction: &Transaction) -> Vec<(Utxo, Digest, Digest)> {
         let mut received_expected_utxos = vec![];
         for (utxo, sender_randomness, receiver_preimage) in self.get_expected_utxos() {
-            let ar = commit::<Hash>(
-                &Hash::hash(&utxo),
-                &sender_randomness,
-                &Hash::hash(&receiver_preimage),
+            let receiver_digest = Hash::hash_pair(
+                &receiver_preimage,
+                &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
             );
+            let ar = commit::<Hash>(&Hash::hash(&utxo), &sender_randomness, &receiver_digest);
             if transaction
                 .kernel
                 .outputs
@@ -200,7 +224,7 @@ impl WalletState {
             .collect_vec()
     }
 
-    fn add_expected_utxo(
+    pub fn add_expected_utxo(
         &mut self,
         utxo: Utxo,
         sender_randomness: Digest,
@@ -213,7 +237,7 @@ impl WalletState {
         });
     }
 
-    fn drop_expected_utxo(
+    pub fn drop_expected_utxo(
         &mut self,
         utxo: Utxo,
         sender_randomness: Digest,
@@ -248,14 +272,26 @@ impl WalletState {
         // utxo, sender randomness, receiver preimage, addition record
         let mut received_outputs: Vec<(Utxo, Digest, Digest)> = vec![];
         received_outputs.append(&mut self.scan_for_announced_utxos(&transaction));
+        debug!(
+            "received_outputs as announced outputs = {}",
+            received_outputs.len()
+        );
         received_outputs.append(&mut self.scan_for_expected_utxos(&transaction));
+        debug!("received total outputs: = {}", received_outputs.len());
 
         let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =
             received_outputs
                 .into_iter()
                 .map(|(utxo, send_rand, rec_premi)| {
                     (
-                        commit::<Hash>(&Hash::hash(&utxo), &send_rand, &Hash::hash(&rec_premi)),
+                        commit::<Hash>(
+                            &Hash::hash(&utxo),
+                            &send_rand,
+                            &Hash::hash_pair(
+                                &rec_premi,
+                                &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+                            ),
+                        ),
                         (utxo, send_rand, rec_premi),
                     )
                 })

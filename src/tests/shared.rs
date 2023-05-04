@@ -49,6 +49,7 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
+use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
@@ -701,38 +702,14 @@ pub fn new_random_wallet() -> WalletSecret {
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(wallet_secret: Option<WalletSecret>) -> WalletState {
-    let wallet = match wallet_secret {
+pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) -> WalletState {
+    let wallet_secret = match maybe_wallet_secret {
         Some(wallet) => wallet,
         None => WalletSecret::devnet_authority_wallet(),
     };
 
-    let data_dir = unit_test_data_directory(Network::Main).unwrap();
-    let mut raw_wallet_db = RustyWalletDatabase::connect(
-        DB::open(
-            data_dir.wallet_database_dir_path(),
-            rusty_leveldb::in_memory(),
-        )
-        .unwrap(),
-    );
-    raw_wallet_db.restore_or_new();
-    let wallet_db = Arc::new(TokioMutex::new(raw_wallet_db));
-
-    let ret = WalletState {
-        wallet_db: wallet_db.clone(),
-        wallet_secret: wallet,
-        // This number is set high since some tests depend on a high number here.
-        number_of_mps_per_utxo: 30,
-        expected_utxos: vec![],
-    };
-
-    // Wallet state has to be initialized with the genesis block, otherwise the outputs
-    // from it would be unspendable.
-    let mut wallet_db_lock = wallet_db.lock().await;
-    ret.update_wallet_state_with_new_block(&Block::genesis_block(), &mut wallet_db_lock)
-        .expect("Applying genesis block in unit test setup must succeed");
-
-    ret
+    let number_of_mps_per_utxo = 30;
+    WalletState::new_from_wallet_secret(None, wallet_secret, number_of_mps_per_utxo).await
 }
 
 pub async fn make_unit_test_archival_state(

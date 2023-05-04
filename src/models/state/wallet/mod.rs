@@ -212,6 +212,7 @@ mod wallet_tests {
     use twenty_first::util_types::storage_vec::StorageVec;
 
     use crate::config_models::network::Network;
+    use crate::models::blockchain::address::generation_address;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
@@ -960,9 +961,11 @@ mod wallet_tests {
     fn get_authority_spending_public_key() {
         // Helper function/test to print the public key associated with the authority signatures
         let _authority_wallet = WalletSecret::devnet_authority_wallet();
-        // println!(
-        //     "_authority_wallet pub key: {}",
-        //     _authority_wallet.get_public_key()
-        // );
+        println!(
+            "_authority_wallet pub key: {}",
+            generation_address::ReceivingAddress::derive_from_seed(_authority_wallet.secret_seed)
+                .to_bech32m(Network::Main)
+                .unwrap()
+        );
     }
 }

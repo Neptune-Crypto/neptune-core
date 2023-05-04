@@ -68,7 +68,7 @@ fn make_devnet_block_template(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Got bad time timestamp in mining process")
-            .as_secs(),
+            .as_millis() as u64,
     );
 
     let block_header = BlockHeader {
@@ -159,7 +159,7 @@ fn make_coinbase_transaction(
     let coinbase_addition_record = commit::<Hash>(
         &Hash::hash(&coinbase_utxo),
         &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
-        &receiver_digest,
+        receiver_digest,
     );
 
     let timestamp: BFieldElement = BFieldElement::new(
@@ -314,10 +314,13 @@ pub async fn mock_regtest_mine(
 
 #[cfg(test)]
 mod mine_loop_tests {
+    use tracing_test::traced_test;
+
     use crate::{config_models::network::Network, tests::shared::get_mock_global_state};
 
     use super::*;
 
+    #[traced_test]
     #[tokio::test]
     async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
@@ -371,7 +374,8 @@ mod mine_loop_tests {
                 )],
                 1.into(),
             )
-            .await?;
+            .await
+            .unwrap();
         premine_receiver_global_state
             .mempool
             .insert(&tx_by_preminer);

@@ -6,6 +6,7 @@ use tracing::{debug, warn};
 use twenty_first::shared_math::lattice::kem::PublicKey;
 use twenty_first::shared_math::lattice::{self, ModuleElement};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
@@ -29,6 +30,7 @@ use super::transaction::utxo::Utxo;
 use super::transaction::{amount::Amount, Transaction};
 use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::shared::Hash;
+use crate::models::state::wallet::WalletSecret;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
@@ -98,7 +100,7 @@ impl Block {
 
             // Add pre-mine UTXO to MutatorSet
             let addition_record = commit::<Hash>(&utxo_digest, &bad_randomness, &receiver_digest);
-            ms_update.additions.push(addition_record.clone());
+            ms_update.additions.push(addition_record);
             genesis_mutator_set.add(&addition_record);
 
             // Add pre-mine UTXO + commitment to coinbase transaction
@@ -136,7 +138,10 @@ impl Block {
 
     pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, Amount)> {
         // The premine UTXOs can be hardcoded here.
-        vec![] // TODO: populate this
+        let authority_wallet = WalletSecret::devnet_authority_wallet();
+        let authority_receiving_address =
+            generation_address::ReceivingAddress::derive_from_seed(authority_wallet.secret_seed);
+        vec![(authority_receiving_address, 20000.into())]
     }
 
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {

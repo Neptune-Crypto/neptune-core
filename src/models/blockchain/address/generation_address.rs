@@ -7,7 +7,6 @@ use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use bech32::Variant;
-use itertools::Itertools;
 use num_traits::Zero;
 use rand::thread_rng;
 use rand::Rng;
@@ -72,7 +71,7 @@ fn ciphertext_from_pubscript_input(
     if pubscript_input.len() <= 3 {
         bail!("Public script does not contain ciphertext.");
     }
-    return Ok(pubscript_input[3..].to_vec());
+    Ok(pubscript_input[3..].to_vec())
 }
 
 /// Encodes a slice of bytes to a vec of BFieldElements. This
@@ -227,49 +226,15 @@ impl SpendingKey {
         Ok(bincode::deserialize(&plaintext)?)
     }
 
-    fn generate_lock_preimages(&self) -> [Digest; 512] {
-        let nth_preimage = |n: usize| {
-            Hash::hash_varlen(
-                &[
-                    self.unlock_key.to_sequence(),
-                    [BFieldElement::new(n.try_into().unwrap())].to_vec(),
-                ]
-                .concat(),
-            )
-        };
-        (0..512).map(nth_preimage).collect_vec().try_into().unwrap()
-    }
-
     fn generate_spending_lock(&self) -> Digest {
-        let lock_preimages = self.generate_lock_preimages();
-        let mut nodes: [Digest; 512] = [Digest::default(); 512];
-        for i in 0..256 {
-            nodes[256 + i] = lock_preimages[i];
-        }
-        for i in 0..255 {
-            nodes[255 - i] = Hash::hash_pair(&nodes[510 - 2 * i], &nodes[511 - 2 * i]);
-        }
-        return nodes[1];
+        self.unlock_key.vmhash::<Hash>()
     }
 
-    fn binding_unlock(&self, bind_to: &Digest) -> Vec<Digest> {
-        let lock_preimages = self.generate_lock_preimages();
-        let mut bind_bits = ReceivingAddress::bind_bits(bind_to);
-
-        let witness_data = bind_bits
-            .into_iter()
-            .zip(lock_preimages.into_iter())
-            .map(|(bit, preimage)| match bit {
-                0 => preimage,
-                1 => Hash::hash_pair(
-                    &preimage,
-                    &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
-                ),
-                _ => unreachable!(),
-            })
-            .collect_vec();
-
-        witness_data
+    /// Unlock the UTXO binding it to some transaction by its kernel hash.
+    /// This function mocks proof generation.
+    fn binding_unlock(&self, _bind_to: &Digest) -> [BFieldElement; DIGEST_LENGTH] {
+        let witness_data = self.unlock_key;
+        witness_data.values()
     }
 }
 
@@ -282,11 +247,8 @@ impl ReceivingAddress {
         let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
             .try_into()
             .unwrap();
-        let (sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = Hash::hash_pair(
-            &spending_key.privacy_preimage,
-            &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
-        );
+        let (_sk, pk) = lattice::kem::keygen(randomness);
+        let privacy_digest = spending_key.privacy_preimage.vmhash::<Hash>();
         Self {
             receiver_identifier,
             encryption_key: pk,
@@ -352,36 +314,15 @@ impl ReceivingAddress {
 
     /// Verify the UTXO owner's assent to the transaction.
     /// This is the rust reference implementation, but the version of
-    /// this logic that is proven is `lock_script`. This function
-    /// crashes if it fails to verify; and returns nothing (but
-    /// gracefully) if it succeeds.
-    pub fn verify_unlock(&self, bind_to: &Digest, witness_data: &[Digest]) {
-        let bind_bits = Self::bind_bits(&bind_to);
-
-        let mut nodes: [Digest; 512] = [Digest::default(); 512];
-        for ((i, d), b) in witness_data.iter().enumerate().zip(bind_bits.iter()) {
-            nodes[256 + i] = match b {
-                0 => Hash::hash_pair(d, &Digest::new([BFieldElement::zero(); 5])),
-                1 => *d,
-                _ => unreachable!(),
-            };
-        }
-        for i in 0..255 {
-            nodes[255 - i] = Hash::hash_pair(&nodes[510 - 2 * i], &nodes[511 - 2 * i]);
-        }
-        assert_eq!(self.spending_lock, nodes[1]);
-    }
-
-    pub fn bind_bits(bind_to: &Digest) -> Vec<usize> {
-        let mut bits: Vec<usize> = Vec::with_capacity(256);
-        for d in bind_to.values().into_iter().take(4) {
-            let value = d.value();
-            for j in 0..64 {
-                bits.push(((value >> j) & 1) as usize);
-            }
-        }
-
-        bits
+    /// this logic that is proven is `lock_script`.
+    ///
+    /// This function mocks proof verification.
+    pub fn reference_verify_unlock(
+        &self,
+        _bind_to: &Digest,
+        witness_data: &[BFieldElement; DIGEST_LENGTH],
+    ) -> bool {
+        self.spending_lock == Digest::new(*witness_data).vmhash::<Hash>()
     }
 
     /// Generate a lock script from the spending lock. Satisfaction
@@ -532,7 +473,7 @@ mod test_generation_addresses {
 
         let msg: Digest = rng.gen();
         let witness_data = spending_key.binding_unlock(&msg);
-        receiving_address.verify_unlock(&msg, &witness_data);
+        receiving_address.reference_verify_unlock(&msg, &witness_data);
     }
 
     #[test]
