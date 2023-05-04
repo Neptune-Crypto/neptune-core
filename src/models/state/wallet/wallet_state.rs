@@ -177,35 +177,52 @@ impl WalletState {
         spent_own_utxos
     }
 
-    fn scan_for_announced_utxos(&self, transaction: &Transaction) -> Vec<(Utxo, Digest, Digest)> {
+    /// Scan the given transaction for announced UTXOs as
+    /// recognized by owned `SpendingKey`s, and then verify
+    /// those announced UTXOs are actually present.
+    fn scan_for_announced_utxos(
+        &self,
+        transaction: &Transaction,
+    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
         let spending_keys = vec![generation_address::SpendingKey::derive_from_seed(
-            self.wallet_secret.secret_seed.clone(),
+            self.wallet_secret.secret_seed,
         )];
 
-        spending_keys
+        // get recognized UTXOs
+        let recognized_utxos = spending_keys
             .iter()
-            .map(|spending_key| spending_key.scan_for_received_utxos(transaction))
+            .map(|spending_key| spending_key.scan_for_announced_utxos(transaction))
             .collect_vec()
-            .concat()
+            .concat();
+
+        // filter for presence in transaction
+        recognized_utxos
+            .into_iter()
+            .filter(|(ar, ut, sr, rp)| if !transaction.kernel.outputs.contains(&ar) {
+                warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {ut:#?}");
+                false
+            } else { true })
+            .collect_vec()
     }
 
-    /// Scans the transaction for outputs that match with list of expected incomign utxos
-    fn scan_for_expected_utxos(&self, transaction: &Transaction) -> Vec<(Utxo, Digest, Digest)> {
+    /// Scans the transaction for outputs that match with list of expected
+    /// incomign UTXOs, and returns expected UTXOs that are present in the
+    /// transaction.
+    fn scan_for_expected_utxos(
+        &self,
+        transaction: &Transaction,
+    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
         let mut received_expected_utxos = vec![];
         for (utxo, sender_randomness, receiver_preimage) in self.get_expected_utxos() {
-            let receiver_digest = Hash::hash_pair(
-                &receiver_preimage,
-                &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
-            );
+            let receiver_digest = receiver_preimage.vmhash::<Hash>();
             let ar = commit::<Hash>(&Hash::hash(&utxo), &sender_randomness, &receiver_digest);
             if transaction
                 .kernel
                 .outputs
                 .iter()
-                .find(|output| **output == ar)
-                .is_some()
+                .any(|output| *output == ar)
             {
-                received_expected_utxos.push((utxo, sender_randomness, receiver_preimage));
+                received_expected_utxos.push((ar, utxo, sender_randomness, receiver_preimage));
             }
         }
         received_expected_utxos
@@ -270,7 +287,7 @@ impl WalletState {
             self.scan_for_spent_utxos(&transaction, wallet_db_lock);
 
         // utxo, sender randomness, receiver preimage, addition record
-        let mut received_outputs: Vec<(Utxo, Digest, Digest)> = vec![];
+        let mut received_outputs: Vec<(AdditionRecord, Utxo, Digest, Digest)> = vec![];
         received_outputs.append(&mut self.scan_for_announced_utxos(&transaction));
         debug!(
             "received_outputs as announced outputs = {}",
@@ -282,19 +299,7 @@ impl WalletState {
         let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =
             received_outputs
                 .into_iter()
-                .map(|(utxo, send_rand, rec_premi)| {
-                    (
-                        commit::<Hash>(
-                            &Hash::hash(&utxo),
-                            &send_rand,
-                            &Hash::hash_pair(
-                                &rec_premi,
-                                &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
-                            ),
-                        ),
-                        (utxo, send_rand, rec_premi),
-                    )
-                })
+                .map(|(ar, utxo, send_rand, rec_premi)| (ar, (utxo, send_rand, rec_premi)))
                 .collect();
 
         // Derive the membership proofs for received UTXOs, and in

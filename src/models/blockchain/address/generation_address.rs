@@ -7,7 +7,8 @@ use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use bech32::Variant;
-use num_traits::Zero;
+use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
 use rand::thread_rng;
 use rand::Rng;
 use serde_derive::Deserialize;
@@ -20,6 +21,7 @@ use twenty_first::{
 };
 
 use crate::config_models::network::Network;
+use crate::models::blockchain::digest::BYTES_PER_BFE;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -98,8 +100,12 @@ pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
 
 /// Decodes a slice of BFieldElements to a vec of bytes. This method
 /// computes the inverse of `bytes_to_bfes`.
-pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Vec<u8> {
+pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
     let length = bfes[0].value() as usize;
+    if length > bfes.len() * BYTES_PER_BFE {
+        bail!("Cannot decode byte stream shorter than length indicated. BFE slice length: {}, indicated byte stream length: {length}", bfes.len());
+    }
+
     let mut bytes: Vec<u8> = Vec::with_capacity(length);
     let mut skip_top = false;
     for bfe in bfes.iter().skip(1) {
@@ -117,14 +123,14 @@ pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Vec<u8> {
         }
     }
 
-    bytes[0..length].to_vec()
+    Ok(bytes[0..length].to_vec())
 }
 
 impl SpendingKey {
-    pub fn scan_for_received_utxos(
+    pub fn scan_for_announced_utxos(
         &self,
         transaction: &Transaction,
-    ) -> Vec<(Utxo, Digest, Digest)> {
+    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
         let mut received_utxos_with_randomnesses = vec![];
 
         // for all public scripts that contain a ciphertext for me,
@@ -132,8 +138,8 @@ impl SpendingKey {
             .kernel
             .pubscript_hashes_and_inputs
             .iter()
-            .filter(|(psh, psi)| pubscript_input_is_marked(psi))
-            .filter(|(psh, psi)| {
+            .filter(|(_psh, psi)| pubscript_input_is_marked(psi))
+            .filter(|(_psh, psi)| {
                 let receiver_id = receiver_identifier_from_pubscript_input(psi);
                 match receiver_id {
                     Ok(recid) => recid == self.receiver_identifier,
@@ -158,15 +164,18 @@ impl SpendingKey {
 
             // and join those with the receiver digest to get a commitment
             // Note: the commitment is computed in the same way as in the mutator set.
-            let receiver_preimage = self.privacy_preimage.clone();
-            let receiver_digest = Hash::hash(&receiver_preimage);
-            let canonical_commitment = Hash::hash_pair(
-                &Hash::hash_pair(&Hash::hash(&utxo), &sender_randomness),
-                &receiver_digest,
-            );
+            let receiver_preimage = self.privacy_preimage;
+            let receiver_digest = receiver_preimage.vmhash::<Hash>();
+            let addition_record =
+                commit::<Hash>(&Hash::hash(&utxo), &sender_randomness, &receiver_digest);
 
             // push to list
-            received_utxos_with_randomnesses.push((utxo, sender_randomness, receiver_preimage));
+            received_utxos_with_randomnesses.push((
+                addition_record,
+                utxo,
+                sender_randomness,
+                receiver_preimage,
+            ));
         }
 
         received_utxos_with_randomnesses
@@ -180,7 +189,7 @@ impl SpendingKey {
         let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
             .try_into()
             .unwrap();
-        let (sk, pk) = lattice::kem::keygen(randomness);
+        let (sk, _pk) = lattice::kem::keygen(randomness);
         let receiver_identifier =
             Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(2)]].concat()).values()
                 [0];
@@ -204,7 +213,7 @@ impl SpendingKey {
         if remainder_ctxt.len() <= 1 {
             bail!("Ciphertext does not have payload.")
         }
-        let (nonce_ctxt, _dem_ctxt) = remainder_ctxt.split_at(1);
+        let (nonce_ctxt, dem_ctxt) = remainder_ctxt.split_at(1);
         let kem_ctxt_array: [BFieldElement; CIPHERTEXT_SIZE_IN_BFES] = kem_ctxt.try_into().unwrap();
 
         // decrypt
@@ -214,9 +223,9 @@ impl SpendingKey {
             None => bail!("Could not establish shared secret key."),
         };
         let cipher = Aes256Gcm::new(&shared_key.into());
-        let nonce_as_bytes = nonce_ctxt[0].value().to_be_bytes();
+        let nonce_as_bytes = [nonce_ctxt[0].value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
-        let ciphertext_bytes = bfes_to_bytes(&ciphertext);
+        let ciphertext_bytes = bfes_to_bytes(dem_ctxt)?;
         let plaintext = match cipher.decrypt(nonce, ciphertext_bytes.as_ref()) {
             Ok(ptxt) => ptxt,
             Err(_) => bail!("Failed to decrypt symmetric payload."),
@@ -232,7 +241,7 @@ impl SpendingKey {
 
     /// Unlock the UTXO binding it to some transaction by its kernel hash.
     /// This function mocks proof generation.
-    fn binding_unlock(&self, _bind_to: &Digest) -> [BFieldElement; DIGEST_LENGTH] {
+    pub fn binding_unlock(&self, _bind_to: &Digest) -> [BFieldElement; DIGEST_LENGTH] {
         let witness_data = self.unlock_key;
         witness_data.values()
     }
@@ -277,7 +286,7 @@ impl ReceivingAddress {
 
         // generate symmetric ciphertext
         let cipher = Aes256Gcm::new(&shared_key.into());
-        let nonce_as_bytes = nonce_bfe.value().to_be_bytes();
+        let nonce_as_bytes = [nonce_bfe.value().to_be_bytes().to_vec(), vec![0u8; 4]].concat();
         let nonce = Nonce::from_slice(&nonce_as_bytes); // almost 64 bits; unique per message
         let ciphertext = match cipher.encrypt(nonce, plaintext.as_ref()) {
             Ok(ctxt) => ctxt,
@@ -406,7 +415,10 @@ mod test_generation_addresses {
 
     use crate::{
         config_models::network::Network,
-        models::blockchain::address::generation_address::{bfes_to_bytes, bytes_to_bfes},
+        models::blockchain::{
+            address::generation_address::{bfes_to_bytes, bytes_to_bfes},
+            transaction::{amount::Amount, utxo::Utxo},
+        },
     };
 
     use super::{ReceivingAddress, SpendingKey};
@@ -418,7 +430,7 @@ mod test_generation_addresses {
         let byte_array: [u8; N] = rng.gen();
         let byte_vec = byte_array.to_vec();
         let bfes = bytes_to_bfes(&byte_vec);
-        let bytes_again = bfes_to_bytes(&bfes);
+        let bytes_again = bfes_to_bytes(&bfes).unwrap();
 
         assert_eq!(byte_vec, bytes_again);
     }
@@ -431,7 +443,7 @@ mod test_generation_addresses {
             let mut byte_vec: Vec<u8> = vec![0; n];
             rng.try_fill_bytes(&mut byte_vec).unwrap();
             let bfes = bytes_to_bfes(&byte_vec);
-            let bytes_again = bfes_to_bytes(&bfes);
+            let bytes_again = bfes_to_bytes(&bfes).unwrap();
 
             assert_eq!(byte_vec, bytes_again);
         }
@@ -458,7 +470,7 @@ mod test_generation_addresses {
             .concat(),
         ] {
             let bfes = bytes_to_bfes(&test_case);
-            let bytes_again = bfes_to_bytes(&bfes);
+            let bytes_again = bfes_to_bytes(&bfes).unwrap();
 
             assert_eq!(test_case, bytes_again);
         }
@@ -468,7 +480,7 @@ mod test_generation_addresses {
     fn test_keygen_sign_verify() {
         let mut rng = thread_rng();
         let seed: Digest = rng.gen();
-        let spending_key = SpendingKey::derive_from_seed(seed.clone());
+        let spending_key = SpendingKey::derive_from_seed(seed);
         let receiving_address = ReceivingAddress::derive_from_seed(seed);
 
         let msg: Digest = rng.gen();
@@ -485,5 +497,28 @@ mod test_generation_addresses {
             ReceivingAddress::from_bech32m(encoded, Network::Testnet).unwrap();
 
         assert_eq!(receiving_address, receiving_address_again);
+    }
+
+    #[test]
+    fn test_encrypt_decrypt() {
+        let mut rng = thread_rng();
+        let seed: Digest = rng.gen();
+        let spending_key = SpendingKey::derive_from_seed(seed);
+        let receiving_address = ReceivingAddress::from_spending_key(&spending_key);
+
+        let amount: Amount = rng.next_u32().into();
+        let coins = amount.to_native_coins();
+        let lock_script = receiving_address.lock_script();
+        let utxo = Utxo::new(lock_script, coins);
+
+        let sender_randomness: Digest = rng.gen();
+
+        let ciphertext = receiving_address.encrypt(&utxo, sender_randomness).unwrap();
+
+        let (utxo_again, sender_randomness_again) = spending_key.decrypt(&ciphertext).unwrap();
+
+        assert_eq!(utxo, utxo_again);
+
+        assert_eq!(sender_randomness, sender_randomness_again);
     }
 }
