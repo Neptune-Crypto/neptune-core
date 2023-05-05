@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use twenty_first::amount::u32s::U32s;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 
 use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::blockchain::block::{block_height::BlockHeight, Block};

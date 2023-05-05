@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;

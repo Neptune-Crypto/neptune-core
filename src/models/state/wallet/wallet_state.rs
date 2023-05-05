@@ -20,7 +20,7 @@ use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
+use twenty_first::shared_math::digest::{Digest, DIGEST_LENGTH};
 
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::wallet_status::{WalletStatus, WalletStatusElement};

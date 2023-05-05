@@ -20,7 +20,7 @@ use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSet
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 
 use self::amount::Amount;
 use self::native_coin::native_coin_typescript;

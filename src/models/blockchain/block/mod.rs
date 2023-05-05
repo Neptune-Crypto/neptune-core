@@ -11,7 +11,7 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::{amount::u32s::U32s, shared_math::rescue_prime_digest::Digest};
+use twenty_first::{amount::u32s::U32s, shared_math::digest::Digest};
 
 pub mod block_body;
 pub mod block_header;

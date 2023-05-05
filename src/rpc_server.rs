@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::config_models::network::Network;

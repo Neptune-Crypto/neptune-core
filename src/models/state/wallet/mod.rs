@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
+use twenty_first::shared_math::digest::{Digest, DIGEST_LENGTH};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
