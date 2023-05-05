@@ -18,6 +18,7 @@ use futures::channel::oneshot;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use num_traits::identities::Zero;
+use rand::random;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -25,9 +26,7 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::shared_math::digest::Digest;
-use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -39,8 +38,8 @@ fn make_devnet_block_template(
     previous_block: &Block,
     transaction: Transaction,
 ) -> (BlockHeader, BlockBody) {
-    let mut additions = transaction.kernel.outputs.clone();
-    let mut removals = transaction.kernel.inputs.clone();
+    let additions = transaction.kernel.outputs.clone();
+    let removals = transaction.kernel.inputs.clone();
     let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> =
         previous_block.body.next_mutator_set_accumulator.clone();
 
@@ -156,9 +155,10 @@ fn make_coinbase_transaction(
         lock_script: lock_script.clone(),
         coins: amount.to_native_coins(),
     };
+    let output_randomness: Digest = random();
     let coinbase_addition_record = commit::<Hash>(
         &Hash::hash(&coinbase_utxo),
-        &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+        &output_randomness,
         receiver_digest,
     );
 
@@ -168,8 +168,6 @@ fn make_coinbase_transaction(
             .expect("Got bad time timestamp in mining process")
             .as_secs(),
     );
-
-    let output_randomness: Digest = Digest::new(random_elements_array());
 
     let kernel = TransactionKernel {
         inputs: vec![],
@@ -200,12 +198,11 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
         .iter()
         .fold(Amount::zero(), |acc, tx| acc + tx.kernel.fee);
 
-    let wallet_seed = state.wallet_state.wallet_secret.secret_seed;
-    let spending_key = generation_address::SpendingKey::derive_from_seed(wallet_seed);
-    let receiving_address = generation_address::ReceivingAddress::from_spending_key(&spending_key);
+    let receiving_address = generation_address::ReceivingAddress::derive_from_seed(
+        state.wallet_state.wallet_secret.secret_seed,
+    );
     let lock_script = receiving_address.lock_script();
-    let receiver_preimage = spending_key.privacy_preimage;
-    let receiver_digest = Hash::hash(&receiver_preimage);
+    let receiver_digest = receiving_address.privacy_digest;
 
     let coinbase_transaction = make_coinbase_transaction(
         &lock_script,

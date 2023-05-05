@@ -429,10 +429,11 @@ impl GlobalState {
 #[cfg(test)]
 mod global_state_tests {
     use crate::{
-        config_models::network::Network, models::blockchain::block::Block,
-        tests::shared::get_mock_global_state,
+        config_models::network::Network,
+        models::blockchain::block::Block,
+        tests::shared::{get_mock_global_state, make_mock_block},
     };
-    use rand::thread_rng;
+    use rand::{random, thread_rng};
     use secp256k1::Secp256k1;
     use tracing_test::traced_test;
 
@@ -551,202 +552,213 @@ mod global_state_tests {
         );
     }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
-    //     let global_state = get_mock_global_state(Network::Main, 2, None).await;
+    #[traced_test]
+    #[tokio::test]
+    async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
+        let global_state = get_mock_global_state(Network::Main, 2, None).await;
 
-    //     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-    //         Secp256k1::new().generate_keypair(&mut thread_rng());
+        let other_receiver_address =
+            generation_address::ReceivingAddress::derive_from_seed(random());
 
-    //     // 1. Create new block 1 and store it to the DB
-    //     let genesis_block = global_state
-    //         .chain
-    //         .archival_state
-    //         .as_ref()
-    //         .unwrap()
-    //         .get_latest_block()
-    //         .await;
-    //     let mock_block_1a = make_mock_block(&genesis_block, None, public_key);
-    //     {
-    //         let mut block_db_lock = global_state
-    //             .chain
-    //             .archival_state
-    //             .as_ref()
-    //             .unwrap()
-    //             .block_index_db
-    //             .lock()
-    //             .await;
-    //         global_state
-    //             .chain
-    //             .archival_state
-    //             .as_ref()
-    //             .unwrap()
-    //             .write_block(
-    //                 Box::new(mock_block_1a.clone()),
-    //                 &mut block_db_lock,
-    //                 Some(mock_block_1a.header.proof_of_work_family),
-    //             )?;
-    //     }
+        // 1. Create new block 1 and store it to the DB
+        let genesis_block = global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let (mock_block_1a, _, _) = make_mock_block(&genesis_block, None, other_receiver_address);
+        {
+            let mut block_db_lock = global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_index_db
+                .lock()
+                .await;
+            global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .write_block(
+                    Box::new(mock_block_1a.clone()),
+                    &mut block_db_lock,
+                    Some(mock_block_1a.header.proof_of_work_family),
+                )?;
+        }
 
-    //     // Verify that wallet has a monitored UTXO (from genesis)
-    //     assert!(!global_state.wallet_state.get_balance().await.is_zero());
+        // Verify that wallet has a monitored UTXO (from genesis)
+        assert!(!global_state.wallet_state.get_balance().await.is_zero());
 
-    //     // Verify that this is unsynced with mock_block_1a
-    //     assert!(
-    //         global_state
-    //             .wallet_state
-    //             .is_synced_to(genesis_block.hash)
-    //             .await
-    //     );
-    //     assert!(
-    //         !global_state
-    //             .wallet_state
-    //             .is_synced_to(mock_block_1a.hash)
-    //             .await
-    //     );
+        // Verify that this is unsynced with mock_block_1a
+        assert!(
+            global_state
+                .wallet_state
+                .is_synced_to(genesis_block.hash)
+                .await
+        );
+        assert!(
+            !global_state
+                .wallet_state
+                .is_synced_to(mock_block_1a.hash)
+                .await
+        );
 
-    //     // Call resync
-    //     global_state
-    //         .resync_membership_proofs_to_tip(mock_block_1a.hash)
-    //         .await
-    //         .unwrap();
+        // Call resync
+        global_state
+            .resync_membership_proofs_to_tip(mock_block_1a.hash)
+            .await
+            .unwrap();
 
-    //     // Verify that it is synced
-    //     assert!(
-    //         global_state
-    //             .wallet_state
-    //             .is_synced_to(mock_block_1a.hash)
-    //             .await
-    //     );
+        // Verify that it is synced
+        assert!(
+            global_state
+                .wallet_state
+                .is_synced_to(mock_block_1a.hash)
+                .await
+        );
 
-    //     // Verify that MPs are valid
-    //     assert!(
-    //         wallet_state_has_all_valid_mps_for(&global_state.wallet_state, &mock_block_1a).await
-    //     );
+        // Verify that MPs are valid
+        assert!(
+            wallet_state_has_all_valid_mps_for(&global_state.wallet_state, &mock_block_1a).await
+        );
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
-    //     let global_state = get_mock_global_state(Network::Main, 2, None).await;
-    //     let own_pubkey = global_state.wallet_state.wallet_secret.get_public_key();
+    #[traced_test]
+    #[tokio::test]
+    async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
+        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let own_spending_address = generation_address::SpendingKey::derive_from_seed(
+            global_state.wallet_state.wallet_secret.secret_seed,
+        );
+        let own_receiving_address =
+            generation_address::ReceivingAddress::from_spending_key(&own_spending_address);
 
-    //     // 1. Create new block 1a where we receive a coinbase UTXO, store it
-    //     let genesis_block = global_state
-    //         .chain
-    //         .archival_state
-    //         .as_ref()
-    //         .unwrap()
-    //         .get_latest_block()
-    //         .await;
-    //     let mock_block_1a = make_mock_block(&genesis_block, None, own_pubkey);
-    //     {
-    //         let mut block_db_lock = global_state
-    //             .chain
-    //             .archival_state
-    //             .as_ref()
-    //             .unwrap()
-    //             .block_index_db
-    //             .lock()
-    //             .await;
-    //         global_state
-    //             .chain
-    //             .archival_state
-    //             .as_ref()
-    //             .unwrap()
-    //             .write_block(
-    //                 Box::new(mock_block_1a.clone()),
-    //                 &mut block_db_lock,
-    //                 Some(mock_block_1a.header.proof_of_work_family),
-    //             )?;
-    //         let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
-    //         global_state
-    //             .wallet_state
-    //             .update_wallet_state_with_new_block(&mock_block_1a, &mut wallet_db_lock)
-    //             .unwrap();
-    //     }
+        // 1. Create new block 1a where we receive a coinbase UTXO, store it
+        let genesis_block = global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let (mock_block_1a, _coinbase_utxo, coinbase_output_randomness) =
+            make_mock_block(&genesis_block, None, own_receiving_address.clone());
+        {
+            let mut block_db_lock = global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_index_db
+                .lock()
+                .await;
+            global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .write_block(
+                    Box::new(mock_block_1a.clone()),
+                    &mut block_db_lock,
+                    Some(mock_block_1a.header.proof_of_work_family),
+                )?;
+            let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+            global_state.wallet_state.add_expected_utxo(
+                _coinbase_utxo,
+                coinbase_output_randomness,
+                own_spending_address.privacy_preimage,
+            );
+            global_state
+                .wallet_state
+                .update_wallet_state_with_new_block(&mock_block_1a, &mut wallet_db_lock)
+                .unwrap();
+        }
 
-    //     // Verify that wallet has a monitored UTXO (from genesis)
-    //     let wallet_status = global_state.wallet_state.get_wallet_status_from_lock(
-    //         &mut global_state.wallet_state.wallet_db.lock().await,
-    //         &mock_block_1a,
-    //     );
-    //     assert_eq!(2, wallet_status.synced_unspent.len());
+        // Verify that wallet has monitored UTXOs, from genesis and from block_1a
+        let wallet_status = global_state.wallet_state.get_wallet_status_from_lock(
+            &mut global_state.wallet_state.wallet_db.lock().await,
+            &mock_block_1a,
+        );
+        assert_eq!(2, wallet_status.synced_unspent.len());
 
-    //     // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
-    //     let (_secret_key, other_pubkey): (secp256k1::SecretKey, secp256k1::PublicKey) =
-    //         Secp256k1::new().generate_keypair(&mut thread_rng());
-    //     let mut parent_block = genesis_block;
-    //     for _ in 0..5 {
-    //         let next_block = make_mock_block(&parent_block, None, other_pubkey);
-    //         let mut block_db_lock = global_state
-    //             .chain
-    //             .archival_state
-    //             .as_ref()
-    //             .unwrap()
-    //             .block_index_db
-    //             .lock()
-    //             .await;
-    //         global_state
-    //             .chain
-    //             .archival_state
-    //             .as_ref()
-    //             .unwrap()
-    //             .write_block(
-    //                 Box::new(next_block.clone()),
-    //                 &mut block_db_lock,
-    //                 Some(next_block.header.proof_of_work_family),
-    //             )?;
-    //         let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
-    //         global_state
-    //             .wallet_state
-    //             .update_wallet_state_with_new_block(&next_block, &mut wallet_db_lock)
-    //             .unwrap();
-    //         parent_block = next_block;
-    //     }
+        // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
+        let other_receiving_address =
+            generation_address::ReceivingAddress::derive_from_seed(random());
+        let mut parent_block = genesis_block;
+        for _ in 0..5 {
+            let (next_block, _, _) =
+                make_mock_block(&parent_block, None, other_receiving_address.clone());
+            let mut block_db_lock = global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_index_db
+                .lock()
+                .await;
+            global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .write_block(
+                    Box::new(next_block.clone()),
+                    &mut block_db_lock,
+                    Some(next_block.header.proof_of_work_family),
+                )?;
+            let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+            global_state
+                .wallet_state
+                .update_wallet_state_with_new_block(&next_block, &mut wallet_db_lock)
+                .unwrap();
+            parent_block = next_block;
+        }
 
-    //     // Call resync which fails to sync the UTXO that was abandoned when block 1a was abandoned
-    //     global_state
-    //         .resync_membership_proofs_to_tip(parent_block.hash)
-    //         .await
-    //         .unwrap();
+        // Call resync which fails to sync the UTXO that was abandoned when block 1a was abandoned
+        global_state
+            .resync_membership_proofs_to_tip(parent_block.hash)
+            .await
+            .unwrap();
 
-    //     // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
-    //     let wallet_status_after_forking = global_state.wallet_state.get_wallet_status_from_lock(
-    //         &mut global_state.wallet_state.wallet_db.lock().await,
-    //         &parent_block,
-    //     );
-    //     assert_eq!(1, wallet_status_after_forking.synced_unspent.len());
-    //     assert_eq!(1, wallet_status_after_forking.unsynced_unspent.len());
+        // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
+        let wallet_status_after_forking = global_state.wallet_state.get_wallet_status_from_lock(
+            &mut global_state.wallet_state.wallet_db.lock().await,
+            &parent_block,
+        );
+        assert_eq!(1, wallet_status_after_forking.synced_unspent.len());
+        assert_eq!(1, wallet_status_after_forking.unsynced_unspent.len());
 
-    //     // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
-    //     // genesis block is not.
-    //     let wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
-    //     let monitored_utxos = &wallet_db_lock.monitored_utxos;
-    //     assert!(
-    //         !monitored_utxos
-    //             .get(0)
-    //             .was_abandoned(
-    //                 &parent_block.hash,
-    //                 global_state.chain.archival_state.as_ref().unwrap()
-    //             )
-    //             .await
-    //     );
-    //     assert!(
-    //         monitored_utxos
-    //             .get(1)
-    //             .was_abandoned(
-    //                 &parent_block.hash,
-    //                 global_state.chain.archival_state.as_ref().unwrap()
-    //             )
-    //             .await
-    //     );
+        // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
+        // genesis block is not.
+        let wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+        let monitored_utxos = &wallet_db_lock.monitored_utxos;
+        assert!(
+            !monitored_utxos
+                .get(0)
+                .was_abandoned(
+                    &parent_block.hash,
+                    global_state.chain.archival_state.as_ref().unwrap()
+                )
+                .await
+        );
+        assert!(
+            monitored_utxos
+                .get(1)
+                .was_abandoned(
+                    &parent_block.hash,
+                    global_state.chain.archival_state.as_ref().unwrap()
+                )
+                .await
+        );
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     // #[traced_test]
     // #[tokio::test]

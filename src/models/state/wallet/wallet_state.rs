@@ -9,7 +9,7 @@ use rusty_leveldb::DB;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex as TokioMutex, MutexGuard};
 use tracing::{debug, error, info, warn};
@@ -41,7 +41,7 @@ pub struct WalletState {
     pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
-    expected_utxos: Vec<ExpectedUtxo>,
+    expected_utxos: Arc<std::sync::RwLock<Vec<ExpectedUtxo>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -103,11 +103,11 @@ impl WalletState {
 
         let rusty_wallet_database = Arc::new(TokioMutex::new(rusty_wallet_database));
 
-        let mut ret = Self {
+        let ret = Self {
             wallet_db: rusty_wallet_database.clone(),
             wallet_secret,
             number_of_mps_per_utxo,
-            expected_utxos: vec![],
+            expected_utxos: Arc::new(RwLock::new(vec![])),
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -230,6 +230,8 @@ impl WalletState {
 
     fn get_expected_utxos(&self) -> Vec<(Utxo, Digest, Digest)> {
         self.expected_utxos
+            .read()
+            .unwrap()
             .iter()
             .map(|expected_utxo| {
                 (
@@ -242,12 +244,12 @@ impl WalletState {
     }
 
     pub fn add_expected_utxo(
-        &mut self,
+        &self,
         utxo: Utxo,
         sender_randomness: Digest,
         receiver_preimage: Digest,
     ) {
-        self.expected_utxos.push(ExpectedUtxo {
+        self.expected_utxos.write().unwrap().push(ExpectedUtxo {
             utxo,
             sender_randomness,
             receiver_preimage,
@@ -265,13 +267,16 @@ impl WalletState {
             &sender_randomness,
             &Hash::hash(&receiver_preimage),
         );
-        self.expected_utxos.retain(|expected_utxo| {
-            commit::<Hash>(
-                &Hash::hash(&expected_utxo.utxo),
-                &expected_utxo.sender_randomness,
-                &Hash::hash(&expected_utxo.receiver_preimage),
-            ) != ar
-        });
+        self.expected_utxos
+            .write()
+            .unwrap()
+            .retain(|expected_utxo| {
+                commit::<Hash>(
+                    &Hash::hash(&expected_utxo.utxo),
+                    &expected_utxo.sender_randomness,
+                    &Hash::hash(&expected_utxo.receiver_preimage),
+                ) != ar
+            });
     }
 
     /// Update wallet state with new block. Assumes the given block

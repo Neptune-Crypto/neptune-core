@@ -73,8 +73,9 @@ impl Block {
         let empty_mutator_set = MutatorSetAccumulator::default();
         let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
-        // This is just the UNIX timestamp when this code was written
-        let timestamp: BFieldElement = BFieldElement::new(1655916990u64);
+
+        // This is the UNIX timestamp in ms when this code was written the 1st time
+        let timestamp: BFieldElement = BFieldElement::new(1655916990000u64);
 
         let mut genesis_coinbase_tx = Transaction {
             kernel: TransactionKernel {

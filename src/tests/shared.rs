@@ -54,7 +54,9 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
+use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
@@ -579,26 +581,30 @@ pub fn new_random_wallet() -> WalletSecret {
 
 // `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
 // already have created `DevNetInput`s.
-// pub fn make_mock_transaction(
-//     inputs: Vec<DevNetInput>,
-//     outputs: Vec<(Utxo, Digest)>,
-// ) -> Transaction {
-//     let timestamp: BFieldElement = BFieldElement::new(
-//         SystemTime::now()
-//             .duration_since(UNIX_EPOCH)
-//             .expect("Got bad time timestamp in mining process")
-//             .as_secs(),
-//     );
+pub fn make_mock_transaction(
+    inputs: Vec<RemovalRecord<Hash>>,
+    outputs: Vec<AdditionRecord>,
+) -> Transaction {
+    let timestamp: BFieldElement = BFieldElement::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Got bad time timestamp in mining process")
+            .as_millis()
+            .try_into()
+            .unwrap(),
+    );
 
-//     Transaction {
-//         inputs,
-//         outputs,
-//         public_scripts: vec![],
-//         fee: Amount::zero(),
-//         timestamp,
-//         authority_proof: None,
-//     }
-// }
+    Transaction {
+        kernel: TransactionKernel {
+            inputs,
+            outputs,
+            pubscript_hashes_and_inputs: vec![],
+            fee: 1.into(),
+            timestamp,
+        },
+        witness: transaction::Witness::Faith,
+    }
+}
 
 // `make_mock_transaction2`, in contrast to `make_mock_transaction`, allows you
 // to choose signing wallet, fee, and timestamp.
@@ -639,66 +645,89 @@ pub fn new_random_wallet() -> WalletSecret {
 //     }
 // }
 
-// /// Return a fake block with a random hash, containing *one* output UTXO in the form
-// /// of a coinbase output.
-// pub fn make_mock_block(
-//     previous_block: &Block,
-//     target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
-//     coinbase_beneficiary: secp256k1::PublicKey,
-// ) -> Block {
-//     let new_block_height: BlockHeight = previous_block.header.height.next();
-//     let coinbase_utxo = Utxo {
-//         amount: Block::get_mining_reward(new_block_height),
-//         public_key: coinbase_beneficiary,
-//     };
-//     let output_randomness: Digest = Digest::new(random_elements_array());
-//     let receiver_digest: Digest = Digest::new(random_elements_array());
-//     let transaction = make_mock_transaction(vec![], vec![(coinbase_utxo, output_randomness)]);
-//     let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
-//     let previous_ms = new_ms.clone();
-//     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
+/// Build a fake block with a random hash, containing *one* output UTXO in the form
+/// of a coinbase output.
+///
+/// Returns (block, coinbase UTXO, Coinbase output randomness)
+pub fn make_mock_block(
+    previous_block: &Block,
+    target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
+    coinbase_beneficiary: generation_address::ReceivingAddress,
+) -> (Block, Utxo, Digest) {
+    let new_block_height: BlockHeight = previous_block.header.height.next();
 
-//     let coinbase_addition_record: AdditionRecord =
-//         commit::<Hash>(&coinbase_digest, &output_randomness, &receiver_digest);
-//     let mutator_set_update: MutatorSetUpdate = MutatorSetUpdate {
-//         removals: vec![],
-//         additions: vec![coinbase_addition_record.clone()],
-//     };
-//     new_ms.add(&coinbase_addition_record);
+    // Build coinbase UTXO and associated data
+    let lock_script = coinbase_beneficiary.lock_script();
+    let coinbase_amount = Block::get_mining_reward(new_block_height);
+    let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
+    let coinbase_output_randomness: Digest = Digest::new(random_elements_array());
+    let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
-//     let block_body: BlockBody = BlockBody {
-//         transaction,
-//         next_mutator_set_accumulator: new_ms.clone(),
-//         mutator_set_update,
+    let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
+    let previous_ms = new_ms.clone();
+    let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
-//         previous_mutator_set_accumulator: previous_ms,
-//         stark_proof: vec![],
-//     };
+    let coinbase_addition_record: AdditionRecord = commit::<Hash>(
+        &coinbase_digest,
+        &coinbase_output_randomness,
+        &receiver_digest,
+    );
+    new_ms.add(&coinbase_addition_record);
 
-//     let block_target_difficulty = previous_block.header.target_difficulty;
-//     let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
-//     let pow_family = pow_line;
-//     let zero = BFieldElement::zero();
-//     let block_header = BlockHeader {
-//         version: zero,
-//         height: new_block_height,
-//         mutator_set_hash: new_ms.hash(),
-//         prev_block_digest: previous_block.hash,
-//         timestamp: block_body.transaction.timestamp,
-//         nonce: [zero, zero, zero],
-//         max_block_size: 1_000_000,
-//         proof_of_work_line: pow_family,
-//         proof_of_work_family: pow_family,
-//         target_difficulty: match target_difficulty {
-//             Some(td) => td,
-//             None => U32s::one(),
-//         },
-//         block_body_merkle_root: Hash::hash(&block_body),
-//         uncles: vec![],
-//     };
+    let timestamp: BFieldElement = BFieldElement::new(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Got bad time timestamp in mining process")
+            .as_secs(),
+    );
 
-//     Block::new(block_header, block_body)
-// }
+    let transaction = Transaction {
+        kernel: TransactionKernel {
+            inputs: vec![],
+            outputs: vec![coinbase_addition_record],
+            pubscript_hashes_and_inputs: vec![],
+            fee: Amount::zero(),
+            timestamp,
+        },
+        witness: transaction::Witness::Faith,
+    };
+
+    let block_body: BlockBody = BlockBody {
+        transaction,
+        next_mutator_set_accumulator: new_ms.clone(),
+
+        previous_mutator_set_accumulator: previous_ms,
+        stark_proof: vec![],
+    };
+
+    let block_target_difficulty = previous_block.header.target_difficulty;
+    let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
+    let pow_family = pow_line;
+    let zero = BFieldElement::zero();
+    let block_header = BlockHeader {
+        version: zero,
+        height: new_block_height,
+        mutator_set_hash: new_ms.hash(),
+        prev_block_digest: previous_block.hash,
+        timestamp: block_body.transaction.kernel.timestamp,
+        nonce: [zero, zero, zero],
+        max_block_size: 1_000_000,
+        proof_of_work_line: pow_family,
+        proof_of_work_family: pow_family,
+        target_difficulty: match target_difficulty {
+            Some(td) => td,
+            None => U32s::one(),
+        },
+        block_body_merkle_root: Hash::hash(&block_body),
+        uncles: vec![],
+    };
+
+    (
+        Block::new(block_header, block_body),
+        coinbase_utxo,
+        coinbase_output_randomness,
+    )
+}
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
