@@ -5,7 +5,6 @@ pub mod wallet_status;
 
 use anyhow::{bail, Context, Result};
 use num_traits::{One, Zero};
-use secp256k1::{ecdsa, Secp256k1};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,9 +14,6 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
-use crate::models::blockchain::digest::{
-    DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
-};
 use crate::Hash;
 
 pub const WALLET_FILE_NAME: &str = "wallet.dat";
@@ -146,34 +142,6 @@ impl WalletSecret {
         fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
     }
 
-    // **Note:** `Message::from_slice()` has to take a slice that is a cryptographically
-    // secure hash of the actual message that's going to be signed. Otherwise the result
-    // of signing isn't a secure signature. Since `msg_digest` is expected to come from
-    // Rescue-Prime.
-    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
-        let sk = self.get_ecdsa_signing_secret_key();
-        let msg_bytes: [u8; Digest::BYTES] = msg_digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
-            .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
-        sk.sign_ecdsa(msg)
-    }
-
-    pub fn get_public_key(&self) -> secp256k1::PublicKey {
-        let secp = Secp256k1::new();
-        let ecdsa_secret_key: secp256k1::SecretKey = self.get_ecdsa_signing_secret_key();
-        secp256k1::PublicKey::from_secret_key(&secp, &ecdsa_secret_key)
-    }
-
-    // This is a temporary workaround until our own cryptography is ready.
-    // At that point we can return `Digest` as is. Note that `Digest::BYTES`
-    // is 5 * 8 = 40 bytes, while SecretKey expects 32 bytes.
-    fn get_ecdsa_signing_secret_key(&self) -> secp256k1::SecretKey {
-        let signing_key: Digest = self.get_signing_key();
-        let bytes: [u8; Digest::BYTES] = signing_key.into();
-        secp256k1::SecretKey::from_slice(&bytes[..DEVNET_SECRET_KEY_SIZE_IN_BYTES])
-            .expect("a byte slice that is DEVNET_SECRET_KEY_SIZE_IN_BYTES long")
-    }
-
     /// Return the secret key that is used for signatures
     fn get_signing_key(&self) -> Digest {
         let secret_seed = self.secret_seed;
@@ -207,6 +175,7 @@ mod wallet_tests {
     use std::sync::Arc;
 
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use rand::random;
     use tokio::sync::Mutex;
     use tracing_test::traced_test;
     use twenty_first::util_types::storage_vec::StorageVec;
@@ -215,11 +184,12 @@ mod wallet_tests {
     use crate::models::blockchain::address::generation_address;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::amount::Amount;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::tests::shared::{get_mock_wallet_state, make_unit_test_archival_state};
+    use crate::tests::shared::{
+        get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
+    };
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
@@ -235,158 +205,178 @@ mod wallet_tests {
         monitored_utxos
     }
 
-    // #[tokio::test]
-    // async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
-    //     // This test is designed to verify that the genesis block is applied
-    //     // to the wallet state at initialization.
-    //     let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
-    //     let monitored_utxos_premine_wallet =
-    //         get_monitored_utxos(&wallet_state_premine_recipient).await;
-    //     assert_eq!(
-    //         1,
-    //         monitored_utxos_premine_wallet.len(),
-    //         "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
-    //     );
-    //     assert_eq!(
-    //         monitored_utxos_premine_wallet[0].utxo,
-    //         Block::premine_utxos()[0],
-    //         "Auth wallet's monitored UTXO must match that from genesis block at initialization"
-    //     );
+    #[tokio::test]
+    async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
+        // This test is designed to verify that the genesis block is applied
+        // to the wallet state at initialization.
+        let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
+        let monitored_utxos_premine_wallet =
+            get_monitored_utxos(&wallet_state_premine_recipient).await;
+        assert_eq!(
+            1,
+            monitored_utxos_premine_wallet.len(),
+            "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
+        );
 
-    //     let random_wallet = WalletSecret::new(generate_secret_key());
-    //     let wallet_state_other = get_mock_wallet_state(Some(random_wallet)).await;
-    //     let monitored_utxos_other = get_monitored_utxos(&wallet_state_other).await;
-    //     assert!(
-    //         monitored_utxos_other.is_empty(),
-    //         "Monitored UTXO list must be empty at init if wallet is not premine-wallet"
-    //     );
+        let premine_receiver_spending_key = generation_address::SpendingKey::derive_from_seed(
+            wallet_state_premine_recipient.wallet_secret.secret_seed,
+        );
+        let premine_receiver_address =
+            generation_address::ReceivingAddress::from_spending_key(&premine_receiver_spending_key);
+        let expected_premine_utxo = Utxo {
+            coins: Block::premine_distribution()[0].1.to_native_coins(),
+            lock_script: premine_receiver_address.lock_script(),
+        };
+        assert_eq!(
+            expected_premine_utxo, monitored_utxos_premine_wallet[0].utxo,
+            "Auth wallet's monitored UTXO must match that from genesis block at initialization"
+        );
 
-    //     // Add 12 blocks and verify that membership proofs are still valid
-    //     let genesis_block = Block::genesis_block();
-    //     let mut next_block = genesis_block.clone();
-    //     for _ in 0..12 {
-    //         let previous_block = next_block;
-    //         next_block = make_mock_block(
-    //             &previous_block,
-    //             None,
-    //             wallet_state_other.wallet_secret.get_public_key(),
-    //         );
-    //         wallet_state_premine_recipient.update_wallet_state_with_new_block(
-    //             &next_block,
-    //             &mut wallet_state_premine_recipient.wallet_db.lock().await,
-    //         )?;
-    //     }
+        let random_wallet = WalletSecret::new(generate_secret_key());
+        let wallet_state_other = get_mock_wallet_state(Some(random_wallet)).await;
+        let monitored_utxos_other = get_monitored_utxos(&wallet_state_other).await;
+        assert!(
+            monitored_utxos_other.is_empty(),
+            "Monitored UTXO list must be empty at init if wallet is not premine-wallet"
+        );
 
-    //     let monitored_utxos = get_monitored_utxos(&wallet_state_premine_recipient).await;
-    //     assert_eq!(
-    //         1,
-    //         monitored_utxos.len(),
-    //         "monitored UTXOs must be 1 after applying N blocks not mined by wallet"
-    //     );
+        // Add 12 blocks and verify that membership proofs are still valid
+        let genesis_block = Block::genesis_block();
+        let mut next_block = genesis_block.clone();
+        let other_receiver_address =
+            generation_address::ReceivingAddress::derive_from_seed(random());
+        for _ in 0..12 {
+            let previous_block = next_block;
+            let (nb, _coinbase_utxo, _sender_randomness) =
+                make_mock_block(&previous_block, None, other_receiver_address.clone());
+            next_block = nb;
+            wallet_state_premine_recipient.update_wallet_state_with_new_block(
+                &next_block,
+                &mut wallet_state_premine_recipient.wallet_db.lock().await,
+            )?;
+        }
 
-    //     let genesis_block_output_utxo = genesis_block.body.transaction.outputs[0].0;
-    //     let ms_membership_proof = monitored_utxos[0]
-    //         .get_membership_proof_for_block(&next_block.hash)
-    //         .unwrap();
-    //     assert!(
-    //         next_block.body.next_mutator_set_accumulator.verify(
-    //             &Hash::hash(&genesis_block_output_utxo),
-    //             &ms_membership_proof
-    //         ),
-    //         "Membership proof must be valid after updating wallet state with generated blocks"
-    //     );
+        let monitored_utxos = get_monitored_utxos(&wallet_state_premine_recipient).await;
+        assert_eq!(
+            1,
+            monitored_utxos.len(),
+            "monitored UTXOs must be 1 after applying N blocks not mined by wallet"
+        );
 
-    //     Ok(())
-    // }
+        let genesis_block_output_utxo = monitored_utxos[0].utxo.clone();
+        let ms_membership_proof = monitored_utxos[0]
+            .get_membership_proof_for_block(&next_block.hash)
+            .unwrap();
+        assert!(
+            next_block.body.next_mutator_set_accumulator.verify(
+                &Hash::hash(&genesis_block_output_utxo),
+                &ms_membership_proof
+            ),
+            "Membership proof must be valid after updating wallet state with generated blocks"
+        );
 
-    // #[tokio::test]
-    // async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
-    //     let wallet = WalletSecret::new(generate_secret_key());
-    //     let wallet_state = get_mock_wallet_state(Some(wallet.clone())).await;
-    //     let other_wallet = WalletSecret::new(generate_secret_key());
+        Ok(())
+    }
 
-    //     let mut monitored_utxos = get_monitored_utxos(&wallet_state).await;
-    //     assert!(
-    //         monitored_utxos.is_empty(),
-    //         "Monitored UTXO list must be empty at init"
-    //     );
+    #[tokio::test]
+    async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
+        let wallet_secret = WalletSecret::new(generate_secret_key());
+        let wallet_state = get_mock_wallet_state(Some(wallet_secret.clone())).await;
+        let other_wallet_secret = WalletSecret::new(generate_secret_key());
+        let other_recipient_address =
+            generation_address::ReceivingAddress::derive_from_seed(random());
 
-    //     let genesis_block = Block::genesis_block();
-    //     let block_1 = make_mock_block(&genesis_block, None, wallet.get_public_key());
-    //     wallet_state.update_wallet_state_with_new_block(
-    //         &block_1,
-    //         &mut wallet_state.wallet_db.lock().await,
-    //     )?;
-    //     monitored_utxos = get_monitored_utxos(&wallet_state).await;
-    //     assert_eq!(
-    //         1,
-    //         monitored_utxos.len(),
-    //         "Monitored UTXO list be one after we mined a block"
-    //     );
+        let mut monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        assert!(
+            monitored_utxos.is_empty(),
+            "Monitored UTXO list must be empty at init"
+        );
 
-    //     // Ensure that the membership proof is valid
-    //     {
-    //         let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
-    //         let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
-    //         let ms_membership_proof = monitored_utxos[0]
-    //             .get_membership_proof_for_block(&block_1.hash)
-    //             .unwrap();
-    //         let membership_proof_is_valid = block_1
-    //             .body
-    //             .next_mutator_set_accumulator
-    //             .verify(&block_1_tx_output_digest, &ms_membership_proof);
-    //         assert!(membership_proof_is_valid);
-    //     }
+        let genesis_block = Block::genesis_block();
+        let own_spending_key =
+            generation_address::SpendingKey::derive_from_seed(wallet_secret.secret_seed);
+        let own_recipient_address =
+            generation_address::ReceivingAddress::from_spending_key(&own_spending_key);
+        let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
+            make_mock_block(&genesis_block, None, own_recipient_address);
 
-    //     // Create new blocks, verify that the membership proofs are *not* valid
-    //     // under this block as tip
-    //     let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
-    //     let block_3 = make_mock_block(&block_2, None, other_wallet.get_public_key());
-    //     monitored_utxos = get_monitored_utxos(&wallet_state).await;
-    //     {
-    //         let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
-    //         let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
-    //         let ms_membership_proof = monitored_utxos[0]
-    //             .get_membership_proof_for_block(&block_1.hash)
-    //             .unwrap();
-    //         let membership_proof_is_valid = block_3
-    //             .body
-    //             .next_mutator_set_accumulator
-    //             .verify(&block_1_tx_output_digest, &ms_membership_proof);
-    //         assert!(
-    //             !membership_proof_is_valid,
-    //             "membership proof must be invalid before updating wallet state"
-    //         );
-    //     }
-    //     // Verify that the membership proof is valid *after* running the updater
-    //     wallet_state.update_wallet_state_with_new_block(
-    //         &block_2,
-    //         &mut wallet_state.wallet_db.lock().await,
-    //     )?;
-    //     wallet_state.update_wallet_state_with_new_block(
-    //         &block_3,
-    //         &mut wallet_state.wallet_db.lock().await,
-    //     )?;
-    //     monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        // Todo: Add expected UTXO here
+        wallet_state.add_expected_utxo(
+            block_1_coinbase_utxo.clone(),
+            block_1_coinbase_sender_randomness,
+            own_spending_key.privacy_preimage,
+        );
+        wallet_state.update_wallet_state_with_new_block(
+            &block_1,
+            &mut wallet_state.wallet_db.lock().await,
+        )?;
+        monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        assert_eq!(
+            1,
+            monitored_utxos.len(),
+            "Monitored UTXO list be one after we mined a block"
+        );
 
-    //     {
-    //         let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
-    //         let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
-    //         let ms_membership_proof = monitored_utxos[0]
-    //             .get_membership_proof_for_block(&block_3.hash)
-    //             .unwrap();
-    //         let membership_proof_is_valid = block_3
-    //             .body
-    //             .next_mutator_set_accumulator
-    //             .verify(&block_1_tx_output_digest, &ms_membership_proof);
-    //         assert!(
-    //             membership_proof_is_valid,
-    //             "Membership proof must be valid after updating wallet state with generated blocks"
-    //         );
-    //     }
+        // Ensure that the membership proof is valid
+        {
+            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
+            let ms_membership_proof = monitored_utxos[0]
+                .get_membership_proof_for_block(&block_1.hash)
+                .unwrap();
+            let membership_proof_is_valid = block_1
+                .body
+                .next_mutator_set_accumulator
+                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+            assert!(membership_proof_is_valid);
+        }
 
-    //     Ok(())
-    // }
+        // Create new blocks, verify that the membership proofs are *not* valid
+        // under this block as tip
+        let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address.clone());
+        let (block_3, _, _) = make_mock_block(&block_2, None, other_recipient_address);
+        monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        {
+            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
+            let ms_membership_proof = monitored_utxos[0]
+                .get_membership_proof_for_block(&block_1.hash)
+                .unwrap();
+            let membership_proof_is_valid = block_3
+                .body
+                .next_mutator_set_accumulator
+                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+            assert!(
+                !membership_proof_is_valid,
+                "membership proof must be invalid before updating wallet state"
+            );
+        }
+        // Verify that the membership proof is valid *after* running the updater
+        wallet_state.update_wallet_state_with_new_block(
+            &block_2,
+            &mut wallet_state.wallet_db.lock().await,
+        )?;
+        wallet_state.update_wallet_state_with_new_block(
+            &block_3,
+            &mut wallet_state.wallet_db.lock().await,
+        )?;
+        monitored_utxos = get_monitored_utxos(&wallet_state).await;
+
+        {
+            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
+            let ms_membership_proof = monitored_utxos[0]
+                .get_membership_proof_for_block(&block_3.hash)
+                .unwrap();
+            let membership_proof_is_valid = block_3
+                .body
+                .next_mutator_set_accumulator
+                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+            assert!(
+                membership_proof_is_valid,
+                "Membership proof must be valid after updating wallet state with generated blocks"
+            );
+        }
+
+        Ok(())
+    }
 
     // #[traced_test]
     // #[tokio::test]
@@ -924,28 +914,28 @@ mod wallet_tests {
     //     Ok(())
     // }
 
-    #[tokio::test]
-    async fn new_random_wallet_base_test() {
-        let random_wallet = WalletSecret::new(generate_secret_key());
-        let wallet_state = get_mock_wallet_state(Some(random_wallet)).await;
-        let pk = wallet_state.wallet_secret.get_public_key();
-        let msg_vec: Vec<BFieldElement> = wallet_state.wallet_secret.secret_seed.values().to_vec();
-        let digest: Digest = Hash::hash_varlen(&msg_vec);
-        let signature = wallet_state.wallet_secret.sign_digest(digest);
-        let msg_bytes: [u8; Digest::BYTES] = digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
-            .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
-        assert!(
-            signature.verify(&msg, &pk).is_ok(),
-            "DEVNET signature must verify"
-        );
+    // #[tokio::test]
+    // async fn new_random_wallet_base_test() {
+    //     let random_wallet = WalletSecret::new(generate_secret_key());
+    //     let wallet_state = get_mock_wallet_state(Some(random_wallet)).await;
+    //     let pk = wallet_state.wallet_secret.get_public_key();
+    //     let msg_vec: Vec<BFieldElement> = wallet_state.wallet_secret.secret_seed.values().to_vec();
+    //     let digest: Digest = Hash::hash_varlen(&msg_vec);
+    //     let signature = wallet_state.wallet_secret.sign_digest(digest);
+    //     let msg_bytes: [u8; Digest::BYTES] = digest.into();
+    //     let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
+    //         .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
+    //     assert!(
+    //         signature.verify(&msg, &pk).is_ok(),
+    //         "DEVNET signature must verify"
+    //     );
 
-        let signature_alt = wallet_state.wallet_secret.sign_digest(digest);
-        assert!(
-            signature_alt.verify(&msg, &pk).is_ok(),
-            "DEVNET signature must verify"
-        );
-    }
+    //     let signature_alt = wallet_state.wallet_secret.sign_digest(digest);
+    //     assert!(
+    //         signature_alt.verify(&msg, &pk).is_ok(),
+    //         "DEVNET signature must verify"
+    //     );
+    // }
 
     #[test]
     fn signature_secret_and_commitment_p_randomness_secret_are_different() {

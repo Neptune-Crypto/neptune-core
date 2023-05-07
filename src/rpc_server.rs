@@ -194,11 +194,6 @@ impl RPC for NeptuneRPCServer {
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
-        tracing::debug!(
-            "Wallet public key: {}",
-            self.state.wallet_state.wallet_secret.get_public_key()
-        );
-
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
         let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
