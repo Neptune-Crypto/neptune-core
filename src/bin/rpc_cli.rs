@@ -37,7 +37,7 @@ enum Command {
     Shutdown,
     Balance,
     WalletStatus,
-    GetPublicKey,
+    GetReceivingAddress,
     MempoolTxCount,
     MempoolSize,
 }
@@ -130,9 +130,10 @@ async fn main() -> Result<()> {
             println!("{}", wallet_status)
         }
 
-        Command::GetPublicKey => {
-            let pub_key: secp256k1::PublicKey = client.get_public_key(context::current()).await?;
-            println!("{}", pub_key)
+        Command::GetReceivingAddress => {
+            let rec_addr: generation_address::ReceivingAddress =
+                client.get_receiving_address(context::current()).await?;
+            println!("{}", rec_addr.to_bech32m(args.network).unwrap())
         }
 
         Command::MempoolTxCount => {

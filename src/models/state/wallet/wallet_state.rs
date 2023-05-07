@@ -360,11 +360,14 @@ impl WalletState {
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
-        let utxo_digests = valid_membership_proofs_and_own_utxo_count
-            .keys()
-            .map(|key| key.utxo_digest)
-            .collect_vec();
         for addition_record in block.body.transaction.kernel.outputs.clone().into_iter() {
+            // Don't pull this declaration out of the for-loop since the hash map can grow
+            // within this loop.
+            let utxo_digests = valid_membership_proofs_and_own_utxo_count
+                .keys()
+                .map(|key| key.utxo_digest)
+                .collect_vec();
+
             {
                 let res: Result<Vec<usize>, Box<dyn Error>> =
                     MsMembershipProof::batch_update_from_addition(

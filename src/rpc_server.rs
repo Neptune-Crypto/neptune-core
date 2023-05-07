@@ -74,7 +74,7 @@ pub trait RPC {
 
     async fn get_wallet_status() -> WalletStatus;
 
-    async fn get_public_key() -> secp256k1::PublicKey;
+    async fn get_receiving_address() -> generation_address::ReceivingAddress;
 
     async fn get_mempool_tx_count() -> usize;
 
@@ -104,7 +104,7 @@ impl RPC for NeptuneRPCServer {
     type GetBalanceFut = Ready<Amount>;
     type GetWalletStatusFut = Ready<WalletStatus>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
-    type GetPublicKeyFut = Ready<secp256k1::PublicKey>;
+    type GetReceivingAddressFut = Ready<generation_address::ReceivingAddress>;
     type GetMempoolTxCountFut = Ready<usize>;
     type GetMempoolSizeFut = Ready<usize>;
     type GetHistoryFut = Ready<Vec<(Duration, Amount, Sign)>>;
@@ -337,8 +337,14 @@ impl RPC for NeptuneRPCServer {
         future::ready(res)
     }
 
-    fn get_public_key(self, _context: tarpc::context::Context) -> Self::GetPublicKeyFut {
-        future::ready(self.state.wallet_state.wallet_secret.get_public_key())
+    fn get_receiving_address(
+        self,
+        _context: tarpc::context::Context,
+    ) -> Self::GetReceivingAddressFut {
+        let receiving_address = generation_address::ReceivingAddress::derive_from_seed(
+            self.state.wallet_state.wallet_secret.secret_seed,
+        );
+        future::ready(receiving_address)
     }
 
     fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> Self::GetMempoolTxCountFut {
