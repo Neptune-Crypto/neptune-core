@@ -12,6 +12,7 @@ use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::shared::SIZE_1MB_IN_BYTES;
+use crate::models::state::wallet::wallet_state::ExpectedUtxo;
 use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
@@ -92,8 +93,9 @@ fn make_devnet_block_template(
 async fn mine_block(
     mut block_header: BlockHeader,
     block_body: BlockBody,
-    sender: oneshot::Sender<Block>,
+    sender: oneshot::Sender<NewBlockFound>,
     state: GlobalState,
+    coinbase_utxo_info: ExpectedUtxo,
 ) {
     info!(
         "Mining on block with {} outputs",
@@ -138,27 +140,26 @@ async fn mine_block(
         block_header.nonce[0], block_header.nonce[1], block_header.nonce[2]
     );
 
+    let new_block_info = NewBlockFound {
+        block: Box::new(Block::new(block_header, block_body)),
+        coinbase_utxo_info: Box::new(coinbase_utxo_info),
+    };
+
     sender
-        .send(Block::new(block_header, block_body))
+        .send(new_block_info)
         .unwrap_or_else(|_| warn!("Receiver in mining loop closed prematurely"))
 }
 
+/// Return the coinbase UTXO for the receiving address and the "sender" randomness
+/// used for the canonical AOCL commitment.
 fn make_coinbase_transaction(
-    lock_script: &LockScript,
+    coinbase_utxo: &Utxo,
     receiver_digest: &Digest,
-    previous_block_header: &BlockHeader,
-    total_transaction_fees: Amount,
-) -> Transaction {
-    let next_block_height: BlockHeight = previous_block_header.height.next();
-    let amount = Block::get_mining_reward(next_block_height) + total_transaction_fees;
-    let coinbase_utxo = Utxo {
-        lock_script: lock_script.clone(),
-        coins: amount.to_native_coins(),
-    };
-    let output_randomness: Digest = random();
+) -> (Transaction, Digest) {
+    let sender_randomness: Digest = random();
     let coinbase_addition_record = commit::<Hash>(
-        &Hash::hash(&coinbase_utxo),
-        &output_randomness,
+        &Hash::hash(coinbase_utxo),
+        &sender_randomness,
         receiver_digest,
     );
 
@@ -166,7 +167,9 @@ fn make_coinbase_transaction(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Got bad time timestamp in mining process")
-            .as_secs(),
+            .as_millis()
+            .try_into()
+            .expect("Must call this function before 584 million years from genesis."),
     );
 
     let kernel = TransactionKernel {
@@ -177,15 +180,22 @@ fn make_coinbase_transaction(
         timestamp,
     };
 
-    Transaction {
-        kernel,
-        witness: Witness::Faith,
-    }
+    (
+        Transaction {
+            kernel,
+            witness: Witness::Faith,
+        },
+        sender_randomness,
+    )
 }
 
 /// Create the transaction that goes into the block template. The transaction is
-/// built from the mempool and from the coinbase transaction.
-fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transaction {
+/// built from the mempool and from the coinbase transaction. Also returns the
+/// "sender randomness" used in the coinbase transaction.
+fn create_block_transaction(
+    latest_block: &Block,
+    state: &GlobalState,
+) -> (Transaction, ExpectedUtxo) {
     let block_capacity_for_transactions = SIZE_1MB_IN_BYTES;
 
     // Get most valuable transactions from mempool
@@ -193,23 +203,24 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
         .mempool
         .get_transactions_for_block(block_capacity_for_transactions);
 
-    // Build coinbase transaction
+    // Build coinbase UTXO
     let transaction_fees = transactions_to_include
         .iter()
         .fold(Amount::zero(), |acc, tx| acc + tx.kernel.fee);
 
-    let receiving_address = generation_address::ReceivingAddress::derive_from_seed(
+    let coinbase_recipient_spending_key = generation_address::SpendingKey::derive_from_seed(
         state.wallet_state.wallet_secret.secret_seed,
     );
-    let lock_script = receiving_address.lock_script();
-    let receiver_digest = receiving_address.privacy_digest;
+    let receiving_address =
+        generation_address::ReceivingAddress::from_spending_key(&coinbase_recipient_spending_key);
+    let next_block_height: BlockHeight = latest_block.header.height.next();
 
-    let coinbase_transaction = make_coinbase_transaction(
-        &lock_script,
-        &receiver_digest,
-        &latest_block.header,
-        transaction_fees,
-    );
+    let lock_script = receiving_address.lock_script();
+    let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
+    let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
+
+    let (coinbase_transaction, coinbase_sender_randomness) =
+        make_coinbase_transaction(&coinbase_utxo, &receiving_address.privacy_digest);
 
     // Merge incoming transactions with the coinbase transaction
     let mut merged_transaction = transactions_to_include
@@ -221,7 +232,13 @@ fn create_block_transaction(latest_block: &Block, state: &GlobalState) -> Transa
     // Then set fee to zero as we've already sent it all to ourself in the coinbase output
     merged_transaction.kernel.fee = Amount::zero();
 
-    merged_transaction
+    let utxo_info_for_coinbase = ExpectedUtxo {
+        utxo: coinbase_utxo,
+        sender_randomness: coinbase_sender_randomness,
+        receiver_preimage: coinbase_recipient_spending_key.privacy_preimage,
+    };
+
+    (merged_transaction, utxo_info_for_coinbase)
 }
 
 pub async fn mock_regtest_mine(
@@ -231,15 +248,21 @@ pub async fn mock_regtest_mine(
     state: GlobalState,
 ) -> Result<()> {
     loop {
-        let (sender, receiver) = oneshot::channel::<Block>();
+        let (sender, receiver) = oneshot::channel::<NewBlockFound>();
         let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
             info!("Not mining because we are syncing");
             None
         } else {
             // Build the block template and spawn the worker thread to mine on it
-            let transaction = create_block_transaction(&latest_block, &state);
+            let (transaction, coinbase_utxo_info) = create_block_transaction(&latest_block, &state);
             let (block_header, block_body) = make_devnet_block_template(&latest_block, transaction);
-            let miner_task = mine_block(block_header, block_body, sender, state.clone());
+            let miner_task = mine_block(
+                block_header,
+                block_body,
+                sender,
+                state.clone(),
+                coinbase_utxo_info,
+            );
             Some(tokio::spawn(miner_task))
         };
 
@@ -275,9 +298,9 @@ pub async fn mock_regtest_mine(
                     }
                 }
             }
-            new_fake_block_res = receiver => {
-                let new_fake_block = match new_fake_block_res {
-                    Ok(block) => block,
+            new_block_res = receiver => {
+                let new_block_info = match new_block_res {
+                    Ok(res) => res,
                     Err(err) => {
                         warn!("Mining thread was cancelled prematurely. Got: {}", err);
                         continue;
@@ -285,12 +308,12 @@ pub async fn mock_regtest_mine(
                 };
 
                 // Sanity check, remove for more efficient mining.
-                assert!(new_fake_block.archival_is_valid(&latest_block), "Own mined block must be valid");
+                assert!(new_block_info.block.archival_is_valid(&latest_block), "Own mined block must be valid");
 
-                info!("Found new regtest block with block height {}. Hash: {}", new_fake_block.header.height, new_fake_block.hash.emojihash());
+                info!("Found new regtest block with block height {}. Hash: {}", new_block_info.block.header.height, new_block_info.block.hash.emojihash());
 
-                latest_block = new_fake_block.clone();
-                to_main.send(MinerToMain::NewBlock(Box::new(new_fake_block))).await?;
+                latest_block = *new_block_info.block.to_owned();
+                to_main.send(MinerToMain::NewBlockFound(new_block_info)).await?;
 
                 // Wait until `main_loop` has updated `global_state` before proceding. Otherwise, we would use
                 // a deprecated version of the mempool to build the next block. We don't mark the from-main loop
@@ -301,6 +324,11 @@ pub async fn mock_regtest_mine(
                 debug!("Got {:?} msg from main after finding block", msg);
                 if !matches!(msg, MainToMiner::ReadyToMineNextBlock) {
                     error!("Got bad message from `main_loop`: {:?}", msg);
+
+                    // TODO: Handle this case
+                    // We found a new block but the main thread updated with a block
+                    // before our could be registered. We should mine on the one
+                    // received from the main loop and not the one we found here.
                 }
             }
         }
@@ -329,7 +357,7 @@ mod mine_loop_tests {
 
         // Verify constructed coinbase transaction and block template when mempool is empty
         let genesis_block = Block::genesis_block();
-        let transaction_empty_mempool =
+        let (transaction_empty_mempool, _coinbase_sender_randomness) =
             create_block_transaction(&genesis_block, &premine_receiver_global_state);
         assert_eq!(
             1,
@@ -379,7 +407,7 @@ mod mine_loop_tests {
         assert_eq!(1, premine_receiver_global_state.mempool.len());
 
         // Build transaction
-        let transaction_non_empty_mempool =
+        let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) =
             create_block_transaction(&genesis_block, &premine_receiver_global_state);
         assert_eq!(
             3,

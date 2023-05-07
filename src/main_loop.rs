@@ -295,10 +295,11 @@ fn stay_in_sync_mode(
 impl MainLoopHandler {
     async fn handle_miner_thread_message(&self, msg: MinerToMain) -> Result<()> {
         match msg {
-            MinerToMain::NewBlock(new_block) => {
+            MinerToMain::NewBlockFound(new_block_info) => {
                 // When receiving a block from the miner thread, we assume it is valid
                 // and we assume it is the longest chain even though we could have received
                 // a block from a peer thread before this event is triggered.
+                let new_block = new_block_info.block;
                 info!("Miner found new block: {}", new_block.header.height);
                 self.main_to_peer_broadcast_tx
                 .send(MainToPeerThread::BlockFromMiner(new_block.clone()))
@@ -375,6 +376,13 @@ impl MainLoopHandler {
                         .as_ref()
                         .unwrap()
                         .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)?;
+
+                    // Notify wallet to expect the coinbase UTXO, as we mined this block
+                    self.global_state.wallet_state.add_expected_utxo(
+                        new_block_info.coinbase_utxo_info.utxo,
+                        new_block_info.coinbase_utxo_info.sender_randomness,
+                        new_block_info.coinbase_utxo_info.receiver_preimage,
+                    );
 
                     // update wallet state with relevant UTXOs from this block
                     self.global_state
@@ -841,9 +849,6 @@ impl MainLoopHandler {
         tokio::pin!(mp_resync_timer);
 
         loop {
-            // Set a timer to run peer discovery process every N seconds
-
-            // Set a timer for synchronization handling, but only if we are in synchronization mod
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
@@ -890,7 +895,8 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server thread
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    if self.handle_rpc_server_message(rpc_server_message.clone()).await? {
+                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone()).await?;
+                    if shutdown_after_execution {
                         break
                     }
                 }
@@ -936,6 +942,7 @@ impl MainLoopHandler {
 
         self.graceful_shutdown().await?;
         info!("Shutdown completed.");
+
         Ok(())
     }
 
@@ -974,6 +981,8 @@ impl MainLoopHandler {
         // Ok(())
     }
 
+    /// Handle messages from the RPC server. Returns `true` iff the client should shut down
+    /// after handling this message.
     async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::Send(transaction) => {

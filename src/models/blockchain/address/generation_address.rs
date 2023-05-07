@@ -29,6 +29,7 @@ use crate::models::blockchain::transaction::Transaction;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 
+#[derive(Clone, Debug)]
 pub struct SpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,

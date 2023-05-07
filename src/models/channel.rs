@@ -3,10 +3,13 @@ use std::net::SocketAddr;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
 
+use super::blockchain::address::generation_address;
 use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::blockchain::block::{block_height::BlockHeight, Block};
+use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::Transaction;
 use super::peer::TransactionNotification;
+use super::state::wallet::wallet_state::ExpectedUtxo;
 
 #[derive(Clone, Debug)]
 pub enum MainToMiner {
@@ -24,8 +27,14 @@ pub enum MainToMiner {
 }
 
 #[derive(Clone, Debug)]
+pub struct NewBlockFound {
+    pub block: Box<Block>,
+    pub coinbase_utxo_info: Box<ExpectedUtxo>,
+}
+
+#[derive(Clone, Debug)]
 pub enum MinerToMain {
-    NewBlock(Box<Block>),
+    NewBlockFound(NewBlockFound),
 }
 
 #[derive(Clone, Debug)]
