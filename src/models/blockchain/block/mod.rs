@@ -150,7 +150,7 @@ impl Block {
         Self { hash, header, body }
     }
 
-    /// Merge a transaction into this block's transaction using the authority signature on the transaction
+    /// Merge a transaction into this block's transaction
     /// Mutator set data must be valid in all inputs.
     pub fn accumulate_transaction(&mut self, transaction: Transaction) {
         // merge

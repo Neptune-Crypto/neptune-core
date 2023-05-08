@@ -343,9 +343,49 @@ impl Transaction {
             timestamp,
         };
 
-        let mut merged_transaction = Transaction {
+        let merged_witness = match (&self.witness, &other.witness) {
+            (Witness::Primitive(self_witness), Witness::Primitive(other_witness)) => {
+                Witness::Primitive(PrimitiveWitness {
+                    input_utxos: vec![
+                        self_witness.input_utxos.clone(),
+                        other_witness.input_utxos.clone(),
+                    ]
+                    .concat(),
+                    lock_script_witnesses: vec![
+                        self_witness.lock_script_witnesses.clone(),
+                        other_witness.lock_script_witnesses.clone(),
+                    ]
+                    .concat(),
+                    input_membership_proofs: vec![
+                        self_witness.input_membership_proofs.clone(),
+                        other_witness.input_membership_proofs.clone(),
+                    ]
+                    .concat(),
+                    output_utxos: vec![
+                        self_witness.output_utxos.clone(),
+                        other_witness.output_utxos.clone(),
+                    ]
+                    .concat(),
+                    pubscripts: vec![
+                        self_witness.pubscripts.clone(),
+                        other_witness.pubscripts.clone(),
+                    ]
+                    .concat(),
+                })
+            }
+            (Witness::Faith, Witness::Primitive(prim_witness)) => {
+                Witness::Primitive(prim_witness.to_owned())
+            }
+            _ => {
+                let self_type = std::mem::discriminant(&self.witness);
+                let other_type = std::mem::discriminant(&other.witness);
+                todo!("Can only merge primitive witnesses for now. Got: self: {self_type:?}; other: {other_type:?}");
+            }
+        };
+
+        let merged_transaction = Transaction {
             kernel: merged_kernel,
-            witness: Witness::SingleProof(SingleProof(Proof(vec![]))),
+            witness: merged_witness,
         };
 
         merged_transaction
