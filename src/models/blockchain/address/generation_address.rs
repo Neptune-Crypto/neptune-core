@@ -127,6 +127,19 @@ pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
     Ok(bytes[0..length].to_vec())
 }
 
+/// Verify the UTXO owner's assent to the transaction.
+/// This is the rust reference implementation, but the version of
+/// this logic that is proven is `lock_script`.
+///
+/// This function mocks proof verification.
+pub fn std_lockscript_reference_verify_unlock(
+    spending_lock: Digest,
+    _bind_to: Digest,
+    witness_data: [BFieldElement; DIGEST_LENGTH],
+) -> bool {
+    spending_lock == Digest::new(witness_data).vmhash::<Hash>()
+}
+
 impl SpendingKey {
     pub fn scan_for_announced_utxos(
         &self,
@@ -322,19 +335,6 @@ impl ReceivingAddress {
         Ok((pubscript, ciphertext))
     }
 
-    /// Verify the UTXO owner's assent to the transaction.
-    /// This is the rust reference implementation, but the version of
-    /// this logic that is proven is `lock_script`.
-    ///
-    /// This function mocks proof verification.
-    pub fn reference_verify_unlock(
-        &self,
-        _bind_to: &Digest,
-        witness_data: &[BFieldElement; DIGEST_LENGTH],
-    ) -> bool {
-        self.spending_lock == Digest::new(*witness_data).vmhash::<Hash>()
-    }
-
     /// Generate a lock script from the spending lock. Satisfaction
     /// of this lock script establishes the UTXO owner's assent to
     /// the transaction. The logic contained in here should be
@@ -402,6 +402,19 @@ impl ReceivingAddress {
             Ok(ra) => Ok(ra),
             Err(e) => bail!("Could not decode bech32m address because of error: {e}"),
         }
+    }
+
+    /// Verify the UTXO owner's assent to the transaction.
+    /// This is the rust reference implementation, but the version of
+    /// this logic that is proven is `lock_script`.
+    ///
+    /// This function mocks proof verification.
+    fn reference_verify_unlock(
+        &self,
+        msg: Digest,
+        witness_data: [BFieldElement; DIGEST_LENGTH],
+    ) -> bool {
+        std_lockscript_reference_verify_unlock(self.spending_lock, msg, witness_data)
     }
 }
 
@@ -486,7 +499,7 @@ mod test_generation_addresses {
 
         let msg: Digest = rng.gen();
         let witness_data = spending_key.binding_unlock(&msg);
-        receiving_address.reference_verify_unlock(&msg, &witness_data);
+        receiving_address.reference_verify_unlock(msg, witness_data);
     }
 
     #[test]

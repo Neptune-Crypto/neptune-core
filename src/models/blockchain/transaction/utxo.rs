@@ -2,6 +2,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use twenty_first::shared_math::tip5::Digest;
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use crate::models::blockchain::shared::Hash;
 
@@ -95,6 +96,27 @@ pub struct LockScript(pub Vec<BFieldElement>);
 impl Hashable for LockScript {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         self.0.clone()
+    }
+}
+
+impl LockScript {
+    /// Extract the public key from a standard lockscript, and compare it
+    /// to a secret input which should be provided through `preimage`
+    pub fn mock_verify_standard(&self, preimage: Digest) -> bool {
+        // TODO: Delete this function once TVM is imported
+        if self.0.len() != 27 {
+            return false;
+        }
+
+        let elem4 = self.0[12];
+        let elem3 = self.0[14];
+        let elem2 = self.0[16];
+        let elem1 = self.0[18];
+        let elem0 = self.0[20];
+
+        let public_key = Digest::new([elem0, elem1, elem2, elem3, elem4]);
+
+        preimage.vmhash::<Hash>() == public_key
     }
 }
 

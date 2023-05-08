@@ -634,11 +634,11 @@ mod tests {
             generation_address::SpendingKey::derive_from_seed(premine_wallet_secret.secret_seed);
         let premine_receiver_address =
             generation_address::ReceivingAddress::from_spending_key(&premine_receiver_spending_key);
-        let other_wallet = WalletSecret::new(generate_secret_key());
+        let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_global_state =
-            get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
+            get_mock_global_state(Network::Main, 2, Some(other_wallet_secret.clone())).await;
         let other_receiver_spending_key =
-            generation_address::SpendingKey::derive_from_seed(premine_wallet_secret.secret_seed);
+            generation_address::SpendingKey::derive_from_seed(other_wallet_secret.secret_seed);
         let other_receiver_address =
             generation_address::ReceivingAddress::from_spending_key(&other_receiver_spending_key);
 

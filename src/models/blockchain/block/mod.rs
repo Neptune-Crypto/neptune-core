@@ -291,14 +291,14 @@ impl Block {
         // consistent with the transactions.
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
-        let mut mutator_set_update = MutatorSetUpdate::new(
+        let mutator_set_update = MutatorSetUpdate::new(
             block_copy.body.transaction.kernel.inputs.clone(),
             block_copy.body.transaction.kernel.outputs.clone(),
         );
         let mut ms = block_copy.body.previous_mutator_set_accumulator.clone();
         let ms_update_result = mutator_set_update.apply(&mut ms);
         match ms_update_result {
-            Ok(_) => (),
+            Ok(()) => (),
             Err(err) => {
                 warn!("Failed to apply mutator set update: {}", err);
                 return false;
@@ -388,60 +388,62 @@ impl Block {
 mod block_tests {
     use crate::{
         config_models::network::Network,
-        models::state::wallet::{self, WalletSecret},
-        tests::shared::get_mock_global_state,
+        models::state::UtxoReceiverData,
+        tests::shared::{get_mock_global_state, make_mock_block},
     };
 
     use super::*;
 
-    use anyhow::Result;
+    use rand::random;
     use tracing_test::traced_test;
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn merge_transaction_test() -> Result<()> {
-    //     // We need the global state to construct a transaction. This global state
-    //     // has a wallet which receives a premine-UTXO.
-    //     let global_state = get_mock_global_state(Network::Main, 2, None).await;
-    //     let genesis_block = Block::genesis_block();
-    //     let mut block_1 = make_mock_block(
-    //         &genesis_block,
-    //         None,
-    //         global_state.wallet_state.wallet_secret.get_public_key(),
-    //     );
-    //     assert!(
-    //         block_1.is_valid_for_devnet(&genesis_block),
-    //         "Block 1 must be valid with only coinbase output"
-    //     );
+    #[traced_test]
+    #[tokio::test]
+    async fn merge_transaction_test() {
+        // We need the global state to construct a transaction. This global state
+        // has a wallet which receives a premine-UTXO.
+        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let spending_key = generation_address::SpendingKey::derive_from_seed(
+            global_state.wallet_state.wallet_secret.secret_seed,
+        );
+        let address = generation_address::ReceivingAddress::from_spending_key(&spending_key);
+        let other_address = generation_address::ReceivingAddress::derive_from_seed(random());
+        let genesis_block = Block::genesis_block();
+        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address);
+        assert!(
+            block_1.is_valid_for_devnet(&genesis_block),
+            "Block 1 must be valid with only coinbase output"
+        );
 
-    //     // create a new transaction, merge it into block 1 and check that block 1 is still valid
-    //     let other_wallet = WalletSecret::new(wallet::generate_secret_key());
-    //     let new_utxo = Utxo {
-    //         amount: 5.into(),
-    //         public_key: other_wallet.get_public_key(),
-    //     };
-    //     let new_tx = global_state
-    //         .create_transaction(vec![new_utxo], 1.into())
-    //         .await
-    //         .unwrap();
-    //     block_1.authority_merge_transaction(new_tx);
-    //     assert!(
-    //         block_1.is_valid_for_devnet(&genesis_block),
-    //         "Block 1 must be valid after adding a transaction"
-    //     );
+        // create a new transaction, merge it into block 1 and check that block 1 is still valid
+        let new_utxo = Utxo::new_native_coin(other_address.lock_script(), 10.into());
+        let reciever_data = UtxoReceiverData {
+            pubscript: vec![],
+            pubscript_input: vec![],
+            receiver_privacy_digest: other_address.privacy_digest,
+            sender_randomness: random(),
+            utxo: new_utxo,
+        };
+        let new_tx = global_state
+            .create_transaction(vec![reciever_data], 1.into())
+            .await
+            .unwrap();
+        block_1.accumulate_transaction(new_tx);
+        assert!(
+            block_1.is_valid_for_devnet(&genesis_block),
+            "Block 1 must be valid after adding a transaction"
+        );
 
-    //     // Sanity checks
-    //     assert_eq!(
-    //         3,
-    //         block_1.body.transaction.outputs.len(),
-    //         "New block must have three outputs: coinbase, transaction, and change"
-    //     );
-    //     assert_eq!(
-    //         1,
-    //         block_1.body.transaction.inputs.len(),
-    //         "New block must have one input: spending of genesis UTXO"
-    //     );
-
-    //     Ok(())
-    // }
+        // Sanity checks
+        assert_eq!(
+            3,
+            block_1.body.transaction.kernel.outputs.len(),
+            "New block must have three outputs: coinbase, transaction, and change"
+        );
+        assert_eq!(
+            1,
+            block_1.body.transaction.kernel.inputs.len(),
+            "New block must have one input: spending of genesis UTXO"
+        );
+    }
 }

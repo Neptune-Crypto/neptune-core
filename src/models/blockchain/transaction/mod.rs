@@ -12,6 +12,7 @@ use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::warn;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
@@ -251,6 +252,14 @@ impl Transaction {
                     let std_input = Hash::hash(&self.kernel).to_sequence();
                     let std_output: Vec<BFieldElement> = vec![];
                     // verify (program, std_input, secret_input, std_output)
+
+                    // std_lockscript_reference_verify_unlock();
+                    if !program.mock_verify_standard(Digest::new(
+                        secret_input.to_vec().try_into().unwrap(),
+                    )) {
+                        warn!("Failed to verify lock script of transaction");
+                        return false;
+                    }
                 }
 
                 // verify removal records
