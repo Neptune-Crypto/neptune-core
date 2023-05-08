@@ -341,7 +341,10 @@ pub async fn mock_regtest_mine(
 mod mine_loop_tests {
     use tracing_test::traced_test;
 
-    use crate::{config_models::network::Network, tests::shared::get_mock_global_state};
+    use crate::{
+        config_models::network::Network, models::state::UtxoReceiverData,
+        tests::shared::get_mock_global_state,
+    };
 
     use super::*;
 
@@ -381,7 +384,7 @@ mod mine_loop_tests {
 
         // Add a transaction to the mempool
         let four_neptune_coins = Amount::from(4).to_native_coins();
-        let receiver_digest = Digest::default();
+        let receiver_privacy_digest = Digest::default();
         let sender_randomness = Digest::default();
         let pubscript: Vec<BFieldElement> = vec![];
         let pubscript_input: Vec<BFieldElement> = vec![];
@@ -391,12 +394,15 @@ mod mine_loop_tests {
         };
         let tx_by_preminer = premine_receiver_global_state
             .create_transaction(
-                vec![(
-                    tx_output,
-                    sender_randomness,
-                    receiver_digest,
-                    (pubscript, pubscript_input),
-                )],
+                vec![
+                    (UtxoReceiverData {
+                        utxo: tx_output,
+                        sender_randomness,
+                        receiver_privacy_digest,
+                        pubscript,
+                        pubscript_input,
+                    }),
+                ],
                 1.into(),
             )
             .await

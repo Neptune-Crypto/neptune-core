@@ -608,42 +608,39 @@ pub fn make_mock_transaction(
 
 // `make_mock_transaction2`, in contrast to `make_mock_transaction`, allows you
 // to choose signing wallet, fee, and timestamp.
-// pub fn make_mock_transaction_with_wallet(
-//     inputs: Vec<Utxo>,
-//     outputs: Vec<Utxo>,
-//     fee: Amount,
-//     wallet_state: &WalletState,
-//     timestamp: Option<BFieldElement>,
-// ) -> Transaction {
-//     let input_utxos_with_signature = inputs
-//         .iter()
-//         .map(|in_utxo| make_mock_unsigned_devnet_input(in_utxo.amount, &wallet_state.wallet_secret))
-//         .collect::<Vec<_>>();
+pub fn make_mock_transaction_with_wallet(
+    inputs: Vec<RemovalRecord<Hash>>,
+    outputs: Vec<AdditionRecord>,
+    fee: Amount,
+    wallet_state: &WalletState,
+    timestamp: Option<BFieldElement>,
+) -> Transaction {
+    let timestamp = match timestamp {
+        Some(ts) => ts,
+        None => BFieldElement::new(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Timestamp generation must work")
+                .as_millis()
+                .try_into()
+                .expect("Timestamp in ms must be representable as u64"),
+        ),
+    };
+    let kernel = TransactionKernel {
+        inputs,
+        outputs,
+        pubscript_hashes_and_inputs: vec![],
+        fee,
+        timestamp,
+    };
 
-//     // TODO: This is probably the wrong digest.  Other code uses: output_randomness.clone().into()
-//     let output_utxos_with_digest = outputs
-//         .into_iter()
-//         .map(|out_utxo| (out_utxo, Hash::hash(&out_utxo)))
-//         .collect::<Vec<_>>();
+    let transaction = Transaction {
+        kernel,
+        witness: transaction::Witness::Faith,
+    };
 
-//     let timestamp = timestamp.unwrap_or_else(|| {
-//         BFieldElement::new(
-//             SystemTime::now()
-//                 .duration_since(UNIX_EPOCH)
-//                 .expect("Timestamping failed")
-//                 .as_secs(),
-//         )
-//     });
-
-//     Transaction {
-//         inputs: input_utxos_with_signature,
-//         outputs: output_utxos_with_digest,
-//         public_scripts: vec![],
-//         fee,
-//         timestamp,
-//         authority_proof: None,
-//     }
-// }
+    transaction
+}
 
 /// Build a fake block with a random hash, containing *one* output UTXO in the form
 /// of a coinbase output.

@@ -490,13 +490,17 @@ mod tests {
         config_models::network::Network,
         models::{
             blockchain::{
+                address::generation_address,
                 block::block_height::BlockHeight,
                 transaction::{amount::Amount, utxo::Utxo, Transaction},
             },
             shared::SIZE_1MB_IN_BYTES,
             state::wallet::{generate_secret_key, WalletSecret},
         },
-        tests::shared::{get_mock_global_state, get_mock_wallet_state},
+        tests::shared::{
+            get_mock_global_state, get_mock_wallet_state, make_mock_block,
+            make_mock_transaction_with_wallet,
+        },
     };
     use anyhow::Result;
     use num_bigint::BigInt;
@@ -504,100 +508,116 @@ mod tests {
     use tracing_test::traced_test;
     use twenty_first::shared_math::b_field_element::BFieldElement;
 
-    // #[tokio::test]
-    // pub async fn insert_then_get_then_remove_then_get() {
-    //     let mempool = Mempool::new(ByteSize::gb(1));
-    //     let wallet_state = get_mock_wallet_state(None).await;
-    //     let transaction =
-    //         make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
-    //     let transaction_digest = &Hash::hash(&transaction);
-    //     assert!(!mempool.contains(transaction_digest));
-    //     mempool.insert(&transaction);
-    //     assert!(mempool.contains(transaction_digest));
+    #[tokio::test]
+    pub async fn insert_then_get_then_remove_then_get() {
+        let mempool = Mempool::new(ByteSize::gb(1));
+        let wallet_state = get_mock_wallet_state(None).await;
+        let transaction =
+            make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
+        let transaction_digest = &Hash::hash(&transaction);
+        assert!(!mempool.contains(transaction_digest));
+        mempool.insert(&transaction);
+        assert!(mempool.contains(transaction_digest));
 
-    //     let transaction_get_option = mempool.get(transaction_digest);
-    //     assert_eq!(Some(transaction.clone()), transaction_get_option);
-    //     assert!(mempool.contains(transaction_digest));
+        let transaction_get_option = mempool.get(transaction_digest);
+        assert_eq!(Some(transaction.clone()), transaction_get_option);
+        assert!(mempool.contains(transaction_digest));
 
-    //     let transaction_remove_option = mempool.remove(transaction_digest);
-    //     assert_eq!(Some(transaction), transaction_remove_option);
-    //     assert!(!mempool.contains(transaction_digest));
+        let transaction_remove_option = mempool.remove(transaction_digest);
+        assert_eq!(Some(transaction), transaction_remove_option);
+        assert!(!mempool.contains(transaction_digest));
 
-    //     let transaction_second_remove_option = mempool.remove(transaction_digest);
-    //     assert_eq!(None, transaction_second_remove_option);
-    //     assert!(!mempool.contains(transaction_digest))
-    // }
+        let transaction_second_remove_option = mempool.remove(transaction_digest);
+        assert_eq!(None, transaction_second_remove_option);
+        assert!(!mempool.contains(transaction_digest))
+    }
 
-    // // Create a mempool with 10 transactions.
-    // async fn setup(transactions_count: u32) -> Mempool {
-    //     let mempool = Mempool::default();
-    //     let wallet_state = get_mock_wallet_state(None).await;
-    //     for i in 0..transactions_count {
-    //         let t = make_mock_transaction_with_wallet(
-    //             vec![],
-    //             vec![],
-    //             Amount::from(i),
-    //             &wallet_state,
-    //             None,
-    //         );
-    //         mempool.insert(&t);
-    //     }
-    //     mempool
-    // }
+    // Create a mempool with n transactions.
+    async fn setup(transactions_count: u32) -> Mempool {
+        let mempool = Mempool::default();
+        let wallet_state = get_mock_wallet_state(None).await;
+        for i in 0..transactions_count {
+            let t = make_mock_transaction_with_wallet(
+                vec![],
+                vec![],
+                Amount::from(i),
+                &wallet_state,
+                None,
+            );
+            mempool.insert(&t);
+        }
+        mempool
+    }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn get_densest_transactions() {
-    //     let mempool = setup(10).await;
+    #[traced_test]
+    #[tokio::test]
+    async fn get_densest_transactions() {
+        // Verify that transactions are returned ordered by fee density, with highest fee density first
+        let mempool = setup(10).await;
 
-    //     let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
-    //     let mut prev_fee_density = max_fee_density;
-    //     for curr_transaction in mempool.get_transactions_for_block(SIZE_1MB_IN_BYTES) {
-    //         let curr_fee_density = curr_transaction.fee_density();
-    //         assert!(curr_fee_density <= prev_fee_density);
-    //         prev_fee_density = curr_fee_density;
-    //     }
-    //     assert!(!mempool.is_empty())
-    // }
+        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
+        let mut prev_fee_density = max_fee_density;
+        for curr_transaction in mempool.get_transactions_for_block(SIZE_1MB_IN_BYTES) {
+            let curr_fee_density = curr_transaction.fee_density();
+            assert!(curr_fee_density <= prev_fee_density);
+            prev_fee_density = curr_fee_density;
+        }
+        assert!(!mempool.is_empty())
+    }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn prune_stale_transactions() {
-    //     let wallet_state = get_mock_wallet_state(None).await;
-    //     let mempool = Mempool::default();
-    //     assert!(
-    //         mempool.is_empty(),
-    //         "Mempool must be empty after initialization"
-    //     );
+    #[traced_test]
+    #[tokio::test]
+    async fn get_sorted_iter() {
+        // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
+        let mempool = setup(10).await;
 
-    //     let eight_days_ago = now() - Duration::from_secs(8 * 24 * 60 * 60);
-    //     let timestamp = Some(BFieldElement::new(eight_days_ago.as_secs()));
+        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
+        let mut prev_fee_density = max_fee_density;
+        for (_transaction_id, curr_fee_density) in mempool.get_sorted_iter() {
+            assert!(curr_fee_density <= prev_fee_density);
+            prev_fee_density = curr_fee_density;
+        }
+        assert!(!mempool.is_empty())
+    }
 
-    //     for i in 0u32..5 {
-    //         let t = make_mock_transaction_with_wallet(
-    //             vec![],
-    //             vec![],
-    //             Amount::from(i),
-    //             &wallet_state,
-    //             timestamp,
-    //         );
-    //         mempool.insert(&t);
-    //     }
+    #[traced_test]
+    #[tokio::test]
+    async fn prune_stale_transactions() {
+        let wallet_state = get_mock_wallet_state(None).await;
+        let mempool = Mempool::default();
+        assert!(
+            mempool.is_empty(),
+            "Mempool must be empty after initialization"
+        );
 
-    //     for i in 0u32..5 {
-    //         let t = make_mock_transaction_with_wallet(
-    //             vec![],
-    //             vec![],
-    //             Amount::from(i),
-    //             &wallet_state,
-    //             None,
-    //         );
-    //         mempool.insert(&t);
-    //     }
-    //     assert_eq!(mempool.len(), 10);
-    //     mempool.prune_stale_transactions();
-    //     assert_eq!(mempool.len(), 5)
-    // }
+        let eight_days_ago = now() - Duration::from_secs(8 * 24 * 60 * 60);
+        let timestamp = Some(BFieldElement::new(eight_days_ago.as_secs()));
+
+        for i in 0u32..5 {
+            let t = make_mock_transaction_with_wallet(
+                vec![],
+                vec![],
+                Amount::from(i),
+                &wallet_state,
+                timestamp,
+            );
+            mempool.insert(&t);
+        }
+
+        for i in 0u32..5 {
+            let t = make_mock_transaction_with_wallet(
+                vec![],
+                vec![],
+                Amount::from(i),
+                &wallet_state,
+                None,
+            );
+            mempool.insert(&t);
+        }
+        assert_eq!(mempool.len(), 10);
+        mempool.prune_stale_transactions();
+        assert_eq!(mempool.len(), 5)
+    }
 
     // #[traced_test]
     // #[tokio::test]
@@ -605,14 +625,23 @@ mod tests {
     //     // We need the global state to construct a transaction. This global state
     //     // has a wallet which receives a premine-UTXO.
     //     let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
-    //     let premine_wallet = &premine_receiver_global_state.wallet_state.wallet_secret;
+    //     let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
+    //     let premine_receiver_spending_key =
+    //         generation_address::SpendingKey::derive_from_seed(premine_wallet_secret.secret_seed);
+    //     let premine_receiver_address =
+    //         generation_address::ReceivingAddress::from_spending_key(&premine_receiver_spending_key);
     //     let other_wallet = WalletSecret::new(generate_secret_key());
     //     let other_global_state =
     //         get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
+    //     let miner_receiver_spending_key =
+    //         generation_address::SpendingKey::derive_from_seed(premine_wallet_secret.secret_seed);
+    //     let miner_receiver_address =
+    //         generation_address::ReceivingAddress::from_spending_key(&miner_receiver_spending_key);
 
     //     // Ensure that both wallets have a non-zero balance
     //     let genesis_block = Block::genesis_block();
-    //     let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());
+    //     let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
+    //         make_mock_block(&genesis_block, None, miner_receiver_address);
 
     //     // Update both states with block 1
     //     premine_receiver_global_state
@@ -631,6 +660,11 @@ mod tests {
     //         .latest_block
     //         .lock()
     //         .await = block_1.clone();
+    //     other_global_state.wallet_state.add_expected_utxo(
+    //         coinbase_utxo_1,
+    //         cb_sender_randomness_1,
+    //         miner_receiver_spending_key.privacy_preimage,
+    //     );
     //     other_global_state
     //         .wallet_state
     //         .update_wallet_state_with_new_block(
@@ -647,13 +681,15 @@ mod tests {
     //     // Create a transaction that's valid to be included in block 2
     //     let mut output_utxos_generated_by_me: Vec<Utxo> = vec![];
     //     for i in 0..7 {
+    //         let amount: Amount = i.into();
     //         let new_utxo = Utxo {
-    //             amount: i.into(),
-    //             public_key: premine_wallet.get_public_key(),
+    //             coins: amount.to_native_coins(),
+    //             lock_script: premine_receiver_address.lock_script(),
     //         };
     //         output_utxos_generated_by_me.push(new_utxo);
     //     }
 
+    //     let receiver_data = output_utxos_generated_by_me.iter().map(|x| (x, )).collect_vec
     //     let tx_by_preminer = premine_receiver_global_state
     //         .create_transaction(output_utxos_generated_by_me, 1.into())
     //         .await?;
@@ -678,7 +714,7 @@ mod tests {
     //     m.insert(&tx_by_other_original);
 
     //     // Create next block which includes this transaction
-    //     let mut block_2 = make_mock_block(&block_1, None, premine_wallet.get_public_key());
+    //     let mut block_2 = make_mock_block(&block_1, None, premine_wallet_secret.get_public_key());
     //     block_2.authority_merge_transaction(tx_by_preminer.clone());
 
     //     // Update the mempool with block 2 and verify that the mempool is now empty
@@ -692,7 +728,7 @@ mod tests {
     //         m.get_transactions_for_block(usize::MAX)[0].clone();
 
     //     let block_3_with_no_input =
-    //         make_mock_block(&block_2, None, premine_wallet.get_public_key());
+    //         make_mock_block(&block_2, None, premine_wallet_secret.get_public_key());
     //     let mut block_3_with_updated_tx = block_3_with_no_input.clone();
 
     //     block_3_with_updated_tx.authority_merge_transaction(tx_by_other_updated.clone());
@@ -784,39 +820,39 @@ mod tests {
     //     Ok(())
     // }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn get_sorted_iter() {
-    //     let mempool = setup(10).await;
+    #[traced_test]
+    #[tokio::test]
+    async fn get_mempool_size() {
+        // Verify that the `get_size` method on mempool returns sane results
+        let tx_count_small = 10;
+        let mempool_small = setup(10).await;
+        let size_gs_small = mempool_small.get_size();
+        let size_serialized_small =
+            bincode::serialize(&mempool_small.internal.read().unwrap().tx_dictionary)
+                .unwrap()
+                .len();
+        assert!(size_gs_small >= size_serialized_small);
+        println!(
+            "size of mempool with {tx_count_small} empty txs reported as: {}",
+            size_gs_small
+        );
+        println!(
+            "actual size of mempool with {tx_count_small} empty txs when serialized: {}",
+            size_serialized_small
+        );
 
-    //     let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
-    //     let mut prev_fee_density = max_fee_density;
-    //     for (_transaction_id, curr_fee_density) in mempool.get_sorted_iter() {
-    //         assert!(curr_fee_density <= prev_fee_density);
-    //         prev_fee_density = curr_fee_density;
-    //     }
-    //     assert!(!mempool.is_empty())
-    // }
-
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn get_mempool_size() {
-    //     // Verify that the `get_size` method on mempool returns sane results
-    //     let mempool_small = setup(10).await;
-    //     let size_gs_small = mempool_small.get_size();
-    //     let size_serialized_small =
-    //         bincode::serialize(&mempool_small.internal.read().unwrap().tx_dictionary)
-    //             .unwrap()
-    //             .len();
-    //     assert!(size_gs_small >= size_serialized_small);
-
-    //     let mempool_big = setup(100).await;
-    //     let size_gs_big = mempool_big.get_size();
-    //     let size_serialized_big =
-    //         bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
-    //             .unwrap()
-    //             .len();
-    //     assert!(size_gs_big >= size_serialized_big);
-    //     assert!(size_gs_big >= 5 * size_gs_small);
-    // }
+        let tx_count_big = 100;
+        let mempool_big = setup(tx_count_big).await;
+        let size_gs_big = mempool_big.get_size();
+        let size_serialized_big =
+            bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
+                .unwrap()
+                .len();
+        assert!(size_gs_big >= size_serialized_big);
+        assert!(size_gs_big >= 5 * size_gs_small);
+        println!("size of mempool with {tx_count_big} empty txs reported as: {size_gs_big}",);
+        println!(
+            "actual size of mempool with {tx_count_big} empty txs when serialized: {size_serialized_big}",
+        );
+    }
 }

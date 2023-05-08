@@ -21,7 +21,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::GlobalState;
+use crate::models::state::{GlobalState, UtxoReceiverData};
 
 #[tarpc::service]
 pub trait RPC {
@@ -199,11 +199,12 @@ impl RPC for NeptuneRPCServer {
         let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
             .header
             .height;
-        let receiver_digest = address.privacy_digest;
-        let sender_randomness =
-            self.state
-                .wallet_state
-                .get_sender_randomness(&utxo, &receiver_digest, block_height);
+        let receiver_privacy_digest = address.privacy_digest;
+        let sender_randomness = self.state.wallet_state.get_sender_randomness(
+            &utxo,
+            &receiver_privacy_digest,
+            block_height,
+        );
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
@@ -219,12 +220,13 @@ impl RPC for NeptuneRPCServer {
                     return future::ready(None);
                 }
             };
-        let receiver_data = [(
+        let receiver_data = [(UtxoReceiverData {
             utxo,
             sender_randomness,
-            receiver_digest,
-            (pubscript, pubscript_input),
-        )]
+            receiver_privacy_digest,
+            pubscript,
+            pubscript_input,
+        })]
         .to_vec();
         let transaction_result =
             executor::block_on(self.state.create_transaction(receiver_data, fee));
