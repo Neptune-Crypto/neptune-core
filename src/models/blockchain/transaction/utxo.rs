@@ -1,10 +1,9 @@
+use crate::models::blockchain::shared::Hash;
+use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::emojihash_trait::Emojihash;
-
-use crate::models::blockchain::shared::Hash;
 
 use super::amount::AmountLike;
 use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
@@ -19,6 +18,27 @@ pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
 pub struct Utxo {
     pub lock_script: LockScript,
     pub coins: Vec<(Digest, Vec<BFieldElement>)>,
+}
+
+impl GetSize for Utxo {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        // self.lock_script.get_heap_size() + self.coins.len() * (std::mem::size_of::<Digest>())
+        let mut total = self.lock_script.get_heap_size();
+        for v in self.coins.iter() {
+            total += std::mem::size_of::<Digest>();
+            total += v.1.len() * std::mem::size_of::<BFieldElement>();
+        }
+
+        total
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
 }
 
 impl Utxo {
@@ -92,6 +112,20 @@ impl StdHash for Utxo {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockScript(pub Vec<BFieldElement>);
+
+impl GetSize for LockScript {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        std::mem::size_of::<BFieldElement>() * self.0.len()
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
 
 impl Hashable for LockScript {
     fn to_sequence(&self) -> Vec<BFieldElement> {

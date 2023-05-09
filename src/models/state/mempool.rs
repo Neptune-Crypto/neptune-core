@@ -67,15 +67,9 @@ pub struct Mempool {
     pub internal: Arc<StdRwLock<MempoolInternal>>,
 }
 
-impl Default for Mempool {
-    fn default() -> Self {
-        Mempool::new(ByteSize::gb(1))
-    }
-}
-
 impl Mempool {
-    pub fn new(max_size: ByteSize) -> Self {
-        let mempool_internal = MempoolInternal::new(max_size);
+    pub fn new(max_total_size: ByteSize) -> Self {
+        let mempool_internal = MempoolInternal::new(max_total_size);
         let internal = Arc::new(StdRwLock::new(mempool_internal));
         Mempool { internal }
     }
@@ -168,8 +162,9 @@ impl Mempool {
     ///
     /// ```
     /// use neptune_core::models::state::mempool::Mempool;
+    /// use bytesize::ByteSize;
     ///
-    /// let mempool = Mempool::default();
+    /// let mempool = Mempool::new(ByteSize::gb(1));
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
@@ -196,9 +191,10 @@ impl Mempool {
 /// // Instantiate Mempool, insert and get a transaction.
 /// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
 /// use neptune_core::models::state::mempool::Mempool;
+/// use byte_size::ByteSize;
 /// use twenty_first::{shared_math::b_field_element::BFieldElement, amount::u32s::U32s};
 ///
-/// let mempool = Mempool::default();
+/// let mempool = Mempool::new(ByteSize::gb(1));
 /// let timestamp = BFieldElement::new(0);
 /// let transaction = Transaction {
 ///     inputs: vec![],
@@ -215,7 +211,7 @@ impl Mempool {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct MempoolInternal {
-    max_size: usize,
+    max_total_size: usize,
     // Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
     // Maintain for fast min and max
@@ -224,12 +220,12 @@ pub struct MempoolInternal {
 }
 
 impl MempoolInternal {
-    fn new(max_size: ByteSize) -> Self {
-        let max_size = max_size.0.try_into().unwrap();
+    fn new(max_total_size: ByteSize) -> Self {
         let table = Default::default();
         let queue = Default::default();
+        let max_total_size = max_total_size.0.try_into().unwrap();
         Self {
-            max_size,
+            max_total_size,
             tx_dictionary: table,
             queue,
         }
@@ -268,6 +264,8 @@ impl MempoolInternal {
         None
     }
 
+    /// Insert a transaction into the mempool. It is the caller's responsibility to verify
+    /// that the transaction is valid.
     fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         {
             // Early exit on transactions too long into the future.
@@ -278,6 +276,10 @@ impl MempoolInternal {
                 return None;
             }
         }
+
+        // TODO: Do we need to check that the transaction does not exceed a max size?
+        // I don't think we do since the caller has already checked that the transaction
+        // is valid.
 
         // If transaction to be inserted conflicts with a transaction that's already
         // in the mempool we preserve only the one with the highest fee density.
@@ -465,7 +467,7 @@ impl MempoolInternal {
 
     fn shrink_to_max_size(&mut self) {
         // Repeately remove the least valuable transaction
-        while self.get_size() > self.max_size && self.pop_min().is_some() {
+        while self.get_size() > self.max_total_size && self.pop_min().is_some() {
             continue;
         }
 
@@ -496,7 +498,7 @@ mod tests {
             },
             shared::SIZE_1MB_IN_BYTES,
             state::{
-                wallet::{generate_secret_key, wallet_state::UtxoNotifier, WalletSecret},
+                wallet::{generate_secret_key, utxo_notification_pool::UtxoNotifier, WalletSecret},
                 UtxoReceiverData,
             },
         },
@@ -538,7 +540,7 @@ mod tests {
 
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32) -> Mempool {
-        let mempool = Mempool::default();
+        let mempool = Mempool::new(ByteSize::gb(1));
         let wallet_state = get_mock_wallet_state(None).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
@@ -588,7 +590,7 @@ mod tests {
     #[tokio::test]
     async fn prune_stale_transactions() {
         let wallet_state = get_mock_wallet_state(None).await;
-        let mempool = Mempool::default();
+        let mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -664,12 +666,17 @@ mod tests {
             .latest_block
             .lock()
             .await = block_1.clone();
-        other_global_state.wallet_state.add_expected_utxo(
-            coinbase_utxo_1,
-            cb_sender_randomness_1,
-            other_receiver_spending_key.privacy_preimage,
-            UtxoNotifier::OwnMiner,
-        );
+        other_global_state
+            .wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                coinbase_utxo_1,
+                cb_sender_randomness_1,
+                other_receiver_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            );
         other_global_state
             .wallet_state
             .update_wallet_state_with_new_block(
@@ -706,7 +713,7 @@ mod tests {
             .await?;
 
         // Add this transaction to the mempool
-        let m = Mempool::default();
+        let m = Mempool::new(ByteSize::gb(1));
         m.insert(&tx_by_preminer);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually

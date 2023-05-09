@@ -27,6 +27,7 @@ use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
+use bytesize::ByteSize;
 use config_models::cli_args;
 use config_models::network::Network;
 use database::rusty::RustyLevelDB;
@@ -60,23 +61,16 @@ const RPC_CHANNEL_CAPACITY: usize = 1000;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
-    // Clone for injecting into `GlobalState`
-    let cli = cli_args.clone();
-
     // Get data directory (wallet, block database), create one if none exists
-    let data_dir = DataDirectory::get(cli_args.data_dir, cli_args.network)?;
+    let data_dir = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
     DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path())?;
     debug!("Data directory is {}", data_dir);
 
     // Get wallet object, create one if none exists
     let wallet_secret: WalletSecret =
         WalletSecret::read_from_file_or_create(&data_dir.wallet_file_path())?;
-    let wallet_state = WalletState::new_from_wallet_secret(
-        Some(&data_dir),
-        wallet_secret,
-        cli.number_of_mps_per_utxo,
-    )
-    .await;
+    let wallet_state =
+        WalletState::new_from_wallet_secret(Some(&data_dir), wallet_secret, &cli_args).await;
 
     // Connect to or create databases for block index, peers, mutator set, block sync
     let block_index_db = ArchivalState::initialize_block_index_database(&data_dir)?;
@@ -121,10 +115,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         light_state,
         archival_state: Some(archival_state),
     };
-    let mempool = Mempool::default();
+    let mempool = Mempool::new(cli_args.max_mempool_size);
     let state = GlobalState {
         chain: blockchain_state,
-        cli,
+        cli: cli_args,
         net: networking_state,
         wallet_state,
         mempool,

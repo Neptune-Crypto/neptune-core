@@ -1,12 +1,15 @@
 use anyhow::{bail, Result};
+use bytesize::ByteSize;
+use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use mutator_set_tf::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use num_traits::Zero;
+use priority_queue::DoublePriorityQueue;
 use rusty_leveldb::DB;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -24,8 +27,10 @@ use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipPr
 use twenty_first::shared_math::digest::{Digest, DIGEST_LENGTH};
 
 use super::rusty_wallet_database::RustyWalletDatabase;
+use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
 use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::WalletSecret;
+use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -34,7 +39,6 @@ use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
-use crate::models::peer::{InstanceId, PeerInfo};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::Hash;
 
@@ -43,41 +47,9 @@ pub struct WalletState {
     pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
-    expected_utxos: Arc<std::sync::RwLock<Vec<ExpectedUtxo>>>,
-}
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum UtxoNotifier {
-    OwnMiner,
-    Cli,
-    Peer((InstanceId, SocketAddr)),
-    Premine,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ExpectedUtxo {
-    pub utxo: Utxo,
-    pub sender_randomness: Digest,
-    pub receiver_preimage: Digest,
-    pub received_from: UtxoNotifier,
-    pub notification_received: SystemTime,
-}
-
-impl ExpectedUtxo {
-    pub fn new(
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiver_preimage: Digest,
-        received_from: UtxoNotifier,
-    ) -> Self {
-        Self {
-            utxo,
-            sender_randomness,
-            receiver_preimage,
-            received_from,
-            notification_received: SystemTime::now(),
-        }
-    }
+    // Anyone may read from expected_utxos, only main thread should write
+    pub expected_utxos: Arc<std::sync::RwLock<UtxoNotificationPool>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -107,7 +79,7 @@ impl WalletState {
     pub async fn new_from_wallet_secret(
         data_dir: Option<&DataDirectory>,
         wallet_secret: WalletSecret,
-        number_of_mps_per_utxo: usize,
+        cli_args: &Args,
     ) -> Self {
         // Create or connect to wallet block DB
         let wallet_db = match data_dir {
@@ -135,8 +107,10 @@ impl WalletState {
         let ret = Self {
             wallet_db: rusty_wallet_database.clone(),
             wallet_secret,
-            number_of_mps_per_utxo,
-            expected_utxos: Arc::new(RwLock::new(vec![])),
+            number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
+            expected_utxos: Arc::new(RwLock::new(UtxoNotificationPool::new(
+                cli_args.max_utxo_notification_size,
+            ))),
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -156,7 +130,7 @@ impl WalletState {
                         let lock_script = own_receiving_address.lock_script();
                         let utxo = Utxo::new(lock_script, coins);
 
-                        ret.add_expected_utxo(
+                        ret.expected_utxos.write().unwrap().add_expected_utxo(
                             utxo,
                             Digest::default(),
                             own_spending_key.privacy_preimage,
@@ -235,83 +209,6 @@ impl WalletState {
             .collect_vec()
     }
 
-    /// Scans the transaction for outputs that match with list of expected
-    /// incomign UTXOs, and returns expected UTXOs that are present in the
-    /// transaction.
-    fn scan_for_expected_utxos(
-        &self,
-        transaction: &Transaction,
-    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
-        let mut received_expected_utxos = vec![];
-        for (utxo, sender_randomness, receiver_preimage) in self.get_expected_utxos() {
-            let receiver_digest = receiver_preimage.vmhash::<Hash>();
-            let ar = commit::<Hash>(&Hash::hash(&utxo), &sender_randomness, &receiver_digest);
-            if transaction
-                .kernel
-                .outputs
-                .iter()
-                .any(|output| *output == ar)
-            {
-                received_expected_utxos.push((ar, utxo, sender_randomness, receiver_preimage));
-            }
-        }
-        received_expected_utxos
-    }
-
-    fn get_expected_utxos(&self) -> Vec<(Utxo, Digest, Digest)> {
-        self.expected_utxos
-            .read()
-            .unwrap()
-            .iter()
-            .map(|expected_utxo| {
-                (
-                    expected_utxo.utxo.clone(),
-                    expected_utxo.sender_randomness,
-                    expected_utxo.receiver_preimage,
-                )
-            })
-            .collect_vec()
-    }
-
-    pub fn add_expected_utxo(
-        &self,
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiver_preimage: Digest,
-        received_from: UtxoNotifier,
-    ) {
-        self.expected_utxos.write().unwrap().push(ExpectedUtxo {
-            utxo,
-            sender_randomness,
-            receiver_preimage,
-            received_from,
-            notification_received: SystemTime::now(),
-        });
-    }
-
-    pub fn drop_expected_utxo(
-        &mut self,
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiver_preimage: Digest,
-    ) {
-        let ar = commit::<Hash>(
-            &Hash::hash(&utxo),
-            &sender_randomness,
-            &Hash::hash(&receiver_preimage),
-        );
-        self.expected_utxos
-            .write()
-            .unwrap()
-            .retain(|expected_utxo| {
-                commit::<Hash>(
-                    &Hash::hash(&expected_utxo.utxo),
-                    &expected_utxo.sender_randomness,
-                    &Hash::hash(&expected_utxo.receiver_preimage),
-                ) != ar
-            });
-    }
-
     /// Update wallet state with new block. Assumes the given block
     /// is valid and that the wallet state is not up to date yet.
     pub fn update_wallet_state_with_new_block(
@@ -331,7 +228,13 @@ impl WalletState {
             "received_outputs as announced outputs = {}",
             received_outputs.len()
         );
-        received_outputs.append(&mut self.scan_for_expected_utxos(&transaction));
+        received_outputs.append(
+            &mut self
+                .expected_utxos
+                .read()
+                .unwrap()
+                .scan_for_expected_utxos(&transaction),
+        );
         debug!("received total outputs: = {}", received_outputs.len());
 
         let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =

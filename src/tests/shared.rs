@@ -1,5 +1,6 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
+use bytesize::ByteSize;
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
@@ -45,6 +46,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
+use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
@@ -195,7 +197,7 @@ pub async fn get_mock_global_state(
         light_state,
         archival_state: Some(archival_state),
     };
-    let mempool = Mempool::default();
+    let mempool = Mempool::new(ByteSize::gb(1));
     GlobalState {
         chain: blockchain_state,
         cli: Default::default(),
@@ -734,8 +736,9 @@ pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) ->
         None => WalletSecret::devnet_authority_wallet(),
     };
 
-    let number_of_mps_per_utxo = 30;
-    WalletState::new_from_wallet_secret(None, wallet_secret, number_of_mps_per_utxo).await
+    let mut cli_args: cli_args::Args = Default::default();
+    cli_args.number_of_mps_per_utxo = 30;
+    WalletState::new_from_wallet_secret(None, wallet_secret, &cli_args).await
 }
 
 pub async fn make_unit_test_archival_state(

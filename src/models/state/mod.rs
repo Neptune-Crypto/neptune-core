@@ -426,17 +426,14 @@ impl GlobalState {
 mod global_state_tests {
     use crate::{
         config_models::network::Network,
-        models::blockchain::block::Block,
+        models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},
         tests::shared::{get_mock_global_state, make_mock_block},
     };
     use rand::{random, thread_rng};
     use secp256k1::Secp256k1;
     use tracing_test::traced_test;
 
-    use super::{
-        wallet::{wallet_state::UtxoNotifier, WalletSecret},
-        *,
-    };
+    use super::{wallet::WalletSecret, *};
 
     async fn wallet_state_has_all_valid_mps_for(
         wallet_state: &WalletState,
@@ -650,7 +647,7 @@ mod global_state_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let (mock_block_1a, _coinbase_utxo, coinbase_output_randomness) =
+        let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
             make_mock_block(&genesis_block, None, own_receiving_address.clone());
         {
             let mut block_db_lock = global_state
@@ -672,12 +669,17 @@ mod global_state_tests {
                     Some(mock_block_1a.header.proof_of_work_family),
                 )?;
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
-            global_state.wallet_state.add_expected_utxo(
-                _coinbase_utxo,
-                coinbase_output_randomness,
-                own_spending_address.privacy_preimage,
-                UtxoNotifier::OwnMiner,
-            );
+            global_state
+                .wallet_state
+                .expected_utxos
+                .write()
+                .unwrap()
+                .add_expected_utxo(
+                    coinbase_utxo,
+                    coinbase_output_randomness,
+                    own_spending_address.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                );
             global_state
                 .wallet_state
                 .update_wallet_state_with_new_block(&mock_block_1a, &mut wallet_db_lock)
@@ -806,12 +808,17 @@ mod global_state_tests {
                     &mut block_db_lock,
                     Some(mock_block_1a.header.proof_of_work_family),
                 )?;
-            global_state.wallet_state.add_expected_utxo(
-                coinbase_utxo_1a,
-                cb_utxo_output_randomness_1a,
-                own_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
-            );
+            global_state
+                .wallet_state
+                .expected_utxos
+                .write()
+                .unwrap()
+                .add_expected_utxo(
+                    coinbase_utxo_1a,
+                    cb_utxo_output_randomness_1a,
+                    own_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                );
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
                 .wallet_state

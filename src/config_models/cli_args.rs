@@ -59,6 +59,14 @@ pub struct Args {
     #[clap(long, default_value = "1G", value_name = "SIZE")]
     pub max_mempool_size: ByteSize,
 
+    /// Prune the pool of UTXO notification when it exceeds this size in RAM.
+    ///
+    /// Units: B (bytes), K (kilobytes), M (megabytes), G (gigabytes)
+    ///
+    /// E.g. --max-utxo-notification-size 50M
+    #[clap(long, default_value = "10M", value_name = "SIZE")]
+    pub max_utxo_notification_size: ByteSize,
+
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,

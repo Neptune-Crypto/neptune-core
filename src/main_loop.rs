@@ -9,7 +9,7 @@ use crate::models::peer::{
 };
 use crate::models::state::mempool::MempoolInternal;
 use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
-use crate::models::state::wallet::wallet_state::UtxoNotifier;
+use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::GlobalState;
 use anyhow::Result;
 use rand::prelude::{IteratorRandom, SliceRandom};
@@ -379,12 +379,17 @@ impl MainLoopHandler {
                         .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)?;
 
                     // Notify wallet to expect the coinbase UTXO, as we mined this block
-                    self.global_state.wallet_state.add_expected_utxo(
-                        new_block_info.coinbase_utxo_info.utxo,
-                        new_block_info.coinbase_utxo_info.sender_randomness,
-                        new_block_info.coinbase_utxo_info.receiver_preimage,
-                        UtxoNotifier::OwnMiner,
-                    );
+                    self.global_state
+                        .wallet_state
+                        .expected_utxos
+                        .write()
+                        .unwrap()
+                        .add_expected_utxo(
+                            new_block_info.coinbase_utxo_info.utxo,
+                            new_block_info.coinbase_utxo_info.sender_randomness,
+                            new_block_info.coinbase_utxo_info.receiver_preimage,
+                            UtxoNotifier::OwnMiner,
+                        );
 
                     // update wallet state with relevant UTXOs from this block
                     self.global_state

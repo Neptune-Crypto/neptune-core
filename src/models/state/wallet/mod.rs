@@ -1,5 +1,6 @@
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
+pub mod utxo_notification_pool;
 pub mod wallet_state;
 pub mod wallet_status;
 
@@ -187,7 +188,7 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::amount::Amount;
     use crate::models::blockchain::transaction::utxo::Utxo;
-    use crate::models::state::wallet::wallet_state::UtxoNotifier;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::tests::shared::{
         get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
     };
@@ -302,12 +303,16 @@ mod wallet_tests {
             make_mock_block(&genesis_block, None, own_recipient_address);
 
         // Todo: Add expected UTXO here
-        wallet_state.add_expected_utxo(
-            block_1_coinbase_utxo.clone(),
-            block_1_coinbase_sender_randomness,
-            own_spending_key.privacy_preimage,
-            UtxoNotifier::OwnMiner,
-        );
+        wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                block_1_coinbase_utxo.clone(),
+                block_1_coinbase_sender_randomness,
+                own_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            );
         wallet_state.update_wallet_state_with_new_block(
             &block_1,
             &mut wallet_state.wallet_db.lock().await,

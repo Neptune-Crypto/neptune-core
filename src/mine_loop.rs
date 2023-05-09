@@ -12,7 +12,7 @@ use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::shared::SIZE_1MB_IN_BYTES;
-use crate::models::state::wallet::wallet_state::{ExpectedUtxo, UtxoNotifier};
+use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
 use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;

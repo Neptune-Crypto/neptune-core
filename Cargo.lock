@@ -1307,6 +1307,7 @@ version = "0.8.0"
 dependencies = [
  "bincode",
  "blake3",
+ "get-size",
  "itertools",
  "num-traits",
  "rand 0.8.5",
