@@ -9,6 +9,7 @@ use rusty_leveldb::DB;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex as TokioMutex, MutexGuard};
@@ -33,6 +34,7 @@ use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
+use crate::models::peer::{InstanceId, PeerInfo};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::Hash;
 
@@ -45,10 +47,37 @@ pub struct WalletState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum UtxoNotifier {
+    OwnMiner,
+    Cli,
+    Peer((InstanceId, SocketAddr)),
+    Premine,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExpectedUtxo {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
+    pub received_from: UtxoNotifier,
+    pub notification_received: SystemTime,
+}
+
+impl ExpectedUtxo {
+    pub fn new(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
+        received_from: UtxoNotifier,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_preimage,
+            received_from,
+            notification_received: SystemTime::now(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -131,6 +160,7 @@ impl WalletState {
                             utxo,
                             Digest::default(),
                             own_spending_key.privacy_preimage,
+                            UtxoNotifier::Premine,
                         );
                     }
                 }
@@ -248,11 +278,14 @@ impl WalletState {
         utxo: Utxo,
         sender_randomness: Digest,
         receiver_preimage: Digest,
+        received_from: UtxoNotifier,
     ) {
         self.expected_utxos.write().unwrap().push(ExpectedUtxo {
             utxo,
             sender_randomness,
             receiver_preimage,
+            received_from,
+            notification_received: SystemTime::now(),
         });
     }
 

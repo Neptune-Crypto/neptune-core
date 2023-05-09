@@ -496,7 +496,7 @@ mod tests {
             },
             shared::SIZE_1MB_IN_BYTES,
             state::{
-                wallet::{generate_secret_key, WalletSecret},
+                wallet::{generate_secret_key, wallet_state::UtxoNotifier, WalletSecret},
                 UtxoReceiverData,
             },
         },
@@ -668,6 +668,7 @@ mod tests {
             coinbase_utxo_1,
             cb_sender_randomness_1,
             other_receiver_spending_key.privacy_preimage,
+            UtxoNotifier::OwnMiner,
         );
         other_global_state
             .wallet_state

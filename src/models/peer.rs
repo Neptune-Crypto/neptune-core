@@ -24,11 +24,13 @@ const INVALID_MESSAGE_SEVERITY: u16 = 2;
 const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
 const INVALID_TRANSACTION: u16 = 10;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+pub type InstanceId = u128;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerInfo {
     pub address_for_incoming_connections: Option<SocketAddr>,
     pub connected_address: SocketAddr,
-    pub instance_id: u128,
+    pub instance_id: InstanceId,
     pub inbound: bool,
     pub last_seen: SystemTime,
     pub standing: PeerStanding,
@@ -36,7 +38,7 @@ pub struct PeerInfo {
     pub is_archival_node: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum PeerSanctionReason {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
@@ -101,7 +103,7 @@ impl PeerSanctionReason {
 
 /// This is object that gets stored in the database to record how well a peer
 /// at a certain IP behaves. A lower number is better.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub struct PeerStanding {
     pub standing: u16,
     pub latest_sanction: Option<PeerSanctionReason>,

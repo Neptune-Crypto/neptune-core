@@ -12,7 +12,7 @@ use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::shared::SIZE_1MB_IN_BYTES;
-use crate::models::state::wallet::wallet_state::ExpectedUtxo;
+use crate::models::state::wallet::wallet_state::{ExpectedUtxo, UtxoNotifier};
 use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
@@ -232,11 +232,12 @@ fn create_block_transaction(
     // Then set fee to zero as we've already sent it all to ourself in the coinbase output
     merged_transaction.kernel.fee = Amount::zero();
 
-    let utxo_info_for_coinbase = ExpectedUtxo {
-        utxo: coinbase_utxo,
-        sender_randomness: coinbase_sender_randomness,
-        receiver_preimage: coinbase_recipient_spending_key.privacy_preimage,
-    };
+    let utxo_info_for_coinbase = ExpectedUtxo::new(
+        coinbase_utxo,
+        coinbase_sender_randomness,
+        coinbase_recipient_spending_key.privacy_preimage,
+        UtxoNotifier::OwnMiner,
+    );
 
     (merged_transaction, utxo_info_for_coinbase)
 }

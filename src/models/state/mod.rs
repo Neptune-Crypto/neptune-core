@@ -433,7 +433,10 @@ mod global_state_tests {
     use secp256k1::Secp256k1;
     use tracing_test::traced_test;
 
-    use super::{wallet::WalletSecret, *};
+    use super::{
+        wallet::{wallet_state::UtxoNotifier, WalletSecret},
+        *,
+    };
 
     async fn wallet_state_has_all_valid_mps_for(
         wallet_state: &WalletState,
@@ -673,6 +676,7 @@ mod global_state_tests {
                 _coinbase_utxo,
                 coinbase_output_randomness,
                 own_spending_address.privacy_preimage,
+                UtxoNotifier::OwnMiner,
             );
             global_state
                 .wallet_state
@@ -806,6 +810,7 @@ mod global_state_tests {
                 coinbase_utxo_1a,
                 cb_utxo_output_randomness_1a,
                 own_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
             );
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
