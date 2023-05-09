@@ -21,6 +21,7 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 bincode = "1.3"
 blake3 = "1.3.3"
 itertools = "0"
+get-size = { version = "^0.1", features = ["derive"] }
 num-traits = "0"
 rand = "0.8"
 rand_core = "0"

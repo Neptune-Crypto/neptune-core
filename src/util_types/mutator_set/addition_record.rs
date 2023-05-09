@@ -1,10 +1,11 @@
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize)]
 pub struct AdditionRecord {
     pub canonical_commitment: Digest,
 }
@@ -31,6 +32,19 @@ mod addition_record_tests {
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
     use super::*;
+
+    #[test]
+    fn get_size_test() {
+        type H = Tip5;
+
+        let addition_record_0: AdditionRecord = commit::<H>(
+            &H::hash(&1492u128),
+            &H::hash(&1522u128),
+            &H::hash(&1521u128),
+        );
+
+        assert_eq!(std::mem::size_of::<Digest>(), addition_record_0.get_size());
+    }
 
     #[test]
     fn hash_identity_test() {

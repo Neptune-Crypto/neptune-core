@@ -1,3 +1,4 @@
+use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -5,7 +6,7 @@ use twenty_first::util_types::algebraic_hasher::Hashable;
 
 use super::shared::CHUNK_SIZE;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
 pub struct Chunk {
     pub relative_indices: Vec<u32>,
 }

@@ -1,3 +1,4 @@
+use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
 pub struct ChunkDictionary<H: AlgebraicHasher> {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
     pub dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>,

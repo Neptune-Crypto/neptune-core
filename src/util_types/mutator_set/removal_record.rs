@@ -1,3 +1,4 @@
+use get_size::GetSize;
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
 use serde::Deserialize;
@@ -23,6 +24,20 @@ use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
+
+impl GetSize for AbsoluteIndexSet {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        self.0.get_heap_size()
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
 
 impl AbsoluteIndexSet {
     pub fn new(indices: &[u128; NUM_TRIALS as usize]) -> Self {
@@ -121,7 +136,7 @@ pub enum RemovalRecordError {
     MissingChunkOnUpdateFromRemove(u128),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize)]
 pub struct RemovalRecord<H: AlgebraicHasher> {
     pub absolute_indices: AbsoluteIndexSet,
     pub target_chunks: ChunkDictionary<H>,
@@ -330,6 +345,19 @@ mod removal_record_tests {
             accumulator.prove(&item, &sender_randomness, &receiver_preimage);
         let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
         (item, mp, removal_record)
+    }
+
+    #[test]
+    fn get_size_test() {
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+
+        let serialization_result = bincode::serialize(&removal_record).unwrap();
+        let reported_size = removal_record.get_size();
+
+        // Assert that length of serialization result have same
+        // order of magnitude as reported size result.
+        assert!(serialization_result.len() * 2 > reported_size);
+        assert!(reported_size * 2 > serialization_result.len());
     }
 
     #[test]
