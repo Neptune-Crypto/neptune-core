@@ -7,7 +7,10 @@ use mutator_set_tf::util_types::mutator_set::{
 };
 use num_traits::Zero;
 use priority_queue::DoublePriorityQueue;
-use std::{collections::HashMap, time::SystemTime};
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 use tracing::{error, info, warn};
 use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
@@ -21,6 +24,10 @@ use crate::models::{
 
 pub type Credibility = i32;
 
+// 28 days in secs
+pub const UNRECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS: u64 = 28 * 24 * 60 * 60;
+pub const RECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS: u64 = 3 * 24 * 60 * 60;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize)]
 pub struct ExpectedUtxo {
     pub utxo: Utxo,
@@ -29,7 +36,7 @@ pub struct ExpectedUtxo {
     pub receiver_preimage: Digest,
     pub received_from: UtxoNotifier,
     pub notification_received: SystemTime,
-    pub mined_in_block: Option<Digest>,
+    pub mined_in_block: Option<(Digest, SystemTime)>,
 }
 
 impl ExpectedUtxo {
@@ -88,18 +95,49 @@ impl UtxoNotificationPool {
         }
     }
 
-    fn _shrink_to_fit(&mut self) {
+    /// Minimize space used by data model. Reduces `capacity` of contained data structures
+    fn shrink_to_fit(&mut self) {
         self.queue.shrink_to_fit();
-        self.notifications.shrink_to_fit()
+        self.notifications.shrink_to_fit();
+        self.peer_id_to_expected_utxos.shrink_to_fit();
     }
 
+    /// Drop elements of lowest credibility until data model does not exceed its max allowed size
     fn shrink_to_max_size(&mut self) {
         while self.get_size() > self.max_total_size && self.pop_min().is_some() {
             continue;
         }
 
         // TODO: A call to this function might reallocate. Expensive! Is this a good idea?
-        // self._shrink_to_fit()
+        // self.shrink_to_fit()
+    }
+
+    /// Delete an expected UTXO from this data model
+    fn drop_expected_utxo(&mut self, addition_record: AdditionRecord) {
+        let maybe_removed = self.notifications.remove(&addition_record);
+
+        if let Some(removed_exp_utxo) = maybe_removed {
+            self.queue.remove(&addition_record);
+            if let UtxoNotifier::PeerUnsigned((peer_id, _socket), _cred) =
+                removed_exp_utxo.received_from
+            {
+                self.peer_id_to_expected_utxos
+                    .entry(peer_id)
+                    .and_modify(|e| e.retain(|ar| *ar != addition_record));
+                if self.peer_id_to_expected_utxos[&peer_id].is_empty() {
+                    self.peer_id_to_expected_utxos.remove(&peer_id);
+                }
+            }
+        }
+
+        debug_assert_eq!(
+            self.notifications.len(),
+            self.queue.len(),
+            "hashmap and queue length must agree for expected UTXO pool after drop"
+        );
+        debug_assert!(
+            self.peer_id_to_expected_utxos.values().map(|x| x.len()).sum::<usize>() <= self.notifications.len(),
+            "Total number of UTXO notifications from peers may not exceed total number of expected UTXOs");
     }
 
     pub fn new(max_total_size: ByteSize, max_notification_count_per_peer: usize) -> Self {
@@ -152,13 +190,14 @@ impl UtxoNotificationPool {
         self.notifications.values().cloned().collect_vec()
     }
 
+    /// Add an expected incoming UTXO to this data model
     pub fn add_expected_utxo(
         &mut self,
         utxo: Utxo,
         sender_randomness: Digest,
         receiver_preimage: Digest,
         received_from: UtxoNotifier,
-    ) -> Result<()> {
+    ) -> Result<AdditionRecord> {
         // Check if UTXO notification exceeds peer's max number of allowed notifications
         if let UtxoNotifier::PeerUnsigned((peer_id, peer_socket), _cred) = &received_from {
             if let Some(expected_utxos_for_peer) = self.peer_id_to_expected_utxos.get(&peer_id) {
@@ -197,7 +236,7 @@ impl UtxoNotificationPool {
         // If it is, do not allow its timestamp to be updated. Return early.
         if self.notifications.contains_key(&addition_record) {
             warn!("Received repeated addition record. Ignoring");
-            return Ok(());
+            return Ok(addition_record);
         }
 
         let expected_utxo = ExpectedUtxo {
@@ -234,18 +273,20 @@ impl UtxoNotificationPool {
                 .or_insert(vec![addition_record]);
         }
 
+        // Ensure that data model does not take up more space than allowed
         self.shrink_to_max_size();
 
-        Ok(())
+        Ok(addition_record)
     }
 
+    /// Mark an expected incoming UTXO as received
     pub fn mark_as_received(
         &mut self,
         addition_record: AdditionRecord,
         block_digest: Digest,
     ) -> Result<()> {
         if let Some(entry) = self.notifications.get_mut(&addition_record) {
-            entry.mined_in_block = Some(block_digest);
+            entry.mined_in_block = Some((block_digest, SystemTime::now()));
             Ok(())
         } else {
             let error_msg = "Requested to mark unknown UTXO notification as received";
@@ -254,41 +295,28 @@ impl UtxoNotificationPool {
         }
     }
 
-    pub fn drop_expected_utxo(
-        &mut self,
-        utxo: Utxo,
-        sender_randomness: Digest,
-        receiver_preimage: Digest,
-    ) {
-        let addition_record = commit::<Hash>(
-            &Hash::hash(&utxo),
-            &sender_randomness,
-            &receiver_preimage.vmhash::<Hash>(),
-        );
-        let maybe_removed = self.notifications.remove(&addition_record);
+    /// Delete UTXO notifications that exceed a certain age
+    pub fn prune_stale_utxo_notifications(&mut self) {
+        let cutoff_for_unreceived = SystemTime::now()
+            - Duration::from_secs(UNRECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS);
+        let cutoff_for_received = SystemTime::now()
+            - Duration::from_secs(RECEIVED_UTXO_NOTIFICATION_THRESHOLD_AGE_IN_SECS);
+        let stale_notifications = self
+            .notifications
+            .iter()
+            .filter(|(_ar, expected)| match expected.mined_in_block {
+                Some((_bh, registered_timestamp)) => registered_timestamp < cutoff_for_received,
+                None => expected.notification_received < cutoff_for_unreceived,
+            })
+            .map(|(ar, _)| *ar)
+            .collect_vec();
 
-        if let Some(removed_exp_utxo) = maybe_removed {
-            self.queue.remove(&addition_record);
-            if let UtxoNotifier::PeerUnsigned((peer_id, _socket), _cred) =
-                removed_exp_utxo.received_from
-            {
-                self.peer_id_to_expected_utxos
-                    .entry(peer_id)
-                    .and_modify(|e| e.retain(|ar| *ar != addition_record));
-                if self.peer_id_to_expected_utxos[&peer_id].is_empty() {
-                    self.peer_id_to_expected_utxos.remove(&peer_id);
-                }
-            }
+        for stale_notification in stale_notifications {
+            self.drop_expected_utxo(stale_notification);
         }
 
-        debug_assert_eq!(
-            self.notifications.len(),
-            self.queue.len(),
-            "hashmap and queue length must agree for expected UTXO pool after drop"
-        );
-        debug_assert!(
-            self.peer_id_to_expected_utxos.values().map(|x| x.len()).sum::<usize>() <= self.notifications.len(),
-            "Total number of UTXO notifications from peers may not exceed total number of expected UTXOs");
+        // Minimize space used by data model.
+        self.shrink_to_fit();
     }
 }
 
@@ -382,7 +410,7 @@ mod wallet_state_tests {
         assert!(ret_with_tx_without_utxo.is_empty());
 
         // Verify that we can remove the expected UTXO again
-        notification_pool.drop_expected_utxo(mock_utxo, sender_randomness, receiver_preimage);
+        notification_pool.drop_expected_utxo(expected_addition_record);
         assert!(notification_pool.is_empty());
         assert!(
             !notification_pool
@@ -509,5 +537,79 @@ mod wallet_state_tests {
             ),
             lowest_priority_notif.received_from
         );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn prune_stale_utxo_notifications_test() {
+        let mut notification_pool = UtxoNotificationPool::new(ByteSize::mb(1), 100);
+        let mock_utxo = Utxo {
+            lock_script: LockScript(vec![]),
+            coins: Into::<Amount>::into(14).to_native_coins(),
+        };
+
+        // Add a UTXO notification
+        let mut addition_records = vec![];
+        let ar = notification_pool
+            .add_expected_utxo(
+                mock_utxo.clone(),
+                random(),
+                random(),
+                UtxoNotifier::PeerUnsigned((random(), String::default()), 10),
+            )
+            .unwrap();
+        addition_records.push(ar);
+
+        // Add three more
+        for _ in 0..3 {
+            let ar_new = notification_pool
+                .add_expected_utxo(
+                    mock_utxo.clone(),
+                    random(),
+                    random(),
+                    UtxoNotifier::PeerUnsigned((random(), String::default()), 10),
+                )
+                .unwrap();
+            addition_records.push(ar_new);
+        }
+
+        // Test with a UTXO that was received
+        // Manipulate the time this entry was inserted
+        let two_weeks_as_sec = 60 * 60 * 24 * 7 * 2;
+        notification_pool
+            .notifications
+            .get_mut(&addition_records[0])
+            .unwrap()
+            .mined_in_block = Some((
+            Digest::default(),
+            SystemTime::now() - Duration::from_secs(two_weeks_as_sec),
+        ));
+
+        assert_eq!(4, notification_pool.len());
+        notification_pool.prune_stale_utxo_notifications();
+        assert_eq!(3, notification_pool.len());
+
+        // Test with a UTXOs that were *not* received
+        // Manipulate the time of two more entries
+        let eight_weeks_as_secs = 60 * 60 * 24 * 7 * 8;
+        notification_pool
+            .notifications
+            .get_mut(&addition_records[1])
+            .unwrap()
+            .notification_received = SystemTime::now() - Duration::from_secs(eight_weeks_as_secs);
+        notification_pool
+            .notifications
+            .get_mut(&addition_records[3])
+            .unwrap()
+            .notification_received = SystemTime::now() - Duration::from_secs(eight_weeks_as_secs);
+        assert_eq!(3, notification_pool.len());
+        notification_pool.prune_stale_utxo_notifications();
+        assert_eq!(1, notification_pool.len());
+
+        assert_eq!(
+            addition_records[2],
+            notification_pool.get_all_expected_utxos()[0].addition_record,
+            "Expected UTXO notification must remain"
+        )
     }
 }

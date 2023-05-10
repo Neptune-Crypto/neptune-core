@@ -311,7 +311,8 @@ mod wallet_tests {
                 block_1_coinbase_sender_randomness,
                 own_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
-            );
+            )
+            .unwrap();
         assert_eq!(
             1,
             wallet_state.expected_utxos.read().unwrap().len(),
@@ -332,8 +333,8 @@ mod wallet_tests {
             .get_all_expected_utxos();
         assert_eq!(1, expected_utxos.len(), "B: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
         assert_eq!(
-            Some(block_1.hash),
-            expected_utxos[0].mined_in_block,
+            block_1.hash,
+            expected_utxos[0].mined_in_block.unwrap().0,
             "Expected UTXO must be registered as being mined"
         );
         monitored_utxos = get_monitored_utxos(&wallet_state).await;

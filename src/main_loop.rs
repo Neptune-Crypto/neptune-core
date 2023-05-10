@@ -34,6 +34,8 @@ const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
 const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 const MP_RESYNC_INTERVAL_IN_SECS: u64 = 59;
+const UTXO_NOTIFICATION_POOL_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
+
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
@@ -389,7 +391,8 @@ impl MainLoopHandler {
                             new_block_info.coinbase_utxo_info.sender_randomness,
                             new_block_info.coinbase_utxo_info.receiver_preimage,
                             UtxoNotifier::OwnMiner,
-                        );
+                        )
+                        .expect("UTXO notification from miner must be accepted");
 
                     // update wallet state with relevant UTXOs from this block
                     self.global_state
@@ -851,6 +854,13 @@ impl MainLoopHandler {
         let mempool_cleanup_timer = time::sleep(mempool_cleanup_timer_interval);
         tokio::pin!(mempool_cleanup_timer);
 
+        // Set removal of stale notifications for incoming UTXOs
+        let utxo_notification_cleanup_timer_interval =
+            Duration::from_secs(UTXO_NOTIFICATION_POOL_PRUNE_INTERVAL_IN_SECS);
+        let utxo_notification_cleanup_timer = time::sleep(utxo_notification_cleanup_timer_interval);
+        tokio::pin!(utxo_notification_cleanup_timer);
+
+        // Set restoration of membership proofs to run every Q seconds
         let mp_resync_timer_interval = Duration::from_secs(MP_RESYNC_INTERVAL_IN_SECS);
         let mp_resync_timer = time::sleep(mp_resync_timer_interval);
         tokio::pin!(mp_resync_timer);
@@ -935,6 +945,14 @@ impl MainLoopHandler {
 
                     // Reset the timer to run this branch again in P seconds
                     mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
+                }
+
+                // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
+                _ = &mut utxo_notification_cleanup_timer => {
+                    debug!("Running UTXO notification pool cleanup job");
+                    self.global_state.wallet_state.expected_utxos.write().unwrap().prune_stale_utxo_notifications();
+
+                    utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
                 }
 
                 // Handle membership proof resynchronization

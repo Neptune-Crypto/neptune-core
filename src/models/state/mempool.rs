@@ -676,7 +676,8 @@ mod tests {
                 cb_sender_randomness_1,
                 other_receiver_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
-            );
+            )
+            .expect("UTXO notification from miner must be accepted");
         other_global_state
             .wallet_state
             .update_wallet_state_with_new_block(
