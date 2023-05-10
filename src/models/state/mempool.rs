@@ -494,7 +494,7 @@ mod tests {
             blockchain::{
                 address::generation_address,
                 block::block_height::BlockHeight,
-                transaction::{amount::Amount, utxo::Utxo, Transaction},
+                transaction::{amount::Amount, utxo::Utxo, PubScript, Transaction},
             },
             shared::SIZE_1MB_IN_BYTES,
             state::{
@@ -701,7 +701,7 @@ mod tests {
             };
 
             output_utxos_generated_by_me.push(UtxoReceiverData {
-                pubscript: vec![],
+                pubscript: PubScript(vec![]),
                 pubscript_input: vec![],
                 receiver_privacy_digest: premine_receiver_address.privacy_digest,
                 sender_randomness: random(),
@@ -729,7 +729,7 @@ mod tests {
             },
             sender_randomness: random(),
             receiver_privacy_digest: other_receiver_address.privacy_digest,
-            pubscript: vec![],
+            pubscript: PubScript(vec![]),
             pubscript_input: vec![],
         }];
         let tx_by_other_original = other_global_state
@@ -809,7 +809,7 @@ mod tests {
             utxo,
             receiver_privacy_digest: premine_address.privacy_digest,
             sender_randomness: random(),
-            pubscript: vec![],
+            pubscript: PubScript(vec![]),
             pubscript_input: vec![],
         };
         let tx_by_preminer_low_fee = preminer_state

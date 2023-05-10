@@ -388,7 +388,7 @@ impl Block {
 mod block_tests {
     use crate::{
         config_models::network::Network,
-        models::state::UtxoReceiverData,
+        models::{blockchain::transaction::PubScript, state::UtxoReceiverData},
         tests::shared::{get_mock_global_state, make_mock_block},
     };
 
@@ -418,7 +418,7 @@ mod block_tests {
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
         let new_utxo = Utxo::new_native_coin(other_address.lock_script(), 10.into());
         let reciever_data = UtxoReceiverData {
-            pubscript: vec![],
+            pubscript: PubScript(vec![]),
             pubscript_input: vec![],
             receiver_privacy_digest: other_address.privacy_digest,
             sender_randomness: random(),

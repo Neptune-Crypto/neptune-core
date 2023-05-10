@@ -27,7 +27,7 @@ use super::blockchain::transaction::native_coin::{
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::{amount::Amount, Transaction};
-use super::blockchain::transaction::{PrimitiveWitness, Witness};
+use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDBIterator;
@@ -68,7 +68,7 @@ pub struct UtxoReceiverData {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_privacy_digest: Digest,
-    pub pubscript: Vec<BFieldElement>,
+    pub pubscript: PubScript,
     pub pubscript_input: Vec<BFieldElement>,
 }
 
@@ -161,7 +161,7 @@ impl GlobalState {
 
         let pubscript_hashes_and_inputs = receiver_data
             .iter()
-            .map(|x| (Hash::hash_varlen(&x.pubscript), x.pubscript_input.clone()))
+            .map(|x| (Hash::hash(&x.pubscript), x.pubscript_input.clone()))
             .collect_vec();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)

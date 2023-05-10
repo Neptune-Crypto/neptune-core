@@ -27,9 +27,17 @@ use self::amount::Amount;
 use self::native_coin::native_coin_typescript;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
-use super::address::generation_address;
 use super::block::Block;
 use super::shared::Hash;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PubScript(pub Vec<BFieldElement>);
+
+impl Hashable for PubScript {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        self.0.clone()
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Proof(pub Vec<BFieldElement>);
@@ -48,7 +56,7 @@ pub struct PrimitiveWitness {
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
     pub output_utxos: Vec<Utxo>,
-    pub pubscripts: Vec<Vec<BFieldElement>>,
+    pub pubscripts: Vec<PubScript>,
 }
 
 /// Linked proofs are one abstraction level above raw witness. They
@@ -316,7 +324,7 @@ impl Transaction {
                     .iter()
                     .zip(primitive_witness.pubscripts.iter())
                 {
-                    if *pubscript_hash != Hash::hash_varlen(&pubscript) {
+                    if *pubscript_hash != Hash::hash(pubscript) {
                         return false;
                     }
 

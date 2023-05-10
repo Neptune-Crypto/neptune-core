@@ -590,7 +590,7 @@ pub fn make_mock_transaction(
     let timestamp: BFieldElement = BFieldElement::new(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
+            .expect("Got bad timestamp")
             .as_millis()
             .try_into()
             .unwrap(),

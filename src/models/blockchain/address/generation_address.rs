@@ -25,6 +25,7 @@ use crate::models::blockchain::digest::BYTES_PER_BFE;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PubScript;
 use crate::models::blockchain::transaction::Transaction;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
@@ -324,15 +325,15 @@ impl ReceivingAddress {
         &self,
         utxo: &Utxo,
         sender_randomness: Digest,
-    ) -> Result<(Vec<BFieldElement>, Vec<BFieldElement>)> {
-        let ciphertext = self.encrypt(utxo, sender_randomness)?;
+    ) -> Result<(PubScript, Vec<BFieldElement>)> {
+        let mut ciphertext = vec![HALT, GENERATION_FLAG, self.receiver_identifier];
+        ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
         const READ_IO: BFieldElement = BFieldElement::new(128);
         const HALT: BFieldElement = BFieldElement::new(0);
 
-        let mut pubscript = vec![READ_IO; ciphertext.len() + 1];
-        *pubscript.last_mut().unwrap() = HALT;
+        let pubscript = vec![vec![READ_IO; ciphertext.len()], vec![HALT]].concat();
 
-        Ok((pubscript, ciphertext))
+        Ok((PubScript(pubscript), ciphertext))
     }
 
     /// Generate a lock script from the spending lock. Satisfaction

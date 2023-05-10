@@ -387,7 +387,7 @@ mod mine_loop_tests {
         let four_neptune_coins = Amount::from(4).to_native_coins();
         let receiver_privacy_digest = Digest::default();
         let sender_randomness = Digest::default();
-        let pubscript: Vec<BFieldElement> = vec![];
+        let pubscript: PubScript = PubScript(vec![]);
         let pubscript_input: Vec<BFieldElement> = vec![];
         let tx_output = Utxo {
             coins: four_neptune_coins,
