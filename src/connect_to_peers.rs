@@ -22,6 +22,18 @@ use crate::{
     MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
 };
 
+// Max peer message size is 200MB
+pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 200 * 1024 * 1024;
+
+/// Use this function to ensure that the same rules apply for both
+/// ingoing and outgoing connections. This limits the size of messages
+/// peers can send.
+fn get_codec_rules() -> LengthDelimitedCodec {
+    let mut codec_rules = LengthDelimitedCodec::new();
+    codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
+    codec_rules
+}
+
 async fn get_connection_status(
     state: &GlobalState,
     own_handshake: &HandshakeData,
@@ -84,11 +96,13 @@ where
     info!("Established connection");
 
     // Build the communication/serialization/frame handler
-    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
-    let mut peer = tokio_serde::SymmetricallyFramed::new(
-        length_delimited,
-        SymmetricalBincode::<PeerMessage>::default(),
-    );
+    let length_delimited = Framed::new(stream, get_codec_rules());
+    let mut peer: tokio_serde::Framed<
+        Framed<S, LengthDelimitedCodec>,
+        PeerMessage,
+        PeerMessage,
+        Bincode<PeerMessage, PeerMessage>,
+    > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
 
     // Complete Neptune handshake
     let peer_handshake_data: HandshakeData = match peer.try_next().await? {
@@ -135,13 +149,14 @@ where
 
     // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
     info!("Connection accepted from {}", peer_address);
+    let peer_distance = 1; // All incoming connections have distance 1
     let peer_loop_handler = PeerLoopHandler::new(
         peer_thread_to_main_tx,
         state,
         peer_address,
         peer_handshake_data,
         true,
-        1, // All incoming connections have distance 1
+        peer_distance,
     );
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_thread_rx)
@@ -191,19 +206,18 @@ async fn call_peer<S>(
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: &HandshakeData,
-    distance: u8,
+    peer_distance: u8,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
     info!("Established connection");
 
-    // Delimit frames using a length header
-    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
-
-    // Serialize frames with bincode
-    let mut peer: SymmetricallyFramed<
+    // Build the communication/serialization/frame handler
+    let length_delimited = Framed::new(stream, get_codec_rules());
+    let mut peer: tokio_serde::Framed<
         Framed<S, LengthDelimitedCodec>,
+        PeerMessage,
         PeerMessage,
         Bincode<PeerMessage, PeerMessage>,
     > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
@@ -239,7 +253,9 @@ where
     };
 
     match peer.try_next().await? {
-        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => (),
+        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => {
+            info!("Connection accepted by {peer_address}");
+        }
         Some(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(reason))) => {
             bail!("Connection attempt refused. Reason: {:?}", reason);
         }
@@ -254,7 +270,7 @@ where
         peer_address,
         peer_handshake_data,
         false,
-        distance,
+        peer_distance,
     );
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_thread_rx)
