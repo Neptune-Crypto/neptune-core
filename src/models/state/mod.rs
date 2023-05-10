@@ -679,7 +679,8 @@ mod global_state_tests {
                     coinbase_output_randomness,
                     own_spending_address.privacy_preimage,
                     UtxoNotifier::OwnMiner,
-                );
+                )
+                .unwrap();
             global_state
                 .wallet_state
                 .update_wallet_state_with_new_block(&mock_block_1a, &mut wallet_db_lock)

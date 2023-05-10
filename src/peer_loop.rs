@@ -664,12 +664,19 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // Get transaction's timestamp
+                let tx_timestamp = match transaction.get_timestamp() {
+                    Ok(ts) => ts,
+                    Err(_) => {
+                        warn!("Received tx with invalid timestamp");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                };
+
                 // 2. Ignore if transaction is too old
-                let tx_timestamp: SystemTime = std::time::UNIX_EPOCH
-                    + std::time::Duration::from_secs(transaction.kernel.timestamp.value());
+                let now = SystemTime::now();
                 if tx_timestamp
-                    < SystemTime::now()
-                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
+                    < now - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
                 {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
@@ -678,13 +685,13 @@ impl PeerLoopHandler {
 
                 // 3. Ignore if transaction is too far into the future
                 if tx_timestamp
-                    > SystemTime::now()
+                    > now
                         + std::time::Duration::from_secs(
                             MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
                         )
                 {
                     // TODO: Consider punishing here
-                    warn!("Received tx too far into the future");
+                    warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -706,33 +713,9 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 2. Ignore if transaction is too old
-                if transaction_notification.timestamp
-                    < SystemTime::now()
-                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
-                {
-                    // TODO: Consider punishing here
-                    debug!(
-                        "transaction was too old. Got: {:?}. Current time: {:?}",
-                        transaction_notification.timestamp,
-                        SystemTime::now()
-                    );
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
+                // Should we check a timestamp here?
 
-                // 3. Ignore if transaction is too far into the future
-                if transaction_notification.timestamp
-                    > SystemTime::now()
-                        + std::time::Duration::from_secs(
-                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
-                        )
-                {
-                    // TODO: Consider punishing here
-                    debug!("transaction was too far into the future");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 4. Request the actual `Transaction` from peer
+                // 2. Request the actual `Transaction` from peer
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(
                     transaction_notification.transaction_digest,

@@ -231,6 +231,11 @@ impl Transaction {
         Ok(())
     }
 
+    pub fn get_timestamp(&self) -> Result<SystemTime> {
+        Ok(std::time::UNIX_EPOCH
+            + std::time::Duration::from_millis(self.kernel.timestamp.value().try_into()?))
+    }
+
     /// Validate Transaction
     ///
     /// This method tests the transaction's internal consistency in

@@ -196,20 +196,15 @@ pub enum ConnectionStatus {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionNotification {
     pub transaction_digest: Digest,
-    // The timestamp of a transaction notification is the associated transaction's timestamp.
-    // The timestamp is used for mempool purposes.
-    pub timestamp: SystemTime,
+    // TODO: Consider adding `timestamp` here
+    // pub timestamp: SystemTime,
 }
 
 impl From<Transaction> for TransactionNotification {
     fn from(transaction: Transaction) -> Self {
         let transaction_digest = Hash::hash(&transaction);
-        let timestamp = std::time::UNIX_EPOCH
-            + std::time::Duration::from_secs(transaction.kernel.timestamp.value());
-        Self {
-            transaction_digest,
-            timestamp,
-        }
+
+        Self { transaction_digest }
     }
 }
 
