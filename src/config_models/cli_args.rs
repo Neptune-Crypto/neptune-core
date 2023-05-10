@@ -67,6 +67,15 @@ pub struct Args {
     #[clap(long, default_value = "10M", value_name = "SIZE")]
     pub max_utxo_notification_size: ByteSize,
 
+    /// Maximum number of unconfirmed expected UTXOs that can be stored for each peer.
+    ///
+    /// You may want to increase this number from its default value if
+    /// you're running a node that receives a very high number of UTXOs.
+    ///
+    /// E.g. --max_unconfirmed_utxo_notification_count_per_peer 5000
+    #[clap(long, default_value = "1000", value_name = "COUNT")]
+    pub max_unconfirmed_utxo_notification_count_per_peer: usize,
+
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,

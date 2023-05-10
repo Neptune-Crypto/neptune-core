@@ -48,7 +48,7 @@ pub struct WalletState {
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
 
-    // Anyone may read from expected_utxos, only main thread should write
+    // Anyone may read from expected_utxos, only main thread may write
     pub expected_utxos: Arc<std::sync::RwLock<UtxoNotificationPool>>,
 }
 
@@ -110,6 +110,7 @@ impl WalletState {
             number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
             expected_utxos: Arc::new(RwLock::new(UtxoNotificationPool::new(
                 cli_args.max_utxo_notification_size,
+                cli_args.max_unconfirmed_utxo_notification_count_per_peer,
             ))),
         };
 
@@ -130,12 +131,16 @@ impl WalletState {
                         let lock_script = own_receiving_address.lock_script();
                         let utxo = Utxo::new(lock_script, coins);
 
-                        ret.expected_utxos.write().unwrap().add_expected_utxo(
-                            utxo,
-                            Digest::default(),
-                            own_spending_key.privacy_preimage,
-                            UtxoNotifier::Premine,
-                        );
+                        ret.expected_utxos
+                            .write()
+                            .unwrap()
+                            .add_expected_utxo(
+                                utxo,
+                                Digest::default(),
+                                own_spending_key.privacy_preimage,
+                                UtxoNotifier::Premine,
+                            )
+                            .unwrap();
                     }
                 }
 
@@ -506,7 +511,9 @@ impl WalletState {
             expected_utxos_in_this_block
                 .into_iter()
                 .for_each(|(addition_rec, _, _, _)| {
-                    expected_utxo_writer.mark_as_received(addition_rec, block.hash)
+                    expected_utxo_writer
+                        .mark_as_received(addition_rec, block.hash)
+                        .expect("Expected UTXO must be present when marking it as received")
                 });
         }
 
