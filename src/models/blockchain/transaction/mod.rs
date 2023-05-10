@@ -417,14 +417,38 @@ impl Transaction {
 
 #[cfg(test)]
 mod transaction_tests {
-    use super::*;
+    use std::time::Duration;
+
+    use super::{utxo::LockScript, *};
     use crate::{
         config_models::network::Network,
         models::state::wallet::{self, generate_secret_key},
-        tests::shared::{get_mock_global_state, new_random_wallet},
+        tests::shared::{get_mock_global_state, make_mock_transaction, new_random_wallet},
     };
+    use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
+    use rand::random;
     use tracing_test::traced_test;
     use twenty_first::shared_math::other::random_elements_array;
+
+    #[traced_test]
+    #[test]
+    fn tx_get_timestamp_test() {
+        let output_1 = Utxo {
+            coins: Into::<Amount>::into(42).to_native_coins(),
+            lock_script: LockScript(vec![]),
+        };
+        let ar = commit::<Hash>(&Hash::hash(&output_1), &random(), &random());
+
+        // Verify that a sane timestamp is returned. `make_mock_transaction` must follow
+        // the correct time convention for this test to work.
+        let coinbase_transaction = make_mock_transaction(vec![], vec![ar]);
+        assert!(
+            SystemTime::now()
+                .duration_since(coinbase_transaction.get_timestamp().unwrap())
+                .unwrap()
+                < Duration::from_secs(10)
+        );
+    }
 
     // #[traced_test]
     // #[test]
