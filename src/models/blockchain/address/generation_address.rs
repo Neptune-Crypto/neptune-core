@@ -542,6 +542,8 @@ mod test_generation_addresses {
 
     #[test]
     fn scan_for_announced_utxos_test() {
+        // Mark a transaction as containing a generation address, and then verify that
+        // this is recognized by the receiver.
         let mut rng = thread_rng();
         let seed: Digest = rng.gen();
         let spending_key = SpendingKey::derive_from_seed(seed);

@@ -547,8 +547,8 @@ impl WalletState {
 
         // Limit scope of wallet DB lock to release it ASAP
         let sum: Amount = {
-            // TODO: Consider using `try_lock` here to not hog the wallet_db lock
-            // let mut wallet_db_l = self.wallet_db.try_lock();
+            // As long as we're only grabbing one lock here, there
+            // shouln't be any risk of a deadlock
             let lock = self.wallet_db.lock().await;
 
             let tick = SystemTime::now();
