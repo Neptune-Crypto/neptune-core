@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -79,12 +80,14 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             membership_proofs
                 .iter()
                 .all(|mp| mp.auth_path_aocl.leaf_index < mutator_set.aocl.count_leaves()),
-            "No AOCL data index can point outside of provided mutator set"
+            "No AOCL data index can point outside of provided mutator set. aocl leaf count: {}; mp leaf indices: {}",
+            mutator_set.aocl.count_leaves(),
+            membership_proofs.iter().map(|x| x.auth_path_aocl.leaf_index.to_string()).join(",")
         );
         assert_eq!(
             membership_proofs.len(),
             own_items.len(),
-            "Function must be called with same number of membership proofs and items"
+            "Function must be called with same number of membership proofs and items. Got {} items and {} membership proofs", own_items.len(), membership_proofs.len()
         );
 
         let new_item_index = mutator_set.aocl.count_leaves();
