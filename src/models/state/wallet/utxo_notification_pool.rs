@@ -6,6 +6,7 @@ use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::{
     addition_record::AdditionRecord, mutator_set_trait::commit,
 };
+use num_traits::Zero;
 use priority_queue::DoublePriorityQueue;
 use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
@@ -17,7 +18,7 @@ use crate::models::{
     peer::InstanceId,
 };
 
-pub type Credibility = u32;
+pub type Credibility = i32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize)]
 pub struct ExpectedUtxo {
@@ -26,6 +27,7 @@ pub struct ExpectedUtxo {
     pub receiver_preimage: Digest,
     pub received_from: UtxoNotifier,
     pub notification_received: SystemTime,
+    pub mined_in_block: Option<Digest>,
 }
 
 impl ExpectedUtxo {
@@ -41,6 +43,7 @@ impl ExpectedUtxo {
             receiver_preimage,
             received_from,
             notification_received: SystemTime::now(),
+            mined_in_block: None,
         }
     }
 }
@@ -76,7 +79,7 @@ impl UtxoNotificationPool {
         }
 
         // TODO: A call to this function might reallocate. Expensive! Is this a good idea?
-        // self.shrink_to_fit()
+        // self._shrink_to_fit()
     }
 
     pub fn new(max_total_size: ByteSize) -> Self {
@@ -87,41 +90,44 @@ impl UtxoNotificationPool {
         }
     }
 
+    pub fn len(&self) -> usize {
+        debug_assert_eq!(
+            self.notifications.len(),
+            self.queue.len(),
+            "Lengths of queue and hash map must match"
+        );
+        self.notifications.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len().is_zero()
+    }
+
     /// Scans the transaction for outputs that match with list of expected
-    /// incomign UTXOs, and returns expected UTXOs that are present in the
+    /// incoming UTXOs, and returns expected UTXOs that are present in the
     /// transaction.
+    /// Returns a list of (addition record, UTXO, sender randomness, receiver_preimage)
     pub fn scan_for_expected_utxos(
         &self,
         transaction: &Transaction,
     ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
         let mut received_expected_utxos = vec![];
-        for (utxo, sender_randomness, receiver_preimage) in self.get_expected_utxos() {
-            let receiver_digest = receiver_preimage.vmhash::<Hash>();
-            let ar = commit::<Hash>(&Hash::hash(&utxo), &sender_randomness, &receiver_digest);
-            if transaction
-                .kernel
-                .outputs
-                .iter()
-                .any(|output| *output == ar)
-            {
-                received_expected_utxos.push((ar, utxo, sender_randomness, receiver_preimage));
+        for tx_output in transaction.kernel.outputs.iter() {
+            if let Some(expected_utxo) = self.notifications.get(tx_output) {
+                received_expected_utxos.push((
+                    tx_output.to_owned(),
+                    expected_utxo.utxo.to_owned(),
+                    expected_utxo.sender_randomness,
+                    expected_utxo.receiver_preimage,
+                ));
             }
         }
         received_expected_utxos
     }
 
-    fn get_expected_utxos(&self) -> Vec<(Utxo, Digest, Digest)> {
-        println!("self.notifications.len() = {}", self.notifications.len());
-        self.notifications
-            .iter()
-            .map(|(_, expected_utxo)| {
-                (
-                    expected_utxo.utxo.clone(),
-                    expected_utxo.sender_randomness,
-                    expected_utxo.receiver_preimage,
-                )
-            })
-            .collect_vec()
+    /// Return all expected UTXOs
+    pub fn get_all_expected_utxos(&self) -> Vec<ExpectedUtxo> {
+        self.notifications.values().cloned().collect_vec()
     }
 
     pub fn add_expected_utxo(
@@ -146,6 +152,7 @@ impl UtxoNotificationPool {
             receiver_preimage,
             received_from: received_from.clone(),
             notification_received: SystemTime::now(),
+            mined_in_block: None,
         };
         self.notifications.insert(addition_record, expected_utxo);
         self.queue
@@ -158,6 +165,12 @@ impl UtxoNotificationPool {
         );
 
         self.shrink_to_max_size();
+    }
+
+    pub fn mark_as_received(&mut self, addition_record: AdditionRecord, block_digest: Digest) {
+        self.notifications
+            .entry(addition_record)
+            .and_modify(|x| x.mined_in_block = Some(block_digest));
     }
 
     pub fn drop_expected_utxo(
@@ -198,14 +211,69 @@ impl UtxoNotifier {
             UtxoNotifier::OwnMiner => Credibility::MAX - 1,
             UtxoNotifier::Cli => Credibility::MAX - 2,
             UtxoNotifier::Peer(_, credibility) => {
-                // Prevent ensure that peer notifications  always have lower priority
+                // Ensure that peer notifications always have lower priority
                 // than those reported other ways, and prevent overflow in this calculation
-                if *credibility >= 3 {
-                    credibility - 3
-                } else {
-                    0
-                }
+                credibility.saturating_sub(3)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod wallet_state_tests {
+    use rand::random;
+
+    use super::*;
+    use crate::{
+        models::blockchain::transaction::{amount::Amount, utxo::LockScript},
+        tests::shared::make_mock_transaction,
+    };
+
+    #[tokio::test]
+    async fn utxo_notification_insert_remove_scan() {
+        let mut notification_pool = UtxoNotificationPool::new(ByteSize::kb(1));
+        assert!(notification_pool.is_empty());
+        assert!(notification_pool.len().is_zero());
+        let mock_utxo = Utxo {
+            lock_script: LockScript(vec![]),
+            coins: Into::<Amount>::into(10).to_native_coins(),
+        };
+        let sender_randomness: Digest = random();
+        let receiver_preimage: Digest = random();
+        let peer_instance_id: InstanceId = random();
+        let expected_addition_record = commit::<Hash>(
+            &Hash::hash(&mock_utxo),
+            &sender_randomness,
+            &receiver_preimage.vmhash::<Hash>(),
+        );
+        notification_pool.add_expected_utxo(
+            mock_utxo.clone(),
+            sender_randomness,
+            receiver_preimage,
+            UtxoNotifier::Peer((peer_instance_id, String::default()), 100),
+        );
+        assert!(!notification_pool.is_empty());
+        assert_eq!(1, notification_pool.len());
+
+        let mock_tx_containing_expected_utxo =
+            make_mock_transaction(vec![], vec![expected_addition_record]);
+
+        let ret_with_tx_containing_utxo =
+            notification_pool.scan_for_expected_utxos(&mock_tx_containing_expected_utxo);
+        assert_eq!(1, ret_with_tx_containing_utxo.len());
+
+        // Call scan but with another input. Verify that it returns the empty list
+        let another_addition_record = commit::<Hash>(
+            &Hash::hash(&mock_utxo),
+            &random(),
+            &receiver_preimage.vmhash::<Hash>(),
+        );
+        let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
+        let ret_with_tx_without_utxo = notification_pool.scan_for_expected_utxos(&tx_without_utxo);
+        assert!(ret_with_tx_without_utxo.is_empty());
+
+        // Verify that we can remove the expected UTXO again
+        notification_pool.drop_expected_utxo(mock_utxo, sender_randomness, receiver_preimage);
+        assert!(notification_pool.is_empty());
     }
 }

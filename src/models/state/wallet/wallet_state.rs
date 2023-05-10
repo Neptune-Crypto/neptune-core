@@ -228,13 +228,12 @@ impl WalletState {
             "received_outputs as announced outputs = {}",
             received_outputs.len()
         );
-        received_outputs.append(
-            &mut self
-                .expected_utxos
-                .read()
-                .unwrap()
-                .scan_for_expected_utxos(&transaction),
-        );
+        let expected_utxos_in_this_block = self
+            .expected_utxos
+            .read()
+            .unwrap()
+            .scan_for_expected_utxos(&transaction);
+        received_outputs.append(&mut expected_utxos_in_this_block.clone());
         debug!("received total outputs: = {}", received_outputs.len());
 
         let addition_record_to_utxo_info: HashMap<AdditionRecord, (Utxo, Digest, Digest)> =
@@ -500,6 +499,16 @@ impl WalletState {
 
         wallet_db_lock.set_sync_label(block.hash);
         wallet_db_lock.persist();
+
+        // Mark all expected UTXOs that were received in this block as received
+        {
+            let mut expected_utxo_writer = self.expected_utxos.write().unwrap();
+            expected_utxos_in_this_block
+                .into_iter()
+                .for_each(|(addition_rec, _, _, _)| {
+                    expected_utxo_writer.mark_as_received(addition_rec, block.hash)
+                });
+        }
 
         Ok(())
     }
