@@ -888,8 +888,8 @@ impl PeerLoopHandler {
                             }
                         }
                         Err(err) => {
-                            error!("Error when receiving from peer: {}.", self.peer_address);
-                            bail!("Error when receiving from peer: {}. Closing connection.", err);
+                            error!("Error when receiving from peer: {}. Error: {err}", self.peer_address);
+                            bail!("Error when receiving from peer: {}. Closing connection:", err);
                         }
                     }
                 }
