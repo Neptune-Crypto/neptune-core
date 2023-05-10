@@ -60,6 +60,10 @@ fn pubscript_input_is_marked(pubscript_input: &[BFieldElement]) -> bool {
     }
 }
 
+fn derive_receiver_id(seed: Digest) -> BFieldElement {
+    Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(2)]].concat()).values()[0]
+}
+
 fn receiver_identifier_from_pubscript_input(
     public_script: &[BFieldElement],
 ) -> Result<BFieldElement> {
@@ -142,6 +146,7 @@ pub fn std_lockscript_reference_verify_unlock(
 }
 
 impl SpendingKey {
+    /// Return announces a list of (addition record, utxo, sender randomness, receiver preimage)
     pub fn scan_for_announced_utxos(
         &self,
         transaction: &Transaction,
@@ -205,9 +210,7 @@ impl SpendingKey {
             .try_into()
             .unwrap();
         let (sk, _pk) = lattice::kem::keygen(randomness);
-        let receiver_identifier =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(2)]].concat()).values()
-                [0];
+        let receiver_identifier = derive_receiver_id(seed);
 
         Self {
             receiver_identifier,
@@ -265,9 +268,7 @@ impl SpendingKey {
 impl ReceivingAddress {
     pub fn from_spending_key(spending_key: &SpendingKey) -> Self {
         let seed = spending_key.seed;
-        let receiver_identifier =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat()).values()
-                [0];
+        let receiver_identifier = derive_receiver_id(seed);
         let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
             .try_into()
             .unwrap();
@@ -425,18 +426,20 @@ impl ReceivingAddress {
 
 #[cfg(test)]
 mod test_generation_addresses {
-    use rand::{thread_rng, Rng, RngCore};
-    use twenty_first::shared_math::tip5::Digest;
+    use rand::{random, thread_rng, Rng, RngCore};
+    use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
     use crate::{
         config_models::network::Network,
         models::blockchain::{
             address::generation_address::{bfes_to_bytes, bytes_to_bfes},
+            shared::Hash,
             transaction::{amount::Amount, utxo::Utxo},
         },
+        tests::shared::make_mock_transaction,
     };
 
-    use super::{ReceivingAddress, SpendingKey};
+    use super::*;
 
     #[test]
     fn test_conversion_fixed_length() {
@@ -535,5 +538,48 @@ mod test_generation_addresses {
         assert_eq!(utxo, utxo_again);
 
         assert_eq!(sender_randomness, sender_randomness_again);
+    }
+
+    #[test]
+    fn scan_for_announced_utxos_test() {
+        let mut rng = thread_rng();
+        let seed: Digest = rng.gen();
+        let spending_key = SpendingKey::derive_from_seed(seed);
+        let receiving_address = ReceivingAddress::from_spending_key(&spending_key);
+        let utxo = Utxo {
+            lock_script: receiving_address.lock_script(),
+            coins: Into::<Amount>::into(10).to_native_coins(),
+        };
+        let sender_randomness: Digest = random();
+
+        let (pubscript, pubscript_input) = receiving_address
+            .generate_pubscript_and_input(&utxo, sender_randomness)
+            .unwrap();
+        let mut mock_tx = make_mock_transaction(vec![], vec![]);
+
+        assert!(spending_key.scan_for_announced_utxos(&mock_tx).is_empty());
+
+        // Add a pubscript for our keys and verify that they are recognized
+        assert!(pubscript_input_is_marked(&pubscript_input));
+        mock_tx
+            .kernel
+            .pubscript_hashes_and_inputs
+            .push((Hash::hash(&pubscript), pubscript_input));
+
+        let announced_txs = spending_key.scan_for_announced_utxos(&mock_tx);
+        assert_eq!(1, announced_txs.len());
+
+        let (read_ar, read_utxo, read_sender_randomness, returned_receiver_preimage) =
+            announced_txs[0].clone();
+        assert_eq!(utxo, read_utxo);
+
+        let expected_addition_record = commit::<Hash>(
+            &Hash::hash(&utxo),
+            &sender_randomness,
+            &receiving_address.privacy_digest,
+        );
+        assert_eq!(expected_addition_record, read_ar);
+        assert_eq!(sender_randomness, read_sender_randomness);
+        assert_eq!(returned_receiver_preimage, spending_key.privacy_preimage);
     }
 }
