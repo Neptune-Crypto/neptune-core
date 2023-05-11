@@ -37,6 +37,8 @@ pub trait RPC {
     /// Returns the digest of the latest n blocks
     async fn heads(n: usize) -> Vec<Digest>;
 
+    async fn get_tip_header() -> BlockHeader;
+
     async fn get_header(hash: Digest) -> Option<BlockHeader>;
 
     /// Clears standing for all peers, connected or not
@@ -103,6 +105,7 @@ impl RPC for NeptuneRPCServer {
     type ShutdownFut = Ready<bool>;
     type GetBalanceFut = Ready<Amount>;
     type GetWalletStatusFut = Ready<WalletStatus>;
+    type GetTipHeaderFut = Ready<BlockHeader>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
     type GetReceivingAddressFut = Ready<generation_address::ReceivingAddress>;
     type GetMempoolTxCountFut = Ready<usize>;
@@ -316,6 +319,12 @@ impl RPC for NeptuneRPCServer {
             .wallet_state
             .get_wallet_status_from_lock(&mut db_lock, &block_lock);
         future::ready(wallet_status)
+    }
+
+    fn get_tip_header(self, _: context::Context) -> Self::GetTipHeaderFut {
+        let latest_block_block_header =
+            executor::block_on(self.state.chain.light_state.get_latest_block_header());
+        future::ready(latest_block_block_header)
     }
 
     fn get_header(
