@@ -452,7 +452,7 @@ impl Widget for OverviewScreen {
         // TODO: Do we want to show the emojihash here?
         let tip_digest = data.block_header.as_ref().map(|x| Hash::hash(x));
         lines.push(format!(
-            "tip digest:\n\n{}\n{}\n\n",
+            "tip digest:\n{}\n{}\n\n",
             dashifnotset!(tip_digest.map(|x| x.emojihash())),
             dashifnotset!(tip_digest),
         ));

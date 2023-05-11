@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use twenty_first::shared_math::digest::Digest;
@@ -53,6 +54,30 @@ pub enum PeerSanctionReason {
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
     InvalidTransaction,
+}
+
+impl Display for PeerSanctionReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let string = match self {
+            PeerSanctionReason::InvalidBlock(_) => "invalid block",
+            PeerSanctionReason::DifferentGenesis => "different genesis",
+            PeerSanctionReason::ForkResolutionError(_) => "fork resolution error",
+            PeerSanctionReason::SynchronizationTimeout => "synchronization timeout",
+            PeerSanctionReason::FloodPeerListResponse => "flood peer list response",
+            PeerSanctionReason::BlockRequestUnknownHeight => "block request unknown height",
+            PeerSanctionReason::InvalidMessage => "invalid message",
+            PeerSanctionReason::TooShortBlockBatch => "too short block batch",
+            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => {
+                "received block batch outside of sync"
+            }
+            PeerSanctionReason::BatchBlocksInvalidStartHeight => {
+                "invalid start height of batch blocks"
+            }
+            PeerSanctionReason::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
+            PeerSanctionReason::InvalidTransaction => "invalid transaction",
+        };
+        write!(f, "{string}")
+    }
 }
 
 /// Used by main thread to manage synchronizations/catch-up. Main thread has
