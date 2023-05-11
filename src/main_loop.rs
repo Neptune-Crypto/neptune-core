@@ -865,10 +865,51 @@ impl MainLoopHandler {
         let mp_resync_timer = time::sleep(mp_resync_timer_interval);
         tokio::pin!(mp_resync_timer);
 
+        // Handle SIGTERM and SIGINT signals on Unix systems
+        #[cfg(unix)]
+        let (sigterm, sigint) = {
+            use tokio::signal::unix::{signal, SignalKind};
+            let sigterm = signal(SignalKind::terminate())?;
+            let sigint = signal(SignalKind::interrupt())?;
+            (Some(sigterm), Some(sigint))
+        };
+        #[cfg(not(unix))]
+        let (mut sigterm, mut sigint) = (None, None);
+
+        // Spawn threads to monitor for SIGTERM and SIGINT
+        let (tx_term, mut rx_term) = tokio::sync::mpsc::channel(2);
+        if let Some(mut sigterm_stream) = sigterm {
+            tokio::spawn(async move {
+                if let Some(_) = sigterm_stream.recv().await {
+                    println!("Received SIGTERM");
+                    tx_term.send(()).await.unwrap();
+                }
+            });
+        }
+        let (tx_int, mut rx_int) = tokio::sync::mpsc::channel(2);
+        if let Some(mut sigint_stream) = sigint {
+            tokio::spawn(async move {
+                if let Some(_) = sigint_stream.recv().await {
+                    println!("Received SIGINT");
+                    tx_int.send(()).await.unwrap();
+                }
+            });
+        }
+
         loop {
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
+                    break;
+                }
+
+                // Monitor for SIGTERM and SIGINT
+                Some(_) = rx_term.recv() => {
+                    info!("Detected SIGTERM signal.");
+                    break;
+                }
+                Some(_) = rx_int.recv() => {
+                    info!("Detected SIGINT signal.");
                     break;
                 }
 
