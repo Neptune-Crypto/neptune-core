@@ -42,8 +42,7 @@ pub struct ReceiveScreen {
 }
 
 impl ReceiveScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, args: Config) -> Self {
-        let network = args.network;
+    pub fn new(rpc_server: Arc<RPCClient>, args: Config, network: Network) -> Self {
         ReceiveScreen {
             active: false,
             fg: Color::Gray,

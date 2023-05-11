@@ -9,6 +9,7 @@ use std::{
 use bytesize::ByteSize;
 use chrono::DateTime;
 use itertools::Itertools;
+use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::shared::Hash;
 use neptune_core::models::blockchain::{
@@ -31,12 +32,13 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct OverviewData {
     balance: Option<Amount>,
     confirmations: Option<usize>,
     synchronization: Option<f64>,
 
+    network: Network,
     block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
 
@@ -60,12 +62,37 @@ pub struct OverviewData {
 }
 
 impl OverviewData {
+    pub fn new(network: Network) -> Self {
+        Self {
+            balance: Default::default(),
+            confirmations: Default::default(),
+            synchronization: Default::default(),
+            network: network,
+            block_header: Default::default(),
+            block_interval: Default::default(),
+            archive_size: Default::default(),
+            archive_coverage: Default::default(),
+            mempool_size: Default::default(),
+            mempool_tx_count: Default::default(),
+            peer_count: Default::default(),
+            max_peer_count: Default::default(),
+            authenticated_peer_count: Default::default(),
+            up_since: Default::default(),
+            cpu_load: Default::default(),
+            cpu_capacity: Default::default(),
+            cpu_temperature: Default::default(),
+            ram_total: Default::default(),
+            ram_available: Default::default(),
+            ram_used: Default::default(),
+        }
+    }
     pub fn test() -> Self {
         OverviewData {
             balance: Some(Amount::zero()),
             confirmations: Some(17),
             synchronization: Some(99.5),
 
+            network: Network::Testnet,
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block().header,
             ),
@@ -110,13 +137,13 @@ pub struct OverviewScreen {
 }
 
 impl OverviewScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network) -> Self {
         OverviewScreen {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            data: Arc::new(Mutex::new(OverviewData::default())),
+            data: Arc::new(Mutex::new(OverviewData::new(network))),
             server: rpc_server,
             poll_thread: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
@@ -420,10 +447,12 @@ impl Widget for OverviewScreen {
         // blockchain
         lines = vec![];
 
+        lines.push(format!("network: {}", data.network));
+
         // TODO: Do we want to show the emojihash here?
         let tip_digest = data.block_header.as_ref().map(|x| Hash::hash(x));
         lines.push(format!(
-            "tip digest:\n{}\n{}\n\n",
+            "tip digest:\n\n{}\n{}\n\n",
             dashifnotset!(tip_digest.map(|x| x.emojihash())),
             dashifnotset!(tip_digest),
         ));

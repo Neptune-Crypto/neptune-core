@@ -46,10 +46,11 @@ pub struct SendScreen {
     reset_me: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
     args: Config,
+    network: Network,
 }
 
 impl SendScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, args: Config) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, args: Config, network: Network) -> Self {
         SendScreen {
             active: false,
             fg: Color::Gray,
@@ -63,6 +64,7 @@ impl SendScreen {
             reset_me: Arc::new(Mutex::new(false)),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
             args,
+            network,
         }
     }
 
@@ -178,7 +180,7 @@ impl SendScreen {
                                     let notice = self.notice.clone();
                                     let focus = self.focus.clone();
                                     let reset_me = self.reset_me.clone();
-                                    let network = self.args.network.clone();
+                                    let network = self.network;
 
                                     tokio::spawn(async move {
                                         Self::check_and_pay_sequence(

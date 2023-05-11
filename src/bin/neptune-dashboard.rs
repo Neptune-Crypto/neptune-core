@@ -14,7 +14,7 @@ use anyhow::{bail, Result};
 use clap::Parser;
 
 use dashboard_src::dashboard_app::DashboardApp;
-use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
+use neptune_core::rpc_server::RPCClient;
 use std::net::{Ipv4Addr, SocketAddr};
 use tarpc::{client, context};
 use tokio_serde::formats::Json;
@@ -27,8 +27,6 @@ pub struct Config {
     /// Sets the server address to connect to.
     #[clap(long, default_value = "9799", value_name = "PORT")]
     port: u16,
-    #[structopt(long, short, default_value = "main")]
-    pub network: Network,
 }
 
 #[tokio::main]
@@ -46,18 +44,17 @@ async fn main() -> Result<()> {
     };
     let client = RPCClient::new(client::Config::default(), transport).spawn();
 
-    // Block height functions as our ping endpoint
-    let ping = client.block_height(context::current()).await;
-    match ping {
-        Ok(_pong) => {}
+    // Read what network the client is running and ensure that client is up and running
+    let network = match client.get_network(context::current()).await {
+        Ok(nw) => nw,
         Err(err) => {
             eprintln!("{err}");
             bail!("Could not ping neptune-core. Do configurations match?");
         }
-    }
+    };
 
     // run app until quit
-    let res = DashboardApp::run(client, args).await;
+    let res = DashboardApp::run(client, args, network).await;
 
     match res {
         Err(err) => {

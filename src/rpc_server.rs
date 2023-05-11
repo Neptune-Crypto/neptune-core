@@ -25,6 +25,9 @@ use crate::models::state::{GlobalState, UtxoReceiverData};
 
 #[tarpc::service]
 pub trait RPC {
+    // Return which network the client is running
+    async fn get_network() -> Network;
+
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
 
@@ -92,6 +95,7 @@ pub struct NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
+    type GetNetworkFut = Ready<Network>;
     type BlockHeightFut = Ready<BlockHeight>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
     type HeadFut = Ready<Digest>;
@@ -111,6 +115,11 @@ impl RPC for NeptuneRPCServer {
     type GetMempoolTxCountFut = Ready<usize>;
     type GetMempoolSizeFut = Ready<usize>;
     type GetHistoryFut = Ready<Vec<(Duration, Amount, Sign)>>;
+
+    fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
+        let network = self.state.cli.network;
+        future::ready(network)
+    }
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
