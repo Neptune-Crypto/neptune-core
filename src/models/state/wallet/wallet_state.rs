@@ -88,7 +88,10 @@ impl WalletState {
                 rusty_leveldb::Options::default(),
             ),
             // This case should only be hit when running unit-test
-            None => DB::open("in-memory DB", rusty_leveldb::in_memory()),
+            None => {
+                assert!(cfg!(test), "In memory database may only be used for tests");
+                DB::open("in-memory DB", rusty_leveldb::in_memory())
+            }
         };
 
         let wallet_db = match wallet_db {
