@@ -16,6 +16,7 @@ use crate::models::state::GlobalState;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
+use itertools::Itertools;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
@@ -234,11 +235,18 @@ impl PeerLoopHandler {
         peer_state.fork_reconciliation_blocks = vec![];
 
         // Sanity check, that the blocks are correctly sorted (they should be)
+        // TODO: This has failed: Investigate!
+        // See: https://neptune.builders/core-team/neptune-core/issues/125
         let mut new_blocks_sorted_check = new_blocks.clone();
         new_blocks_sorted_check.sort_by(|a, b| a.header.height.cmp(&b.header.height));
         assert_eq!(
-            new_blocks_sorted_check, new_blocks,
-            "Block list in fork resolution must be sorted"
+            new_blocks_sorted_check,
+            new_blocks,
+            "Block list in fork resolution must be sorted. Got blocks in this order: {}",
+            new_blocks
+                .iter()
+                .map(|b| b.header.height.to_string())
+                .join(", ")
         );
 
         // Parent block is guaranteed to be set here, either it is fetched from the
