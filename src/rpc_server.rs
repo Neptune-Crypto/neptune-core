@@ -472,10 +472,10 @@ mod rpc_server_tests {
         };
 
         state
-            .write_peer_standing_on_increase(peer_address_0.ip(), standing_0)
+            .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
             .await;
         state
-            .write_peer_standing_on_increase(peer_address_1.ip(), standing_1)
+            .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
 
         // Verify expected initial conditions
@@ -569,10 +569,10 @@ mod rpc_server_tests {
         };
 
         state
-            .write_peer_standing_on_increase(peer_address_0.ip(), standing_0)
+            .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
             .await;
         state
-            .write_peer_standing_on_increase(peer_address_1.ip(), standing_1)
+            .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
 
         // Verify expected initial conditions

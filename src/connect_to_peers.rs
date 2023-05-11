@@ -54,7 +54,7 @@ async fn get_connection_status(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some() && standing.unwrap().standing > state.cli.peer_tolerance {
+    if standing.is_some() && standing.unwrap().standing < -(state.cli.peer_tolerance as i32) {
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
@@ -409,20 +409,15 @@ mod connect_tests {
 
         // Then check that peers can be banned by bad behavior
         let bad_standing: PeerStanding = PeerStanding {
-            standing: u16::MAX,
+            standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
             ))),
-            timestamp_of_latest_sanction: Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Failed to generate timestamp for peer standing")
-                    .as_secs(),
-            ),
+            timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
         state
-            .write_peer_standing_on_increase(peer_sa.ip(), bad_standing)
+            .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
             .await;
         status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
@@ -611,21 +606,16 @@ mod connect_tests {
             get_test_genesis_setup(Network::Main, peer_count_before_incoming_connection_request)
                 .await?;
         let bad_standing: PeerStanding = PeerStanding {
-            standing: u16::MAX,
+            standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
             ))),
-            timestamp_of_latest_sanction: Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Failed to generate timestamp for peer standing")
-                    .as_secs(),
-            ),
+            timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
         let peer_address = get_dummy_address(3);
         state
-            .write_peer_standing_on_increase(peer_address.ip(), bad_standing)
+            .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
             .await;
 
         let answer = answer_peer(

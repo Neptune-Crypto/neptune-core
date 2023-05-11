@@ -33,6 +33,8 @@ const MINIMUM_BLOCK_BATCH_SIZE: usize = 10;
 const KEEP_CONNECTION_ALIVE: bool = false;
 const _DISCONNECT_CONNECTION: bool = true;
 
+pub type PeerStandingNumber = i32;
+
 /// Contains the immutable data that this peer-loop needs. Does not contain the `peer` variable
 /// since this needs to be a mutable variable in most methods.
 pub struct PeerLoopHandler {
@@ -63,6 +65,8 @@ impl PeerLoopHandler {
         }
     }
 
+    // TODO: Add a reward function that mutates the peer status
+
     fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
         warn!(
             "Sanctioning peer {} for {:?}",
@@ -75,12 +79,12 @@ impl PeerLoopHandler {
             .peer_map
             .lock()
             .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-        let new_standing: &mut u16 = &mut 0;
+        let new_standing: &mut PeerStandingNumber = &mut 0;
         peers
             .entry(self.peer_address)
             .and_modify(|p| *new_standing = p.standing.sanction(reason));
 
-        if *new_standing > self.state.cli.peer_tolerance {
+        if *new_standing < -(self.state.cli.peer_tolerance as PeerStandingNumber) {
             warn!("Banning peer");
             bail!("Banning peer");
         }
@@ -1014,7 +1018,7 @@ impl PeerLoopHandler {
             });
         debug!("Fetched peer info standing for {}", self.peer_address);
         self.state
-            .write_peer_standing_on_increase(self.peer_address.ip(), peer_info_writeback.standing)
+            .write_peer_standing_on_decrease(self.peer_address.ip(), peer_info_writeback.standing)
             .await;
         debug!("Stored peer info standing for {}", self.peer_address);
 

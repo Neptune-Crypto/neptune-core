@@ -105,28 +105,19 @@ impl PeerSanctionReason {
 /// at a certain IP behaves. A lower number is better.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub struct PeerStanding {
-    pub standing: u16,
+    pub standing: i32,
     pub latest_sanction: Option<PeerSanctionReason>,
-    pub timestamp_of_latest_sanction: Option<u64>,
+    pub timestamp_of_latest_sanction: Option<SystemTime>,
 }
 
 impl PeerStanding {
     /// Sanction peer and return latest standing score
-    pub fn sanction(&mut self, reason: PeerSanctionReason) -> u16 {
-        let (mut new_standing, overflow) = self.standing.overflowing_add(reason.to_severity());
-        if overflow {
-            new_standing = u16::MAX;
-        }
-
-        self.standing = new_standing;
+    pub fn sanction(&mut self, reason: PeerSanctionReason) -> i32 {
+        self.standing = self
+            .standing
+            .saturating_sub(reason.to_severity().try_into().unwrap());
         self.latest_sanction = Some(reason);
-        self.timestamp_of_latest_sanction = Some(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Failed to generate timestamp for peer standing")
-                .as_secs(),
-        );
-
+        self.timestamp_of_latest_sanction = Some(SystemTime::now());
         self.standing
     }
 
