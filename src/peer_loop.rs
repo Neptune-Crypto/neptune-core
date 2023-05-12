@@ -237,6 +237,8 @@ impl PeerLoopHandler {
         // Sanity check, that the blocks are correctly sorted (they should be)
         // TODO: This has failed: Investigate!
         // See: https://neptune.builders/core-team/neptune-core/issues/125
+        // TODO: This assert should be replaced with something to punish or disconnect
+        // from a peer instead. It can be used by a malevolent peer to crash peer nodes.
         let mut new_blocks_sorted_check = new_blocks.clone();
         new_blocks_sorted_check.sort_by(|a, b| a.header.height.cmp(&b.header.height));
         assert_eq!(
@@ -761,20 +763,9 @@ impl PeerLoopHandler {
     {
         debug!("Handling {} message from main in peer loop", msg.get_type());
         match msg {
-            MainToPeerThread::BlockFromMiner(block) => {
-                // If this client found a block, we need to share it immediately
-                // to reduce the risk that someone else finds another one and shares
-                // it faster.
-                let new_block_height = block.header.height;
-                let block_notification: PeerBlockNotification = (&(*block)).into();
-                let t_block: Box<TransferBlock> = Box::new((*block).into());
-                peer.send(PeerMessage::Block(t_block)).await?;
-                peer.send(PeerMessage::BlockNotification(block_notification))
-                    .await?;
-                peer_state_info.highest_shared_block_height = new_block_height;
-                Ok(false)
-            }
             MainToPeerThread::Block(block) => {
+                // We don't currently differentiate whether a new block came from a peer, or from our
+                // own miner. It's always shared through this logic.
                 let new_block_height = block.header.height;
                 if new_block_height > peer_state_info.highest_shared_block_height {
                     debug!("Sending PeerMessage::BlockNotification");

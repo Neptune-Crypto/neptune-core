@@ -40,7 +40,6 @@ pub enum MinerToMain {
 #[derive(Clone, Debug)]
 pub enum MainToPeerThread {
     Block(Box<Block>),
-    BlockFromMiner(Box<Block>),
     RequestBlockBatch(Vec<Digest>, SocketAddr), // (most canonical known digests, peer_socket_to_request)
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
@@ -55,7 +54,6 @@ impl MainToPeerThread {
     pub fn get_type(&self) -> String {
         match self {
             MainToPeerThread::Block(_) => "block".to_string(),
-            MainToPeerThread::BlockFromMiner(_) => "block from miner".to_string(),
             MainToPeerThread::RequestBlockBatch(_, _) => "req block batch".to_string(),
             MainToPeerThread::PeerSynchronizationTimeout(_) => "peer sync timeout".to_string(),
             MainToPeerThread::MakePeerDiscoveryRequest => "make peer discovery req".to_string(),

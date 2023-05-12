@@ -304,11 +304,6 @@ impl MainLoopHandler {
                 // a block from a peer thread before this event is triggered.
                 let new_block = new_block_info.block;
                 info!("Miner found new block: {}", new_block.header.height);
-                self.main_to_peer_broadcast_tx
-                .send(MainToPeerThread::BlockFromMiner(new_block.clone()))
-                .expect(
-                    "Peer handler broadcast channel prematurely closed. This should never happen.",
-                );
 
                 // Store block in database
                 // Acquire all locks before updating
@@ -405,7 +400,7 @@ impl MainLoopHandler {
                         .mempool
                         .update_with_block(&new_block, &mut mempool_write_lock);
 
-                    *light_state_locked = *new_block;
+                    *light_state_locked = *new_block.clone();
                 }
 
                 // Flush databases
@@ -415,6 +410,13 @@ impl MainLoopHandler {
                 // to mine the next block
                 self.main_to_miner_tx
                     .send(MainToMiner::ReadyToMineNextBlock)?;
+
+                // Share block with peers
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerThread::Block(new_block.clone()))
+                    .expect(
+                        "Peer handler broadcast channel prematurely closed. This should never happen.",
+                    );
             }
         }
 
