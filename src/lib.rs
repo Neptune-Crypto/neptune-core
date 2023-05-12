@@ -66,9 +66,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path())?;
     debug!("Data directory is {}", data_dir);
 
-    // Get wallet object, create one if none exists
+    // Get wallet object, create various wallet secret files
+    let wallet_dir = data_dir.wallet_director_path();
+    DataDirectory::create_dir_if_not_exists(&wallet_dir)?;
     let wallet_secret: WalletSecret =
-        WalletSecret::read_from_file_or_create(&data_dir.wallet_file_path())?;
+        WalletSecret::read_from_file_or_create(&data_dir.wallet_director_path())?;
     let wallet_state =
         WalletState::new_from_wallet_secret(Some(&data_dir), wallet_secret, &cli_args).await;
 

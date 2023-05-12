@@ -10,7 +10,9 @@ use crate::models::state::networking_state::BANNED_IPS_DB_NAME;
 use crate::models::state::shared::{
     BLOCK_FILENAME_EXTENSION, BLOCK_FILENAME_PREFIX, DIR_NAME_FOR_BLOCKS,
 };
-use crate::models::state::wallet::{WALLET_DB_NAME, WALLET_FILE_NAME, WALLET_OUTPUT_COUNT_DB_NAME};
+use crate::models::state::wallet::{
+    WALLET_DB_NAME, WALLET_DIRECTORY, WALLET_OUTPUT_COUNT_DB_NAME, WALLET_SECRET_FILE_NAME,
+};
 
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone)]
@@ -86,8 +88,8 @@ impl DataDirectory {
     ///////////////////////////////////////////////////////////////////////////
     ///
     /// The wallet file path
-    pub fn wallet_file_path(&self) -> PathBuf {
-        self.data_dir.join(Path::new(WALLET_FILE_NAME))
+    pub fn wallet_director_path(&self) -> PathBuf {
+        self.data_dir.join(Path::new(WALLET_DIRECTORY))
     }
 
     /// The wallet database directory path.

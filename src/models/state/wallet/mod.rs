@@ -18,7 +18,10 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use crate::models::blockchain::address::generation_address;
 use crate::Hash;
 
-pub const WALLET_FILE_NAME: &str = "wallet.dat";
+pub const WALLET_DIRECTORY: &str = "wallet";
+pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
+pub const WALLET_OUTGOING_SECRETS_FILE_NAME: &str = "outgoing_randomness.dat";
+pub const WALLET_INCOMING_SECRETS_FILE_NAME: &str = "incoming_randomness.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
 const STANDARD_WALLET_VERSION: u8 = 0;
 pub const WALLET_DB_NAME: &str = "wallet_block_db";
@@ -66,23 +69,64 @@ impl WalletSecret {
         WalletSecret::new(secret_seed)
     }
 
+    fn wallet_secret_path(wallet_directory_path: &Path) -> PathBuf {
+        wallet_directory_path.join(WALLET_SECRET_FILE_NAME)
+    }
+
+    fn wallet_outgoing_secrets_path(wallet_directory_path: &Path) -> PathBuf {
+        wallet_directory_path.join(WALLET_OUTGOING_SECRETS_FILE_NAME)
+    }
+
+    fn wallet_incoming_secrets_path(wallet_directory_path: &Path) -> PathBuf {
+        wallet_directory_path.join(WALLET_INCOMING_SECRETS_FILE_NAME)
+    }
+
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
     /// and save it to `wallet_file`.
-    pub fn read_from_file_or_create(wallet_file_path: &Path) -> Result<Self> {
-        let wallet = if wallet_file_path.exists() {
-            Self::read_from_file(wallet_file_path)?
+    /// Also create files for incoming and outgoing randomness which are appended to
+    /// on each incoming and outgoing transaction.
+    pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
+        let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
+        let wallet = if wallet_secret_path.exists() {
+            Self::read_from_file(&wallet_secret_path)?
         } else {
             let new_secret: Digest = generate_secret_key();
             let new_wallet: WalletSecret = WalletSecret::new(new_secret);
-            new_wallet.create_wallet_file(wallet_file_path)?;
+            new_wallet.create_wallet_secret_file(&wallet_secret_path)?;
             new_wallet
         };
 
-        // Sanity check that wallet file was stored on disk.
-        if !wallet_file_path.exists() {
+        // Generate files for outgoing and ingoing randomness if those files
+        // do not already exist
+        let outgoing_randomness_file = Self::wallet_outgoing_secrets_path(wallet_directory_path);
+        if !outgoing_randomness_file.exists() {
+            Self::create_empty_wallet_randomness_file(&outgoing_randomness_file).expect(
+                "Create file for outgoing randomness must succeed. Attempted to create file: {outgoing_randomness_file}",
+            );
+        }
+
+        let incoming_randomness_file = Self::wallet_incoming_secrets_path(wallet_directory_path);
+        if !incoming_randomness_file.exists() {
+            Self::create_empty_wallet_randomness_file(&incoming_randomness_file).expect("Create file for outgoing randomness must succeed. Attempted to create file: {incoming_randomness_file}");
+        }
+
+        // Sanity checks that files were actually created
+        if !wallet_secret_path.exists() {
             bail!(
-                "Wallet file '{}' must exist on disk after reading/creating it.",
-                wallet_file_path.to_string_lossy()
+                "Wallet secret file '{}' must exist on disk after reading/creating it.",
+                wallet_secret_path.to_string_lossy()
+            );
+        }
+        if !outgoing_randomness_file.exists() {
+            bail!(
+                "file containing outgoing randomness '{}' must exist on disk.",
+                outgoing_randomness_file.to_string_lossy()
+            );
+        }
+        if !incoming_randomness_file.exists() {
+            bail!(
+                "file containing ingoing randomness '{}' must exist on disk.",
+                incoming_randomness_file.to_string_lossy()
             );
         }
 
@@ -124,20 +168,31 @@ impl WalletSecret {
         })
     }
 
+    /// Used to generate both the file for incoming and outgoing randomness
+    fn create_empty_wallet_randomness_file(file_path: &Path) -> Result<()> {
+        let init_value: String = String::default();
+
+        if cfg!(not(unix)) {
+            Self::create_wallet_file_windows(&file_path.to_path_buf(), init_value)
+        } else {
+            Self::create_wallet_file_unix(&file_path.to_path_buf(), init_value)
+        }
+    }
+
     /// Create wallet file with restrictive permissions and save this wallet to disk
-    fn create_wallet_file(&self, wallet_file: &Path) -> Result<()> {
-        let wallet_as_json: String = serde_json::to_string(self).unwrap();
+    fn create_wallet_secret_file(&self, wallet_file: &Path) -> Result<()> {
+        let wallet_secret_as_json: String = serde_json::to_string(self).unwrap();
 
         if cfg!(windows) {
-            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_as_json)
+            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_secret_as_json)
         } else {
-            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_as_json)
+            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_secret_as_json)
         }
     }
 
     #[cfg(target_family = "unix")]
     /// Create a wallet file, and set restrictive permissions
-    fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) -> Result<()> {
+    fn create_wallet_file_unix(path: &PathBuf, file_content: String) -> Result<()> {
         // On Unix/Linux we set the file permissions to 600, to disallow
         // other users on the same machine to access the secrets.
         // I don't think the `std::os::unix` library can be imported on a Windows machine,
@@ -149,7 +204,7 @@ impl WalletSecret {
             .mode(0o600)
             .open(path)
             .unwrap();
-        fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
+        fs::write(path.clone(), file_content).context("Failed to write wallet file to disk")
     }
 
     /// Create a wallet file, without setting restrictive UNIX permissions
