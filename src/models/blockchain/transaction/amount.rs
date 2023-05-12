@@ -34,9 +34,12 @@ pub trait AmountLike:
     + Serialize
     + DeserializeOwned
     + From<i32>
+    + From<u32>
+    + From<u64>
     + Hashable
 {
     fn from_bfes(bfes: &[BFieldElement]) -> Self;
+    fn scalar_mul(&self, factor: u64) -> Self;
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,6 +62,11 @@ impl AmountLike for Amount {
             .try_into()
             .unwrap();
         Amount(U32s::new(limbs))
+    }
+
+    fn scalar_mul(&self, factor: u64) -> Self {
+        let factor_as_u32s: U32s<AMOUNT_SIZE_FOR_U32> = factor.try_into().unwrap();
+        Amount(factor_as_u32s * self.0)
     }
 }
 
@@ -205,12 +213,21 @@ impl From<u32> for Amount {
     }
 }
 
+impl From<u64> for Amount {
+    fn from(value: u64) -> Self {
+        let mut limbs = [0u32; AMOUNT_SIZE_FOR_U32];
+        limbs[0] = (value & (u32::MAX as u64)) as u32;
+        limbs[1] = (value >> 32) as u32;
+        Amount(U32s::new(limbs))
+    }
+}
+
 #[cfg(test)]
 mod amount_tests {
     use std::str::FromStr;
 
     use itertools::Itertools;
-    use rand::{thread_rng, RngCore};
+    use rand::{thread_rng, Rng, RngCore};
     use twenty_first::{amount::u32s::U32s, util_types::algebraic_hasher::Hashable};
 
     use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
@@ -252,5 +269,42 @@ mod amount_tests {
 
             assert_eq!(amount, reconstructed_amount);
         }
+    }
+
+    #[test]
+    fn from_u64_conversion_simple_test() {
+        let a: u64 = u32::MAX as u64;
+        let b: u64 = 100u64;
+        let a_amount: Amount = a.into();
+        let b_amount: Amount = b.into();
+        assert_eq!(a_amount + b_amount, (a + b).into());
+    }
+
+    #[test]
+    fn from_u64_conversion_pbt() {
+        let mut rng = thread_rng();
+        let a: u64 = rng.gen_range(0..(1 << 63));
+        let b: u64 = rng.gen_range(0..(1 << 63));
+        let a_amount: Amount = a.into();
+        let b_amount: Amount = b.into();
+        assert_eq!(a_amount + b_amount, (a + b).into());
+    }
+
+    #[test]
+    fn amount_simple_scalar_mul_test() {
+        let fourteen: Amount = 14.into();
+        let fourtytwo: Amount = 42.into();
+        assert_eq!(fourtytwo, fourteen.scalar_mul(3));
+    }
+
+    #[test]
+    fn amount_scalar_mul_pbt() {
+        let mut rng = thread_rng();
+        let a: u64 = rng.gen_range(0..u32::MAX as u64);
+        let b: u64 = rng.gen_range(0..u32::MAX as u64);
+        let prod_checked: Amount = (a * b).into();
+        let mut prod_calculated: Amount = Into::<Amount>::into(a);
+        prod_calculated = prod_calculated.scalar_mul(b);
+        assert_eq!(prod_checked, prod_calculated);
     }
 }
