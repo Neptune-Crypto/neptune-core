@@ -146,6 +146,20 @@ pub fn std_lockscript_reference_verify_unlock(
 }
 
 impl SpendingKey {
+    pub fn to_address(&self) -> ReceivingAddress {
+        let randomness: [u8; 32] = shake256(&bincode::serialize(&self.seed).unwrap(), 32)
+            .try_into()
+            .unwrap();
+        let (_sk, pk) = lattice::kem::keygen(randomness);
+        let privacy_digest = self.privacy_preimage.vmhash::<Hash>();
+        ReceivingAddress {
+            receiver_identifier: self.receiver_identifier,
+            encryption_key: pk,
+            privacy_digest,
+            spending_lock: self.generate_spending_lock(),
+        }
+    }
+
     /// Return announces a list of (addition record, utxo, sender randomness, receiver preimage)
     pub fn scan_for_announced_utxos(
         &self,
@@ -222,7 +236,7 @@ impl SpendingKey {
     }
 
     /// Decrypt a Generation Address ciphertext
-    pub fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
+    fn decrypt(&self, ciphertext: &[BFieldElement]) -> Result<(Utxo, Digest)> {
         // parse ciphertext
         if ciphertext.len() <= CIPHERTEXT_SIZE_IN_BFES {
             bail!("Ciphertext does not have nonce.");

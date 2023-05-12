@@ -30,7 +30,7 @@ use self::utxo::Utxo;
 use super::block::Block;
 use super::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PubScript(pub Vec<BFieldElement>);
 
 impl Hashable for PubScript {

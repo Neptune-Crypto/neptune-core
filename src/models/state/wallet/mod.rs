@@ -11,10 +11,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use twenty_first::shared_math::digest::{Digest, DIGEST_LENGTH};
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
+use crate::models::blockchain::address::generation_address;
 use crate::Hash;
 
 pub const WALLET_FILE_NAME: &str = "wallet.dat";
@@ -86,6 +87,24 @@ impl WalletSecret {
         }
 
         Ok(wallet)
+    }
+
+    pub fn nth_generation_spending_key(&self, counter: u16) -> generation_address::SpendingKey {
+        assert!(
+            counter.is_zero(),
+            "For now we only support one generation address per wallet"
+        );
+
+        // We keep n between 0 and 2^16 as this makes it possible to scan all possible addresses
+        // in case you don't know with what counter you made the address
+        let key_seed = Hash::hash_varlen(
+            &[
+                self.secret_seed.to_sequence(),
+                vec![BFieldElement::new(counter.try_into().unwrap())],
+            ]
+            .concat(),
+        );
+        generation_address::SpendingKey::derive_from_seed(key_seed)
     }
 
     /// Read Wallet from file as JSON
@@ -175,7 +194,9 @@ impl WalletSecret {
 mod wallet_tests {
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use num_traits::CheckedSub;
     use rand::random;
     use tokio::sync::Mutex;
     use tracing_test::traced_test;
@@ -186,11 +207,14 @@ mod wallet_tests {
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
-    use crate::models::blockchain::transaction::amount::Amount;
-    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
+    use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
+    use crate::models::blockchain::transaction::PubScript;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
-        get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
+        get_mock_wallet_state, make_mock_block, make_mock_transaction_with_generation_key,
+        make_unit_test_archival_state,
     };
 
     use super::monitored_utxo::MonitoredUtxo;
@@ -405,188 +429,203 @@ mod wallet_tests {
         Ok(())
     }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn allocate_sufficient_input_funds_test() -> Result<()> {
-    //     let own_wallet = WalletSecret::new(generate_secret_key());
-    //     let own_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
-    //     let genesis_block = Block::genesis_block();
-    //     let block_1 = make_mock_block(
-    //         &genesis_block,
-    //         None,
-    //         own_wallet_state.wallet_secret.get_public_key(),
-    //     );
+    #[traced_test]
+    #[tokio::test]
+    async fn allocate_sufficient_input_funds_test() -> Result<()> {
+        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret)).await;
+        let own_spending_key = own_wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let genesis_block = Block::genesis_block();
+        let (block_1, mut cb_utxo, mut cb_output_randomness) =
+            make_mock_block(&genesis_block, None, own_spending_key.to_address());
+        let mining_reward = cb_utxo.get_native_coin_amount();
 
-    //     // Add block to wallet state
-    //     own_wallet_state.update_wallet_state_with_new_block(
-    //         &block_1,
-    //         &mut own_wallet_state.wallet_db.lock().await,
-    //     )?;
+        // Add block to wallet state
+        own_wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                cb_utxo,
+                cb_output_randomness,
+                own_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            )
+            .unwrap();
+        own_wallet_state.update_wallet_state_with_new_block(
+            &block_1,
+            &mut own_wallet_state.wallet_db.lock().await,
+        )?;
 
-    //     // wrap block
-    //     let wrapped_block = Arc::new(Mutex::new(block_1.clone()));
-    //     let locked_block = wrapped_block.lock().await;
+        // wrap block
+        let wrapped_block = Arc::new(Mutex::new(block_1.clone()));
+        let locked_block = wrapped_block.lock().await;
 
-    //     // Verify that the allocater returns a sane amount
-    //     assert_eq!(
-    //         1,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(1.into(), &locked_block)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
-    //     assert_eq!(
-    //         1,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(99.into(), &locked_block)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
-    //     assert_eq!(
-    //         1,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(100.into(), &locked_block)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
+        // Verify that the allocater returns a sane amount
+        assert_eq!(
+            1,
+            own_wallet_state
+                .allocate_sufficient_input_funds(Amount::one(), &locked_block)
+                .await
+                .unwrap()
+                .len()
+        );
+        assert_eq!(
+            1,
+            own_wallet_state
+                .allocate_sufficient_input_funds(
+                    mining_reward.checked_sub(&Amount::one()).unwrap(),
+                    &locked_block
+                )
+                .await
+                .unwrap()
+                .len()
+        );
+        assert_eq!(
+            1,
+            own_wallet_state
+                .allocate_sufficient_input_funds(mining_reward, &locked_block)
+                .await
+                .unwrap()
+                .len()
+        );
 
-    //     // Cannot allocate more than we have: 100
-    //     assert!(own_wallet_state
-    //         .allocate_sufficient_input_funds(101.into(), &locked_block)
-    //         .await
-    //         .is_err());
+        // Cannot allocate more than we have: `mining_reward`
+        assert!(own_wallet_state
+            .allocate_sufficient_input_funds(mining_reward + Amount::one(), &locked_block)
+            .await
+            .is_err());
 
-    //     // Mine 21 more blocks and verify that 2200 worth of UTXOs can be allocated
-    //     let mut next_block = block_1.clone();
-    //     for _ in 0..21 {
-    //         let previous_block = next_block;
-    //         next_block = make_mock_block(
-    //             &previous_block,
-    //             None,
-    //             own_wallet_state.wallet_secret.get_public_key(),
-    //         );
-    //         own_wallet_state.update_wallet_state_with_new_block(
-    //             &next_block,
-    //             &mut own_wallet_state.wallet_db.lock().await,
-    //         )?;
-    //     }
+        // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
+        let mut next_block = block_1.clone();
+        for _ in 0..21 {
+            let previous_block = next_block;
+            (next_block, cb_utxo, cb_output_randomness) =
+                make_mock_block(&previous_block, None, own_spending_key.to_address());
+            own_wallet_state
+                .expected_utxos
+                .write()
+                .unwrap()
+                .add_expected_utxo(
+                    cb_utxo,
+                    cb_output_randomness,
+                    own_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                )
+                .unwrap();
+            own_wallet_state.update_wallet_state_with_new_block(
+                &next_block,
+                &mut own_wallet_state.wallet_db.lock().await,
+            )?;
+        }
 
-    //     let wrapped_block_ = Arc::new(Mutex::new(next_block.clone()));
-    //     let block_lock = wrapped_block_.lock().await;
+        let wrapped_block_ = Arc::new(Mutex::new(next_block.clone()));
+        let block_lock = wrapped_block_.lock().await;
 
-    //     assert_eq!(
-    //         5,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(500.into(), &block_lock)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
-    //     assert_eq!(
-    //         6,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(501.into(), &block_lock)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
-    //     assert_eq!(
-    //         22,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(2200.into(), &block_lock)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
+        assert_eq!(
+            5,
+            own_wallet_state
+                .allocate_sufficient_input_funds(mining_reward.scalar_mul(5), &block_lock)
+                .await
+                .unwrap()
+                .len()
+        );
+        assert_eq!(
+            6,
+            own_wallet_state
+                .allocate_sufficient_input_funds(
+                    mining_reward.scalar_mul(5) + Amount::one(),
+                    &block_lock
+                )
+                .await
+                .unwrap()
+                .len()
+        );
 
-    //     // Cannot allocate more than we have: 2200
-    //     assert!(own_wallet_state
-    //         .allocate_sufficient_input_funds(2201.into(), &block_lock)
-    //         .await
-    //         .is_err());
+        let expected_balance = mining_reward.scalar_mul(22);
+        assert_eq!(
+            22,
+            own_wallet_state
+                .allocate_sufficient_input_funds(expected_balance, &block_lock)
+                .await
+                .unwrap()
+                .len()
+        );
 
-    //     // Make a block that spends an input, then verify that this is reflected by
-    //     // the allocator.
-    //     let two_utxos = own_wallet_state
-    //         .allocate_sufficient_input_funds(200.into(), &block_lock)
-    //         .await
-    //         .unwrap();
-    //     assert_eq!(
-    //         2,
-    //         two_utxos.len(),
-    //         "Must use two UTXOs each worth 100 to send 200"
-    //     );
+        // Cannot allocate more than we have: 22 * mining reward
+        assert!(own_wallet_state
+            .allocate_sufficient_input_funds(expected_balance + Amount::one(), &block_lock)
+            .await
+            .is_err());
 
-    //     // This block spends two UTXOs and gives us none, so the new balance
-    //     // becomes 2000
-    //     let other_wallet = WalletSecret::new(generate_secret_key());
-    //     assert_eq!(Into::<BlockHeight>::into(22u64), next_block.header.height);
-    //     next_block = make_mock_block(&next_block.clone(), None, other_wallet.get_public_key());
-    //     assert_eq!(Into::<BlockHeight>::into(23u64), next_block.header.height);
-    //     for (utxo, ms_mp) in two_utxos {
-    //         add_unsigned_input_to_block(&mut next_block, utxo, ms_mp);
-    //     }
+        // Make a block that spends an input, then verify that this is reflected by
+        // the allocator.
+        let two_utxos = own_wallet_state
+            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), &block_lock)
+            .await
+            .unwrap();
+        assert_eq!(
+            2,
+            two_utxos.len(),
+            "Must use two UTXOs when sending 2 x mining reward"
+        );
 
-    //     own_wallet_state.update_wallet_state_with_new_block(
-    //         &next_block,
-    //         &mut own_wallet_state.wallet_db.lock().await,
-    //     )?;
+        // This block spends two UTXOs and gives us none, so the new balance
+        // becomes 2000
+        let other_wallet = WalletSecret::new(generate_secret_key());
+        let other_wallet_recipient_address =
+            other_wallet.nth_generation_spending_key(0).to_address();
+        assert_eq!(Into::<BlockHeight>::into(22u64), next_block.header.height);
+        (next_block, _, _) =
+            make_mock_block(&next_block.clone(), None, own_spending_key.to_address());
+        assert_eq!(Into::<BlockHeight>::into(23u64), next_block.header.height);
+        let msa_tip = next_block.body.next_mutator_set_accumulator.clone();
+        let receiver_data = vec![UtxoReceiverData {
+            utxo: Utxo {
+                lock_script: LockScript(vec![]),
+                coins: Into::<Amount>::into(200).to_native_coins(),
+            },
+            sender_randomness: random(),
+            receiver_privacy_digest: other_wallet_recipient_address.privacy_digest,
+            pubscript: PubScript::default(),
+            pubscript_input: vec![],
+        }];
+        let input_utxos_mps_keys = two_utxos
+            .into_iter()
+            .map(|(utxo, mp)| (utxo, mp, own_spending_key.clone()))
+            .collect_vec();
+        let tx = make_mock_transaction_with_generation_key(
+            input_utxos_mps_keys,
+            receiver_data,
+            Amount::zero(),
+            msa_tip,
+        );
+        next_block.accumulate_transaction(tx);
 
-    //     assert_eq!(
-    //         20,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(2000.into(), &next_block)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
+        own_wallet_state.update_wallet_state_with_new_block(
+            &next_block,
+            &mut own_wallet_state.wallet_db.lock().await,
+        )?;
 
-    //     // Cannot allocate more than we have: 2000
-    //     assert!(own_wallet_state
-    //         .allocate_sufficient_input_funds(2001.into(), &block_lock)
-    //         .await
-    //         .is_err());
+        assert_eq!(
+            20,
+            own_wallet_state
+                .allocate_sufficient_input_funds(2000.into(), &next_block)
+                .await
+                .unwrap()
+                .len()
+        );
 
-    //     // Add another block that spends *one* UTXO and gives us none, so the new balance
-    //     // becomes 1900
-    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
-    //     own_wallet_state.update_wallet_state_with_new_block(
-    //         &next_block,
-    //         &mut own_wallet_state.wallet_db.lock().await,
-    //     )?;
+        // Cannot allocate more than we have: 2000
+        assert!(own_wallet_state
+            .allocate_sufficient_input_funds(2001.into(), &block_lock)
+            .await
+            .is_err());
 
-    //     let one_utxo = own_wallet_state
-    //         .allocate_sufficient_input_funds(98.into(), &next_block)
-    //         .await
-    //         .unwrap();
-    //     assert_eq!(1, one_utxo.len());
-    //     add_unsigned_input_to_block(&mut next_block, one_utxo[0].0, one_utxo[0].1.clone());
-
-    //     own_wallet_state.update_wallet_state_with_new_block(
-    //         &next_block,
-    //         &mut own_wallet_state.wallet_db.lock().await,
-    //     )?;
-
-    //     assert_eq!(
-    //         19,
-    //         own_wallet_state
-    //             .allocate_sufficient_input_funds(1900.into(), &block_lock)
-    //             .await
-    //             .unwrap()
-    //             .len()
-    //     );
-
-    //     // Cannot allocate more than we have: 1900
-    //     assert!(own_wallet_state
-    //         .allocate_sufficient_input_funds(1901.into(), &block_lock)
-    //         .await
-    //         .is_err());
-
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
     // #[traced_test]
     // #[tokio::test]

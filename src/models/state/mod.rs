@@ -87,6 +87,7 @@ impl GlobalState {
         receiver_data: Vec<UtxoReceiverData>,
         fee: Amount,
     ) -> Result<Transaction> {
+        // TODO: Spending key should probably be input to this function
         // acquire a lock on `WalletState` to prevent it from being updated
         let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
 
@@ -173,7 +174,7 @@ impl GlobalState {
             outputs: transaction_outputs,
             pubscript_hashes_and_inputs,
             fee,
-            timestamp: BFieldElement::new(timestamp as u64),
+            timestamp: BFieldElement::new(timestamp.try_into().unwrap()),
         };
 
         let spending_key = generation_address::SpendingKey::derive_from_seed(

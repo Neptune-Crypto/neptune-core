@@ -4,6 +4,8 @@ use bytesize::ByteSize;
 use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
+use itertools::Itertools;
+use mutator_set_tf::util_types::mutator_set::addition_record;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
 use mutator_set_tf::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use num_traits::{One, Zero};
@@ -32,6 +34,7 @@ use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::algebraic_hasher::Hashable;
 use twenty_first::util_types::storage_schema::StorageWriter;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
@@ -59,6 +62,8 @@ use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::PrimitiveWitness;
+use crate::models::blockchain::transaction::Witness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
@@ -76,6 +81,7 @@ use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
+use crate::models::state::UtxoReceiverData;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
@@ -580,6 +586,87 @@ pub fn new_random_wallet() -> WalletSecret {
 
 //     transaction_1
 // }
+
+// TODO: Consider moving this to to the appropriate place in global state,
+// keep fn interface. Can be helper function to `create_transaction`.
+pub fn make_mock_transaction_with_generation_key(
+    input_utxos_mps_keys: Vec<(
+        Utxo,
+        MsMembershipProof<Hash>,
+        generation_address::SpendingKey,
+    )>,
+    receiver_data: Vec<UtxoReceiverData>,
+    fee: Amount,
+    tip_msa: MutatorSetAccumulator<Hash>,
+) -> Transaction {
+    // Generate removal records
+    let mut inputs = vec![];
+    for (input_utxo, input_mp, _) in input_utxos_mps_keys.iter() {
+        let removal_record = tip_msa.kernel.drop(&Hash::hash(input_utxo), input_mp);
+        inputs.push(removal_record);
+    }
+
+    let mut outputs = vec![];
+    for rd in receiver_data.iter() {
+        let addition_record = commit::<Hash>(
+            &Hash::hash(&rd.utxo),
+            &rd.sender_randomness,
+            &rd.receiver_privacy_digest,
+        );
+        outputs.push(addition_record);
+    }
+
+    let pubscript_hashes_and_inputs = receiver_data
+        .iter()
+        .map(|x| (Hash::hash(&x.pubscript), x.pubscript_input.clone()))
+        .collect_vec();
+    let timestamp: u64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .try_into()
+        .unwrap();
+
+    let kernel = TransactionKernel {
+        inputs: inputs,
+        outputs: outputs,
+        pubscript_hashes_and_inputs,
+        fee,
+        timestamp: BFieldElement::new(timestamp),
+    };
+
+    let input_utxos = input_utxos_mps_keys
+        .iter()
+        .map(|(utxo, _mp, _)| utxo)
+        .cloned()
+        .collect_vec();
+    let input_membership_proofs = input_utxos_mps_keys
+        .iter()
+        .map(|(_utxo, mp, _)| mp)
+        .cloned()
+        .collect_vec();
+    let spending_key_unlock_keys = input_utxos_mps_keys
+        .iter()
+        .map(|(_utxo, _mp, sk)| sk.unlock_key.to_sequence())
+        .collect_vec();
+    let pubscripts = receiver_data
+        .iter()
+        .map(|rd| rd.pubscript.to_owned())
+        .collect();
+    let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
+    let witness = PrimitiveWitness {
+        input_utxos: input_utxos.clone(),
+        lock_script_witnesses: spending_key_unlock_keys,
+        input_membership_proofs,
+        output_utxos,
+        pubscripts,
+    };
+
+    Transaction {
+        kernel,
+        witness: Witness::Primitive(witness),
+    }
+}
 
 // `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
 // already have created `DevNetInput`s.
