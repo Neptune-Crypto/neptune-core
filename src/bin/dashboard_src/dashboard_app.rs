@@ -10,6 +10,7 @@ use std::{
     collections::HashMap,
     error::Error,
     io::{self, Stdout},
+    net::SocketAddr,
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -121,12 +122,18 @@ pub struct DashboardApp {
 }
 
 impl DashboardApp {
-    pub fn new(rpc_server: Arc<RPCClient>, args: Config, network: Network) -> Self {
+    pub fn new(
+        rpc_server: Arc<RPCClient>,
+        args: Config,
+        network: Network,
+        listen_addr_for_peers: Option<SocketAddr>,
+    ) -> Self {
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
 
         let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(
             rpc_server.clone(),
             network,
+            listen_addr_for_peers,
         )));
         let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
@@ -217,9 +224,10 @@ impl DashboardApp {
         client: RPCClient,
         args: Config,
         network: Network,
+        listen_addr_for_peers: Option<SocketAddr>,
     ) -> Result<String, Box<dyn Error>> {
         // create app
-        let mut app = DashboardApp::new(Arc::new(client), args, network);
+        let mut app = DashboardApp::new(Arc::new(client), args, network, listen_addr_for_peers);
 
         // setup terminal
         let mut terminal = Self::enable_raw_mode()?;

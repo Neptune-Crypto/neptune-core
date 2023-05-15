@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::time::SystemTime;
 use std::{
     cell::RefCell,
@@ -48,6 +49,7 @@ pub struct OverviewData {
     mempool_size: Option<ByteSize>,
     mempool_tx_count: Option<u32>,
 
+    listen_address: Option<SocketAddr>,
     peer_count: Option<usize>,
     max_peer_count: Option<usize>,
     authenticated_peer_count: Option<usize>,
@@ -62,12 +64,13 @@ pub struct OverviewData {
 }
 
 impl OverviewData {
-    pub fn new(network: Network) -> Self {
+    pub fn new(network: Network, listen_address: Option<SocketAddr>) -> Self {
         Self {
             balance: Default::default(),
             confirmations: Default::default(),
             synchronization: Default::default(),
-            network: network,
+            network,
+            listen_address,
             block_header: Default::default(),
             block_interval: Default::default(),
             archive_size: Default::default(),
@@ -92,6 +95,7 @@ impl OverviewData {
             confirmations: Some(17),
             synchronization: Some(99.5),
 
+            listen_address: None,
             network: Network::Testnet,
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block().header,
@@ -137,13 +141,20 @@ pub struct OverviewScreen {
 }
 
 impl OverviewScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, network: Network) -> Self {
+    pub fn new(
+        rpc_server: Arc<RPCClient>,
+        network: Network,
+        listen_addr_for_peers: Option<SocketAddr>,
+    ) -> Self {
         OverviewScreen {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            data: Arc::new(Mutex::new(OverviewData::new(network))),
+            data: Arc::new(Mutex::new(OverviewData::new(
+                network,
+                listen_addr_for_peers,
+            ))),
             server: rpc_server,
             poll_thread: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
@@ -512,6 +523,10 @@ impl Widget for OverviewScreen {
 
         // peers
         lines = vec![];
+        lines.push(format!(
+            "listen address: {}",
+            dashifnotset!(data.listen_address)
+        ));
         lines.push(format!(
             "number: {} / {}",
             dashifnotset!(data.peer_count),

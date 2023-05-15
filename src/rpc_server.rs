@@ -28,6 +28,8 @@ pub trait RPC {
     // Return which network the client is running
     async fn get_network() -> Network;
 
+    async fn get_listen_address_for_peers() -> Option<SocketAddr>;
+
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
 
@@ -96,6 +98,7 @@ pub struct NeptuneRPCServer {
 
 impl RPC for NeptuneRPCServer {
     type GetNetworkFut = Ready<Network>;
+    type GetListenAddressForPeersFut = Ready<Option<SocketAddr>>;
     type BlockHeightFut = Ready<BlockHeight>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
     type HeadFut = Ready<Digest>;
@@ -119,6 +122,16 @@ impl RPC for NeptuneRPCServer {
     fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
         let network = self.state.cli.network;
         future::ready(network)
+    }
+
+    fn get_listen_address_for_peers(
+        self,
+        _context: context::Context,
+    ) -> Self::GetListenAddressForPeersFut {
+        let listen_for_peers_ip = self.state.cli.listen_addr;
+        let listen_for_peers_socket = self.state.cli.peer_port;
+        let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
+        future::ready(Some(socket_address))
     }
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {

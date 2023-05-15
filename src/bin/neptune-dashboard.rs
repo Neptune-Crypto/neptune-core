@@ -53,8 +53,19 @@ async fn main() -> Result<()> {
         }
     };
 
+    let listen_addr_for_peers = match client
+        .get_listen_address_for_peers(context::current())
+        .await
+    {
+        Ok(la) => la,
+        Err(err) => {
+            eprintln!("{err}");
+            bail!("Could not get listen address from client.");
+        }
+    };
+
     // run app until quit
-    let res = DashboardApp::run(client, args, network).await;
+    let res = DashboardApp::run(client, args, network, listen_addr_for_peers).await;
 
     match res {
         Err(err) => {
