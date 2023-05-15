@@ -226,13 +226,26 @@ impl SpendingKey {
         let (sk, _pk) = lattice::kem::keygen(randomness);
         let receiver_identifier = derive_receiver_id(seed);
 
-        Self {
+        let spending_key = Self {
             receiver_identifier,
             decryption_key: sk,
             privacy_preimage,
             unlock_key,
             seed: seed.to_owned(),
-        }
+        };
+
+        // Sanity check that spending key's receiver address can be encoded to
+        // bech32m without loss of information.
+        let receiving_address = spending_key.to_address();
+        let encoded_address = receiving_address.to_bech32m(Network::Main).unwrap();
+        let decoded_address =
+            ReceivingAddress::from_bech32m(encoded_address, Network::Main).unwrap();
+        assert_eq!(
+            receiving_address, decoded_address,
+            "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
+        );
+
+        spending_key
     }
 
     /// Decrypt a Generation Address ciphertext
@@ -524,13 +537,15 @@ mod test_generation_addresses {
 
     #[test]
     fn test_bech32m_conversion() {
-        let seed: Digest = thread_rng().gen();
-        let receiving_address = ReceivingAddress::derive_from_seed(seed);
-        let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();
-        let receiving_address_again =
-            ReceivingAddress::from_bech32m(encoded, Network::Testnet).unwrap();
+        for _ in 0..100 {
+            let seed: Digest = thread_rng().gen();
+            let receiving_address = ReceivingAddress::derive_from_seed(seed);
+            let encoded = receiving_address.to_bech32m(Network::Testnet).unwrap();
+            let receiving_address_again =
+                ReceivingAddress::from_bech32m(encoded, Network::Testnet).unwrap();
 
-        assert_eq!(receiving_address, receiving_address_again);
+            assert_eq!(receiving_address, receiving_address_again);
+        }
     }
 
     #[test]
