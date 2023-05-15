@@ -641,21 +641,6 @@ impl WalletState {
         }
     }
 
-    /// The sender randomness is used for producing the addition record. We get it here pseudorandomly, from the arguments.
-    pub fn get_sender_randomness(
-        &self,
-        utxo: &Utxo,
-        receiver_digest: &Digest,
-        block_height: BlockHeight,
-    ) -> Digest {
-        let mut right = [BFieldElement::zero(); DIGEST_LENGTH];
-        right[0] = block_height.into();
-        Hash::hash_pair(
-            &Hash::hash_pair(&Hash::hash(utxo), &self.wallet_secret.secret_seed),
-            &Hash::hash_pair(receiver_digest, &Digest::new(right)),
-        )
-    }
-
     pub fn allocate_sufficient_input_funds_from_lock(
         &self,
         lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,

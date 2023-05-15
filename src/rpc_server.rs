@@ -212,11 +212,11 @@ impl RPC for NeptuneRPCServer {
             .header
             .height;
         let receiver_privacy_digest = address.privacy_digest;
-        let sender_randomness = self.state.wallet_state.get_sender_randomness(
-            &utxo,
-            &receiver_privacy_digest,
-            block_height,
-        );
+        let sender_randomness = self
+            .state
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(block_height, receiver_privacy_digest);
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user

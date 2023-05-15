@@ -13,6 +13,7 @@ use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::shared::SIZE_1MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
+use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
@@ -155,8 +156,11 @@ async fn mine_block(
 fn make_coinbase_transaction(
     coinbase_utxo: &Utxo,
     receiver_digest: &Digest,
+    wallet_secret: &WalletSecret,
+    block_height: BlockHeight,
 ) -> (Transaction, Digest) {
-    let sender_randomness: Digest = random();
+    let sender_randomness: Digest =
+        wallet_secret.generate_sender_randomness(block_height, *receiver_digest);
     let coinbase_addition_record = commit::<Hash>(
         &Hash::hash(coinbase_utxo),
         &sender_randomness,
@@ -219,8 +223,12 @@ fn create_block_transaction(
     let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
     let coinbase_utxo = Utxo::new_native_coin(lock_script, coinbase_amount);
 
-    let (coinbase_transaction, coinbase_sender_randomness) =
-        make_coinbase_transaction(&coinbase_utxo, &receiving_address.privacy_digest);
+    let (coinbase_transaction, coinbase_sender_randomness) = make_coinbase_transaction(
+        &coinbase_utxo,
+        &receiving_address.privacy_digest,
+        &state.wallet_state.wallet_secret,
+        next_block_height,
+    );
 
     // Merge incoming transactions with the coinbase transaction
     let mut merged_transaction = transactions_to_include

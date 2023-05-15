@@ -144,11 +144,10 @@ impl GlobalState {
                 lock_script,
             };
             let receiver_digest = own_receiving_address.privacy_digest;
-            let change_sender_randomness = self.wallet_state.get_sender_randomness(
-                &change_utxo,
-                &receiver_digest,
-                bc_tip.header.height,
-            );
+            let change_sender_randomness = self
+                .wallet_state
+                .wallet_secret
+                .generate_sender_randomness(bc_tip.header.height, receiver_digest);
             let change_addition_record = commit::<Hash>(
                 &Hash::hash(&change_utxo),
                 &change_sender_randomness,

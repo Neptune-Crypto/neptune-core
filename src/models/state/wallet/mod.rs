@@ -16,6 +16,7 @@ use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use crate::models::blockchain::address::generation_address;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::Hash;
 
 pub const WALLET_DIRECTORY: &str = "wallet";
@@ -154,6 +155,27 @@ impl WalletSecret {
         generation_address::SpendingKey::derive_from_seed(key_seed)
     }
 
+    /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
+    /// for the mutator set.
+    pub fn generate_sender_randomness(
+        &self,
+        block_height: BlockHeight,
+        receiver_digest: Digest,
+    ) -> Digest {
+        const GET_SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
+        Hash::hash_varlen(
+            &[
+                self.secret_seed.to_sequence(),
+                vec![
+                    BFieldElement::new(GET_SENDER_RANDOMNESS_FLAG),
+                    block_height.into(),
+                ],
+                receiver_digest.to_sequence(),
+            ]
+            .concat(),
+        )
+    }
+
     /// Read Wallet from file as JSON
     fn read_from_file(wallet_file: &Path) -> Result<Self> {
         let wallet_file_content: String = fs::read_to_string(wallet_file).with_context(|| {
@@ -218,33 +240,6 @@ impl WalletSecret {
             .open(path)
             .unwrap();
         fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
-    }
-
-    /// Return the secret key that is used for signatures
-    fn get_signing_key(&self) -> Digest {
-        let secret_seed = self.secret_seed;
-        Hash::hash_pair(&secret_seed, &Self::signature_secret_key_marker())
-    }
-
-    /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
-    /// for the mutator set.
-    fn get_commitment_randomness_seed(&self) -> Digest {
-        let secret_seed = self.secret_seed;
-        Hash::hash_pair(&secret_seed, &Self::commitment_marker())
-    }
-
-    fn signature_secret_key_marker() -> Digest {
-        Digest::new([BFieldElement::zero(); DIGEST_LENGTH])
-    }
-
-    fn commitment_marker() -> Digest {
-        Digest::new([
-            BFieldElement::one(),
-            BFieldElement::zero(),
-            BFieldElement::zero(),
-            BFieldElement::zero(),
-            BFieldElement::zero(),
-        ])
     }
 }
 
@@ -558,23 +553,24 @@ mod wallet_tests {
         let mut next_block = block_1.clone();
         for _ in 0..21 {
             let previous_block = next_block;
-            (next_block, cb_utxo, cb_output_randomness) =
+            let (next_block_prime, cb_utxo_prime, cb_output_randomness_prime) =
                 make_mock_block(&previous_block, None, own_spending_key.to_address());
             own_wallet_state
                 .expected_utxos
                 .write()
                 .unwrap()
                 .add_expected_utxo(
-                    cb_utxo,
-                    cb_output_randomness,
+                    cb_utxo_prime,
+                    cb_output_randomness_prime,
                     own_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
                 )
                 .unwrap();
             own_wallet_state.update_wallet_state_with_new_block(
-                &next_block,
+                &next_block_prime,
                 &mut own_wallet_state.wallet_db.lock().await,
             )?;
+            next_block = next_block_prime;
         }
 
         let wrapped_block_ = Arc::new(Mutex::new(next_block.clone()));
@@ -1060,12 +1056,12 @@ mod wallet_tests {
     // }
 
     #[test]
-    fn signature_secret_and_commitment_p_randomness_secret_are_different() {
+    fn master_seed_is_not_sender_randomness() {
         let secret = generate_secret_key();
         let wallet = WalletSecret::new(secret);
         assert_ne!(
-            wallet.get_commitment_randomness_seed(),
-            wallet.get_signing_key()
+            wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
+            secret
         );
     }
 
