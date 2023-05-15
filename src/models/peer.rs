@@ -150,6 +150,10 @@ impl PeerStanding {
     pub fn clear_standing(&mut self) {
         *self = PeerStanding::default();
     }
+
+    pub fn is_negative(&self) -> bool {
+        self.standing.is_negative()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -295,8 +295,8 @@ mod connect_tests {
         ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
     };
     use crate::tests::shared::{
-        get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block,
-        get_dummy_peer_connection_data, get_test_genesis_setup, to_bytes,
+        get_dummy_handshake_data, get_dummy_latest_block, get_dummy_peer_connection_data,
+        get_dummy_socket_address, get_test_genesis_setup, to_bytes,
     };
     use crate::{MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE};
 
@@ -326,7 +326,7 @@ mod connect_tests {
         call_peer(
             mock,
             state.clone(),
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             &own_handshake,
@@ -460,7 +460,7 @@ mod connect_tests {
         answer_peer(
             mock,
             state.clone(),
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -495,7 +495,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -528,7 +528,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -568,7 +568,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(2),
+            get_dummy_socket_address(2),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -613,7 +613,7 @@ mod connect_tests {
             ))),
             timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
-        let peer_address = get_dummy_address(3);
+        let peer_address = get_dummy_socket_address(3);
         state
             .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
             .await;

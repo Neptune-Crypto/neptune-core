@@ -111,7 +111,7 @@ pub fn unit_test_databases(
     Ok((block_db_lock, peer_db_lock, data_dir))
 }
 
-pub fn get_dummy_address(count: u8) -> SocketAddr {
+pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
     std::net::SocketAddr::from_str(&format!("127.0.0.{}:8080", count)).unwrap()
 }
 
@@ -154,7 +154,7 @@ pub fn get_dummy_handshake_data(network: Network, id: u8) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
         tip_header: get_dummy_latest_block(None).2.lock().unwrap().to_owned(),
-        listen_address: Some(get_dummy_address(id)),
+        listen_address: Some(get_dummy_socket_address(id)),
         network,
         version: get_dummy_version(),
         is_archival_node: true,
@@ -171,7 +171,7 @@ pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
 
 pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeData, SocketAddr) {
     let handshake = get_dummy_handshake_data(network, id);
-    let socket_address = get_dummy_address(id);
+    let socket_address = get_dummy_socket_address(id);
 
     (handshake, socket_address)
 }
