@@ -563,6 +563,10 @@ mod test_generation_addresses {
         let sender_randomness: Digest = rng.gen();
 
         let ciphertext = receiving_address.encrypt(&utxo, sender_randomness).unwrap();
+        println!(
+            "ciphertext.get_size() = {}",
+            ciphertext.len() * BYTES_PER_BFE
+        );
 
         let (utxo_again, sender_randomness_again) = spending_key.decrypt(&ciphertext).unwrap();
 

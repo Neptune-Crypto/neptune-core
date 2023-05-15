@@ -39,6 +39,20 @@ impl Hashable for PubScript {
     }
 }
 
+impl GetSize for PubScript {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        self.0.len() * std::mem::size_of::<BFieldElement>()
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Proof(pub Vec<BFieldElement>);
 
@@ -48,9 +62,23 @@ impl Hashable for Proof {
     }
 }
 
+impl GetSize for Proof {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        self.0.len() * std::mem::size_of::<BFieldElement>()
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
+
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct PrimitiveWitness {
     pub input_utxos: Vec<Utxo>,
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
@@ -64,7 +92,7 @@ pub struct PrimitiveWitness {
 /// information is still leaked though, such as the number of inputs
 /// and outputs, and number of type scripts, but this information
 /// cannot be used to spend someone else's coins.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct LinkedProofs {
     lock_script_proofs: Vec<Proof>,
     lock_script_hashes: Vec<Digest>,
@@ -84,7 +112,21 @@ pub struct LinkedProofs {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SingleProof(pub Proof);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+impl GetSize for SingleProof {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        self.0.get_heap_size()
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub enum Witness {
     Primitive(PrimitiveWitness),
     LinkedProofs(LinkedProofs),
@@ -92,26 +134,11 @@ pub enum Witness {
     Faith,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
     pub witness: Witness,
-}
-
-impl GetSize for Transaction {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
-
-    fn get_heap_size(&self) -> usize {
-        // TODO:  This is wrong and `GetSize` needs to be implemeted recursively.
-        42
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
 }
 
 impl Hashable for Transaction {

@@ -370,6 +370,7 @@ impl WalletState {
                 mutxo.confirmed_in_block = Some((
                     block.hash,
                     Duration::from_millis(block.header.timestamp.value()),
+                    block.header.height,
                 ));
                 wallet_db_lock.monitored_utxos.push(mutxo);
             }
@@ -690,7 +691,7 @@ impl WalletState {
         let mut history = vec![];
         for i in 0..num_monitored_utxos {
             let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
-            if let Some((confirming_block, confirmation_timestamp)) =
+            if let Some((confirming_block, confirmation_timestamp, _)) =
                 monitored_utxo.confirmed_in_block
             {
                 let amount = monitored_utxo.utxo.get_native_coin_amount();

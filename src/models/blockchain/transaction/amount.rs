@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::bail;
+use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
@@ -52,6 +53,20 @@ pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq)]
 pub struct Amount(pub U32s<AMOUNT_SIZE_FOR_U32>);
+
+impl GetSize for Amount {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        0
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
 
 impl AmountLike for Amount {
     fn from_bfes(bfes: &[BFieldElement]) -> Self {
@@ -226,6 +241,7 @@ impl From<u64> for Amount {
 mod amount_tests {
     use std::str::FromStr;
 
+    use get_size::GetSize;
     use itertools::Itertools;
     use rand::{thread_rng, Rng, RngCore};
     use twenty_first::{amount::u32s::U32s, util_types::algebraic_hasher::Hashable};
@@ -306,5 +322,11 @@ mod amount_tests {
         let mut prod_calculated: Amount = Into::<Amount>::into(a);
         prod_calculated = prod_calculated.scalar_mul(b);
         assert_eq!(prod_checked, prod_calculated);
+    }
+
+    #[test]
+    fn get_size_test() {
+        let fourteen: Amount = 14.into();
+        assert_eq!(4 * 4, fourteen.get_size())
     }
 }

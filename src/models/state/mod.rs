@@ -7,7 +7,7 @@ use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::debug;
+use tracing::{debug, warn};
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
@@ -319,12 +319,15 @@ impl GlobalState {
 
             // If the UTXO was not confirmed yet, there is no
             // point in synchronizing its membership proof.
-            let confirming_block = match monitored_utxo.confirmed_in_block {
-                Some((confirmed_block_hash, _timestamp)) => confirmed_block_hash,
-                None => {
-                    continue;
-                }
-            };
+            let (confirming_block_digest, confirming_block_height) =
+                match monitored_utxo.confirmed_in_block {
+                    Some((confirmed_block_hash, _timestamp, block_height)) => {
+                        (confirmed_block_hash, block_height)
+                    }
+                    None => {
+                        continue;
+                    }
+                };
 
             // try latest (block hash, membership proof) entry
             let (block_hash, mut membership_proof) = monitored_utxo
@@ -348,7 +351,10 @@ impl GlobalState {
                 // Whenever current owned UTXOs are queried, one
                 // should take care to filter for UTXOs that have a
                 // membership proof synced to the current block tip.
-                if confirming_block == revert_block_hash {
+                if confirming_block_digest == revert_block_hash {
+                    warn!(
+                        "Could not recover MSMP as transaction appears to be on an abandoned chain"
+                    );
                     break 'outer;
                 }
 
@@ -360,6 +366,8 @@ impl GlobalState {
                     .get_block(revert_block_hash)
                     .await?
                     .unwrap();
+
+                debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.header.height);
 
                 // revert removals
                 let removal_records = revert_block.body.transaction.kernel.inputs.clone();
@@ -386,7 +394,7 @@ impl GlobalState {
                 // This can occur in some edge cases of forward-only
                 // resynchronization. In this case, assume the
                 // membership proof is already synced to this block.
-                if confirming_block == apply_block_hash {
+                if confirming_block_digest == apply_block_hash {
                     continue;
                 }
 

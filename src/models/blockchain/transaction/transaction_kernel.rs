@@ -1,3 +1,4 @@
+use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::{
     addition_record::AdditionRecord, removal_record::RemovalRecord,
@@ -11,7 +12,7 @@ use twenty_first::{
 use super::Amount;
 use crate::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct TransactionKernel {
     pub inputs: Vec<RemovalRecord<Hash>>,
 

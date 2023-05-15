@@ -106,9 +106,8 @@ impl ArchivalState {
 
     /// Find the path connecting two blocks. Every path involves
     /// going down some number of steps and then going up some number
-    /// of steps. So this function returns two lists, the list of
-    /// down steps and the list of up steps. (Note the deliberate
-    /// omission of the Oxford comma.)
+    /// of steps. So this function returns two lists: the list of
+    /// down steps and the list of up steps.
     pub async fn find_path(
         &self,
         start: &Digest,
