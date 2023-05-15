@@ -535,10 +535,6 @@ impl<Item> stream::Stream for Mock<Item> {
 //     );
 // }
 
-pub fn new_random_wallet() -> WalletSecret {
-    WalletSecret::new(wallet::generate_secret_key())
-}
-
 // /// Create a mock `DevNetInput`
 // ///
 // /// This mock currently contains a lot of things that don't pass block validation.
@@ -831,12 +827,12 @@ pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) ->
 pub async fn make_unit_test_archival_state(
     network: Network,
 ) -> (ArchivalState, Arc<tokio::sync::Mutex<PeerDatabases>>) {
-    let (block_index_db_lock, peer_db_lock, data_dir) = unit_test_databases(network).unwrap();
+    let (block_index_db, peer_db, data_dir) = unit_test_databases(network).unwrap();
 
     let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
     let ams_lock = Arc::new(tokio::sync::Mutex::new(ams));
 
-    let archival_state = ArchivalState::new(data_dir, block_index_db_lock, ams_lock).await;
+    let archival_state = ArchivalState::new(data_dir, block_index_db, ams_lock).await;
 
-    (archival_state, peer_db_lock)
+    (archival_state, peer_db)
 }

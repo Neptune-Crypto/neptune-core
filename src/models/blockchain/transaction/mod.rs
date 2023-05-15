@@ -33,6 +33,18 @@ use super::shared::Hash;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PubScript(pub Vec<BFieldElement>);
 
+impl From<Vec<BFieldElement>> for PubScript {
+    fn from(value: Vec<BFieldElement>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<PubScript> for Vec<BFieldElement> {
+    fn from(value: PubScript) -> Self {
+        value.0.clone()
+    }
+}
+
 impl Hashable for PubScript {
     fn to_sequence(&self) -> Vec<BFieldElement> {
         self.0.clone()
@@ -458,7 +470,7 @@ mod transaction_tests {
     use crate::{
         config_models::network::Network,
         models::state::wallet::{self, generate_secret_key},
-        tests::shared::{get_mock_global_state, make_mock_transaction, new_random_wallet},
+        tests::shared::{get_mock_global_state, make_mock_transaction},
     };
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
     use rand::random;
