@@ -155,7 +155,22 @@ impl GlobalState {
                 &receiver_digest,
             );
             transaction_outputs.push(change_addition_record);
-            output_utxos.push(change_utxo.to_owned());
+            output_utxos.push(change_utxo.clone());
+
+            // Add change UTXO to pool of expected incoming UTXOs
+            let receiver_preimage = own_spending_key_for_change.privacy_preimage;
+            let _change_addition_record = self
+                .wallet_state
+                .expected_utxos
+                .write()
+                .unwrap()
+                .add_expected_utxo(
+                    change_utxo,
+                    change_sender_randomness,
+                    receiver_preimage,
+                    UtxoNotifier::Myself,
+                )
+                .expect("Adding change UTXO to UTXO notification pool must succeed");
         }
 
         let pubscript_hashes_and_inputs = receiver_data
