@@ -18,12 +18,8 @@ use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
+use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
-use super::blockchain::address::generation_address;
-use super::blockchain::block::block_height::BlockHeight;
-use super::blockchain::transaction::native_coin::{
-    native_coin_typescript, NATIVE_COIN_TYPESCRIPT_DIGEST,
-};
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::{amount::Amount, Transaction};
@@ -137,23 +133,25 @@ impl GlobalState {
 
         // add change UTXO if necessary
         if input_amount > total_spend {
-            let own_receiving_address = generation_address::ReceivingAddress::derive_from_seed(
-                self.wallet_state.wallet_secret.secret_seed.clone(),
-            );
+            let own_spending_key_for_change = self
+                .wallet_state
+                .wallet_secret
+                .nth_generation_spending_key(0);
+            let own_receiving_address = own_spending_key_for_change.to_address();
             let lock_script = own_receiving_address.lock_script();
             let change_utxo = Utxo {
                 coins: change_amount.to_native_coins(),
                 lock_script,
             };
             let receiver_digest = own_receiving_address.privacy_digest;
-            let sender_randomness = self.wallet_state.get_sender_randomness(
+            let change_sender_randomness = self.wallet_state.get_sender_randomness(
                 &change_utxo,
                 &receiver_digest,
                 bc_tip.header.height,
             );
             let change_addition_record = commit::<Hash>(
                 &Hash::hash(&change_utxo),
-                &sender_randomness,
+                &change_sender_randomness,
                 &receiver_digest,
             );
             transaction_outputs.push(change_addition_record);
@@ -177,9 +175,12 @@ impl GlobalState {
             timestamp: BFieldElement::new(timestamp.try_into().unwrap()),
         };
 
-        let spending_key = generation_address::SpendingKey::derive_from_seed(
-            self.wallet_state.wallet_secret.secret_seed,
-        );
+        // TODO: This needs to be fetched from monitored UTXOs. Can be different for each
+        // input UTXO for this transaction
+        let spending_key = self
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
         let input_utxos = spendable_utxos_and_mps
             .iter()
             .map(|(utxo, _mp)| utxo)
@@ -474,8 +475,7 @@ mod global_state_tests {
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
         let twenty_amount: Amount = 20.into();
         let twenty_coins = twenty_amount.to_native_coins();
-        let recipient_address =
-            generation_address::ReceivingAddress::derive_from_seed(other_wallet.secret_seed);
+        let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
         let main_lock_script = recipient_address.lock_script();
         let output_utxo = Utxo {
             coins: twenty_coins,
@@ -516,8 +516,7 @@ mod global_state_tests {
         for i in 2..5 {
             let amount: Amount = i.into();
             let that_many_coins = amount.to_native_coins();
-            let receiving_address =
-                generation_address::ReceivingAddress::derive_from_seed(other_wallet.secret_seed);
+            let receiving_address = other_wallet.nth_generation_spending_key(0).to_address();
             let lock_script = receiving_address.lock_script();
             let utxo = Utxo {
                 coins: that_many_coins,
@@ -529,15 +528,13 @@ mod global_state_tests {
                 .generate_pubscript_and_input(&utxo, other_sender_randomness)
                 .unwrap();
             output_utxos.push(utxo.clone());
-            other_receiver_data.push(
-                (UtxoReceiverData {
-                    utxo,
-                    sender_randomness: other_sender_randomness,
-                    receiver_privacy_digest: other_receiver_digest,
-                    pubscript: other_pubscript,
-                    pubscript_input: other_pubscript_input,
-                }),
-            );
+            other_receiver_data.push(UtxoReceiverData {
+                utxo,
+                sender_randomness: other_sender_randomness,
+                receiver_privacy_digest: other_receiver_digest,
+                pubscript: other_pubscript,
+                pubscript_input: other_pubscript_input,
+            });
         }
 
         let new_tx: Transaction = global_state
@@ -562,8 +559,10 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
 
-        let other_receiver_address =
-            generation_address::ReceivingAddress::derive_from_seed(random());
+        let other_receiver_wallet_secret = WalletSecret::new(random());
+        let other_receiver_address = other_receiver_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
 
         // 1. Create new block 1 and store it to the DB
         let genesis_block = global_state
@@ -638,11 +637,11 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let own_spending_address = generation_address::SpendingKey::derive_from_seed(
-            global_state.wallet_state.wallet_secret.secret_seed,
-        );
-        let own_receiving_address =
-            generation_address::ReceivingAddress::from_spending_key(&own_spending_address);
+        let own_spending_key = global_state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let own_receiving_address = own_spending_key.to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = global_state
@@ -682,7 +681,7 @@ mod global_state_tests {
                 .add_expected_utxo(
                     coinbase_utxo,
                     coinbase_output_randomness,
-                    own_spending_address.privacy_preimage,
+                    own_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
                 )
                 .unwrap();
@@ -700,8 +699,10 @@ mod global_state_tests {
         assert_eq!(2, wallet_status.synced_unspent.len());
 
         // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
-        let other_receiving_address =
-            generation_address::ReceivingAddress::derive_from_seed(random());
+        let other_wallet_secret = WalletSecret::new(random());
+        let other_receiving_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
         let mut parent_block = genesis_block;
         for _ in 0..5 {
             let (next_block, _, _) =
@@ -777,12 +778,12 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
         let wallet_secret = global_state.wallet_state.wallet_secret.clone();
-        let own_spending_key =
-            generation_address::SpendingKey::derive_from_seed(wallet_secret.secret_seed);
-        let own_receiving_address =
-            generation_address::ReceivingAddress::from_spending_key(&own_spending_key);
-        let other_receiving_address =
-            generation_address::ReceivingAddress::from_spending_key(&own_spending_key);
+        let own_spending_key = wallet_secret.nth_generation_spending_key(0);
+        let own_receiving_address = own_spending_key.to_address();
+        let other_wallet_secret = WalletSecret::new(random());
+        let other_receiving_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = global_state
@@ -824,7 +825,8 @@ mod global_state_tests {
                     cb_utxo_output_randomness_1a,
                     own_spending_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
-                );
+                )
+                .unwrap();
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
                 .wallet_state

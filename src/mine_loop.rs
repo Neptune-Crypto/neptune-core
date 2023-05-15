@@ -208,11 +208,11 @@ fn create_block_transaction(
         .iter()
         .fold(Amount::zero(), |acc, tx| acc + tx.kernel.fee);
 
-    let coinbase_recipient_spending_key = generation_address::SpendingKey::derive_from_seed(
-        state.wallet_state.wallet_secret.secret_seed,
-    );
-    let receiving_address =
-        generation_address::ReceivingAddress::from_spending_key(&coinbase_recipient_spending_key);
+    let coinbase_recipient_spending_key = state
+        .wallet_state
+        .wallet_secret
+        .nth_generation_spending_key(0);
+    let receiving_address = coinbase_recipient_spending_key.to_address();
     let next_block_height: BlockHeight = latest_block.header.height.next();
 
     let lock_script = receiving_address.lock_script();

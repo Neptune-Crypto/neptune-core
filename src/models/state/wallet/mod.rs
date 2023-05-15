@@ -144,7 +144,10 @@ impl WalletSecret {
         let key_seed = Hash::hash_varlen(
             &[
                 self.secret_seed.to_sequence(),
-                vec![BFieldElement::new(counter.try_into().unwrap())],
+                vec![
+                    generation_address::GENERATION_FLAG,
+                    BFieldElement::new(counter.try_into().unwrap()),
+                ],
             ]
             .concat(),
         );
@@ -258,7 +261,6 @@ mod wallet_tests {
     use twenty_first::util_types::storage_vec::StorageVec;
 
     use crate::config_models::network::Network;
-    use crate::models::blockchain::address::generation_address;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
@@ -269,7 +271,6 @@ mod wallet_tests {
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
         get_mock_wallet_state, make_mock_block, make_mock_transaction_with_generation_key,
-        make_unit_test_archival_state,
     };
 
     use super::monitored_utxo::MonitoredUtxo;
@@ -299,11 +300,10 @@ mod wallet_tests {
             "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
         );
 
-        let premine_receiver_spending_key = generation_address::SpendingKey::derive_from_seed(
-            wallet_state_premine_recipient.wallet_secret.secret_seed,
-        );
-        let premine_receiver_address =
-            generation_address::ReceivingAddress::from_spending_key(&premine_receiver_spending_key);
+        let premine_receiver_spending_key = wallet_state_premine_recipient
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let premine_receiver_address = premine_receiver_spending_key.to_address();
         let expected_premine_utxo = Utxo {
             coins: Block::premine_distribution()[0].1.to_native_coins(),
             lock_script: premine_receiver_address.lock_script(),
@@ -324,8 +324,10 @@ mod wallet_tests {
         // Add 12 blocks and verify that membership proofs are still valid
         let genesis_block = Block::genesis_block();
         let mut next_block = genesis_block.clone();
-        let other_receiver_address =
-            generation_address::ReceivingAddress::derive_from_seed(random());
+        let other_wallet_secret = WalletSecret::new(random());
+        let other_receiver_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
         for _ in 0..12 {
             let previous_block = next_block;
             let (nb, _coinbase_utxo, _sender_randomness) =
@@ -361,11 +363,12 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
-        let wallet_secret = WalletSecret::new(generate_secret_key());
-        let wallet_state = get_mock_wallet_state(Some(wallet_secret.clone())).await;
+        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let wallet_state = get_mock_wallet_state(Some(own_wallet_secret.clone())).await;
         let other_wallet_secret = WalletSecret::new(generate_secret_key());
-        let other_recipient_address =
-            generation_address::ReceivingAddress::derive_from_seed(random());
+        let other_recipient_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
 
         let mut monitored_utxos = get_monitored_utxos(&wallet_state).await;
         assert!(
@@ -374,10 +377,8 @@ mod wallet_tests {
         );
 
         let genesis_block = Block::genesis_block();
-        let own_spending_key =
-            generation_address::SpendingKey::derive_from_seed(wallet_secret.secret_seed);
-        let own_recipient_address =
-            generation_address::ReceivingAddress::from_spending_key(&own_spending_key);
+        let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
+        let own_recipient_address = own_spending_key.to_address();
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
             make_mock_block(&genesis_block, None, own_recipient_address);
 
@@ -1071,10 +1072,12 @@ mod wallet_tests {
     #[test]
     fn get_authority_spending_public_key() {
         // Helper function/test to print the public key associated with the authority signatures
-        let _authority_wallet = WalletSecret::devnet_authority_wallet();
+        let authority_wallet = WalletSecret::devnet_authority_wallet();
         println!(
             "_authority_wallet pub key: {}",
-            generation_address::ReceivingAddress::derive_from_seed(_authority_wallet.secret_seed)
+            authority_wallet
+                .nth_generation_spending_key(0)
+                .to_address()
                 .to_bech32m(Network::Main)
                 .unwrap()
         );

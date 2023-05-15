@@ -517,7 +517,10 @@ mod test_generation_addresses {
 
         let msg: Digest = rng.gen();
         let witness_data = spending_key.binding_unlock(&msg);
-        receiving_address.reference_verify_unlock(msg, witness_data);
+        assert!(receiving_address.reference_verify_unlock(msg, witness_data));
+
+        let receiving_address_again = spending_key.to_address();
+        assert_eq!(receiving_address, receiving_address_again);
     }
 
     #[test]

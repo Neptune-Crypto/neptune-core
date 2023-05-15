@@ -123,11 +123,8 @@ impl WalletState {
             let mut wallet_db_lock = rusty_wallet_database.lock().await;
             if wallet_db_lock.get_sync_label() == Digest::default() {
                 // Check if we are premine recipients
-                let own_spending_key = generation_address::SpendingKey::derive_from_seed(
-                    ret.wallet_secret.secret_seed,
-                );
-                let own_receiving_address =
-                    generation_address::ReceivingAddress::from_spending_key(&own_spending_key);
+                let own_spending_key = ret.wallet_secret.nth_generation_spending_key(0);
+                let own_receiving_address = own_spending_key.to_address();
                 for (premine_receiving_address, amount) in Block::premine_distribution() {
                     if premine_receiving_address == own_receiving_address {
                         let coins = amount.to_native_coins();
@@ -196,9 +193,10 @@ impl WalletState {
         &self,
         transaction: &Transaction,
     ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
-        let spending_keys = vec![generation_address::SpendingKey::derive_from_seed(
-            self.wallet_secret.secret_seed,
-        )];
+        // TODO: These spending keys should probably be derived dynamically from some
+        // state in the wallet. And we should allow for other types than just generation
+        // addresses.
+        let spending_keys = vec![self.wallet_secret.nth_generation_spending_key(0)];
 
         // get recognized UTXOs
         let recognized_utxos = spending_keys

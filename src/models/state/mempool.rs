@@ -492,7 +492,6 @@ mod tests {
         config_models::network::Network,
         models::{
             blockchain::{
-                address::generation_address,
                 block::block_height::BlockHeight,
                 transaction::{amount::Amount, utxo::Utxo, PubScript, Transaction},
             },
@@ -632,17 +631,13 @@ mod tests {
         // has a wallet which receives a premine-UTXO.
         let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
-        let premine_receiver_spending_key =
-            generation_address::SpendingKey::derive_from_seed(premine_wallet_secret.secret_seed);
-        let premine_receiver_address =
-            generation_address::ReceivingAddress::from_spending_key(&premine_receiver_spending_key);
+        let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
+        let premine_receiver_address = premine_receiver_spending_key.to_address();
         let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_global_state =
             get_mock_global_state(Network::Main, 2, Some(other_wallet_secret.clone())).await;
-        let other_receiver_spending_key =
-            generation_address::SpendingKey::derive_from_seed(other_wallet_secret.secret_seed);
-        let other_receiver_address =
-            generation_address::ReceivingAddress::from_spending_key(&other_receiver_spending_key);
+        let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
+        let other_receiver_address = other_receiver_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
         let genesis_block = Block::genesis_block();
@@ -795,10 +790,8 @@ mod tests {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state = get_mock_global_state(Network::Main, 2, None).await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
-        let premine_spending_key =
-            generation_address::SpendingKey::derive_from_seed(premine_wallet_secret.secret_seed);
-        let premine_address =
-            generation_address::ReceivingAddress::from_spending_key(&premine_spending_key);
+        let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
+        let premine_address = premine_spending_key.to_address();
 
         // Create a transaction and insert it into the mempool
         let utxo = Utxo {

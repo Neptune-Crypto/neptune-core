@@ -356,9 +356,12 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> Self::GetReceivingAddressFut {
-        let receiving_address = generation_address::ReceivingAddress::derive_from_seed(
-            self.state.wallet_state.wallet_secret.secret_seed,
-        );
+        let receiving_address = self
+            .state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
         future::ready(receiving_address)
     }
 

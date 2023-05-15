@@ -141,7 +141,7 @@ impl Block {
         // The premine UTXOs can be hardcoded here.
         let authority_wallet = WalletSecret::devnet_authority_wallet();
         let authority_receiving_address =
-            generation_address::ReceivingAddress::derive_from_seed(authority_wallet.secret_seed);
+            authority_wallet.nth_generation_spending_key(0).to_address();
         vec![(authority_receiving_address, 20000.into())]
     }
 
@@ -403,11 +403,15 @@ mod block_tests {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let spending_key = generation_address::SpendingKey::derive_from_seed(
-            global_state.wallet_state.wallet_secret.secret_seed,
-        );
-        let address = generation_address::ReceivingAddress::from_spending_key(&spending_key);
-        let other_address = generation_address::ReceivingAddress::derive_from_seed(random());
+        let spending_key = global_state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let address = spending_key.to_address();
+        let other_wallet_secret = WalletSecret::new(random());
+        let other_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
         let genesis_block = Block::genesis_block();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address);
         assert!(

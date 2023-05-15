@@ -324,6 +324,7 @@ impl UtxoNotificationPool {
 pub enum UtxoNotifier {
     OwnMiner,
     Cli,
+    Myself,
     // ((instanceId, stringified SocketAddr), peer credibility)
     PeerUnsigned((InstanceId, String), Credibility),
     Premine,
@@ -331,6 +332,7 @@ pub enum UtxoNotifier {
 
 const OWN_MINER_SUPPRESSION: Credibility = 1;
 const CLI_SUPPRESSION: Credibility = 2;
+const MYSELF_SUPPRESSION: Credibility = 1;
 const UNSIGNED_PEER_SUPPRESSION: Credibility = 4;
 
 impl UtxoNotifier {
@@ -339,6 +341,7 @@ impl UtxoNotifier {
             UtxoNotifier::Premine => Credibility::MAX,
             UtxoNotifier::OwnMiner => Credibility::MAX - OWN_MINER_SUPPRESSION,
             UtxoNotifier::Cli => Credibility::MAX - CLI_SUPPRESSION,
+            UtxoNotifier::Myself => Credibility::MAX - MYSELF_SUPPRESSION,
             UtxoNotifier::PeerUnsigned(_, credibility) => {
                 // Ensure that peer notifications always have lower priority
                 // than those reported other ways, and prevent overflow in this calculation

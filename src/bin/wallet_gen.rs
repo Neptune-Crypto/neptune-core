@@ -1,7 +1,6 @@
 use anyhow::Result;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
-use neptune_core::models::blockchain::address::generation_address;
 use neptune_core::models::state::wallet::WalletSecret;
 
 #[tokio::main]
@@ -19,13 +18,11 @@ async fn main() -> Result<()> {
     let wallet_secret = WalletSecret::read_from_file_or_create(&wallet_file).unwrap();
 
     println!("Wallet stored in: {}", wallet_file.display());
-    // println!("Wallet public key: {}", wallet_secret.get_public_key());
-    let spending_key = generation_address::SpendingKey::derive_from_seed(wallet_secret.secret_seed);
+    let spending_key = wallet_secret.nth_generation_spending_key(0);
+    let receiver_address = spending_key.to_address();
     println!(
         "Wallet receiver address: {}",
-        generation_address::ReceivingAddress::from_spending_key(&spending_key)
-            .to_bech32m(network)
-            .unwrap()
+        receiver_address.to_bech32m(network).unwrap()
     );
 
     Ok(())
