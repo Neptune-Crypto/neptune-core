@@ -1038,6 +1038,7 @@ impl PeerLoopHandler {
 #[cfg(test)]
 mod peer_loop_tests {
     use rand::random;
+    use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
     use twenty_first::amount::u32s::U32s;
 
@@ -1045,11 +1046,11 @@ mod peer_loop_tests {
         config_models::{cli_args, network::Network},
         models::{
             blockchain::block::block_header::TARGET_DIFFICULTY_U32_SIZE, blockchain::shared::Hash,
-            state::wallet::WalletSecret,
+            peer::TransactionNotification, state::wallet::WalletSecret,
         },
         tests::shared::{
             add_block, get_dummy_peer_connection_data, get_dummy_socket_address,
-            get_test_genesis_setup, make_mock_block, Action, Mock,
+            get_test_genesis_setup, make_mock_block, make_mock_transaction, Action, Mock,
         },
     };
 
@@ -1817,364 +1818,366 @@ mod peer_loop_tests {
         Ok(())
     }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
-    //     // In this scenario, the client only knows the genesis block (block 0) and then
-    //     // receives block 3, meaning that block 2 and 1 will have to be requested.
-    //     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-    //         get_test_genesis_setup(Network::Main, 0).await?;
-    //     let peer_address = get_dummy_address(0);
-    //     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-    //         Secp256k1::new().generate_keypair(&mut thread_rng());
-    //     let genesis_block: Block = state
-    //         .chain
-    //         .archival_state
-    //         .as_ref()
-    //         .unwrap()
-    //         .get_latest_block()
-    //         .await;
-    //     let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
-    //     let block_2 = make_mock_block(&block_1.clone(), None, public_key);
-    //     let block_3 = make_mock_block(&block_2.clone(), None, public_key);
+    #[traced_test]
+    #[tokio::test]
+    async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
+        // In this scenario, the client only knows the genesis block (block 0) and then
+        // receives block 3, meaning that block 2 and 1 will have to be requested.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_test_genesis_setup(Network::Main, 0).await?;
+        let peer_address = get_dummy_socket_address(0);
 
-    //     let mock = Mock::new(vec![
-    //         Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
-    //         Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
-    //         Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
-    //         Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
-    //         Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
-    //         Action::Read(PeerMessage::Bye),
-    //     ]);
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
 
-    //     let peer_loop_handler = PeerLoopHandler::new(
-    //         to_main_tx.clone(),
-    //         state.clone(),
-    //         peer_address,
-    //         hsd,
-    //         true,
-    //         1,
-    //     );
-    //     peer_loop_handler
-    //         .run_wrapper(mock, from_main_rx_clone)
-    //         .await?;
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
+            Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
+            Action::Read(PeerMessage::Bye),
+        ]);
 
-    //     // Verify that peer max block height was sent
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-    //         _ => bail!("Must receive add of peer block max height"),
-    //     }
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_address,
+            hsd,
+            true,
+            1,
+        );
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await?;
 
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::NewBlocks(blocks)) => {
-    //             if blocks[0].hash != block_1.hash {
-    //                 bail!("1st received block by main loop must be block 1");
-    //             }
-    //             if blocks[1].hash != block_2.hash {
-    //                 bail!("2nd received block by main loop must be block 2");
-    //             }
-    //             if blocks[2].hash != block_3.hash {
-    //                 bail!("3rd received block by main loop must be block 3");
-    //             }
-    //         }
-    //         _ => bail!("Did not find msg sent to main thread"),
-    //     };
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
-    //         _ => bail!("Must receive remove of peer block max height"),
-    //     }
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive add of peer block max height"),
+        }
 
-    //     if !state.net.peer_map.lock().unwrap().is_empty() {
-    //         bail!("peer map must be empty after closing connection gracefully");
-    //     }
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+                if blocks[0].hash != block_1.hash {
+                    bail!("1st received block by main loop must be block 1");
+                }
+                if blocks[1].hash != block_2.hash {
+                    bail!("2nd received block by main loop must be block 2");
+                }
+                if blocks[2].hash != block_3.hash {
+                    bail!("3rd received block by main loop must be block 3");
+                }
+            }
+            _ => bail!("Did not find msg sent to main thread"),
+        };
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
-    //     Ok(())
-    // }
+        if !state.net.peer_map.lock().unwrap().is_empty() {
+            bail!("peer map must be empty after closing connection gracefully");
+        }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
-    //     // In this scenario, the client know the genesis block (block 0) and block 1, it
-    //     // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
-    //     // But the requests are interrupted by the peer sending another message: a new block
-    //     // notification.
-    //     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-    //         get_test_genesis_setup(Network::Main, 0).await?;
-    //     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-    //         Secp256k1::new().generate_keypair(&mut thread_rng());
-    //     let peer_address: SocketAddr = get_dummy_address(0);
-    //     let genesis_block: Block = state
-    //         .chain
-    //         .archival_state
-    //         .as_ref()
-    //         .unwrap()
-    //         .get_latest_block()
-    //         .await;
-    //     let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
-    //     let block_2 = make_mock_block(&block_1.clone(), None, public_key);
-    //     let block_3 = make_mock_block(&block_2.clone(), None, public_key);
-    //     let block_4 = make_mock_block(&block_3.clone(), None, public_key);
-    //     let block_5 = make_mock_block(&block_4.clone(), None, public_key);
-    //     add_block(&state, block_1.clone()).await?;
+        Ok(())
+    }
 
-    //     let mock = Mock::new(vec![
-    //         Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
-    //         Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
-    //         Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
-    //         Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
-    //         //
-    //         // Now make the interruption of the block reconciliation process
-    //         Action::Read(PeerMessage::BlockNotification(block_5.clone().into())),
-    //         //
-    //         // Complete the block reconciliation process by requesting the last block
-    //         // in this process, to get back to a mutually known block.
-    //         Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
-    //         //
-    //         // Then anticipate the request of the block that was announced
-    //         // in the interruption.
-    //         // Note that we cannot anticipate the response, as only the main
-    //         // thread writes to the database. And the database needs to be updated
-    //         // for the handling of block 5 to be done correctly.
-    //         Action::Write(PeerMessage::BlockRequestByHeight(block_5.header.height)),
-    //         Action::Read(PeerMessage::Bye),
-    //     ]);
+    #[traced_test]
+    #[tokio::test]
+    async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
+        // In this scenario, the client know the genesis block (block 0) and block 1, it
+        // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
+        // But the requests are interrupted by the peer sending another message: a new block
+        // notification.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+            get_test_genesis_setup(Network::Main, 0).await?;
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
+        let (block_5, _, _) = make_mock_block(&block_4.clone(), None, a_recipient_address);
+        add_block(&state, block_1.clone()).await?;
 
-    //     let peer_loop_handler = PeerLoopHandler::new(
-    //         to_main_tx.clone(),
-    //         state.clone(),
-    //         peer_address,
-    //         hsd,
-    //         false,
-    //         1,
-    //     );
-    //     peer_loop_handler
-    //         .run_wrapper(mock, from_main_rx_clone)
-    //         .await?;
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+            //
+            // Now make the interruption of the block reconciliation process
+            Action::Read(PeerMessage::BlockNotification(block_5.clone().into())),
+            //
+            // Complete the block reconciliation process by requesting the last block
+            // in this process, to get back to a mutually known block.
+            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            //
+            // Then anticipate the request of the block that was announced
+            // in the interruption.
+            // Note that we cannot anticipate the response, as only the main
+            // thread writes to the database. And the database needs to be updated
+            // for the handling of block 5 to be done correctly.
+            Action::Write(PeerMessage::BlockRequestByHeight(block_5.header.height)),
+            Action::Read(PeerMessage::Bye),
+        ]);
 
-    //     // Verify that peer max block height was sent
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-    //         _ => bail!("Must receive add of peer block max height"),
-    //     }
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state.clone(),
+            peer_socket_address,
+            hsd,
+            false,
+            1,
+        );
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await?;
 
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::NewBlocks(blocks)) => {
-    //             if blocks[0].hash != block_2.hash {
-    //                 bail!("1st received block by main loop must be block 1");
-    //             }
-    //             if blocks[1].hash != block_3.hash {
-    //                 bail!("2nd received block by main loop must be block 2");
-    //             }
-    //             if blocks[2].hash != block_4.hash {
-    //                 bail!("3rd received block by main loop must be block 3");
-    //             }
-    //         }
-    //         _ => bail!("Did not find msg sent to main thread"),
-    //     };
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
-    //         _ => bail!("Must receive remove of peer block max height"),
-    //     }
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive add of peer block max height"),
+        }
 
-    //     if !state.net.peer_map.lock().unwrap().is_empty() {
-    //         bail!("peer map must be empty after closing connection gracefully");
-    //     }
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+                if blocks[0].hash != block_2.hash {
+                    bail!("1st received block by main loop must be block 1");
+                }
+                if blocks[1].hash != block_3.hash {
+                    bail!("2nd received block by main loop must be block 2");
+                }
+                if blocks[2].hash != block_4.hash {
+                    bail!("3rd received block by main loop must be block 3");
+                }
+            }
+            _ => bail!("Did not find msg sent to main thread"),
+        };
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
-    //     Ok(())
-    // }
+        if !state.net.peer_map.lock().unwrap().is_empty() {
+            bail!("peer map must be empty after closing connection gracefully");
+        }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
-    //     // In this scenario, the client knows the genesis block (block 0) and block 1, it
-    //     // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
-    //     // But the requests are interrupted by the peer sending another message: a request
-    //     // for a list of peers.
-    //     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
-    //         get_test_genesis_setup(Network::Main, 1).await?;
-    //     let peer_infos: Vec<PeerInfo> = state
-    //         .net
-    //         .peer_map
-    //         .lock()
-    //         .unwrap()
-    //         .clone()
-    //         .into_values()
-    //         .collect::<Vec<_>>();
+        Ok(())
+    }
 
-    //     let genesis_block: Block = state
-    //         .chain
-    //         .archival_state
-    //         .as_ref()
-    //         .unwrap()
-    //         .get_latest_block()
-    //         .await;
-    //     let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-    //         Secp256k1::new().generate_keypair(&mut thread_rng());
-    //     let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
-    //     let block_2 = make_mock_block(&block_1.clone(), None, public_key);
-    //     let block_3 = make_mock_block(&block_2.clone(), None, public_key);
-    //     let block_4 = make_mock_block(&block_3.clone(), None, public_key);
-    //     add_block(&state, block_1.clone()).await?;
+    #[traced_test]
+    #[tokio::test]
+    async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
+        // In this scenario, the client knows the genesis block (block 0) and block 1, it
+        // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
+        // But the requests are interrupted by the peer sending another message: a request
+        // for a list of peers.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Main, 1).await?;
+        let peer_infos: Vec<PeerInfo> = state
+            .net
+            .peer_map
+            .lock()
+            .unwrap()
+            .clone()
+            .into_values()
+            .collect::<Vec<_>>();
 
-    //     let (hsd_1, sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
-    //     let expected_peer_list_resp = vec![
-    //         (
-    //             peer_infos[0].address_for_incoming_connections.unwrap(),
-    //             peer_infos[0].instance_id,
-    //         ),
-    //         (sa_1, hsd_1.instance_id),
-    //     ];
-    //     let mock = Mock::new(vec![
-    //         Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
-    //         Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
-    //         Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
-    //         Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
-    //         //
-    //         // Now make the interruption of the block reconciliation process
-    //         Action::Read(PeerMessage::PeerListRequest),
-    //         //
-    //         // Answer the request for a peer list
-    //         Action::Write(PeerMessage::PeerListResponse(expected_peer_list_resp)),
-    //         //
-    //         // Complete the block reconciliation process by requesting the last block
-    //         // in this process, to get back to a mutually known block.
-    //         Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
-    //         Action::Read(PeerMessage::Bye),
-    //     ]);
+        let genesis_block: Block = state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await;
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
+        add_block(&state, block_1.clone()).await?;
 
-    //     let peer_loop_handler =
-    //         PeerLoopHandler::new(to_main_tx, state.clone(), sa_1, hsd_1, true, 1);
-    //     peer_loop_handler
-    //         .run_wrapper(mock, from_main_rx_clone)
-    //         .await?;
+        let (hsd_1, sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let expected_peer_list_resp = vec![
+            (
+                peer_infos[0].address_for_incoming_connections.unwrap(),
+                peer_infos[0].instance_id,
+            ),
+            (sa_1, hsd_1.instance_id),
+        ];
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
+            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+            Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
+            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+            //
+            // Now make the interruption of the block reconciliation process
+            Action::Read(PeerMessage::PeerListRequest),
+            //
+            // Answer the request for a peer list
+            Action::Write(PeerMessage::PeerListResponse(expected_peer_list_resp)),
+            //
+            // Complete the block reconciliation process by requesting the last block
+            // in this process, to get back to a mutually known block.
+            Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
+            Action::Read(PeerMessage::Bye),
+        ]);
 
-    //     // Verify that peer max block height was sent
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
-    //         _ => bail!("Must receive peer block max height"),
-    //     }
+        let peer_loop_handler =
+            PeerLoopHandler::new(to_main_tx, state.clone(), sa_1, hsd_1, true, 1);
+        peer_loop_handler
+            .run_wrapper(mock, from_main_rx_clone)
+            .await?;
 
-    //     // Verify that blocks are sent to `main_loop` in expected ordering
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::NewBlocks(blocks)) => {
-    //             if blocks[0].hash != block_2.hash {
-    //                 bail!("1st received block by main loop must be block 1");
-    //             }
-    //             if blocks[1].hash != block_3.hash {
-    //                 bail!("2nd received block by main loop must be block 2");
-    //             }
-    //             if blocks[2].hash != block_4.hash {
-    //                 bail!("3rd received block by main loop must be block 3");
-    //             }
-    //         }
-    //         _ => bail!("Did not find msg sent to main thread"),
-    //     };
+        // Verify that peer max block height was sent
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::AddPeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive peer block max height"),
+        }
 
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
-    //         _ => bail!("Must receive remove of peer block max height"),
-    //     }
+        // Verify that blocks are sent to `main_loop` in expected ordering
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::NewBlocks(blocks)) => {
+                if blocks[0].hash != block_2.hash {
+                    bail!("1st received block by main loop must be block 1");
+                }
+                if blocks[1].hash != block_3.hash {
+                    bail!("2nd received block by main loop must be block 2");
+                }
+                if blocks[2].hash != block_4.hash {
+                    bail!("3rd received block by main loop must be block 3");
+                }
+            }
+            _ => bail!("Did not find msg sent to main thread"),
+        };
 
-    //     assert_eq!(
-    //         1,
-    //         state.net.peer_map.lock().unwrap().len(),
-    //         "One peer must remain in peer list after peer_1 closed gracefully"
-    //     );
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::RemovePeerMaxBlockHeight(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
-    //     Ok(())
-    // }
+        assert_eq!(
+            1,
+            state.net.peer_map.lock().unwrap().len(),
+            "One peer must remain in peer list after peer_1 closed gracefully"
+        );
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn empty_mempool_request_tx_test() -> Result<()> {
-    //     // In this scenerio the client receives a transaction from a peer, requests it back
-    //     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
-    //         get_test_genesis_setup(Network::Main, 1).await?;
+        Ok(())
+    }
 
-    //     let transaction_1 = make_mock_signed_valid_tx();
+    #[traced_test]
+    #[tokio::test]
+    async fn empty_mempool_request_tx_test() -> Result<()> {
+        // In this scenerio the client receives a transaction notification from
+        // a peer of a transaction it doesn't know; the client must then request it.
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Main, 1).await?;
 
-    //     // Build the resulting transaction notification
-    //     let tx_notification: TransactionNotification = transaction_1.clone().into();
-    //     let mock = Mock::new(vec![
-    //         Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-    //         Action::Write(PeerMessage::TransactionRequest(
-    //             tx_notification.transaction_digest,
-    //         )),
-    //         Action::Read(PeerMessage::Transaction(transaction_1)),
-    //         Action::Read(PeerMessage::Bye),
-    //     ]);
+        let transaction_1 = make_mock_transaction(vec![], vec![]);
 
-    //     let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
-    //     let peer_loop_handler = PeerLoopHandler::new(
-    //         to_main_tx,
-    //         state.clone(),
-    //         get_dummy_address(0),
-    //         hsd_1.clone(),
-    //         true,
-    //         1,
-    //     );
-    //     let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Write(PeerMessage::TransactionRequest(
+                tx_notification.transaction_digest,
+            )),
+            Action::Read(PeerMessage::Transaction(transaction_1)),
+            Action::Read(PeerMessage::Bye),
+        ]);
 
-    //     assert!(state.mempool.is_empty(), "Mempool must be empty at init");
-    //     peer_loop_handler
-    //         .run(mock, from_main_rx_clone, &mut peer_state)
-    //         .await?;
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state.clone(),
+            get_dummy_socket_address(0),
+            hsd_1.clone(),
+            true,
+            1,
+        );
+        let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
-    //     // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
-    //     // by the `main_loop`.
-    //     match to_main_rx1.recv().await {
-    //         Some(PeerThreadToMain::Transaction(_)) => (),
-    //         _ => bail!("Must receive remove of peer block max height"),
-    //     }
+        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
+        peer_loop_handler
+            .run(mock, from_main_rx_clone, &mut peer_state)
+            .await?;
 
-    //     Ok(())
-    // }
+        // Transaction must be sent to `main_loop`. The transaction is stored to the mempool
+        // by the `main_loop`.
+        match to_main_rx1.recv().await {
+            Some(PeerThreadToMain::Transaction(_)) => (),
+            _ => bail!("Must receive remove of peer block max height"),
+        }
 
-    // #[traced_test]
-    // #[tokio::test]
-    // async fn populated_mempool_request_tx_test() -> Result<()> {
-    //     // In this scenario the peer is informed of a transaction that it already knows
-    //     let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
-    //         get_test_genesis_setup(Network::Main, 1).await?;
+        Ok(())
+    }
 
-    //     let transaction_1 = make_mock_signed_valid_tx();
+    #[traced_test]
+    #[tokio::test]
+    async fn populated_mempool_request_tx_test() -> Result<()> {
+        // In this scenario the peer is informed of a transaction that it already knows
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+            get_test_genesis_setup(Network::Main, 1).await?;
 
-    //     // Build the resulting transaction notification
-    //     let tx_notification: TransactionNotification = transaction_1.clone().into();
-    //     let mock = Mock::new(vec![
-    //         Action::Read(PeerMessage::TransactionNotification(tx_notification)),
-    //         Action::Read(PeerMessage::Bye),
-    //     ]);
+        let transaction_1 = make_mock_transaction(vec![], vec![]);
 
-    //     let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
-    //     let peer_loop_handler = PeerLoopHandler::new(
-    //         to_main_tx,
-    //         state.clone(),
-    //         get_dummy_address(0),
-    //         hsd_1.clone(),
-    //         true,
-    //         1,
-    //     );
-    //     let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
+        // Build the resulting transaction notification
+        let tx_notification: TransactionNotification = transaction_1.clone().into();
+        let mock = Mock::new(vec![
+            Action::Read(PeerMessage::TransactionNotification(tx_notification)),
+            Action::Read(PeerMessage::Bye),
+        ]);
 
-    //     assert!(state.mempool.is_empty(), "Mempool must be empty at init");
-    //     state.mempool.insert(&transaction_1);
-    //     assert!(
-    //         !state.mempool.is_empty(),
-    //         "Mempool must be non-empty after insertion"
-    //     );
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx,
+            state.clone(),
+            get_dummy_socket_address(0),
+            hsd_1.clone(),
+            true,
+            1,
+        );
+        let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
-    //     peer_loop_handler
-    //         .run(mock, from_main_rx_clone, &mut peer_state)
-    //         .await?;
+        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
+        state.mempool.insert(&transaction_1);
+        assert!(
+            !state.mempool.is_empty(),
+            "Mempool must be non-empty after insertion"
+        );
 
-    //     // nothing may be sent to `main_loop`
-    //     match to_main_rx1.try_recv() {
-    //         Err(TryRecvError::Empty) => (),
-    //         Err(TryRecvError::Disconnected) => bail!("to_main channel must still be open"),
-    //         Ok(_) => bail!("to_main channel must be empty"),
-    //     }
+        peer_loop_handler
+            .run(mock, from_main_rx_clone, &mut peer_state)
+            .await?;
 
-    //     Ok(())
-    // }
+        // nothing may be sent to `main_loop`
+        match to_main_rx1.try_recv() {
+            Err(TryRecvError::Empty) => (),
+            Err(TryRecvError::Disconnected) => bail!("to_main channel must still be open"),
+            Ok(_) => bail!("to_main channel must be empty"),
+        }
+
+        Ok(())
+    }
 }

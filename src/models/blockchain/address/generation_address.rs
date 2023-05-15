@@ -30,7 +30,7 @@ use crate::models::blockchain::transaction::Transaction;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct SpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
@@ -39,7 +39,7 @@ pub struct SpendingKey {
     pub seed: Digest,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReceivingAddress {
     pub receiver_identifier: BFieldElement,
     pub encryption_key: lattice::kem::PublicKey,
@@ -249,8 +249,7 @@ impl SpendingKey {
         let kem_ctxt_array: [BFieldElement; CIPHERTEXT_SIZE_IN_BFES] = kem_ctxt.try_into().unwrap();
 
         // decrypt
-        let shared_key = match lattice::kem::dec(self.decryption_key.clone(), kem_ctxt_array.into())
-        {
+        let shared_key = match lattice::kem::dec(self.decryption_key, kem_ctxt_array.into()) {
             Some(sk) => sk,
             None => bail!("Could not establish shared secret key."),
         };
@@ -306,7 +305,7 @@ impl ReceivingAddress {
         let mut randomness = [0u8; 32];
         let mut rng = thread_rng();
         rng.fill(&mut randomness);
-        let (shared_key, kem_ctxt) = lattice::kem::enc(self.encryption_key.clone(), randomness);
+        let (shared_key, kem_ctxt) = lattice::kem::enc(self.encryption_key, randomness);
 
         // sample nonce
         let nonce_bfe: BFieldElement = rng.gen();
