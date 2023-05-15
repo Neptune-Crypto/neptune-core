@@ -1,3 +1,4 @@
+use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -39,7 +40,7 @@ pub enum MembershipProofError {
 }
 
 // In order to store this structure in the database, it needs to be serializable.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
 pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
