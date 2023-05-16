@@ -4,7 +4,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
+use crate::models::channel::{MainToPeerThread, PeerThreadToMain, PeerThreadToMainTransaction};
 use crate::models::peer::{
     HandshakeData, MutablePeerState, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
 };
@@ -677,7 +677,17 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // Get transaction's timestamp
+                // if transaction is not confirmable, punish
+                let latest_block = self.state.chain.light_state.get_latest_block().await;
+                if !transaction
+                    .is_confirmable_relative_to(&latest_block.body.next_mutator_set_accumulator)
+                {
+                    warn!("Received unconfirmable tx");
+                    self.punish(PeerSanctionReason::UnconfirmableTransaction)?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Get transaction timestamp
                 let tx_timestamp = match transaction.get_timestamp() {
                     Ok(ts) => ts,
                     Err(_) => {
@@ -709,8 +719,12 @@ impl PeerLoopHandler {
                 }
 
                 // Otherwise relay to main
+                let pt2m_transaction = PeerThreadToMainTransaction {
+                    transaction: *transaction.to_owned(),
+                    confirmable_for_block: latest_block.hash,
+                };
                 self.to_main_tx
-                    .send(PeerThreadToMain::Transaction(transaction))
+                    .send(PeerThreadToMain::Transaction(Box::new(pt2m_transaction)))
                     .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -739,7 +753,8 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
                 if let Some(transaction) = self.state.mempool.get(&transaction_identifier) {
-                    peer.send(PeerMessage::Transaction(transaction)).await?;
+                    peer.send(PeerMessage::Transaction(Box::new(transaction)))
+                        .await?;
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -821,12 +836,6 @@ impl PeerLoopHandler {
                     peer.send(PeerMessage::PeerListRequest).await?;
                 }
                 Ok(false)
-            }
-            MainToPeerThread::Transaction(transaction) => {
-                debug!("Sending PeerMessage::Transaction");
-                peer.send(PeerMessage::Transaction(transaction)).await?;
-                debug!("Sent PeerMessage::Transaction");
-                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerThread::TransactionNotification(transaction_notification) => {
                 debug!("Sending PeerMessage::TransactionNotification");
@@ -2094,6 +2103,7 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
             get_test_genesis_setup(Network::Main, 1).await?;
 
+        let genesis_block = Block::genesis_block();
         let transaction_1 = make_mock_transaction(vec![], vec![]);
 
         // Build the resulting transaction notification
@@ -2103,7 +2113,7 @@ mod peer_loop_tests {
             Action::Write(PeerMessage::TransactionRequest(
                 tx_notification.transaction_digest,
             )),
-            Action::Read(PeerMessage::Transaction(transaction_1)),
+            Action::Read(PeerMessage::Transaction(Box::new(transaction_1))),
             Action::Read(PeerMessage::Bye),
         ]);
 

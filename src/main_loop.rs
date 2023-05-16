@@ -627,17 +627,34 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerThreadToMain::Transaction(transaction) => {
+            PeerThreadToMain::Transaction(pt2m_transaction) => {
                 debug!(
                     "`main` received following transaction from `peer`: {:?}",
-                    transaction
+                    pt2m_transaction
                 );
 
+                if pt2m_transaction.confirmable_for_block
+                    != self
+                        .global_state
+                        .chain
+                        .light_state
+                        .latest_block
+                        .lock()
+                        .await
+                        .hash
+                {
+                    warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
+                    return Ok(());
+                }
+
                 // Insert into mempool
-                self.global_state.mempool.insert(&transaction);
+                self.global_state
+                    .mempool
+                    .insert(&pt2m_transaction.transaction);
 
                 // send notification to peers
-                let transaction_notification: TransactionNotification = transaction.into();
+                let transaction_notification: TransactionNotification =
+                    pt2m_transaction.transaction.into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(
                         transaction_notification,

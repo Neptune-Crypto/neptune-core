@@ -24,6 +24,7 @@ const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
 const INVALID_MESSAGE_SEVERITY: u16 = 2;
 const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
 const INVALID_TRANSACTION: u16 = 10;
+const UNCONFIRMABLE_TRANSACTION: u16 = 2;
 
 pub type InstanceId = u128;
 
@@ -54,6 +55,7 @@ pub enum PeerSanctionReason {
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
     InvalidTransaction,
+    UnconfirmableTransaction,
 }
 
 impl Display for PeerSanctionReason {
@@ -75,6 +77,7 @@ impl Display for PeerSanctionReason {
             }
             PeerSanctionReason::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
             PeerSanctionReason::InvalidTransaction => "invalid transaction",
+            PeerSanctionReason::UnconfirmableTransaction => "unconfirmable transaction",
         };
         write!(f, "{string}")
     }
@@ -122,6 +125,7 @@ impl PeerSanctionReason {
             PeerSanctionReason::BatchBlocksUnknownRequest => BAD_BLOCK_BATCH_REQUEST_SEVERITY,
             PeerSanctionReason::BlockRequestUnknownHeight => UNKNOWN_BLOCK_HEIGHT,
             PeerSanctionReason::InvalidTransaction => INVALID_TRANSACTION,
+            PeerSanctionReason::UnconfirmableTransaction => UNCONFIRMABLE_TRANSACTION,
         }
     }
 }
@@ -238,7 +242,7 @@ pub enum PeerMessage {
     BlockRequestBatch(Vec<Digest>, usize), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
     /// Send a full transaction object to a peer.
-    Transaction(Transaction),
+    Transaction(Box<Transaction>),
     /// Send a notification to a peer, informing it that this node stores the
     /// transaction with digest and timestamp specified in
     /// `TransactionNotification`.

@@ -27,6 +27,7 @@ use self::amount::Amount;
 use self::native_coin::native_coin_typescript;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
+use super::block::block_height::BlockHeight;
 use super::block::Block;
 use super::shared::Hash;
 
@@ -199,18 +200,10 @@ impl StdHash for Transaction {
 }
 
 impl Transaction {
-    // pub fn get_own_input_utxos(&self, pub_key: PublicKey) -> Vec<Utxo> {
-    //     self.inputs
-    //         .iter()
-    //         .map(|dni| dni.utxo)
-    //         .filter(|utxo| utxo.public_key == pub_key)
-    //         .collect()
-    // }
-
     /// Update mutator set data in a transaction to update its
     /// compatibility with a new block. Note that this will
     /// invalidate the proof, requiring an update.
-    pub fn update_mutator_set_data(&mut self, block: &Block) -> Result<()> {
+    pub fn update_mutator_set_records(&mut self, block: &Block) -> Result<()> {
         let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
         let block_addition_records: Vec<AdditionRecord> =
@@ -460,6 +453,20 @@ impl Transaction {
         let transaction_fee = BigInt::from(BigUint::from(self.kernel.fee.0));
         BigRational::new_raw(transaction_fee, transaction_size)
     }
+
+    /// Determine if the transaction can be validly confirmed if the block has
+    /// the given mutator set accumulator. Specifically, test whether the
+    /// removal records determine indices absent in the mutator set sliding
+    /// window Bloom filter, and whether the MMR membership proofs are valid.
+    pub fn is_confirmable_relative_to(
+        &self,
+        mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+    ) -> bool {
+        self.kernel
+            .inputs
+            .iter()
+            .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
+    }
 }
 
 #[cfg(test)]
@@ -469,8 +476,11 @@ mod transaction_tests {
     use super::{utxo::LockScript, *};
     use crate::{
         config_models::network::Network,
-        models::state::wallet::{self, generate_secret_key},
-        tests::shared::{get_mock_global_state, make_mock_transaction},
+        models::state::{
+            wallet::{self, generate_secret_key},
+            UtxoReceiverData,
+        },
+        tests::shared::{get_mock_global_state, make_mock_block, make_mock_transaction},
     };
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
     use rand::random;
@@ -566,23 +576,34 @@ mod transaction_tests {
     //     let other_wallet = wallet::WalletSecret::new(wallet::generate_secret_key());
 
     //     // Create a transaction that's valid after the Genesis block
-    //     let new_utxo = Utxo {
-    //         amount: 5.into(),
-    //         public_key: other_wallet.get_public_key(),
-    //     };
-    //     let mut updated_tx = global_state
-    //         .create_transaction(vec![new_utxo], 1.into())
+    //     let receiver_data = vec![UtxoReceiverData {
+    //         utxo: Utxo {
+    //             lock_script: LockScript(vec![]),
+    //             coins: Into::<Amount>::into(5).to_native_coins(),
+    //         },
+    //         sender_randomness: random(),
+    //         receiver_privacy_digest: random(),
+    //         pubscript: PubScript::default(),
+    //         pubscript_input: vec![],
+    //     }];
+    //     let mut transaction = global_state
+    //         .create_transaction(receiver_data, Amount::one())
     //         .await
     //         .unwrap();
 
     //     let genesis_block = Block::genesis_block();
-    //     let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());
+    //     let (block_1, _, _) = make_mock_block(
+    //         &genesis_block,
+    //         None,
+    //         other_wallet.nth_generation_spending_key(0).to_address(),
+    //     );
     //     assert!(
     //         block_1.is_valid_for_devnet(&genesis_block),
     //         "Block 1 must be valid with only coinbase output"
     //     );
 
-    //     updated_tx.update_ms_data(&block_1).unwrap();
+    //     assert!(transaction.is_valid(None));
+    //     transaction.update_mutator_set_records(&block_1).unwrap();
 
     //     // Insert the updated transaction into block 2 and verify that this block is valid
     //     let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());

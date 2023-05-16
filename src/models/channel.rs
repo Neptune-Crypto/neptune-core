@@ -42,7 +42,6 @@ pub enum MainToPeerThread {
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
-    Transaction(Transaction),                     // Push a transaction
     TransactionNotification(TransactionNotification), // Publish knowledge of a transaction
     Disconnect(SocketAddr),                       // Disconnect from a specific peer
     DisconnectAll(),                              // Disconnect from all peers
@@ -58,7 +57,6 @@ impl MainToPeerThread {
             MainToPeerThread::MakeSpecificPeerDiscoveryRequest(_) => {
                 "make specific peer discovery req".to_string()
             }
-            MainToPeerThread::Transaction(_) => "transaction".to_string(),
             MainToPeerThread::TransactionNotification(_) => "transaction notification".to_string(),
             MainToPeerThread::Disconnect(_) => "disconnect".to_string(),
             MainToPeerThread::DisconnectAll() => "disconnect all".to_string(),
@@ -72,7 +70,13 @@ pub enum PeerThreadToMain {
     AddPeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
-    Transaction(Transaction),
+    Transaction(Box<PeerThreadToMainTransaction>),
+}
+
+#[derive(Clone, Debug)]
+pub struct PeerThreadToMainTransaction {
+    pub transaction: Transaction,
+    pub confirmable_for_block: Digest,
 }
 
 impl PeerThreadToMain {

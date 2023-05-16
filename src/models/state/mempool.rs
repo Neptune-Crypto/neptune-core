@@ -265,7 +265,7 @@ impl MempoolInternal {
     }
 
     /// Insert a transaction into the mempool. It is the caller's responsibility to verify
-    /// that the transaction is valid.
+    /// that the transaction is valid and confirmable.
     fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         {
             // Early exit on transactions too long into the future.
@@ -455,7 +455,7 @@ impl MempoolInternal {
 
         // Update the remaining transactions so their mutator set data is still valid
         for tx in self.tx_dictionary.values_mut() {
-            tx.update_mutator_set_data(block)
+            tx.update_mutator_set_records(block)
                 .expect("Updating mempool transaction must succeed");
         }
 
