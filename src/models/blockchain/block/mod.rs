@@ -150,8 +150,8 @@ impl Block {
         Self { hash, header, body }
     }
 
-    /// Merge a transaction into this block's transaction
-    /// Mutator set data must be valid in all inputs.
+    /// Merge a transaction into this block's transaction.
+    /// The mutator set data must be valid in all inputs.
     pub fn accumulate_transaction(&mut self, transaction: Transaction) {
         // merge
         let new_transaction = self.body.transaction.clone().merge_with(transaction);

@@ -464,8 +464,7 @@ mod global_state_tests {
         models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},
         tests::shared::{get_mock_global_state, make_mock_block},
     };
-    use rand::{random, thread_rng};
-    use secp256k1::Secp256k1;
+    use rand::random;
     use tracing_test::traced_test;
 
     use super::{wallet::WalletSecret, *};

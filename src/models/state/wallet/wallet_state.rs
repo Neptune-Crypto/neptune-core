@@ -1,30 +1,25 @@
 use anyhow::{bail, Result};
-use bytesize::ByteSize;
-use get_size::GetSize;
 use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use num_traits::Zero;
-use priority_queue::DoublePriorityQueue;
 use rusty_leveldb::DB;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
-use tokio::sync::{Mutex as TokioMutex, MutexGuard};
+use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use twenty_first::shared_math::digest::{Digest, DIGEST_LENGTH};
+use twenty_first::shared_math::digest::Digest;
 
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
@@ -32,8 +27,6 @@ use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::WalletSecret;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
-use crate::models::blockchain::address::generation_address;
-use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
@@ -208,7 +201,7 @@ impl WalletState {
         // filter for presence in transaction
         recognized_utxos
             .into_iter()
-            .filter(|(ar, ut, sr, rp)| if !transaction.kernel.outputs.contains(&ar) {
+            .filter(|(ar, ut, _sr, _rp)| if !transaction.kernel.outputs.contains(ar) {
                 warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {ut:#?}");
                 false
             } else { true })
@@ -345,9 +338,9 @@ impl WalletState {
                     block.header.height,
                     utxo.coins
                         .iter()
-                        .filter(|(type_script_hash, state)| *type_script_hash
+                        .filter(|(type_script_hash, _state)| *type_script_hash
                             == NATIVE_COIN_TYPESCRIPT_DIGEST)
-                        .map(|(type_script_hash, state)| Amount::from_bfes(state))
+                        .map(|(_type_script_hash, state)| Amount::from_bfes(state))
                         .sum::<Amount>(),
                 );
                 let utxo_digest = Hash::hash(&utxo);
@@ -427,16 +420,15 @@ impl WalletState {
             // if input_utxo.matches_pubkey(my_pub_key) {
             match spent_inputs
                 .iter()
-                .find(|(_, abs_i, mutxo_list_index)| *abs_i == removal_record.absolute_indices)
+                .find(|(_, abs_i, _mutxo_list_index)| *abs_i == removal_record.absolute_indices)
             {
                 None => (),
-                Some((spent_utxo, abs_i, mutxo_list_index)) => {
+                Some((_spent_utxo, _abs_i, mutxo_list_index)) => {
                     debug!(
                         "Discovered own input at input {}, marking UTXO as spent.",
                         i
                     );
 
-                    let input_utxo_digest = Hash::hash(spent_utxo);
                     let mut spent_mutxo = wallet_db_lock.monitored_utxos.get(*mutxo_list_index);
                     spent_mutxo.spent_in_block = Some((
                         block.hash,
@@ -711,9 +703,4 @@ impl WalletState {
         }
         history
     }
-}
-
-#[cfg(test)]
-mod wallet_state_tests {
-    use crate::tests::shared::get_mock_wallet_state;
 }
