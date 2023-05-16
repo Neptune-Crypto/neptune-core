@@ -7,7 +7,6 @@ use neptune_core::models::blockchain::transaction::amount::Amount;
 use num_bigint::BigUint;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;

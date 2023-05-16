@@ -1,7 +1,5 @@
 use std::{cmp::max, error::Error, sync::Arc, time::Duration};
 
-use crate::Config;
-
 use super::{
     dashboard_app::{ConsoleIO, DashboardEvent},
     overview_screen::VerticalRectifier,
@@ -45,12 +43,11 @@ pub struct SendScreen {
     notice: Arc<Mutex<String>>,
     reset_me: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
-    args: Config,
     network: Network,
 }
 
 impl SendScreen {
-    pub fn new(rpc_server: Arc<RPCClient>, args: Config, network: Network) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network) -> Self {
         SendScreen {
             active: false,
             fg: Color::Gray,
@@ -63,7 +60,6 @@ impl SendScreen {
             notice: Arc::new(Mutex::new("".to_string())),
             reset_me: Arc::new(Mutex::new(false)),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
-            args,
             network,
         }
     }

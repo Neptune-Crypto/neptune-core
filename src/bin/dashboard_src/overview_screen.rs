@@ -13,9 +13,7 @@ use itertools::Itertools;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::shared::Hash;
-use neptune_core::models::blockchain::{
-    block::block_height::BlockHeight, transaction::amount::Amount,
-};
+use neptune_core::models::blockchain::transaction::amount::Amount;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
 use tarpc::context;
@@ -25,8 +23,6 @@ use tui::{
     style::{Color, Style},
     widgets::{Block, Borders, List, ListItem, Widget},
 };
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -461,7 +457,7 @@ impl Widget for OverviewScreen {
         lines.push(format!("network: {}", data.network));
 
         // TODO: Do we want to show the emojihash here?
-        let tip_digest = data.block_header.as_ref().map(|x| Hash::hash(x));
+        let tip_digest = data.block_header.as_ref().map(Hash::hash);
         lines.push(format!(
             "tip digest:\n{}\n{}\n\n",
             dashifnotset!(tip_digest.map(|x| x.emojihash())),

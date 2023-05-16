@@ -3,10 +3,7 @@ use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
-use twenty_first::shared_math::lattice::kem::PublicKey;
-use twenty_first::shared_math::lattice::{self, ModuleElement};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
@@ -202,14 +199,6 @@ impl Block {
         self.body = block_body;
         self.hash = Hash::hash(&block_header);
         self.header = block_header;
-    }
-
-    fn count_outputs(&self) -> usize {
-        self.body.transaction.kernel.outputs.len()
-    }
-
-    fn count_inputs(&self) -> usize {
-        self.body.transaction.kernel.inputs.len()
     }
 
     /// Verify a block. It is assumed that `previous_block` is valid.

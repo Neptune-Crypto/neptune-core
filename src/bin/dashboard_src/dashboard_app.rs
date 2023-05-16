@@ -27,8 +27,6 @@ use tui::{
     Frame, Terminal,
 };
 
-use crate::Config;
-
 use super::{
     history_screen::HistoryScreen, overview_screen::OverviewScreen, peers_screen::PeersScreen,
     receive_screen::ReceiveScreen, screen::Screen, send_screen::SendScreen,
@@ -124,7 +122,6 @@ pub struct DashboardApp {
 impl DashboardApp {
     pub fn new(
         rpc_server: Arc<RPCClient>,
-        args: Config,
         network: Network,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Self {
@@ -148,13 +145,12 @@ impl DashboardApp {
 
         let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(
             rpc_server.clone(),
-            args.clone(),
             network,
         )));
         let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
 
-        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server, args, network)));
+        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server, network)));
         let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
 
@@ -222,12 +218,11 @@ impl DashboardApp {
 
     pub async fn run(
         client: RPCClient,
-        args: Config,
         network: Network,
         listen_addr_for_peers: Option<SocketAddr>,
     ) -> Result<String, Box<dyn Error>> {
         // create app
-        let mut app = DashboardApp::new(Arc::new(client), args, network, listen_addr_for_peers);
+        let mut app = DashboardApp::new(Arc::new(client), network, listen_addr_for_peers);
 
         // setup terminal
         let mut terminal = Self::enable_raw_mode()?;

@@ -437,7 +437,7 @@ impl ReceivingAddress {
     /// this logic that is proven is `lock_script`.
     ///
     /// This function mocks proof verification.
-    fn reference_verify_unlock(
+    fn _reference_verify_unlock(
         &self,
         msg: Digest,
         witness_data: [BFieldElement; DIGEST_LENGTH],
@@ -529,7 +529,7 @@ mod test_generation_addresses {
 
         let msg: Digest = rng.gen();
         let witness_data = spending_key.binding_unlock(&msg);
-        assert!(receiving_address.reference_verify_unlock(msg, witness_data));
+        assert!(receiving_address._reference_verify_unlock(msg, witness_data));
 
         let receiving_address_again = spending_key.to_address();
         assert_eq!(receiving_address, receiving_address_again);

@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
     };
 
     // run app until quit
-    let res = DashboardApp::run(client, args, network, listen_addr_for_peers).await;
+    let res = DashboardApp::run(client, network, listen_addr_for_peers).await;
 
     match res {
         Err(err) => {
