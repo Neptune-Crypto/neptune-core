@@ -441,6 +441,7 @@ impl WalletState {
                     spent_mutxo.spent_in_block = Some((
                         block.hash,
                         Duration::from_millis(block.header.timestamp.value()),
+                        block.header.height,
                     ));
                     wallet_db_lock
                         .monitored_utxos
@@ -701,7 +702,9 @@ impl WalletState {
                     amount,
                     Sign::NonNegative,
                 ));
-                if let Some((spending_block, spending_timestamp)) = monitored_utxo.spent_in_block {
+                if let Some((spending_block, spending_timestamp, _block_height)) =
+                    monitored_utxo.spent_in_block
+                {
                     history.push((spending_block, spending_timestamp, amount, Sign::Negative));
                 }
             }

@@ -20,7 +20,7 @@ pub struct MonitoredUtxo {
     pub number_of_mps_per_utxo: usize,
 
     // hash of the block, if any, in which this UTXO was spent
-    pub spent_in_block: Option<(Digest, Duration)>,
+    pub spent_in_block: Option<(Digest, Duration, BlockHeight)>,
 
     // hash of the block, if any, in which this UTXO was confirmed
     pub confirmed_in_block: Option<(Digest, Duration, BlockHeight)>,

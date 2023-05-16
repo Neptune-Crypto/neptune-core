@@ -383,8 +383,15 @@ impl GlobalState {
                     revert_block.body.previous_mutator_set_accumulator.clone();
                 membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
 
-                // assert valid
-                assert!(previous_mutator_set
+                // unset spent_in_block field if the UTXO was spent in this block
+                if let Some((spent_block_hash, _, _)) = monitored_utxo.spent_in_block {
+                    if spent_block_hash == revert_block_hash {
+                        monitored_utxo.spent_in_block = None;
+                    }
+                }
+
+                // assert valid (if unspent)
+                assert!(monitored_utxo.spent_in_block.is_some() || previous_mutator_set
                     .verify(&Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
             }
 
