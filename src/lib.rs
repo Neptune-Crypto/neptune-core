@@ -27,7 +27,6 @@ use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
-use bytesize::ByteSize;
 use config_models::cli_args;
 use config_models::network::Network;
 use database::rusty::RustyLevelDB;

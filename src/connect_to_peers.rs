@@ -281,7 +281,7 @@ where
 
 #[cfg(test)]
 mod connect_tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::SystemTime;
 
     use super::*;
 

@@ -5,18 +5,11 @@ use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::addition_record;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
-use mutator_set_tf::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
-use rand::thread_rng;
-use rand::Rng;
-use rusty_leveldb;
-use rusty_leveldb::DB;
-use secp256k1::ecdsa;
 use std::path::Path;
 use std::path::PathBuf;
 use std::{
@@ -28,17 +21,14 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::algebraic_hasher::Hashable;
-use twenty_first::util_types::storage_schema::StorageWriter;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -47,7 +37,6 @@ use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
@@ -57,7 +46,6 @@ use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
-use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
@@ -76,8 +64,6 @@ use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
-use crate::models::state::wallet;
-use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
@@ -691,8 +677,7 @@ pub fn make_mock_transaction(
     }
 }
 
-// `make_mock_transaction2`, in contrast to `make_mock_transaction`, allows you
-// to choose signing wallet, fee, and timestamp.
+// TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord<Hash>>,
     outputs: Vec<AdditionRecord>,

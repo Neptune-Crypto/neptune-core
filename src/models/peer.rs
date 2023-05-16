@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use twenty_first::shared_math::digest::Digest;
 
 use twenty_first::amount::u32s::U32s;

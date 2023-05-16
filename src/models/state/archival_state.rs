@@ -708,7 +708,6 @@ impl ArchivalState {
 mod archival_state_tests {
     use super::*;
 
-    use num_traits::CheckedSub;
     use rand::{random, thread_rng, RngCore};
     use tracing_test::traced_test;
     use twenty_first::util_types::storage_vec::StorageVec;

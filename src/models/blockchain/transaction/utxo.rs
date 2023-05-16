@@ -59,8 +59,8 @@ impl Utxo {
     pub fn get_native_coin_amount(&self) -> Amount {
         self.coins
             .iter()
-            .filter(|(type_script_hash, state)| *type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
-            .map(|(type_script_hash, state)| Amount::from_bfes(state))
+            .filter(|(type_script_hash, _state)| *type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+            .map(|(_type_script_hash, state)| Amount::from_bfes(state))
             .sum()
     }
 }
@@ -91,12 +91,6 @@ impl Hashable for Utxo {
         ]
         .concat()
     }
-}
-
-fn convert<const N: usize>(bytes: &[u8]) -> BFieldElement {
-    let mut u64_input: [u8; 8] = [0; 8];
-    u64_input[..N].copy_from_slice(bytes);
-    BFieldElement::new(u64::from_le_bytes(u64_input))
 }
 
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
@@ -177,7 +171,7 @@ mod utxo_tests {
         let lock_script = LockScript(random_elements(rng.gen_range(1..20)));
         let num_coins = rng.gen_range(0..10);
         let mut coins = vec![];
-        for i in 0..num_coins {
+        for _i in 0..num_coins {
             let type_script = TypeScript(random_elements(rng.gen_range(10..100)));
             let state: Vec<BFieldElement> = random_elements(rng.gen_range(0..10));
             coins.push((Hash::hash(&type_script), state));
