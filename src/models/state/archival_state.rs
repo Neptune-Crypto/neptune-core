@@ -33,11 +33,6 @@ use crate::models::database::{
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
-pub const MS_AOCL_MMR_DB_NAME: &str = "aocl_mmr";
-pub const MS_SWBF_INACTIVE_MMR_DB_NAME: &str = "swbfi_mmr";
-pub const MS_SWBF_ACTIVE_DB_NAME: &str = "swbfa_mmr";
-pub const MS_CHUNKS_DB_NAME: &str = "chunks";
-pub const MS_BLOCK_SYNC_DB_NAME: &str = "ms_block_sync";
 
 #[derive(Clone)]
 pub struct ArchivalState {
