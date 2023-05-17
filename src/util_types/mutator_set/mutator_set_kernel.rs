@@ -684,7 +684,7 @@ mod accumulation_scheme_tests {
         let new_addition_record = commit::<H>(
             &new_item,
             &new_sender_randomness,
-            &H::hash(&new_receiver_preimage),
+            &new_receiver_preimage.vmhash::<H>(),
         );
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
