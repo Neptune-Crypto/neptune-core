@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::time::SystemTime;
 use std::{
     cell::RefCell,
@@ -9,9 +10,10 @@ use std::{
 use bytesize::ByteSize;
 use chrono::DateTime;
 use itertools::Itertools;
-use neptune_core::models::blockchain::{
-    block::block_height::BlockHeight, transaction::amount::Amount,
-};
+use neptune_core::config_models::network::Network;
+use neptune_core::models::blockchain::block::block_header::BlockHeader;
+use neptune_core::models::blockchain::shared::Hash;
+use neptune_core::models::blockchain::transaction::amount::Amount;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
 use tarpc::context;
@@ -21,23 +23,21 @@ use tui::{
     style::{Color, Style},
     widgets::{Block, Borders, List, ListItem, Widget},
 };
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use super::dashboard_app::DashboardEvent;
 use super::screen::Screen;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct OverviewData {
     balance: Option<Amount>,
     confirmations: Option<usize>,
     synchronization: Option<f64>,
 
-    block_height: Option<BlockHeight>,
-    block_size_limit: Option<ByteSize>,
+    network: Network,
+    block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
-    difficulty: Option<f64>,
-    pow_line: Option<f64>,
-    pow_family: Option<f64>,
 
     archive_size: Option<ByteSize>,
     archive_coverage: Option<f64>,
@@ -45,6 +45,7 @@ pub struct OverviewData {
     mempool_size: Option<ByteSize>,
     mempool_tx_count: Option<u32>,
 
+    listen_address: Option<SocketAddr>,
     peer_count: Option<usize>,
     max_peer_count: Option<usize>,
     authenticated_peer_count: Option<usize>,
@@ -59,18 +60,43 @@ pub struct OverviewData {
 }
 
 impl OverviewData {
+    pub fn new(network: Network, listen_address: Option<SocketAddr>) -> Self {
+        Self {
+            balance: Default::default(),
+            confirmations: Default::default(),
+            synchronization: Default::default(),
+            network,
+            listen_address,
+            block_header: Default::default(),
+            block_interval: Default::default(),
+            archive_size: Default::default(),
+            archive_coverage: Default::default(),
+            mempool_size: Default::default(),
+            mempool_tx_count: Default::default(),
+            peer_count: Default::default(),
+            max_peer_count: Default::default(),
+            authenticated_peer_count: Default::default(),
+            up_since: Default::default(),
+            cpu_load: Default::default(),
+            cpu_capacity: Default::default(),
+            cpu_temperature: Default::default(),
+            ram_total: Default::default(),
+            ram_available: Default::default(),
+            ram_used: Default::default(),
+        }
+    }
     pub fn test() -> Self {
         OverviewData {
             balance: Some(Amount::zero()),
             confirmations: Some(17),
             synchronization: Some(99.5),
 
-            block_height: Some(BlockHeight::from(BFieldElement::new(5005))),
-            block_size_limit: Some(ByteSize::b(1 << 20)),
+            listen_address: None,
+            network: Network::Testnet,
+            block_header: Some(
+                neptune_core::models::blockchain::block::Block::genesis_block().header,
+            ),
             block_interval: Some(558u64),
-            difficulty: Some(241.03),
-            pow_line: Some(64.235),
-            pow_family: Some(65.34),
 
             mempool_size: Some(ByteSize::b(10000)), // units?
             mempool_tx_count: Some(1001),
@@ -111,14 +137,20 @@ pub struct OverviewScreen {
 }
 
 impl OverviewScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(
+        rpc_server: Arc<RPCClient>,
+        network: Network,
+        listen_addr_for_peers: Option<SocketAddr>,
+    ) -> Self {
         OverviewScreen {
             active: false,
             fg: Color::Gray,
             bg: Color::Black,
             in_focus: false,
-            // data: Arc::new(Mutex::new(OverviewData::test())),
-            data: Arc::new(Mutex::new(OverviewData::default())),
+            data: Arc::new(Mutex::new(OverviewData::new(
+                network,
+                listen_addr_for_peers,
+            ))),
             server: rpc_server,
             poll_thread: None,
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
@@ -147,7 +179,7 @@ impl OverviewScreen {
         setup_poller!(balance);
         // setup_poller!(confirmations);
         // setup_poller!(synchronization);
-        setup_poller!(block_height);
+        setup_poller!(tip_header);
         // setup_poller!(block_interval);
         // setup_poller!(difficulty);
         // setup_poller!(pow_line);
@@ -184,12 +216,12 @@ impl OverviewScreen {
                     // reset_poller!(synchronization, Duration::from_secs(10));
                 // },
 
-                _ = &mut block_height => {
-                    match rpc_client.block_height(context::current()).await {
-                        Ok(bh) => {
+                _ = &mut tip_header => {
+                    match rpc_client.get_tip_header(context::current()).await {
+                        Ok(header) => {
 
-                            overview_data.lock().unwrap().block_height = Some(bh);
-                            reset_poller!(block_height, Duration::from_secs(10));
+                            overview_data.lock().unwrap().block_header = Some(header);
+                            reset_poller!(tip_header, Duration::from_secs(10));
                         },
                         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
                     }
@@ -421,21 +453,41 @@ impl Widget for OverviewScreen {
 
         // blockchain
         lines = vec![];
+
+        lines.push(format!("network: {}", data.network));
+
+        // TODO: Do we want to show the emojihash here?
+        let tip_digest = data.block_header.as_ref().map(Hash::hash);
+        lines.push(format!(
+            "tip digest:\n{}\n{}\n\n",
+            dashifnotset!(tip_digest.map(|x| x.emojihash())),
+            dashifnotset!(tip_digest),
+        ));
+
         lines.push(format!(
             "block height: {}",
-            dashifnotset!(data.block_height),
+            dashifnotset!(data.block_header.as_ref().map(|bh| bh.height)),
         ));
         lines.push(format!(
             "block size limit: {}",
-            dashifnotset!(data.block_size_limit)
+            dashifnotset!(data.block_header.as_ref().map(|bh| bh.max_block_size)),
         ));
         lines.push(format!(
             "block interval: {}",
             dashifnotset!(data.block_interval)
         ));
-        lines.push(format!("difficulty: {}", dashifnotset!(data.difficulty),));
-        lines.push(format!("pow line: {}", dashifnotset!(data.pow_line)));
-        lines.push(format!("pow family: {}", dashifnotset!(data.pow_family)));
+        lines.push(format!(
+            "difficulty: {}",
+            dashifnotset!(data.block_header.as_ref().map(|bh| bh.target_difficulty)),
+        ));
+        lines.push(format!(
+            "pow line: {}",
+            dashifnotset!(data.block_header.as_ref().map(|bh| bh.proof_of_work_line))
+        ));
+        lines.push(format!(
+            "pow family: {}",
+            dashifnotset!(data.block_header.as_ref().map(|bh| bh.proof_of_work_family))
+        ));
         Self::report(&lines, "Blockchain")
             .style(style)
             .render(vrecter.next(2 + lines.len() as u16), buf);
@@ -467,6 +519,10 @@ impl Widget for OverviewScreen {
 
         // peers
         lines = vec![];
+        lines.push(format!(
+            "listen address: {}",
+            dashifnotset!(data.listen_address)
+        ));
         lines.push(format!(
             "number: {} / {}",
             dashifnotset!(data.peer_count),

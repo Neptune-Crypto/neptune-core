@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use std::time::SystemTime;
+use twenty_first::shared_math::digest::Digest;
 
 use twenty_first::amount::u32s::U32s;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -23,12 +24,15 @@ const FORK_RESOLUTION_ERROR_SEVERITY_PER_BLOCK: u16 = 3;
 const INVALID_MESSAGE_SEVERITY: u16 = 2;
 const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
 const INVALID_TRANSACTION: u16 = 10;
+const UNCONFIRMABLE_TRANSACTION: u16 = 2;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+pub type InstanceId = u128;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerInfo {
     pub address_for_incoming_connections: Option<SocketAddr>,
     pub connected_address: SocketAddr,
-    pub instance_id: u128,
+    pub instance_id: InstanceId,
     pub inbound: bool,
     pub last_seen: SystemTime,
     pub standing: PeerStanding,
@@ -36,7 +40,7 @@ pub struct PeerInfo {
     pub is_archival_node: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum PeerSanctionReason {
     InvalidBlock((BlockHeight, Digest)),
     DifferentGenesis,
@@ -51,6 +55,32 @@ pub enum PeerSanctionReason {
     BatchBlocksInvalidStartHeight,
     BatchBlocksUnknownRequest,
     InvalidTransaction,
+    UnconfirmableTransaction,
+}
+
+impl Display for PeerSanctionReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let string = match self {
+            PeerSanctionReason::InvalidBlock(_) => "invalid block",
+            PeerSanctionReason::DifferentGenesis => "different genesis",
+            PeerSanctionReason::ForkResolutionError(_) => "fork resolution error",
+            PeerSanctionReason::SynchronizationTimeout => "synchronization timeout",
+            PeerSanctionReason::FloodPeerListResponse => "flood peer list response",
+            PeerSanctionReason::BlockRequestUnknownHeight => "block request unknown height",
+            PeerSanctionReason::InvalidMessage => "invalid message",
+            PeerSanctionReason::TooShortBlockBatch => "too short block batch",
+            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => {
+                "received block batch outside of sync"
+            }
+            PeerSanctionReason::BatchBlocksInvalidStartHeight => {
+                "invalid start height of batch blocks"
+            }
+            PeerSanctionReason::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
+            PeerSanctionReason::InvalidTransaction => "invalid transaction",
+            PeerSanctionReason::UnconfirmableTransaction => "unconfirmable transaction",
+        };
+        write!(f, "{string}")
+    }
 }
 
 /// Used by main thread to manage synchronizations/catch-up. Main thread has
@@ -95,42 +125,38 @@ impl PeerSanctionReason {
             PeerSanctionReason::BatchBlocksUnknownRequest => BAD_BLOCK_BATCH_REQUEST_SEVERITY,
             PeerSanctionReason::BlockRequestUnknownHeight => UNKNOWN_BLOCK_HEIGHT,
             PeerSanctionReason::InvalidTransaction => INVALID_TRANSACTION,
+            PeerSanctionReason::UnconfirmableTransaction => UNCONFIRMABLE_TRANSACTION,
         }
     }
 }
 
 /// This is object that gets stored in the database to record how well a peer
 /// at a certain IP behaves. A lower number is better.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub struct PeerStanding {
-    pub standing: u16,
+    pub standing: i32,
     pub latest_sanction: Option<PeerSanctionReason>,
-    pub timestamp_of_latest_sanction: Option<u64>,
+    pub timestamp_of_latest_sanction: Option<SystemTime>,
 }
 
 impl PeerStanding {
     /// Sanction peer and return latest standing score
-    pub fn sanction(&mut self, reason: PeerSanctionReason) -> u16 {
-        let (mut new_standing, overflow) = self.standing.overflowing_add(reason.to_severity());
-        if overflow {
-            new_standing = u16::MAX;
-        }
-
-        self.standing = new_standing;
+    pub fn sanction(&mut self, reason: PeerSanctionReason) -> i32 {
+        self.standing = self
+            .standing
+            .saturating_sub(reason.to_severity().try_into().unwrap());
         self.latest_sanction = Some(reason);
-        self.timestamp_of_latest_sanction = Some(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Failed to generate timestamp for peer standing")
-                .as_secs(),
-        );
-
+        self.timestamp_of_latest_sanction = Some(SystemTime::now());
         self.standing
     }
 
     /// Clear peer standing record
     pub fn clear_standing(&mut self) {
         *self = PeerStanding::default();
+    }
+
+    pub fn is_negative(&self) -> bool {
+        self.standing.is_negative()
     }
 }
 
@@ -194,20 +220,15 @@ pub enum ConnectionStatus {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionNotification {
     pub transaction_digest: Digest,
-    // The timestamp of a transaction notification is the associated transaction's timestamp.
-    // The timestamp is used for mempool purposes.
-    pub timestamp: SystemTime,
+    // TODO: Consider adding `timestamp` here
+    // pub timestamp: SystemTime,
 }
 
 impl From<Transaction> for TransactionNotification {
     fn from(transaction: Transaction) -> Self {
         let transaction_digest = Hash::hash(&transaction);
-        let timestamp =
-            std::time::UNIX_EPOCH + std::time::Duration::from_secs(transaction.timestamp.value());
-        Self {
-            transaction_digest,
-            timestamp,
-        }
+
+        Self { transaction_digest }
     }
 }
 
@@ -221,7 +242,7 @@ pub enum PeerMessage {
     BlockRequestBatch(Vec<Digest>, usize), // TODO: Consider restricting this in size
     BlockResponseBatch(Vec<TransferBlock>), // TODO: Consider restricting this in size
     /// Send a full transaction object to a peer.
-    Transaction(Transaction),
+    Transaction(Box<Transaction>),
     /// Send a notification to a peer, informing it that this node stores the
     /// transaction with digest and timestamp specified in
     /// `TransactionNotification`.

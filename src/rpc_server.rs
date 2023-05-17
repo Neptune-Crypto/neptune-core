@@ -7,22 +7,29 @@ use std::str::FromStr;
 use std::time::Duration;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
+use crate::config_models::network::Network;
+use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::GlobalState;
+use crate::models::state::{GlobalState, UtxoReceiverData};
 
 #[tarpc::service]
 pub trait RPC {
+    // Return which network the client is running
+    async fn get_network() -> Network;
+
+    async fn get_listen_address_for_peers() -> Option<SocketAddr>;
+
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
 
@@ -35,6 +42,8 @@ pub trait RPC {
     /// Returns the digest of the latest n blocks
     async fn heads(n: usize) -> Vec<Digest>;
 
+    async fn get_tip_header() -> BlockHeader;
+
     async fn get_header(hash: Digest) -> Option<BlockHeader>;
 
     /// Clears standing for all peers, connected or not
@@ -44,10 +53,17 @@ pub trait RPC {
     async fn clear_ip_standing(ip: IpAddr);
 
     /// Send coins
-    async fn send(amount: Amount, address: secp256k1::PublicKey, fee: Amount) -> Option<Digest>;
+    async fn send(
+        amount: Amount,
+        address: generation_address::ReceivingAddress,
+        fee: Amount,
+    ) -> Option<Digest>;
 
     /// Determine whether the user-supplied string is a valid address
-    async fn validate_address(address: String) -> Option<secp256k1::PublicKey>;
+    async fn validate_address(
+        address: String,
+        network: Network,
+    ) -> Option<generation_address::ReceivingAddress>;
 
     /// Determine whether the user-supplied string is a valid amount
     async fn validate_amount(amount: String) -> Option<Amount>;
@@ -65,7 +81,7 @@ pub trait RPC {
 
     async fn get_wallet_status() -> WalletStatus;
 
-    async fn get_public_key() -> secp256k1::PublicKey;
+    async fn get_receiving_address() -> generation_address::ReceivingAddress;
 
     async fn get_mempool_tx_count() -> usize;
 
@@ -81,6 +97,8 @@ pub struct NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
+    type GetNetworkFut = Ready<Network>;
+    type GetListenAddressForPeersFut = Ready<Option<SocketAddr>>;
     type BlockHeightFut = Ready<BlockHeight>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
     type HeadFut = Ready<Digest>;
@@ -88,17 +106,33 @@ impl RPC for NeptuneRPCServer {
     type ClearAllStandingsFut = Ready<()>;
     type ClearIpStandingFut = Ready<()>;
     type SendFut = Ready<Option<Digest>>;
-    type ValidateAddressFut = Ready<Option<secp256k1::PublicKey>>;
+    type ValidateAddressFut = Ready<Option<generation_address::ReceivingAddress>>;
     type ValidateAmountFut = Ready<Option<Amount>>;
     type AmountLeqBalanceFut = Ready<bool>;
     type ShutdownFut = Ready<bool>;
     type GetBalanceFut = Ready<Amount>;
     type GetWalletStatusFut = Ready<WalletStatus>;
+    type GetTipHeaderFut = Ready<BlockHeader>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
-    type GetPublicKeyFut = Ready<secp256k1::PublicKey>;
+    type GetReceivingAddressFut = Ready<generation_address::ReceivingAddress>;
     type GetMempoolTxCountFut = Ready<usize>;
     type GetMempoolSizeFut = Ready<usize>;
     type GetHistoryFut = Ready<Vec<(Duration, Amount, Sign)>>;
+
+    fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
+        let network = self.state.cli.network;
+        future::ready(network)
+    }
+
+    fn get_listen_address_for_peers(
+        self,
+        _context: context::Context,
+    ) -> Self::GetListenAddressForPeersFut {
+        let listen_for_peers_ip = self.state.cli.listen_addr;
+        let listen_for_peers_socket = self.state.cli.peer_port;
+        let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
+        future::ready(Some(socket_address))
+    }
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
@@ -179,26 +213,49 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         amount: Amount,
-        address: secp256k1::PublicKey,
+        address: generation_address::ReceivingAddress,
         fee: Amount,
     ) -> Self::SendFut {
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
-        tracing::debug!(
-            "Wallet public key: {}",
-            self.state.wallet_state.wallet_secret.get_public_key()
-        );
-
-        let recipient_utxos: Vec<Utxo> = [Utxo::new(amount, address)].to_vec();
+        let coins = amount.to_native_coins();
+        let utxo = Utxo::new(address.lock_script(), coins);
+        let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
+            .header
+            .height;
+        let receiver_privacy_digest = address.privacy_digest;
+        let sender_randomness = self
+            .state
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(block_height, receiver_privacy_digest);
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
         // to be in control of this. But we could add an endpoint to get recommended fee
         // density.
-        let transaction_res: Result<Transaction> =
-            executor::block_on(self.state.create_transaction(recipient_utxos, fee));
-        let transaction = match transaction_res {
+        let (pubscript, pubscript_input) =
+            match address.generate_pubscript_and_input(&utxo, sender_randomness) {
+                Ok((ps, inp)) => (ps, inp),
+                Err(_) => {
+                    tracing::error!(
+                        "Failed to generate transaction because could not encrypt to address."
+                    );
+                    return future::ready(None);
+                }
+            };
+        let receiver_data = [(UtxoReceiverData {
+            utxo,
+            sender_randomness,
+            receiver_privacy_digest,
+            pubscript,
+            pubscript_input,
+        })]
+        .to_vec();
+        let transaction_result =
+            executor::block_on(self.state.create_transaction(receiver_data, fee));
+        let transaction = match transaction_result {
             Ok(tx) => tx,
             Err(err) => panic!("Could not create transaction: {}", err),
         };
@@ -206,7 +263,7 @@ impl RPC for NeptuneRPCServer {
         // 2. Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
             self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(transaction.clone())),
+                .send(RPCServerToMain::Send(Box::new(transaction.clone()))),
         );
 
         future::ready(if response.is_ok() {
@@ -220,8 +277,11 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         address_string: String,
+        network: Network,
     ) -> Self::ValidateAddressFut {
-        let ret = if let Ok(address) = secp256k1::PublicKey::from_str(&address_string) {
+        let ret = if let Ok(address) =
+            generation_address::ReceivingAddress::from_bech32m(address_string.clone(), network)
+        {
             Some(address)
         } else {
             None
@@ -283,6 +343,12 @@ impl RPC for NeptuneRPCServer {
         future::ready(wallet_status)
     }
 
+    fn get_tip_header(self, _: context::Context) -> Self::GetTipHeaderFut {
+        let latest_block_block_header =
+            executor::block_on(self.state.chain.light_state.get_latest_block_header());
+        future::ready(latest_block_block_header)
+    }
+
     fn get_header(
         self,
         _context: tarpc::context::Context,
@@ -299,8 +365,17 @@ impl RPC for NeptuneRPCServer {
         future::ready(res)
     }
 
-    fn get_public_key(self, _context: tarpc::context::Context) -> Self::GetPublicKeyFut {
-        future::ready(self.state.wallet_state.wallet_secret.get_public_key())
+    fn get_receiving_address(
+        self,
+        _context: tarpc::context::Context,
+    ) -> Self::GetReceivingAddressFut {
+        let receiving_address = self
+            .state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
+        future::ready(receiving_address)
     }
 
     fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> Self::GetMempoolTxCountFut {
@@ -413,10 +488,10 @@ mod rpc_server_tests {
         };
 
         state
-            .write_peer_standing_on_increase(peer_address_0.ip(), standing_0)
+            .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
             .await;
         state
-            .write_peer_standing_on_increase(peer_address_1.ip(), standing_1)
+            .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
 
         // Verify expected initial conditions
@@ -510,10 +585,10 @@ mod rpc_server_tests {
         };
 
         state
-            .write_peer_standing_on_increase(peer_address_0.ip(), standing_0)
+            .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
             .await;
         state
-            .write_peer_standing_on_increase(peer_address_1.ip(), standing_1)
+            .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
 
         // Verify expected initial conditions

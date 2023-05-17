@@ -4,10 +4,9 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
-use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
+use crate::models::channel::{MainToPeerThread, PeerThreadToMain, PeerThreadToMainTransaction};
 use crate::models::peer::{
-    HandshakeData, MutablePeerState, PeerBlockNotification, PeerInfo, PeerMessage,
-    PeerSanctionReason, PeerStanding,
+    HandshakeData, MutablePeerState, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
 };
 use crate::models::state::mempool::{
     MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_TX_THRESHOLD_AGE_IN_SECS,
@@ -16,6 +15,7 @@ use crate::models::state::GlobalState;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
+use itertools::Itertools;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
@@ -23,7 +23,7 @@ use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
@@ -32,6 +32,8 @@ const MINIMUM_BLOCK_BATCH_SIZE: usize = 10;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const _DISCONNECT_CONNECTION: bool = true;
+
+pub type PeerStandingNumber = i32;
 
 /// Contains the immutable data that this peer-loop needs. Does not contain the `peer` variable
 /// since this needs to be a mutable variable in most methods.
@@ -63,6 +65,8 @@ impl PeerLoopHandler {
         }
     }
 
+    // TODO: Add a reward function that mutates the peer status
+
     fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
         warn!(
             "Sanctioning peer {} for {:?}",
@@ -75,12 +79,12 @@ impl PeerLoopHandler {
             .peer_map
             .lock()
             .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-        let new_standing: &mut u16 = &mut 0;
+        let new_standing: &mut PeerStandingNumber = &mut 0;
         peers
             .entry(self.peer_address)
             .and_modify(|p| *new_standing = p.standing.sanction(reason));
 
-        if *new_standing > self.state.cli.peer_tolerance {
+        if *new_standing < -(self.state.cli.peer_tolerance as PeerStandingNumber) {
             warn!("Banning peer");
             bail!("Banning peer");
         }
@@ -230,11 +234,20 @@ impl PeerLoopHandler {
         peer_state.fork_reconciliation_blocks = vec![];
 
         // Sanity check, that the blocks are correctly sorted (they should be)
+        // TODO: This has failed: Investigate!
+        // See: https://neptune.builders/core-team/neptune-core/issues/125
+        // TODO: This assert should be replaced with something to punish or disconnect
+        // from a peer instead. It can be used by a malevolent peer to crash peer nodes.
         let mut new_blocks_sorted_check = new_blocks.clone();
         new_blocks_sorted_check.sort_by(|a, b| a.header.height.cmp(&b.header.height));
         assert_eq!(
-            new_blocks_sorted_check, new_blocks,
-            "Block list in fork resolution must be sorted"
+            new_blocks_sorted_check,
+            new_blocks,
+            "Block list in fork resolution must be sorted. Got blocks in this order: {}",
+            new_blocks
+                .iter()
+                .map(|b| b.header.height.to_string())
+                .join(", ")
         );
 
         // Parent block is guaranteed to be set here, either it is fetched from the
@@ -658,18 +671,35 @@ impl PeerLoopHandler {
                 );
 
                 // If transaction is invalid, punish
-                if !transaction.is_valid_for_devnet(None) {
+                if !transaction.is_valid(None) {
                     warn!("Received invalid tx");
                     self.punish(PeerSanctionReason::InvalidTransaction)?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // if transaction is not confirmable, punish
+                let latest_block = self.state.chain.light_state.get_latest_block().await;
+                if !transaction
+                    .is_confirmable_relative_to(&latest_block.body.next_mutator_set_accumulator)
+                {
+                    warn!("Received unconfirmable tx");
+                    self.punish(PeerSanctionReason::UnconfirmableTransaction)?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // Get transaction timestamp
+                let tx_timestamp = match transaction.get_timestamp() {
+                    Ok(ts) => ts,
+                    Err(_) => {
+                        warn!("Received tx with invalid timestamp");
+                        return Ok(KEEP_CONNECTION_ALIVE);
+                    }
+                };
+
                 // 2. Ignore if transaction is too old
-                let tx_timestamp: SystemTime = std::time::UNIX_EPOCH
-                    + std::time::Duration::from_secs(transaction.timestamp.value());
+                let now = SystemTime::now();
                 if tx_timestamp
-                    < SystemTime::now()
-                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
+                    < now - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
                 {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
@@ -678,19 +708,23 @@ impl PeerLoopHandler {
 
                 // 3. Ignore if transaction is too far into the future
                 if tx_timestamp
-                    > SystemTime::now()
+                    > now
                         + std::time::Duration::from_secs(
                             MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
                         )
                 {
                     // TODO: Consider punishing here
-                    warn!("Received tx too far into the future");
+                    warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // Otherwise relay to main
+                let pt2m_transaction = PeerThreadToMainTransaction {
+                    transaction: *transaction.to_owned(),
+                    confirmable_for_block: latest_block.hash,
+                };
                 self.to_main_tx
-                    .send(PeerThreadToMain::Transaction(transaction))
+                    .send(PeerThreadToMain::Transaction(Box::new(pt2m_transaction)))
                     .await?;
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -706,33 +740,9 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // 2. Ignore if transaction is too old
-                if transaction_notification.timestamp
-                    < SystemTime::now()
-                        - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
-                {
-                    // TODO: Consider punishing here
-                    debug!(
-                        "transaction was too old. Got: {:?}. Current time: {:?}",
-                        transaction_notification.timestamp,
-                        SystemTime::now()
-                    );
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
+                // Should we check a timestamp here?
 
-                // 3. Ignore if transaction is too far into the future
-                if transaction_notification.timestamp
-                    > SystemTime::now()
-                        + std::time::Duration::from_secs(
-                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
-                        )
-                {
-                    // TODO: Consider punishing here
-                    debug!("transaction was too far into the future");
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // 4. Request the actual `Transaction` from peer
+                // 2. Request the actual `Transaction` from peer
                 debug!("requesting transaction from peer");
                 peer.send(PeerMessage::TransactionRequest(
                     transaction_notification.transaction_digest,
@@ -743,7 +753,8 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
                 if let Some(transaction) = self.state.mempool.get(&transaction_identifier) {
-                    peer.send(PeerMessage::Transaction(transaction)).await?;
+                    peer.send(PeerMessage::Transaction(Box::new(transaction)))
+                        .await?;
                 }
 
                 Ok(KEEP_CONNECTION_ALIVE)
@@ -766,20 +777,9 @@ impl PeerLoopHandler {
     {
         debug!("Handling {} message from main in peer loop", msg.get_type());
         match msg {
-            MainToPeerThread::BlockFromMiner(block) => {
-                // If this client found a block, we need to share it immediately
-                // to reduce the risk that someone else finds another one and shares
-                // it faster.
-                let new_block_height = block.header.height;
-                let block_notification: PeerBlockNotification = (&(*block)).into();
-                let t_block: Box<TransferBlock> = Box::new((*block).into());
-                peer.send(PeerMessage::Block(t_block)).await?;
-                peer.send(PeerMessage::BlockNotification(block_notification))
-                    .await?;
-                peer_state_info.highest_shared_block_height = new_block_height;
-                Ok(false)
-            }
             MainToPeerThread::Block(block) => {
+                // We don't currently differentiate whether a new block came from a peer, or from our
+                // own miner. It's always shared through this logic.
                 let new_block_height = block.header.height;
                 if new_block_height > peer_state_info.highest_shared_block_height {
                     debug!("Sending PeerMessage::BlockNotification");
@@ -836,12 +836,6 @@ impl PeerLoopHandler {
                     peer.send(PeerMessage::PeerListRequest).await?;
                 }
                 Ok(false)
-            }
-            MainToPeerThread::Transaction(transaction) => {
-                debug!("Sending PeerMessage::Transaction");
-                peer.send(PeerMessage::Transaction(transaction)).await?;
-                debug!("Sent PeerMessage::Transaction");
-                Ok(KEEP_CONNECTION_ALIVE)
             }
             MainToPeerThread::TransactionNotification(transaction_notification) => {
                 debug!("Sending PeerMessage::TransactionNotification");
@@ -905,8 +899,8 @@ impl PeerLoopHandler {
                             }
                         }
                         Err(err) => {
-                            error!("Error when receiving from peer: {}.", self.peer_address);
-                            bail!("Error when receiving from peer: {}. Closing connection.", err);
+                            error!("Error when receiving from peer: {}. Error: {err}", self.peer_address);
+                            bail!("Error when receiving from peer: {}. Closing connection:", err);
                         }
                     }
                 }
@@ -1031,7 +1025,7 @@ impl PeerLoopHandler {
             });
         debug!("Fetched peer info standing for {}", self.peer_address);
         self.state
-            .write_peer_standing_on_increase(self.peer_address.ip(), peer_info_writeback.standing)
+            .write_peer_standing_on_decrease(self.peer_address.ip(), peer_info_writeback.standing)
             .await;
         debug!("Stored peer info standing for {}", self.peer_address);
 
@@ -1052,8 +1046,7 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
-    use rand::thread_rng;
-    use secp256k1::Secp256k1;
+    use rand::random;
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
     use twenty_first::amount::u32s::U32s;
@@ -1062,11 +1055,11 @@ mod peer_loop_tests {
         config_models::{cli_args, network::Network},
         models::{
             blockchain::block::block_header::TARGET_DIFFICULTY_U32_SIZE, blockchain::shared::Hash,
-            peer::TransactionNotification,
+            peer::TransactionNotification, state::wallet::WalletSecret,
         },
         tests::shared::{
-            add_block, get_dummy_address, get_dummy_peer_connection_data, get_test_genesis_setup,
-            make_mock_block, make_mock_signed_valid_tx, Action, Mock,
+            add_block, get_dummy_peer_connection_data, get_dummy_socket_address,
+            get_test_genesis_setup, make_mock_block, make_mock_transaction, Action, Mock,
         },
     };
 
@@ -1080,7 +1073,7 @@ mod peer_loop_tests {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 2).await?;
 
-        let peer_address = get_dummy_address(2);
+        let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
         let peer_loop_handler =
             PeerLoopHandler::new(to_main_tx, state.clone(), peer_address, hsd, true, 1);
@@ -1153,7 +1146,7 @@ mod peer_loop_tests {
         // and a ban.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let peer_address = get_dummy_address(0);
+        let peer_address = get_dummy_socket_address(0);
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
         // since that block is hardcoded.
@@ -1166,10 +1159,10 @@ mod peer_loop_tests {
             .await;
         different_genesis_block.header.nonce[2].increment();
         different_genesis_block.hash = Hash::hash(&different_genesis_block.header);
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let block_1_with_different_genesis =
-            make_mock_block(&different_genesis_block, None, public_key);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1_with_different_genesis, _, _) =
+            make_mock_block(&different_genesis_block, None, a_recipient_address);
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
             block_1_with_different_genesis.into(),
         )))]);
@@ -1212,7 +1205,7 @@ mod peer_loop_tests {
         let peer_standing = state
             .get_peer_standing_from_database(peer_address.ip())
             .await;
-        assert_eq!(u16::MAX, peer_standing.unwrap().standing);
+        assert_eq!(-(u16::MAX as i32), peer_standing.unwrap().standing);
         assert_eq!(
             PeerSanctionReason::DifferentGenesis,
             peer_standing.unwrap().latest_sanction.unwrap()
@@ -1223,12 +1216,12 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn bad_block_test() -> Result<()> {
+    async fn block_without_valid_pow_test() -> Result<()> {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let peer_address = get_dummy_address(0);
+        let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1239,14 +1232,14 @@ mod peer_loop_tests {
 
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let block_without_valid_pow = make_mock_block(
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_without_valid_pow, _, _) = make_mock_block(
             &genesis_block,
             Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
                 1_000_000, 0, 0, 0, 0,
             ])),
-            public_key,
+            a_recipient_address,
         );
 
         // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
@@ -1307,7 +1300,7 @@ mod peer_loop_tests {
             .get(peer_address.ip())
             .unwrap();
         assert!(
-            standing.standing > 0,
+            standing.standing < 0,
             "Peer must be sanctioned for sending a bad block"
         );
 
@@ -1322,7 +1315,7 @@ mod peer_loop_tests {
         // a message to the main thread.
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let peer_address = get_dummy_address(0);
+        let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1331,12 +1324,12 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
 
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let block_1 = make_mock_block(&genesis_block, None, public_key);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
-        let mock = Mock::new(vec![
+        let mock_peer_messages = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1352,7 +1345,7 @@ mod peer_loop_tests {
             1,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock_peer_messages, from_main_rx_clone)
             .await?;
 
         // Verify that no block was sent to main loop
@@ -1392,20 +1385,30 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let peer_address = get_dummy_address(0);
-        let block_1 = make_mock_block(&genesis_block, None, public_key);
-        let block_2_a = make_mock_block(
+        let peer_address = get_dummy_socket_address(0);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
+        let (block_2_a, _, _) = make_mock_block(
             &block_1,
             Some(U32s::new([2_000_000, 0, 0, 0, 0])),
-            public_key,
+            a_recipient_address,
         );
-        let block_3_a =
-            make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key); // <--- canonical
-        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
-        let block_3_b =
-            make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
+        let (block_3_a, _, _) = make_mock_block(
+            &block_2_a,
+            Some(U32s::new([2_000, 0, 0, 0, 0])),
+            a_recipient_address,
+        ); // <--- canonical
+        let (block_2_b, _, _) = make_mock_block(
+            &block_1,
+            Some(U32s::new([2_000, 0, 0, 0, 0])),
+            a_recipient_address,
+        );
+        let (block_3_b, _, _) = make_mock_block(
+            &block_2_b,
+            Some(U32s::new([2_000, 0, 0, 0, 0])),
+            a_recipient_address,
+        );
 
         add_block(&state, block_1.clone()).await?;
         add_block(&state, block_2_a.clone()).await?;
@@ -1479,20 +1482,30 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let peer_address = get_dummy_address(0);
-        let block_1 = make_mock_block(&genesis_block, None, public_key);
-        let block_2_a = make_mock_block(
+        let peer_address = get_dummy_socket_address(0);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
+        let (block_2_a, _, _) = make_mock_block(
             &block_1,
             Some(U32s::new([2_000_000, 0, 0, 0, 0])),
-            public_key,
+            a_recipient_address,
         );
-        let block_3_a =
-            make_mock_block(&block_2_a, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key); // <--- canonical
-        let block_2_b = make_mock_block(&block_1, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
-        let block_3_b =
-            make_mock_block(&block_2_b, Some(U32s::new([2_000, 0, 0, 0, 0])), public_key);
+        let (block_3_a, _, _) = make_mock_block(
+            &block_2_a,
+            Some(U32s::new([2_000, 0, 0, 0, 0])),
+            a_recipient_address,
+        ); // <--- canonical
+        let (block_2_b, _, _) = make_mock_block(
+            &block_1,
+            Some(U32s::new([2_000, 0, 0, 0, 0])),
+            a_recipient_address,
+        );
+        let (block_3_b, _, _) = make_mock_block(
+            &block_2_b,
+            Some(U32s::new([2_000, 0, 0, 0, 0])),
+            a_recipient_address,
+        );
 
         add_block(&state, block_1.clone()).await?;
         add_block(&state, block_2_a.clone()).await?;
@@ -1532,9 +1545,9 @@ mod peer_loop_tests {
         // Scenario: client only knows genesis block. Then receives block 1.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let peer_address = get_dummy_address(0);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1543,10 +1556,9 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
 
+        let (mock_block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
         let mock = Mock::new(vec![
-            Action::Read(PeerMessage::Block(Box::new(
-                make_mock_block(&genesis_block, None, public_key).into(),
-            ))),
+            Action::Read(PeerMessage::Block(Box::new(mock_block_1.into()))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -1593,7 +1605,7 @@ mod peer_loop_tests {
         // receives block 2, meaning that block 1 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let peer_address = get_dummy_address(0);
+        let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1601,10 +1613,10 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let block_1 = make_mock_block(&genesis_block, None, public_key);
-        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -1677,26 +1689,15 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(
-            &genesis_block.clone(),
-            None,
-            state.wallet_state.wallet_secret.get_public_key(),
-        );
-        let block_2 = make_mock_block(
-            &block_1.clone(),
-            None,
-            state.wallet_state.wallet_secret.get_public_key(),
-        );
-        let block_3 = make_mock_block(
-            &block_2.clone(),
-            None,
-            state.wallet_state.wallet_secret.get_public_key(),
-        );
-        let block_4 = make_mock_block(
-            &block_3.clone(),
-            None,
-            state.wallet_state.wallet_secret.get_public_key(),
-        );
+        let own_recipient_address = state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, own_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, own_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, own_recipient_address);
+        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, own_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1736,14 +1737,12 @@ mod peer_loop_tests {
         drop(to_main_tx);
 
         // Verify that peer is sanctioned for failed fork reconciliation attempt
-        assert!(
-            state
-                .get_peer_standing_from_database(peer_address1.ip())
-                .await
-                .unwrap()
-                .standing
-                > 0
-        );
+        assert!(state
+            .get_peer_standing_from_database(peer_address1.ip())
+            .await
+            .unwrap()
+            .standing
+            .is_negative());
 
         Ok(())
     }
@@ -1755,7 +1754,7 @@ mod peer_loop_tests {
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let peer_address: SocketAddr = get_dummy_address(0);
+        let peer_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1763,12 +1762,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
-        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
-        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
-        let block_4 = make_mock_block(&block_3.clone(), None, public_key);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1831,9 +1830,8 @@ mod peer_loop_tests {
         // receives block 3, meaning that block 2 and 1 will have to be requested.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let peer_address = get_dummy_address(0);
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
+        let peer_address = get_dummy_socket_address(0);
+
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1841,9 +1839,11 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
-        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
-        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -1907,9 +1907,9 @@ mod peer_loop_tests {
         // notification.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Main, 0).await?;
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let peer_address: SocketAddr = get_dummy_address(0);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1917,11 +1917,11 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
-        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
-        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
-        let block_4 = make_mock_block(&block_3.clone(), None, public_key);
-        let block_5 = make_mock_block(&block_4.clone(), None, public_key);
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
+        let (block_5, _, _) = make_mock_block(&block_4.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1949,7 +1949,7 @@ mod peer_loop_tests {
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state.clone(),
-            peer_address,
+            peer_socket_address,
             hsd,
             false,
             1,
@@ -2015,12 +2015,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let (_secret_key, public_key): (secp256k1::SecretKey, secp256k1::PublicKey) =
-            Secp256k1::new().generate_keypair(&mut thread_rng());
-        let block_1 = make_mock_block(&genesis_block.clone(), None, public_key);
-        let block_2 = make_mock_block(&block_1.clone(), None, public_key);
-        let block_3 = make_mock_block(&block_2.clone(), None, public_key);
-        let block_4 = make_mock_block(&block_3.clone(), None, public_key);
+        let a_wallet_secret = WalletSecret::new(random());
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
@@ -2094,11 +2094,12 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn empty_mempool_request_tx_test() -> Result<()> {
-        // In this scenerio the client receives a transaction from a peer, requests it back
+        // In this scenerio the client receives a transaction notification from
+        // a peer of a transaction it doesn't know; the client must then request it.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
             get_test_genesis_setup(Network::Main, 1).await?;
 
-        let transaction_1 = make_mock_signed_valid_tx();
+        let transaction_1 = make_mock_transaction(vec![], vec![]);
 
         // Build the resulting transaction notification
         let tx_notification: TransactionNotification = transaction_1.clone().into();
@@ -2107,7 +2108,7 @@ mod peer_loop_tests {
             Action::Write(PeerMessage::TransactionRequest(
                 tx_notification.transaction_digest,
             )),
-            Action::Read(PeerMessage::Transaction(transaction_1)),
+            Action::Read(PeerMessage::Transaction(Box::new(transaction_1))),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2115,7 +2116,7 @@ mod peer_loop_tests {
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state.clone(),
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             hsd_1.clone(),
             true,
             1,
@@ -2144,7 +2145,7 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
             get_test_genesis_setup(Network::Main, 1).await?;
 
-        let transaction_1 = make_mock_signed_valid_tx();
+        let transaction_1 = make_mock_transaction(vec![], vec![]);
 
         // Build the resulting transaction notification
         let tx_notification: TransactionNotification = transaction_1.clone().into();
@@ -2157,7 +2158,7 @@ mod peer_loop_tests {
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state.clone(),
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             hsd_1.clone(),
             true,
             1,

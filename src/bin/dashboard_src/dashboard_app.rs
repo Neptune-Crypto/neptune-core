@@ -4,12 +4,13 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use neptune_core::rpc_server::RPCClient;
+use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
 use std::{
     cell::{RefCell, RefMut},
     collections::HashMap,
     error::Error,
     io::{self, Stdout},
+    net::SocketAddr,
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -115,13 +116,22 @@ pub struct DashboardApp {
     screens: HashMap<MenuItem, Rc<RefCell<dyn Screen>>>,
     output: String,
     console_io: Arc<Mutex<Vec<ConsoleIO>>>,
+    network: Network,
 }
 
 impl DashboardApp {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(
+        rpc_server: Arc<RPCClient>,
+        network: Network,
+        listen_addr_for_peers: Option<SocketAddr>,
+    ) -> Self {
         let mut screens = HashMap::<MenuItem, Rc<RefCell<dyn Screen>>>::new();
 
-        let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(rpc_server.clone())));
+        let overview_screen = Rc::new(RefCell::new(OverviewScreen::new(
+            rpc_server.clone(),
+            network,
+            listen_addr_for_peers,
+        )));
         let overview_screen_dyn = Rc::clone(&overview_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Overview, Rc::clone(&overview_screen_dyn));
 
@@ -133,11 +143,14 @@ impl DashboardApp {
         let history_screen_dyn = Rc::clone(&history_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::History, Rc::clone(&history_screen_dyn));
 
-        let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(rpc_server.clone())));
+        let receive_screen = Rc::new(RefCell::new(ReceiveScreen::new(
+            rpc_server.clone(),
+            network,
+        )));
         let receive_screen_dyn = Rc::clone(&receive_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Receive, Rc::clone(&receive_screen_dyn));
 
-        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server)));
+        let send_screen = Rc::new(RefCell::new(SendScreen::new(rpc_server, network)));
         let send_screen_dyn = Rc::clone(&send_screen) as Rc<RefCell<dyn Screen>>;
         screens.insert(MenuItem::Send, Rc::clone(&send_screen_dyn));
 
@@ -153,6 +166,7 @@ impl DashboardApp {
             screens,
             output: "".to_string(),
             console_io: Arc::new(Mutex::new(vec![])),
+            network,
         }
     }
 
@@ -202,9 +216,13 @@ impl DashboardApp {
         self.screens.contains_key(&self.current_menu_item)
     }
 
-    pub async fn run(client: RPCClient) -> Result<String, Box<dyn Error>> {
+    pub async fn run(
+        client: RPCClient,
+        network: Network,
+        listen_addr_for_peers: Option<SocketAddr>,
+    ) -> Result<String, Box<dyn Error>> {
         // create app
-        let mut app = DashboardApp::new(Arc::new(client));
+        let mut app = DashboardApp::new(Arc::new(client), network, listen_addr_for_peers);
 
         // setup terminal
         let mut terminal = Self::enable_raw_mode()?;
@@ -392,7 +410,9 @@ impl DashboardApp {
         let screen_chunk = body_chunks[1];
 
         // render title
-        let title = Span::raw(" ♆ neptune-dashboard");
+        let network = self.network;
+        let title = format!("♆ neptune-dashboard — {network}");
+        let title = Span::raw(&title);
         let title_style = Style::default()
             .add_modifier(Modifier::BOLD)
             .bg(Color::Black)

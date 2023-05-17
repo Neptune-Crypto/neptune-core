@@ -26,7 +26,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
@@ -67,15 +67,9 @@ pub struct Mempool {
     pub internal: Arc<StdRwLock<MempoolInternal>>,
 }
 
-impl Default for Mempool {
-    fn default() -> Self {
-        Mempool::new(ByteSize::gb(1))
-    }
-}
-
 impl Mempool {
-    pub fn new(max_size: ByteSize) -> Self {
-        let mempool_internal = MempoolInternal::new(max_size);
+    pub fn new(max_total_size: ByteSize) -> Self {
+        let mempool_internal = MempoolInternal::new(max_total_size);
         let internal = Arc::new(StdRwLock::new(mempool_internal));
         Mempool { internal }
     }
@@ -168,8 +162,9 @@ impl Mempool {
     ///
     /// ```
     /// use neptune_core::models::state::mempool::Mempool;
+    /// use bytesize::ByteSize;
     ///
-    /// let mempool = Mempool::default();
+    /// let mempool = Mempool::new(ByteSize::gb(1));
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
@@ -196,9 +191,10 @@ impl Mempool {
 /// // Instantiate Mempool, insert and get a transaction.
 /// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
 /// use neptune_core::models::state::mempool::Mempool;
+/// use byte_size::ByteSize;
 /// use twenty_first::{shared_math::b_field_element::BFieldElement, amount::u32s::U32s};
 ///
-/// let mempool = Mempool::default();
+/// let mempool = Mempool::new(ByteSize::gb(1));
 /// let timestamp = BFieldElement::new(0);
 /// let transaction = Transaction {
 ///     inputs: vec![],
@@ -215,7 +211,7 @@ impl Mempool {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct MempoolInternal {
-    max_size: usize,
+    max_total_size: usize,
     // Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
     // Maintain for fast min and max
@@ -224,12 +220,12 @@ pub struct MempoolInternal {
 }
 
 impl MempoolInternal {
-    fn new(max_size: ByteSize) -> Self {
-        let max_size = max_size.0.try_into().unwrap();
+    fn new(max_total_size: ByteSize) -> Self {
         let table = Default::default();
         let queue = Default::default();
+        let max_total_size = max_total_size.0.try_into().unwrap();
         Self {
-            max_size,
+            max_total_size,
             tx_dictionary: table,
             queue,
         }
@@ -251,17 +247,16 @@ impl MempoolInternal {
     ) -> Option<(Digest, Transaction)> {
         // This check could be made a lot more efficient, for example with an invertible Bloom filter
         let tx_sbf_indices: HashSet<_> = transaction
+            .kernel
             .inputs
             .iter()
-            .map(|x| x.removal_record.absolute_indices.to_array())
+            .map(|x| x.absolute_indices.to_array())
             .collect();
 
-        for mempool_tx in self.tx_dictionary.iter() {
-            for mempool_tx_input in mempool_tx.1.inputs.iter() {
-                if tx_sbf_indices
-                    .contains(&mempool_tx_input.removal_record.absolute_indices.to_array())
-                {
-                    return Some((*mempool_tx.0, mempool_tx.1.to_owned()));
+        for (txid, tx) in self.tx_dictionary.iter() {
+            for mempool_tx_input in tx.kernel.inputs.iter() {
+                if tx_sbf_indices.contains(&mempool_tx_input.absolute_indices.to_array()) {
+                    return Some((*txid, tx.to_owned()));
                 }
             }
         }
@@ -269,16 +264,22 @@ impl MempoolInternal {
         None
     }
 
+    /// Insert a transaction into the mempool. It is the caller's responsibility to verify
+    /// that the transaction is valid and confirmable.
     fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         {
             // Early exit on transactions too long into the future.
             let horizon =
                 now() + Duration::from_secs(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD);
 
-            if transaction.timestamp.value() > horizon.as_secs() {
+            if transaction.kernel.timestamp.value() > horizon.as_millis() as u64 {
                 return None;
             }
         }
+
+        // TODO: Do we need to check that the transaction does not exceed a max size?
+        // I don't think we do since the caller has already checked that the transaction
+        // is valid.
 
         // If transaction to be inserted conflicts with a transaction that's already
         // in the mempool we preserve only the one with the highest fee density.
@@ -352,7 +353,7 @@ impl MempoolInternal {
 
                 // Include transaction
                 remaining_storage -= transaction_size;
-                _fee_acc = _fee_acc + transaction_copy.fee;
+                _fee_acc = _fee_acc + transaction_copy.kernel.fee;
                 transactions.push(transaction_copy)
             }
         }
@@ -411,7 +412,7 @@ impl MempoolInternal {
         let cutoff = now() - Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
-            cutoff.as_secs() < transaction.timestamp.value()
+            cutoff.as_secs() < transaction.kernel.timestamp.value()
         };
 
         self.retain(keep);
@@ -428,9 +429,10 @@ impl MempoolInternal {
         let sbf_indices_set_by_block: HashSet<_> = block
             .body
             .transaction
+            .kernel
             .inputs
             .iter()
-            .map(|x| x.removal_record.absolute_indices.to_array())
+            .map(|rr| rr.absolute_indices.to_array())
             .collect();
 
         // The indices that the input UTXOs would flip are used to determine
@@ -439,9 +441,10 @@ impl MempoolInternal {
         // this block is invalid
         let keep = |(_transaction_id, tx): LookupItem| -> bool {
             let bloom_filter_indices: HashSet<_> = tx
+                .kernel
                 .inputs
                 .iter()
-                .map(|x| x.removal_record.absolute_indices.to_array())
+                .map(|rr| rr.absolute_indices.to_array())
                 .collect();
 
             bloom_filter_indices.is_disjoint(&sbf_indices_set_by_block)
@@ -452,7 +455,7 @@ impl MempoolInternal {
 
         // Update the remaining transactions so their mutator set data is still valid
         for tx in self.tx_dictionary.values_mut() {
-            tx.update_ms_data(block)
+            tx.update_mutator_set_records(block)
                 .expect("Updating mempool transaction must succeed");
         }
 
@@ -464,7 +467,7 @@ impl MempoolInternal {
 
     fn shrink_to_max_size(&mut self) {
         // Repeately remove the least valuable transaction
-        while self.get_size() > self.max_size && self.pop_min().is_some() {
+        while self.get_size() > self.max_total_size && self.pop_min().is_some() {
             continue;
         }
 
@@ -490,10 +493,13 @@ mod tests {
         models::{
             blockchain::{
                 block::block_height::BlockHeight,
-                transaction::{amount::Amount, utxo::Utxo, Transaction},
+                transaction::{amount::Amount, utxo::Utxo, PubScript, Transaction},
             },
             shared::SIZE_1MB_IN_BYTES,
-            state::wallet::{generate_secret_key, WalletSecret},
+            state::{
+                wallet::{generate_secret_key, utxo_notification_pool::UtxoNotifier, WalletSecret},
+                UtxoReceiverData,
+            },
         },
         tests::shared::{
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
@@ -503,6 +509,7 @@ mod tests {
     use anyhow::Result;
     use num_bigint::BigInt;
     use num_traits::Zero;
+    use rand::random;
     use tracing_test::traced_test;
     use twenty_first::shared_math::b_field_element::BFieldElement;
 
@@ -530,9 +537,9 @@ mod tests {
         assert!(!mempool.contains(transaction_digest))
     }
 
-    // Create a mempool with 10 transactions.
+    // Create a mempool with n transactions.
     async fn setup(transactions_count: u32) -> Mempool {
-        let mempool = Mempool::default();
+        let mempool = Mempool::new(ByteSize::gb(1));
         let wallet_state = get_mock_wallet_state(None).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
@@ -550,6 +557,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn get_densest_transactions() {
+        // Verify that transactions are returned ordered by fee density, with highest fee density first
         let mempool = setup(10).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
@@ -564,9 +572,24 @@ mod tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn get_sorted_iter() {
+        // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
+        let mempool = setup(10).await;
+
+        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
+        let mut prev_fee_density = max_fee_density;
+        for (_transaction_id, curr_fee_density) in mempool.get_sorted_iter() {
+            assert!(curr_fee_density <= prev_fee_density);
+            prev_fee_density = curr_fee_density;
+        }
+        assert!(!mempool.is_empty())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn prune_stale_transactions() {
         let wallet_state = get_mock_wallet_state(None).await;
-        let mempool = Mempool::default();
+        let mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -607,14 +630,19 @@ mod tests {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
-        let premine_wallet = &premine_receiver_global_state.wallet_state.wallet_secret;
-        let other_wallet = WalletSecret::new(generate_secret_key());
+        let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
+        let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
+        let premine_receiver_address = premine_receiver_spending_key.to_address();
+        let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_global_state =
-            get_mock_global_state(Network::Main, 2, Some(other_wallet.clone())).await;
+            get_mock_global_state(Network::Main, 2, Some(other_wallet_secret.clone())).await;
+        let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
+        let other_receiver_address = other_receiver_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
         let genesis_block = Block::genesis_block();
-        let block_1 = make_mock_block(&genesis_block, None, other_wallet.get_public_key());
+        let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
+            make_mock_block(&genesis_block, None, other_receiver_address);
 
         // Update both states with block 1
         premine_receiver_global_state
@@ -635,6 +663,18 @@ mod tests {
             .await = block_1.clone();
         other_global_state
             .wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                coinbase_utxo_1,
+                cb_sender_randomness_1,
+                other_receiver_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            )
+            .expect("UTXO notification from miner must be accepted");
+        other_global_state
+            .wallet_state
             .update_wallet_state_with_new_block(
                 &block_1,
                 &mut other_global_state.wallet_state.wallet_db.lock().await,
@@ -647,13 +687,21 @@ mod tests {
             .await = block_1.clone();
 
         // Create a transaction that's valid to be included in block 2
-        let mut output_utxos_generated_by_me: Vec<Utxo> = vec![];
+        let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];
         for i in 0..7 {
+            let amount: Amount = i.into();
             let new_utxo = Utxo {
-                amount: i.into(),
-                public_key: premine_wallet.get_public_key(),
+                coins: amount.to_native_coins(),
+                lock_script: premine_receiver_address.lock_script(),
             };
-            output_utxos_generated_by_me.push(new_utxo);
+
+            output_utxos_generated_by_me.push(UtxoReceiverData {
+                pubscript: PubScript(vec![]),
+                pubscript_input: vec![],
+                receiver_privacy_digest: premine_receiver_address.privacy_digest,
+                sender_randomness: random(),
+                utxo: new_utxo,
+            });
         }
 
         let tx_by_preminer = premine_receiver_global_state
@@ -661,7 +709,7 @@ mod tests {
             .await?;
 
         // Add this transaction to the mempool
-        let m = Mempool::default();
+        let m = Mempool::new(ByteSize::gb(1));
         m.insert(&tx_by_preminer);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
@@ -669,21 +717,27 @@ mod tests {
         // not included in block 2 it must still be in the mempool after the mempool has been
         // updated with block 2. Also: The transaction must be valid after block 2 as the mempool
         // manager must keep mutator set data updated.
-        let output_utxos_by_other = vec![Utxo {
-            amount: 68.into(),
-            public_key: other_wallet.get_public_key(),
+        let output_utxo_data_by_miner = vec![UtxoReceiverData {
+            utxo: Utxo {
+                coins: Into::<Amount>::into(68).to_native_coins(),
+                lock_script: other_receiver_address.lock_script(),
+            },
+            sender_randomness: random(),
+            receiver_privacy_digest: other_receiver_address.privacy_digest,
+            pubscript: PubScript(vec![]),
+            pubscript_input: vec![],
         }];
         let tx_by_other_original = other_global_state
-            .create_transaction(output_utxos_by_other, 1.into())
+            .create_transaction(output_utxo_data_by_miner, 1.into())
             .await
             .unwrap();
         m.insert(&tx_by_other_original);
 
-        // Create next block which includes this transaction
-        let mut block_2 = make_mock_block(&block_1, None, premine_wallet.get_public_key());
-        block_2.authority_merge_transaction(tx_by_preminer.clone());
+        // Create next block which includes preminer's transaction
+        let (mut block_2, _, _) = make_mock_block(&block_1, None, premine_receiver_address);
+        block_2.accumulate_transaction(tx_by_preminer);
 
-        // Update the mempool with block 2 and verify that the mempool is now empty
+        // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, m.len());
         m.update_with_block(&block_2, &mut m.internal.write().unwrap());
         assert_eq!(1, m.len());
@@ -693,11 +747,11 @@ mod tests {
         let mut tx_by_other_updated: Transaction =
             m.get_transactions_for_block(usize::MAX)[0].clone();
 
-        let block_3_with_no_input =
-            make_mock_block(&block_2, None, premine_wallet.get_public_key());
+        let (block_3_with_no_input, _, _) =
+            make_mock_block(&block_2, None, premine_receiver_address);
         let mut block_3_with_updated_tx = block_3_with_no_input.clone();
 
-        block_3_with_updated_tx.authority_merge_transaction(tx_by_other_updated.clone());
+        block_3_with_updated_tx.accumulate_transaction(tx_by_other_updated.clone());
         assert!(
             block_3_with_updated_tx.is_valid_for_devnet(&block_2),
             "Block with tx with updated mutator set data must be valid"
@@ -708,19 +762,23 @@ mod tests {
         // valid.
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
-            let next_block = make_mock_block(&previous_block, None, other_wallet.get_public_key());
+            let (next_block, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
             m.update_with_block(&next_block, &mut m.internal.write().unwrap());
             previous_block = next_block;
         }
 
-        let mut block_14 = make_mock_block(&previous_block, None, other_wallet.get_public_key());
+        let (mut block_14, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
         assert_eq!(Into::<BlockHeight>::into(14), block_14.header.height);
         tx_by_other_updated = m.get_transactions_for_block(usize::MAX)[0].clone();
-        block_14.authority_merge_transaction(tx_by_other_updated);
+        block_14.accumulate_transaction(tx_by_other_updated);
         assert!(
             block_14.is_valid_for_devnet(&previous_block),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
+
+        m.update_with_block(&block_14, &mut m.internal.write().unwrap());
+
+        assert!(m.is_empty(), "Mempool must be empty after 2nd tx was mined");
 
         Ok(())
     }
@@ -730,15 +788,24 @@ mod tests {
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state = get_mock_global_state(Network::Main, 2, None).await;
-        let premine_wallet = &preminer_state.wallet_state.wallet_secret;
+        let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
+        let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
+        let premine_address = premine_spending_key.to_address();
 
         // Create a transaction and insert it into the mempool
-        let new_utxo = Utxo {
-            amount: 1.into(),
-            public_key: premine_wallet.get_public_key(),
+        let utxo = Utxo {
+            coins: Into::<Amount>::into(1).to_native_coins(),
+            lock_script: premine_address.lock_script(),
+        };
+        let receiver_data = UtxoReceiverData {
+            utxo,
+            receiver_privacy_digest: premine_address.privacy_digest,
+            sender_randomness: random(),
+            pubscript: PubScript(vec![]),
+            pubscript_input: vec![],
         };
         let tx_by_preminer_low_fee = preminer_state
-            .create_transaction(vec![new_utxo], 1.into())
+            .create_transaction(vec![receiver_data.clone()], 1.into())
             .await?;
 
         assert_eq!(0, preminer_state.mempool.len());
@@ -756,7 +823,7 @@ mod tests {
         // Insert a transaction that spends the same UTXO and has a higher fee.
         // Verify that this replaces the previous transaction.
         let tx_by_preminer_high_fee = preminer_state
-            .create_transaction(vec![new_utxo], 10.into())
+            .create_transaction(vec![receiver_data.clone()], 10.into())
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_high_fee);
         assert_eq!(1, preminer_state.mempool.len());
@@ -771,7 +838,7 @@ mod tests {
         // Insert a conflicting transaction with a lower fee and verify that it
         // does *not* replace the existing transaction.
         let tx_by_preminer_medium_fee = preminer_state
-            .create_transaction(vec![new_utxo], 4.into())
+            .create_transaction(vec![receiver_data], 4.into())
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_medium_fee);
         assert_eq!(1, preminer_state.mempool.len());
@@ -788,22 +855,9 @@ mod tests {
 
     #[traced_test]
     #[tokio::test]
-    async fn get_sorted_iter() {
-        let mempool = setup(10).await;
-
-        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
-        let mut prev_fee_density = max_fee_density;
-        for (_transaction_id, curr_fee_density) in mempool.get_sorted_iter() {
-            assert!(curr_fee_density <= prev_fee_density);
-            prev_fee_density = curr_fee_density;
-        }
-        assert!(!mempool.is_empty())
-    }
-
-    #[traced_test]
-    #[tokio::test]
     async fn get_mempool_size() {
         // Verify that the `get_size` method on mempool returns sane results
+        let tx_count_small = 10;
         let mempool_small = setup(10).await;
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small =
@@ -811,8 +865,17 @@ mod tests {
                 .unwrap()
                 .len();
         assert!(size_gs_small >= size_serialized_small);
+        println!(
+            "size of mempool with {tx_count_small} empty txs reported as: {}",
+            size_gs_small
+        );
+        println!(
+            "actual size of mempool with {tx_count_small} empty txs when serialized: {}",
+            size_serialized_small
+        );
 
-        let mempool_big = setup(100).await;
+        let tx_count_big = 100;
+        let mempool_big = setup(tx_count_big).await;
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big =
             bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
@@ -820,5 +883,9 @@ mod tests {
                 .len();
         assert!(size_gs_big >= size_serialized_big);
         assert!(size_gs_big >= 5 * size_gs_small);
+        println!("size of mempool with {tx_count_big} empty txs reported as: {size_gs_big}",);
+        println!(
+            "actual size of mempool with {tx_count_big} empty txs when serialized: {size_serialized_big}",
+        );
     }
 }

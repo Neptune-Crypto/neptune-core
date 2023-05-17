@@ -59,6 +59,23 @@ pub struct Args {
     #[clap(long, default_value = "1G", value_name = "SIZE")]
     pub max_mempool_size: ByteSize,
 
+    /// Prune the pool of UTXO notification when it exceeds this size in RAM.
+    ///
+    /// Units: B (bytes), K (kilobytes), M (megabytes), G (gigabytes)
+    ///
+    /// E.g. --max-utxo-notification-size 50M
+    #[clap(long, default_value = "10M", value_name = "SIZE")]
+    pub max_utxo_notification_size: ByteSize,
+
+    /// Maximum number of unconfirmed expected UTXOs that can be stored for each peer.
+    ///
+    /// You may want to increase this number from its default value if
+    /// you're running a node that receives a very high number of UTXOs.
+    ///
+    /// E.g. --max_unconfirmed_utxo_notification_count_per_peer 5000
+    #[clap(long, default_value = "1000", value_name = "COUNT")]
+    pub max_unconfirmed_utxo_notification_count_per_peer: usize,
+
     /// Port on which to listen for peer connections.
     #[clap(long, default_value = "9798", value_name = "PORT")]
     pub peer_port: u16,
@@ -76,7 +93,6 @@ pub struct Args {
     /// The process running this program should have access to at least the number of blocks
     /// in this field multiplied with the max block size amounts of RAM. Probably 1.5 to 2 times
     /// that amount.
-    /// #[clap(value_parser(RangedI64ValueParser::new().range(foo..bar)))]
     #[clap(long, default_value = "500", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
     pub max_number_of_blocks_before_syncing: usize,
 

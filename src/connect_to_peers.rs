@@ -22,6 +22,18 @@ use crate::{
     MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
 };
 
+// Max peer message size is 200MB
+pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 200 * 1024 * 1024;
+
+/// Use this function to ensure that the same rules apply for both
+/// ingoing and outgoing connections. This limits the size of messages
+/// peers can send.
+fn get_codec_rules() -> LengthDelimitedCodec {
+    let mut codec_rules = LengthDelimitedCodec::new();
+    codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
+    codec_rules
+}
+
 async fn get_connection_status(
     state: &GlobalState,
     own_handshake: &HandshakeData,
@@ -42,7 +54,7 @@ async fn get_connection_status(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some() && standing.unwrap().standing > state.cli.peer_tolerance {
+    if standing.is_some() && standing.unwrap().standing < -(state.cli.peer_tolerance as i32) {
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
@@ -84,11 +96,13 @@ where
     info!("Established connection");
 
     // Build the communication/serialization/frame handler
-    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
-    let mut peer = tokio_serde::SymmetricallyFramed::new(
-        length_delimited,
-        SymmetricalBincode::<PeerMessage>::default(),
-    );
+    let length_delimited = Framed::new(stream, get_codec_rules());
+    let mut peer: tokio_serde::Framed<
+        Framed<S, LengthDelimitedCodec>,
+        PeerMessage,
+        PeerMessage,
+        Bincode<PeerMessage, PeerMessage>,
+    > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
 
     // Complete Neptune handshake
     let peer_handshake_data: HandshakeData = match peer.try_next().await? {
@@ -135,13 +149,14 @@ where
 
     // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
     info!("Connection accepted from {}", peer_address);
+    let peer_distance = 1; // All incoming connections have distance 1
     let peer_loop_handler = PeerLoopHandler::new(
         peer_thread_to_main_tx,
         state,
         peer_address,
         peer_handshake_data,
         true,
-        1, // All incoming connections have distance 1
+        peer_distance,
     );
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_thread_rx)
@@ -191,19 +206,18 @@ async fn call_peer<S>(
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     own_handshake_data: &HandshakeData,
-    distance: u8,
+    peer_distance: u8,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
     info!("Established connection");
 
-    // Delimit frames using a length header
-    let length_delimited = Framed::new(stream, LengthDelimitedCodec::new());
-
-    // Serialize frames with bincode
-    let mut peer: SymmetricallyFramed<
+    // Build the communication/serialization/frame handler
+    let length_delimited = Framed::new(stream, get_codec_rules());
+    let mut peer: tokio_serde::Framed<
         Framed<S, LengthDelimitedCodec>,
+        PeerMessage,
         PeerMessage,
         Bincode<PeerMessage, PeerMessage>,
     > = SymmetricallyFramed::new(length_delimited, SymmetricalBincode::default());
@@ -239,7 +253,9 @@ where
     };
 
     match peer.try_next().await? {
-        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => (),
+        Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => {
+            info!("Connection accepted by {peer_address}");
+        }
         Some(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(reason))) => {
             bail!("Connection attempt refused. Reason: {:?}", reason);
         }
@@ -254,7 +270,7 @@ where
         peer_address,
         peer_handshake_data,
         false,
-        distance,
+        peer_distance,
     );
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_thread_rx)
@@ -265,22 +281,22 @@ where
 
 #[cfg(test)]
 mod connect_tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::SystemTime;
 
     use super::*;
 
     use anyhow::{bail, Result};
     use tokio_test::io::Builder;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::rescue_prime_digest::Digest;
+    use twenty_first::shared_math::digest::Digest;
 
     use crate::config_models::network::Network;
     use crate::models::peer::{
         ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
     };
     use crate::tests::shared::{
-        get_dummy_address, get_dummy_handshake_data, get_dummy_latest_block,
-        get_dummy_peer_connection_data, get_test_genesis_setup, to_bytes,
+        get_dummy_handshake_data, get_dummy_latest_block, get_dummy_peer_connection_data,
+        get_dummy_socket_address, get_test_genesis_setup, to_bytes,
     };
     use crate::{MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE};
 
@@ -310,7 +326,7 @@ mod connect_tests {
         call_peer(
             mock,
             state.clone(),
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             &own_handshake,
@@ -393,20 +409,15 @@ mod connect_tests {
 
         // Then check that peers can be banned by bad behavior
         let bad_standing: PeerStanding = PeerStanding {
-            standing: u16::MAX,
+            standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
             ))),
-            timestamp_of_latest_sanction: Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Failed to generate timestamp for peer standing")
-                    .as_secs(),
-            ),
+            timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
         state
-            .write_peer_standing_on_increase(peer_sa.ip(), bad_standing)
+            .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
             .await;
         status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
@@ -449,7 +460,7 @@ mod connect_tests {
         answer_peer(
             mock,
             state.clone(),
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -484,7 +495,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -517,7 +528,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(0),
+            get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -557,7 +568,7 @@ mod connect_tests {
         let answer = answer_peer(
             mock,
             state,
-            get_dummy_address(2),
+            get_dummy_socket_address(2),
             from_main_rx_clone,
             to_main_tx,
             own_handshake,
@@ -595,21 +606,16 @@ mod connect_tests {
             get_test_genesis_setup(Network::Main, peer_count_before_incoming_connection_request)
                 .await?;
         let bad_standing: PeerStanding = PeerStanding {
-            standing: u16::MAX,
+            standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
             ))),
-            timestamp_of_latest_sanction: Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Failed to generate timestamp for peer standing")
-                    .as_secs(),
-            ),
+            timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
-        let peer_address = get_dummy_address(3);
+        let peer_address = get_dummy_socket_address(3);
         state
-            .write_peer_standing_on_increase(peer_address.ip(), bad_standing)
+            .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
             .await;
 
         let answer = answer_peer(

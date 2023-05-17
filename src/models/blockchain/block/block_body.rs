@@ -7,14 +7,11 @@ use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 
-use super::mutator_set_update::MutatorSetUpdate;
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockBody {
     pub transaction: Transaction,
     pub next_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
     pub previous_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
-    pub mutator_set_update: MutatorSetUpdate,
     pub stark_proof: Vec<BFieldElement>,
 }
 

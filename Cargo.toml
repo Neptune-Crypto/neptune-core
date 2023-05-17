@@ -12,10 +12,13 @@ features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
 version = "1"
 
 [dependencies]
-twenty-first = "0.19.3"
-# twenty-first = { path = "../twenty-first/twenty-first" }
-mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }
-# mutator-set-tf = { path = "../mutator-set-tf" }
+aead = "0.5.2"
+aes-gcm = "0.10.1"
+bech32 = "0.9.1"
+# twenty-first = "0.20.0"
+twenty-first = { path = "../twenty-first/twenty-first" }
+# mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }
+mutator-set-tf = { path = "../mutator-set-tf" }
 anyhow = "1"
 bincode = "1"
 bytes = "1"
@@ -29,12 +32,6 @@ num-bigint = { version = "0.4", features = ["serde"] }
 num-traits = "0.2"
 rand = "0.8"
 rusty-leveldb = "1"
-secp256k1 = { version = "0", features = [
-    "rand-std",
-    "serde",
-    "global-context",
-    "bitcoin_hashes",
-] }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"

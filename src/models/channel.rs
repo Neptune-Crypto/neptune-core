@@ -1,12 +1,13 @@
 use std::net::SocketAddr;
 
 use twenty_first::amount::u32s::U32s;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 
 use super::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use super::blockchain::block::{block_height::BlockHeight, Block};
 use super::blockchain::transaction::Transaction;
 use super::peer::TransactionNotification;
+use super::state::wallet::utxo_notification_pool::ExpectedUtxo;
 
 #[derive(Clone, Debug)]
 pub enum MainToMiner {
@@ -24,19 +25,23 @@ pub enum MainToMiner {
 }
 
 #[derive(Clone, Debug)]
+pub struct NewBlockFound {
+    pub block: Box<Block>,
+    pub coinbase_utxo_info: Box<ExpectedUtxo>,
+}
+
+#[derive(Clone, Debug)]
 pub enum MinerToMain {
-    NewBlock(Box<Block>),
+    NewBlockFound(NewBlockFound),
 }
 
 #[derive(Clone, Debug)]
 pub enum MainToPeerThread {
     Block(Box<Block>),
-    BlockFromMiner(Box<Block>),
     RequestBlockBatch(Vec<Digest>, SocketAddr), // (most canonical known digests, peer_socket_to_request)
     PeerSynchronizationTimeout(SocketAddr), // sanction a peer for failing to respond to sync request
     MakePeerDiscoveryRequest,               // Request peer list from connected peers
     MakeSpecificPeerDiscoveryRequest(SocketAddr), // Request peers from a specific peer to get peers further away
-    Transaction(Transaction),                     // Push a transaction
     TransactionNotification(TransactionNotification), // Publish knowledge of a transaction
     Disconnect(SocketAddr),                       // Disconnect from a specific peer
     DisconnectAll(),                              // Disconnect from all peers
@@ -46,14 +51,12 @@ impl MainToPeerThread {
     pub fn get_type(&self) -> String {
         match self {
             MainToPeerThread::Block(_) => "block".to_string(),
-            MainToPeerThread::BlockFromMiner(_) => "block from miner".to_string(),
             MainToPeerThread::RequestBlockBatch(_, _) => "req block batch".to_string(),
             MainToPeerThread::PeerSynchronizationTimeout(_) => "peer sync timeout".to_string(),
             MainToPeerThread::MakePeerDiscoveryRequest => "make peer discovery req".to_string(),
             MainToPeerThread::MakeSpecificPeerDiscoveryRequest(_) => {
                 "make specific peer discovery req".to_string()
             }
-            MainToPeerThread::Transaction(_) => "transaction".to_string(),
             MainToPeerThread::TransactionNotification(_) => "transaction notification".to_string(),
             MainToPeerThread::Disconnect(_) => "disconnect".to_string(),
             MainToPeerThread::DisconnectAll() => "disconnect all".to_string(),
@@ -67,7 +70,13 @@ pub enum PeerThreadToMain {
     AddPeerMaxBlockHeight((SocketAddr, BlockHeight, U32s<PROOF_OF_WORK_COUNT_U32_SIZE>)),
     RemovePeerMaxBlockHeight(SocketAddr),
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)), // ([(peer_listen_address)], reported_by, distance)
-    Transaction(Transaction),
+    Transaction(Box<PeerThreadToMainTransaction>),
+}
+
+#[derive(Clone, Debug)]
+pub struct PeerThreadToMainTransaction {
+    pub transaction: Transaction,
+    pub confirmable_for_block: Digest,
 }
 
 impl PeerThreadToMain {
@@ -86,6 +95,6 @@ impl PeerThreadToMain {
 
 #[derive(Clone, Debug)]
 pub enum RPCServerToMain {
-    Send(Transaction),
+    Send(Box<Transaction>),
     Shutdown(),
 }

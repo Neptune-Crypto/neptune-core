@@ -1,27 +1,28 @@
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
-pub mod wallet_block_utxos;
+pub mod utxo_notification_pool;
 pub mod wallet_state;
 pub mod wallet_status;
 
 use anyhow::{bail, Context, Result};
-use num_traits::{One, Zero};
-use secp256k1::{ecdsa, Secp256k1};
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::shared_math::rescue_prime_digest::{Digest, DIGEST_LENGTH};
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
-use crate::models::blockchain::digest::{
-    DEVNET_MSG_DIGEST_SIZE_IN_BYTES, DEVNET_SECRET_KEY_SIZE_IN_BYTES,
-};
+use crate::models::blockchain::address::generation_address;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::Hash;
 
-pub const WALLET_FILE_NAME: &str = "wallet.dat";
+pub const WALLET_DIRECTORY: &str = "wallet";
+pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";
+pub const WALLET_OUTGOING_SECRETS_FILE_NAME: &str = "outgoing_randomness.dat";
+pub const WALLET_INCOMING_SECRETS_FILE_NAME: &str = "incoming_randomness.dat";
 const STANDARD_WALLET_NAME: &str = "standard_wallet";
 const STANDARD_WALLET_VERSION: u8 = 0;
 pub const WALLET_DB_NAME: &str = "wallet_block_db";
@@ -40,7 +41,7 @@ pub struct WalletSecret {
 
     // For now we use `Digest` as secret key as it's consistent with STARK
     // proofs that we're transitioning to after DevNet.
-    secret_seed: Digest,
+    pub secret_seed: Digest,
     version: u8,
 }
 
@@ -69,27 +70,110 @@ impl WalletSecret {
         WalletSecret::new(secret_seed)
     }
 
+    fn wallet_secret_path(wallet_directory_path: &Path) -> PathBuf {
+        wallet_directory_path.join(WALLET_SECRET_FILE_NAME)
+    }
+
+    fn wallet_outgoing_secrets_path(wallet_directory_path: &Path) -> PathBuf {
+        wallet_directory_path.join(WALLET_OUTGOING_SECRETS_FILE_NAME)
+    }
+
+    fn wallet_incoming_secrets_path(wallet_directory_path: &Path) -> PathBuf {
+        wallet_directory_path.join(WALLET_INCOMING_SECRETS_FILE_NAME)
+    }
+
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
     /// and save it to `wallet_file`.
-    pub fn read_from_file_or_create(wallet_file_path: &Path) -> Result<Self> {
-        let wallet = if wallet_file_path.exists() {
-            Self::read_from_file(wallet_file_path)?
+    /// Also create files for incoming and outgoing randomness which are appended to
+    /// on each incoming and outgoing transaction.
+    pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
+        let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
+        let wallet = if wallet_secret_path.exists() {
+            Self::read_from_file(&wallet_secret_path)?
         } else {
             let new_secret: Digest = generate_secret_key();
             let new_wallet: WalletSecret = WalletSecret::new(new_secret);
-            new_wallet.create_wallet_file(wallet_file_path)?;
+            new_wallet.create_wallet_secret_file(&wallet_secret_path)?;
             new_wallet
         };
 
-        // Sanity check that wallet file was stored on disk.
-        if !wallet_file_path.exists() {
+        // Generate files for outgoing and ingoing randomness if those files
+        // do not already exist
+        let outgoing_randomness_file = Self::wallet_outgoing_secrets_path(wallet_directory_path);
+        if !outgoing_randomness_file.exists() {
+            Self::create_empty_wallet_randomness_file(&outgoing_randomness_file).expect(
+                "Create file for outgoing randomness must succeed. Attempted to create file: {outgoing_randomness_file}",
+            );
+        }
+
+        let incoming_randomness_file = Self::wallet_incoming_secrets_path(wallet_directory_path);
+        if !incoming_randomness_file.exists() {
+            Self::create_empty_wallet_randomness_file(&incoming_randomness_file).expect("Create file for outgoing randomness must succeed. Attempted to create file: {incoming_randomness_file}");
+        }
+
+        // Sanity checks that files were actually created
+        if !wallet_secret_path.exists() {
             bail!(
-                "Wallet file '{}' must exist on disk after reading/creating it.",
-                wallet_file_path.to_string_lossy()
+                "Wallet secret file '{}' must exist on disk after reading/creating it.",
+                wallet_secret_path.to_string_lossy()
+            );
+        }
+        if !outgoing_randomness_file.exists() {
+            bail!(
+                "file containing outgoing randomness '{}' must exist on disk.",
+                outgoing_randomness_file.to_string_lossy()
+            );
+        }
+        if !incoming_randomness_file.exists() {
+            bail!(
+                "file containing ingoing randomness '{}' must exist on disk.",
+                incoming_randomness_file.to_string_lossy()
             );
         }
 
         Ok(wallet)
+    }
+
+    pub fn nth_generation_spending_key(&self, counter: u16) -> generation_address::SpendingKey {
+        assert!(
+            counter.is_zero(),
+            "For now we only support one generation address per wallet"
+        );
+
+        // We keep n between 0 and 2^16 as this makes it possible to scan all possible addresses
+        // in case you don't know with what counter you made the address
+        let key_seed = Hash::hash_varlen(
+            &[
+                self.secret_seed.to_sequence(),
+                vec![
+                    generation_address::GENERATION_FLAG,
+                    BFieldElement::new(counter.try_into().unwrap()),
+                ],
+            ]
+            .concat(),
+        );
+        generation_address::SpendingKey::derive_from_seed(key_seed)
+    }
+
+    /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
+    /// for the mutator set.
+    pub fn generate_sender_randomness(
+        &self,
+        block_height: BlockHeight,
+        receiver_digest: Digest,
+    ) -> Digest {
+        const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
+        Hash::hash_varlen(
+            &[
+                self.secret_seed.to_sequence(),
+                vec![
+                    BFieldElement::new(SENDER_RANDOMNESS_FLAG),
+                    block_height.into(),
+                ],
+                receiver_digest.to_sequence(),
+            ]
+            .concat(),
+        )
     }
 
     /// Read Wallet from file as JSON
@@ -109,20 +193,31 @@ impl WalletSecret {
         })
     }
 
+    /// Used to generate both the file for incoming and outgoing randomness
+    fn create_empty_wallet_randomness_file(file_path: &Path) -> Result<()> {
+        let init_value: String = String::default();
+
+        if cfg!(not(unix)) {
+            Self::create_wallet_file_windows(&file_path.to_path_buf(), init_value)
+        } else {
+            Self::create_wallet_file_unix(&file_path.to_path_buf(), init_value)
+        }
+    }
+
     /// Create wallet file with restrictive permissions and save this wallet to disk
-    fn create_wallet_file(&self, wallet_file: &Path) -> Result<()> {
-        let wallet_as_json: String = serde_json::to_string(self).unwrap();
+    fn create_wallet_secret_file(&self, wallet_file: &Path) -> Result<()> {
+        let wallet_secret_as_json: String = serde_json::to_string(self).unwrap();
 
         if cfg!(windows) {
-            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_as_json)
+            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_secret_as_json)
         } else {
-            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_as_json)
+            Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_secret_as_json)
         }
     }
 
     #[cfg(target_family = "unix")]
     /// Create a wallet file, and set restrictive permissions
-    fn create_wallet_file_unix(path: &PathBuf, wallet_as_json: String) -> Result<()> {
+    fn create_wallet_file_unix(path: &PathBuf, file_content: String) -> Result<()> {
         // On Unix/Linux we set the file permissions to 600, to disallow
         // other users on the same machine to access the secrets.
         // I don't think the `std::os::unix` library can be imported on a Windows machine,
@@ -134,7 +229,7 @@ impl WalletSecret {
             .mode(0o600)
             .open(path)
             .unwrap();
-        fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
+        fs::write(path.clone(), file_content).context("Failed to write wallet file to disk")
     }
 
     /// Create a wallet file, without setting restrictive UNIX permissions
@@ -146,68 +241,16 @@ impl WalletSecret {
             .unwrap();
         fs::write(path.clone(), wallet_as_json).context("Failed to write wallet file to disk")
     }
-
-    // **Note:** `Message::from_slice()` has to take a slice that is a cryptographically
-    // secure hash of the actual message that's going to be signed. Otherwise the result
-    // of signing isn't a secure signature. Since `msg_digest` is expected to come from
-    // Rescue-Prime.
-    pub fn sign_digest(&self, msg_digest: Digest) -> ecdsa::Signature {
-        let sk = self.get_ecdsa_signing_secret_key();
-        let msg_bytes: [u8; Digest::BYTES] = msg_digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
-            .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
-        sk.sign_ecdsa(msg)
-    }
-
-    pub fn get_public_key(&self) -> secp256k1::PublicKey {
-        let secp = Secp256k1::new();
-        let ecdsa_secret_key: secp256k1::SecretKey = self.get_ecdsa_signing_secret_key();
-        secp256k1::PublicKey::from_secret_key(&secp, &ecdsa_secret_key)
-    }
-
-    // This is a temporary workaround until our own cryptography is ready.
-    // At that point we can return `Digest` as is. Note that `Digest::BYTES`
-    // is 5 * 8 = 40 bytes, while SecretKey expects 32 bytes.
-    fn get_ecdsa_signing_secret_key(&self) -> secp256k1::SecretKey {
-        let signing_key: Digest = self.get_signing_key();
-        let bytes: [u8; Digest::BYTES] = signing_key.into();
-        secp256k1::SecretKey::from_slice(&bytes[..DEVNET_SECRET_KEY_SIZE_IN_BYTES])
-            .expect("a byte slice that is DEVNET_SECRET_KEY_SIZE_IN_BYTES long")
-    }
-
-    /// Return the secret key that is used for signatures
-    fn get_signing_key(&self) -> Digest {
-        let secret_seed = self.secret_seed;
-        Hash::hash_pair(&secret_seed, &Self::signature_secret_key_marker())
-    }
-
-    /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
-    /// for the mutator set.
-    fn get_commitment_randomness_seed(&self) -> Digest {
-        let secret_seed = self.secret_seed;
-        Hash::hash_pair(&secret_seed, &Self::commitment_marker())
-    }
-
-    fn signature_secret_key_marker() -> Digest {
-        Digest::new([BFieldElement::zero(); DIGEST_LENGTH])
-    }
-
-    fn commitment_marker() -> Digest {
-        Digest::new([
-            BFieldElement::one(),
-            BFieldElement::zero(),
-            BFieldElement::zero(),
-            BFieldElement::zero(),
-            BFieldElement::zero(),
-        ])
-    }
 }
 
 #[cfg(test)]
 mod wallet_tests {
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use num_traits::CheckedSub;
+    use rand::random;
     use tokio::sync::Mutex;
     use tracing_test::traced_test;
     use twenty_first::util_types::storage_vec::StorageVec;
@@ -215,13 +258,15 @@ mod wallet_tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::digest::DEVNET_MSG_DIGEST_SIZE_IN_BYTES;
     use crate::models::blockchain::shared::Hash;
-    use crate::models::blockchain::transaction::amount::Amount;
-    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
+    use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
+    use crate::models::blockchain::transaction::PubScript;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
-        add_output_to_block, add_unsigned_input_to_block, add_unsigned_input_to_block_ams,
-        get_mock_wallet_state, make_mock_block, make_unit_test_archival_state,
+        add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
+        make_mock_transaction_with_generation_key,
     };
 
     use super::monitored_utxo::MonitoredUtxo;
@@ -239,23 +284,6 @@ mod wallet_tests {
     }
 
     #[tokio::test]
-    async fn output_digest_changes_test() {
-        // Verify that output randomness is not repeated
-        let wallet_state = get_mock_wallet_state(None).await;
-        let mut db_lock = wallet_state.wallet_db.lock().await;
-        let mut previous_digest = wallet_state.next_output_randomness_from_lock(&mut db_lock);
-        for _ in 0..12 {
-            let next_output_randomness =
-                wallet_state.next_output_randomness_from_lock(&mut db_lock);
-            assert_ne!(
-                previous_digest, next_output_randomness,
-                "Output randomness must not be repeated"
-            );
-            previous_digest = next_output_randomness;
-        }
-    }
-
-    #[tokio::test]
     async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
@@ -267,9 +295,17 @@ mod wallet_tests {
             monitored_utxos_premine_wallet.len(),
             "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
         );
+
+        let premine_receiver_spending_key = wallet_state_premine_recipient
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let premine_receiver_address = premine_receiver_spending_key.to_address();
+        let expected_premine_utxo = Utxo {
+            coins: Block::premine_distribution()[0].1.to_native_coins(),
+            lock_script: premine_receiver_address.lock_script(),
+        };
         assert_eq!(
-            monitored_utxos_premine_wallet[0].utxo,
-            Block::premine_utxos()[0],
+            expected_premine_utxo, monitored_utxos_premine_wallet[0].utxo,
             "Auth wallet's monitored UTXO must match that from genesis block at initialization"
         );
 
@@ -284,13 +320,15 @@ mod wallet_tests {
         // Add 12 blocks and verify that membership proofs are still valid
         let genesis_block = Block::genesis_block();
         let mut next_block = genesis_block.clone();
+        let other_wallet_secret = WalletSecret::new(random());
+        let other_receiver_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
         for _ in 0..12 {
             let previous_block = next_block;
-            next_block = make_mock_block(
-                &previous_block,
-                None,
-                wallet_state_other.wallet_secret.get_public_key(),
-            );
+            let (nb, _coinbase_utxo, _sender_randomness) =
+                make_mock_block(&previous_block, None, other_receiver_address);
+            next_block = nb;
             wallet_state_premine_recipient.update_wallet_state_with_new_block(
                 &next_block,
                 &mut wallet_state_premine_recipient.wallet_db.lock().await,
@@ -304,7 +342,7 @@ mod wallet_tests {
             "monitored UTXOs must be 1 after applying N blocks not mined by wallet"
         );
 
-        let genesis_block_output_utxo = genesis_block.body.transaction.outputs[0].0;
+        let genesis_block_output_utxo = monitored_utxos[0].utxo.clone();
         let ms_membership_proof = monitored_utxos[0]
             .get_membership_proof_for_block(&next_block.hash)
             .unwrap();
@@ -321,9 +359,12 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
-        let wallet = WalletSecret::new(generate_secret_key());
-        let wallet_state = get_mock_wallet_state(Some(wallet.clone())).await;
-        let other_wallet = WalletSecret::new(generate_secret_key());
+        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let wallet_state = get_mock_wallet_state(Some(own_wallet_secret.clone())).await;
+        let other_wallet_secret = WalletSecret::new(generate_secret_key());
+        let other_recipient_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
 
         let mut monitored_utxos = get_monitored_utxos(&wallet_state).await;
         assert!(
@@ -332,11 +373,46 @@ mod wallet_tests {
         );
 
         let genesis_block = Block::genesis_block();
-        let block_1 = make_mock_block(&genesis_block, None, wallet.get_public_key());
+        let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
+        let own_recipient_address = own_spending_key.to_address();
+        let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
+            make_mock_block(&genesis_block, None, own_recipient_address);
+
+        wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                block_1_coinbase_utxo.clone(),
+                block_1_coinbase_sender_randomness,
+                own_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            )
+            .unwrap();
+        assert_eq!(
+            1,
+            wallet_state.expected_utxos.read().unwrap().len(),
+            "Expected UTXO list must have length 1 before block registration"
+        );
         wallet_state.update_wallet_state_with_new_block(
             &block_1,
             &mut wallet_state.wallet_db.lock().await,
         )?;
+        assert_eq!(
+            1,
+            wallet_state.expected_utxos.read().unwrap().len(),
+            "A: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
+        let expected_utxos = wallet_state
+            .expected_utxos
+            .read()
+            .unwrap()
+            .get_all_expected_utxos();
+        assert_eq!(1, expected_utxos.len(), "B: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
+        assert_eq!(
+            block_1.hash,
+            expected_utxos[0].mined_in_block.unwrap().0,
+            "Expected UTXO must be registered as being mined"
+        );
         monitored_utxos = get_monitored_utxos(&wallet_state).await;
         assert_eq!(
             1,
@@ -346,8 +422,7 @@ mod wallet_tests {
 
         // Ensure that the membership proof is valid
         {
-            let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
-            let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
+            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
                 .get_membership_proof_for_block(&block_1.hash)
                 .unwrap();
@@ -360,12 +435,11 @@ mod wallet_tests {
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
-        let block_3 = make_mock_block(&block_2, None, other_wallet.get_public_key());
+        let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2, None, other_recipient_address);
         monitored_utxos = get_monitored_utxos(&wallet_state).await;
         {
-            let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
-            let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
+            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
                 .get_membership_proof_for_block(&block_1.hash)
                 .unwrap();
@@ -390,8 +464,7 @@ mod wallet_tests {
         monitored_utxos = get_monitored_utxos(&wallet_state).await;
 
         {
-            let block_1_tx_output_utxo = block_1.body.transaction.outputs[0].0;
-            let block_1_tx_output_digest = Hash::hash(&block_1_tx_output_utxo);
+            let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
                 .get_membership_proof_for_block(&block_3.hash)
                 .unwrap();
@@ -411,16 +484,28 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
-        let own_wallet = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
+        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret)).await;
+        let own_spending_key = own_wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
         let genesis_block = Block::genesis_block();
-        let block_1 = make_mock_block(
-            &genesis_block,
-            None,
-            own_wallet_state.wallet_secret.get_public_key(),
-        );
+        let (block_1, cb_utxo, cb_output_randomness) =
+            make_mock_block(&genesis_block, None, own_spending_key.to_address());
+        let mining_reward = cb_utxo.get_native_coin_amount();
 
         // Add block to wallet state
+        own_wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                cb_utxo,
+                cb_output_randomness,
+                own_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            )
+            .unwrap();
         own_wallet_state.update_wallet_state_with_new_block(
             &block_1,
             &mut own_wallet_state.wallet_db.lock().await,
@@ -434,7 +519,7 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(1.into(), &locked_block)
+                .allocate_sufficient_input_funds(Amount::one(), &locked_block)
                 .await
                 .unwrap()
                 .len()
@@ -442,7 +527,10 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(99.into(), &locked_block)
+                .allocate_sufficient_input_funds(
+                    mining_reward.checked_sub(&Amount::one()).unwrap(),
+                    &locked_block
+                )
                 .await
                 .unwrap()
                 .len()
@@ -450,31 +538,40 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(100.into(), &locked_block)
+                .allocate_sufficient_input_funds(mining_reward, &locked_block)
                 .await
                 .unwrap()
                 .len()
         );
 
-        // Cannot allocate more than we have: 100
+        // Cannot allocate more than we have: `mining_reward`
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(101.into(), &locked_block)
+            .allocate_sufficient_input_funds(mining_reward + Amount::one(), &locked_block)
             .await
             .is_err());
 
-        // Mine 21 more blocks and verify that 2200 worth of UTXOs can be allocated
+        // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
         let mut next_block = block_1.clone();
         for _ in 0..21 {
             let previous_block = next_block;
-            next_block = make_mock_block(
-                &previous_block,
-                None,
-                own_wallet_state.wallet_secret.get_public_key(),
-            );
+            let (next_block_prime, cb_utxo_prime, cb_output_randomness_prime) =
+                make_mock_block(&previous_block, None, own_spending_key.to_address());
+            own_wallet_state
+                .expected_utxos
+                .write()
+                .unwrap()
+                .add_expected_utxo(
+                    cb_utxo_prime,
+                    cb_output_randomness_prime,
+                    own_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                )
+                .unwrap();
             own_wallet_state.update_wallet_state_with_new_block(
-                &next_block,
+                &next_block_prime,
                 &mut own_wallet_state.wallet_db.lock().await,
             )?;
+            next_block = next_block_prime;
         }
 
         let wrapped_block_ = Arc::new(Mutex::new(next_block.clone()));
@@ -483,7 +580,7 @@ mod wallet_tests {
         assert_eq!(
             5,
             own_wallet_state
-                .allocate_sufficient_input_funds(500.into(), &block_lock)
+                .allocate_sufficient_input_funds(mining_reward.scalar_mul(5), &block_lock)
                 .await
                 .unwrap()
                 .len()
@@ -491,47 +588,74 @@ mod wallet_tests {
         assert_eq!(
             6,
             own_wallet_state
-                .allocate_sufficient_input_funds(501.into(), &block_lock)
-                .await
-                .unwrap()
-                .len()
-        );
-        assert_eq!(
-            22,
-            own_wallet_state
-                .allocate_sufficient_input_funds(2200.into(), &block_lock)
+                .allocate_sufficient_input_funds(
+                    mining_reward.scalar_mul(5) + Amount::one(),
+                    &block_lock
+                )
                 .await
                 .unwrap()
                 .len()
         );
 
-        // Cannot allocate more than we have: 2200
+        let expected_balance = mining_reward.scalar_mul(22);
+        assert_eq!(
+            22,
+            own_wallet_state
+                .allocate_sufficient_input_funds(expected_balance, &block_lock)
+                .await
+                .unwrap()
+                .len()
+        );
+
+        // Cannot allocate more than we have: 22 * mining reward
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(2201.into(), &block_lock)
+            .allocate_sufficient_input_funds(expected_balance + Amount::one(), &block_lock)
             .await
             .is_err());
 
         // Make a block that spends an input, then verify that this is reflected by
         // the allocator.
         let two_utxos = own_wallet_state
-            .allocate_sufficient_input_funds(200.into(), &block_lock)
+            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), &block_lock)
             .await
             .unwrap();
         assert_eq!(
             2,
             two_utxos.len(),
-            "Must use two UTXOs each worth 100 to send 200"
+            "Must use two UTXOs when sending 2 x mining reward"
         );
 
         // This block spends two UTXOs and gives us none, so the new balance
         // becomes 2000
         let other_wallet = WalletSecret::new(generate_secret_key());
+        let other_wallet_recipient_address =
+            other_wallet.nth_generation_spending_key(0).to_address();
         assert_eq!(Into::<BlockHeight>::into(22u64), next_block.header.height);
-        next_block = make_mock_block(&next_block.clone(), None, other_wallet.get_public_key());
+        (next_block, _, _) =
+            make_mock_block(&next_block.clone(), None, own_spending_key.to_address());
         assert_eq!(Into::<BlockHeight>::into(23u64), next_block.header.height);
-        for (utxo, ms_mp) in two_utxos {
-            add_unsigned_input_to_block(&mut next_block, utxo, ms_mp);
-        }
+        let msa_tip = next_block.body.next_mutator_set_accumulator.clone();
+        let receiver_data = vec![UtxoReceiverData {
+            utxo: Utxo {
+                lock_script: LockScript(vec![]),
+                coins: Into::<Amount>::into(200).to_native_coins(),
+            },
+            sender_randomness: random(),
+            receiver_privacy_digest: other_wallet_recipient_address.privacy_digest,
+            pubscript: PubScript::default(),
+            pubscript_input: vec![],
+        }];
+        let input_utxos_mps_keys = two_utxos
+            .into_iter()
+            .map(|(utxo, mp)| (utxo, mp, own_spending_key))
+            .collect_vec();
+        let tx = make_mock_transaction_with_generation_key(
+            input_utxos_mps_keys,
+            receiver_data,
+            Amount::zero(),
+            msa_tip,
+        );
+        next_block.accumulate_transaction(tx);
 
         own_wallet_state.update_wallet_state_with_new_block(
             &next_block,
@@ -553,41 +677,6 @@ mod wallet_tests {
             .await
             .is_err());
 
-        // Add another block that spends *one* UTXO and gives us none, so the new balance
-        // becomes 1900
-        next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
-        own_wallet_state.update_wallet_state_with_new_block(
-            &next_block,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
-
-        let one_utxo = own_wallet_state
-            .allocate_sufficient_input_funds(98.into(), &next_block)
-            .await
-            .unwrap();
-        assert_eq!(1, one_utxo.len());
-        add_unsigned_input_to_block(&mut next_block, one_utxo[0].0, one_utxo[0].1.clone());
-
-        own_wallet_state.update_wallet_state_with_new_block(
-            &next_block,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
-
-        assert_eq!(
-            19,
-            own_wallet_state
-                .allocate_sufficient_input_funds(1900.into(), &block_lock)
-                .await
-                .unwrap()
-                .len()
-        );
-
-        // Cannot allocate more than we have: 1900
-        assert!(own_wallet_state
-            .allocate_sufficient_input_funds(1901.into(), &block_lock)
-            .await
-            .is_err());
-
         Ok(())
     }
 
@@ -597,75 +686,121 @@ mod wallet_tests {
         // An archival state is needed for how we currently add inputs to a transaction.
         // So it's just used to generate test data, not in any of the functions that are
         // actually tested.
-        let (archival_state, _peer_databases) = make_unit_test_archival_state(Network::Main).await;
-        let own_wallet = WalletSecret::new(generate_secret_key());
-        let non_premine_wallet_state = get_mock_wallet_state(Some(own_wallet)).await;
-        let premine_wallet = get_mock_wallet_state(None).await.wallet_secret;
+        // let (archival_state, _peer_databases) = make_unit_test_archival_state(Network::Main).await;
+        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret)).await;
+        let own_spending_key = own_wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block();
+        let premine_wallet = get_mock_wallet_state(None).await.wallet_secret;
+        let premine_receiver_global_state =
+            get_mock_global_state(Network::Main, 2, Some(premine_wallet)).await;
+        let preminers_original_balance = premine_receiver_global_state
+            .wallet_state
+            .get_balance()
+            .await;
 
-        let mut block_1 = make_mock_block(
-            &genesis_block,
-            None,
-            non_premine_wallet_state.wallet_secret.get_public_key(),
-        );
+        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
 
-        // Add a valid input to the block transaction
-        let consumed_utxo_0 = genesis_block.body.transaction.outputs[0].0;
-        let premine_output_randomness = genesis_block.body.transaction.outputs[0].1;
-        add_unsigned_input_to_block_ams(
-            &mut block_1,
-            consumed_utxo_0,
-            premine_output_randomness,
-            &archival_state.archival_mutator_set,
-            0,
-        )
-        .await;
+        let receiver_data_12_to_other = UtxoReceiverData {
+            pubscript: vec![].into(),
+            pubscript_input: vec![],
+            receiver_privacy_digest: own_address.privacy_digest,
+            sender_randomness: premine_receiver_global_state
+                .wallet_state
+                .wallet_secret
+                .generate_sender_randomness(
+                    genesis_block.header.height,
+                    own_address.privacy_digest,
+                ),
+            utxo: Utxo {
+                coins: Into::<Amount>::into(12).to_native_coins(),
+                lock_script: own_address.lock_script(),
+            },
+        };
+        let receiver_data_one_to_other = UtxoReceiverData {
+            pubscript: vec![].into(),
+            pubscript_input: vec![],
+            receiver_privacy_digest: own_address.privacy_digest,
+            sender_randomness: premine_receiver_global_state
+                .wallet_state
+                .wallet_secret
+                .generate_sender_randomness(
+                    genesis_block.header.height,
+                    own_address.privacy_digest,
+                ),
+            utxo: Utxo {
+                coins: Into::<Amount>::into(1).to_native_coins(),
+                lock_script: own_address.lock_script(),
+            },
+        };
+        let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
+        let valid_tx = premine_receiver_global_state
+            .create_transaction(receiver_data_to_other.clone(), Into::<Amount>::into(2))
+            .await
+            .unwrap();
 
-        // Add one output to the block's transaction
-        let output_utxo_0: Utxo = Utxo::new(
-            Amount::one(),
-            non_premine_wallet_state.wallet_secret.get_public_key(),
-        );
-        add_output_to_block(&mut block_1, output_utxo_0);
+        block_1.accumulate_transaction(valid_tx);
 
-        // Add three more outputs, two of them to self
-        let output_utxo_1: Utxo = Utxo::new(
-            Amount::one() + Amount::one(),
-            non_premine_wallet_state.wallet_secret.get_public_key(),
-        );
-        add_output_to_block(&mut block_1, output_utxo_1);
-        let output_utxo_2: Utxo = Utxo::new(
-            Amount::one() + Amount::one() + Amount::one(),
-            premine_wallet.get_public_key(),
-        );
-        add_output_to_block(&mut block_1, output_utxo_2);
-        let output_utxo_3: Utxo = Utxo::new(
-            Amount::one() + Amount::one() + Amount::one() + Amount::one() + Amount::one(),
-            non_premine_wallet_state.wallet_secret.get_public_key(),
-        );
-        add_output_to_block(&mut block_1, output_utxo_3);
-
-        // Sign the transaction with the premine-wallet (since it owns the single input into
-        // the block), and verify its validity.
-        block_1.body.transaction.sign(&premine_wallet);
+        // Verify the validity of the merged transaction and block
         assert!(block_1.is_valid_for_devnet(&genesis_block));
 
         // Update wallet state with block_1
-        let mut monitored_utxos = get_monitored_utxos(&non_premine_wallet_state).await;
+        let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert!(
             monitored_utxos.is_empty(),
             "List of monitored UTXOs must be empty prior to updating wallet state"
         );
-        non_premine_wallet_state.update_wallet_state_with_new_block(
+
+        // Expect the UTXO outputs
+        for receive_data in receiver_data_to_other {
+            own_wallet_state
+                .expected_utxos
+                .write()
+                .unwrap()
+                .add_expected_utxo(
+                    receive_data.utxo,
+                    receive_data.sender_randomness,
+                    own_spending_key.privacy_preimage,
+                    UtxoNotifier::Cli,
+                )
+                .unwrap();
+        }
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_1,
-            &mut non_premine_wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
+        add_block(&premine_receiver_global_state, block_1.clone())
+            .await
+            .unwrap();
+        premine_receiver_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_1,
+                &mut premine_receiver_global_state
+                    .wallet_state
+                    .wallet_db
+                    .lock()
+                    .await,
+            )?;
+        assert_eq!(
+            preminers_original_balance
+                .checked_sub(&Into::<Amount>::into(15))
+                .unwrap(),
+            premine_receiver_global_state
+                .wallet_state
+                .get_balance()
+                .await,
+            "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
+        );
 
         // Verify that update added 4 UTXOs to list of monitored transactions:
         // three as regular outputs, and one as coinbase UTXO
-        monitored_utxos = get_monitored_utxos(&non_premine_wallet_state).await;
+        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert_eq!(
-            4,
+            2,
             monitored_utxos.len(),
             "List of monitored UTXOs have length 4 after updating wallet state"
         );
@@ -688,24 +823,45 @@ mod wallet_tests {
         let mut next_block = block_1.clone();
         for _ in 0..17 {
             let previous_block = next_block;
-            next_block = make_mock_block(
-                &previous_block,
-                None,
-                non_premine_wallet_state.wallet_secret.get_public_key(),
-            );
-            non_premine_wallet_state.update_wallet_state_with_new_block(
+            let ret = make_mock_block(&previous_block, None, own_address);
+            next_block = ret.0;
+            own_wallet_state
+                .expected_utxos
+                .write()
+                .unwrap()
+                .add_expected_utxo(
+                    ret.1,
+                    ret.2,
+                    own_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                )
+                .unwrap();
+            own_wallet_state.update_wallet_state_with_new_block(
                 &next_block,
-                &mut non_premine_wallet_state.wallet_db.lock().await,
+                &mut own_wallet_state.wallet_db.lock().await,
             )?;
+            add_block(&premine_receiver_global_state, block_1.clone())
+                .await
+                .unwrap();
+            premine_receiver_global_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &next_block,
+                    &mut premine_receiver_global_state
+                        .wallet_state
+                        .wallet_db
+                        .lock()
+                        .await,
+                )?;
         }
 
         let block_18 = next_block;
-        monitored_utxos = get_monitored_utxos(&non_premine_wallet_state).await;
+        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert_eq!(
-            4 + 17,
-            monitored_utxos.len(),
-            "List of monitored UTXOs have length 21 after updating wallet state and mining 17 blocks"
-        );
+                2 + 17,
+                monitored_utxos.len(),
+                "List of monitored UTXOs have length 19 after updating wallet state and mining 17 blocks"
+            );
         for monitored_utxo in monitored_utxos {
             assert!(
                 block_18.body.next_mutator_set_accumulator.verify(
@@ -727,15 +883,13 @@ mod wallet_tests {
 
         // Check that `WalletStatus` is returned correctly
         let wallet_status = {
-            let mut wallet_db_lock = non_premine_wallet_state.wallet_db.lock().await;
-            let wrapped_block = Arc::new(Mutex::new(block_18.clone()));
-            let block_lock = wrapped_block.lock().await;
-            non_premine_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
+            let mut wallet_db_lock = own_wallet_state.wallet_db.lock().await;
+            own_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, &block_18)
         };
         assert_eq!(
-            21,
+            19,
             wallet_status.synced_unspent.len(),
-            "Wallet must have 20 synced, unspent UTXOs"
+            "Wallet must have 19 synced, unspent UTXOs"
         );
         assert!(
             wallet_status.synced_spent.is_empty(),
@@ -751,21 +905,42 @@ mod wallet_tests {
         );
 
         // verify that membership proofs are valid after forks
-        let block_2_b =
-            make_mock_block(&block_1, Some(100.into()), premine_wallet.get_public_key());
-        non_premine_wallet_state.update_wallet_state_with_new_block(
+        let premine_wallet_spending_key = premine_receiver_global_state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let (block_2_b, _, _) = make_mock_block(
+            &block_1,
+            Some(100.into()),
+            premine_wallet_spending_key.to_address(),
+        );
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_2_b,
-            &mut non_premine_wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
-        let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
+        add_block(&premine_receiver_global_state, block_2_b.clone())
+            .await
+            .unwrap();
+        premine_receiver_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_2_b,
+                &mut premine_receiver_global_state
+                    .wallet_state
+                    .wallet_db
+                    .lock()
+                    .await,
+            )
+            .unwrap();
+        let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.is_synced_to(&block_2_b.hash))
             .collect();
         assert_eq!(
-            4,
+            2,
             monitored_utxos_at_2b.len(),
-            "List of monitored UTXOs have length 4 after updating wallet state"
+            "List of synced monitored UTXOs have length 2 after updating wallet state"
         );
 
         // Verify that all monitored UTXOs (with synced MPs) have valid membership proofs
@@ -783,21 +958,24 @@ mod wallet_tests {
 
         // Fork back again to the long chain and verify that the membership proofs
         // all work again
-        let block_19 =
-            make_mock_block(&block_18, Some(100.into()), premine_wallet.get_public_key());
-        non_premine_wallet_state.update_wallet_state_with_new_block(
+        let (block_19, _, _) = make_mock_block(
+            &block_18,
+            Some(100.into()),
+            premine_wallet_spending_key.to_address(),
+        );
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_19,
-            &mut non_premine_wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
-        let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
+        let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|monitored_utxo| monitored_utxo.is_synced_to(&block_19.hash))
             .collect();
         assert_eq!(
-            4 + 17,
+            2 + 17,
             monitored_utxos_block_19.len(),
-            "List of monitored UTXOs have length 21 after returning to good fork"
+            "List of monitored UTXOs have length 19 after returning to good fork"
         );
 
         // Verify that all monitored UTXOs have valid membership proofs
@@ -815,49 +993,69 @@ mod wallet_tests {
 
         // Fork back to the B-chain with `block_3b` which contains two outputs for `own_wallet`,
         // one coinbase UTXO and one other UTXO
-        let mut block_3_b = make_mock_block(
-            &block_2_b,
-            Some(100.into()),
-            non_premine_wallet_state.wallet_secret.get_public_key(),
-        );
+        let (mut block_3_b, cb_utxo, cb_sender_randomness) =
+            make_mock_block(&block_2_b, Some(100.into()), own_address);
 
-        let consumed_utxo_1 = monitored_utxos_at_2b[0].utxo;
-        let consumed_utxo_1_mp = monitored_utxos_at_2b[0]
-            .get_membership_proof_for_block(&block_2_b.hash)
+        let receiver_data_six = UtxoReceiverData {
+            pubscript: vec![].into(),
+            pubscript_input: vec![],
+            receiver_privacy_digest: own_address.privacy_digest,
+            utxo: Utxo {
+                coins: Into::<Amount>::into(6).to_native_coins(),
+                lock_script: own_address.lock_script(),
+            },
+            sender_randomness: random(),
+        };
+        let tx_from_preminer = premine_receiver_global_state
+            .create_transaction(vec![receiver_data_six.clone()], Into::<Amount>::into(4))
+            .await
             .unwrap();
-        add_unsigned_input_to_block(&mut block_3_b, consumed_utxo_1, consumed_utxo_1_mp.clone());
-        let forked_utxo: Utxo = Utxo::new(
-            Amount::from(6u32),
-            non_premine_wallet_state.wallet_secret.get_public_key(),
-        );
-        add_output_to_block(&mut block_3_b, forked_utxo);
-        block_3_b
-            .body
-            .transaction
-            .sign(&non_premine_wallet_state.wallet_secret);
+        block_3_b.accumulate_transaction(tx_from_preminer);
         assert!(block_3_b.is_valid_for_devnet(&block_2_b));
-        non_premine_wallet_state.update_wallet_state_with_new_block(
+        own_wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                cb_utxo,
+                cb_sender_randomness,
+                own_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            )
+            .unwrap();
+        own_wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                receiver_data_six.utxo,
+                receiver_data_six.sender_randomness,
+                own_spending_key.privacy_preimage,
+                UtxoNotifier::Cli,
+            )
+            .unwrap();
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_3_b,
-            &mut non_premine_wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
 
-        let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
+        let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.is_synced_to(&block_3_b.hash))
             .collect();
         assert_eq!(
-            4 + 2,
+            4,
             monitored_utxos_3b.len(),
-            "List of monitored and unspent UTXOs have length 6 after receiving two"
+            "List of monitored and unspent UTXOs have length 4 after receiving two"
         );
         assert_eq!(
-            1,
+            0,
             monitored_utxos_3b
                 .iter()
                 .filter(|x| x.spent_in_block.is_some())
                 .count(),
-            "One monitored UTXO must be marked as spent"
+            "Zero monitored UTXO must be marked as spent"
         );
 
         // Verify that all unspent monitored UTXOs have valid membership proofs
@@ -874,38 +1072,28 @@ mod wallet_tests {
             )
         }
 
-        // Then fork back to A-chain which contains the same output to `own_wallet`
-        let mut block_20 = make_mock_block(
+        // Then fork back to A-chain
+        let (block_20, _, _) = make_mock_block(
             &block_19,
             Some(100.into()),
-            non_premine_wallet_state.wallet_secret.get_public_key(),
+            premine_wallet_spending_key.to_address(),
         );
-        let consumed_utxo_2 = monitored_utxos_block_19[0].utxo;
-        let consumed_utxo_2_mp = monitored_utxos_block_19[0]
-            .get_membership_proof_for_block(&block_19.hash)
-            .unwrap();
-        add_unsigned_input_to_block(&mut block_20, consumed_utxo_2, consumed_utxo_2_mp.clone());
-        add_output_to_block(&mut block_20, forked_utxo);
-        block_20
-            .body
-            .transaction
-            .sign(&non_premine_wallet_state.wallet_secret);
-        non_premine_wallet_state.update_wallet_state_with_new_block(
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_20,
-            &mut non_premine_wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
 
         // Verify that we have two membership proofs of `forked_utxo`: one matching block20 and one matching block_3b
-        let monitored_utxos_20: Vec<_> = get_monitored_utxos(&non_premine_wallet_state)
+        let monitored_utxos_20: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
             .filter(|x| x.is_synced_to(&block_20.hash))
             .collect();
         assert_eq!(
-            4 + 17 + 2, // Two more than after block19
-            monitored_utxos_20.len(),
-            "List of monitored UTXOs must be two higher than after block 19 after returning to bad fork"
-        );
+                19,
+                monitored_utxos_20.len(),
+                "List of monitored UTXOs must be two higher than after block 19 after returning to bad fork"
+            );
         for monitored_utxo in monitored_utxos_20.iter() {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
@@ -919,71 +1107,39 @@ mod wallet_tests {
             )
         }
 
-        // Verify that we only have *one* entry for `forked_utxo`
-        assert_eq!(
-            1,
-            monitored_utxos_20
-                .iter()
-                .filter(|x| Hash::hash(&x.utxo) == Hash::hash(&forked_utxo))
-                .count()
-        );
-
-        // Verify that we have a membership proof for the "migrated" transaction.
-        let forked_utxo_digest = Hash::hash(&forked_utxo);
-        let forked_utxo_info: MonitoredUtxo = monitored_utxos_20
-            .into_iter()
-            .find(|monitored_utxo| Hash::hash(&monitored_utxo.utxo) == forked_utxo_digest)
-            .unwrap();
-        assert!(
-            forked_utxo_info
-                .get_membership_proof_for_block(&block_20.hash)
-                .is_some(),
-            "Wallet state must contain membership proof for current block"
-        );
-
         Ok(())
     }
 
     #[tokio::test]
-    async fn new_random_wallet_base_test() {
-        let random_wallet = WalletSecret::new(generate_secret_key());
-        let wallet_state = get_mock_wallet_state(Some(random_wallet)).await;
-        let pk = wallet_state.wallet_secret.get_public_key();
-        let msg_vec: Vec<BFieldElement> = wallet_state.wallet_secret.secret_seed.values().to_vec();
-        let digest: Digest = Hash::hash_varlen(&msg_vec);
-        let signature = wallet_state.wallet_secret.sign_digest(digest);
-        let msg_bytes: [u8; Digest::BYTES] = digest.into();
-        let msg = secp256k1::Message::from_slice(&msg_bytes[..DEVNET_MSG_DIGEST_SIZE_IN_BYTES])
-            .expect("a byte slice that is DEVNET_MSG_DIGEST_SIZE_IN_BYTES long");
-        assert!(
-            signature.verify(&msg, &pk).is_ok(),
-            "DEVNET signature must verify"
-        );
-
-        let signature_alt = wallet_state.wallet_secret.sign_digest(digest);
-        assert!(
-            signature_alt.verify(&msg, &pk).is_ok(),
-            "DEVNET signature must verify"
-        );
+    async fn basic_wallet_secret_functionality_test() {
+        let random_wallet_secret = WalletSecret::new(generate_secret_key());
+        let spending_key = random_wallet_secret.nth_generation_spending_key(0);
+        let _address = spending_key.to_address();
+        let _sender_randomness = random_wallet_secret
+            .generate_sender_randomness(BFieldElement::new(10).into(), random());
     }
 
     #[test]
-    fn signature_secret_and_commitment_p_randomness_secret_are_different() {
+    fn master_seed_is_not_sender_randomness() {
         let secret = generate_secret_key();
         let wallet = WalletSecret::new(secret);
         assert_ne!(
-            wallet.get_commitment_randomness_seed(),
-            wallet.get_signing_key()
+            wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
+            secret
         );
     }
 
     #[test]
     fn get_authority_spending_public_key() {
         // Helper function/test to print the public key associated with the authority signatures
-        let _authority_wallet = WalletSecret::devnet_authority_wallet();
-        // println!(
-        //     "_authority_wallet pub key: {}",
-        //     _authority_wallet.get_public_key()
-        // );
+        let authority_wallet = WalletSecret::devnet_authority_wallet();
+        println!(
+            "_authority_wallet pub key: {}",
+            authority_wallet
+                .nth_generation_spending_key(0)
+                .to_address()
+                .to_bech32m(Network::Main)
+                .unwrap()
+        );
     }
 }

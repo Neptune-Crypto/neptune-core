@@ -1,16 +1,17 @@
 use anyhow::Result;
 use clap::Parser;
 
+use neptune_core::config_models::network::Network;
+use neptune_core::models::blockchain::address::generation_address;
 use neptune_core::models::blockchain::transaction::amount::Amount;
 use num_bigint::BigUint;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::rpc_server::RPCClient;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 
 #[derive(Debug, Parser)]
 enum Command {
@@ -35,7 +36,7 @@ enum Command {
     Shutdown,
     Balance,
     WalletStatus,
-    GetPublicKey,
+    GetReceivingAddress,
     MempoolTxCount,
     MempoolSize,
 }
@@ -48,6 +49,8 @@ struct Config {
     server_addr: SocketAddr,
     #[clap(subcommand)]
     command: Command,
+    #[structopt(long, short, default_value = "main")]
+    pub network: Network,
 }
 
 #[tokio::main]
@@ -102,10 +105,11 @@ async fn main() -> Result<()> {
             fee,
         } => {
             // Parse on client
-            let address = secp256k1::PublicKey::from_str(&address)?;
+            let receiving_address =
+                generation_address::ReceivingAddress::from_bech32m(address.clone(), args.network)?;
 
             client
-                .send(context::current(), amount, address, fee)
+                .send(context::current(), amount, receiving_address, fee)
                 .await?;
             println!("Send-command issues. Recipient: {address}; amount: {amount}");
         }
@@ -125,9 +129,10 @@ async fn main() -> Result<()> {
             println!("{}", wallet_status)
         }
 
-        Command::GetPublicKey => {
-            let pub_key: secp256k1::PublicKey = client.get_public_key(context::current()).await?;
-            println!("{}", pub_key)
+        Command::GetReceivingAddress => {
+            let rec_addr: generation_address::ReceivingAddress =
+                client.get_receiving_address(context::current()).await?;
+            println!("{}", rec_addr.to_bech32m(args.network).unwrap())
         }
 
         Command::MempoolTxCount => {

@@ -23,7 +23,7 @@ pub mod dashboard_src;
 
 #[derive(Debug, Parser, Clone)]
 #[clap(name = "neptune-dashboard", about = "Terminal user interface")]
-struct Config {
+pub struct Config {
     /// Sets the server address to connect to.
     #[clap(long, default_value = "9799", value_name = "PORT")]
     port: u16,
@@ -44,18 +44,28 @@ async fn main() -> Result<()> {
     };
     let client = RPCClient::new(client::Config::default(), transport).spawn();
 
-    // Block height functions as our ping endpoint
-    let ping = client.block_height(context::current()).await;
-    match ping {
-        Ok(_pong) => {}
+    // Read what network the client is running and ensure that client is up and running
+    let network = match client.get_network(context::current()).await {
+        Ok(nw) => nw,
         Err(err) => {
             eprintln!("{err}");
             bail!("Could not ping neptune-core. Do configurations match?");
         }
-    }
+    };
+
+    let listen_addr_for_peers = match client
+        .get_listen_address_for_peers(context::current())
+        .await
+    {
+        Ok(la) => la,
+        Err(err) => {
+            eprintln!("{err}");
+            bail!("Could not get listen address from client.");
+        }
+    };
 
     // run app until quit
-    let res = DashboardApp::run(client).await;
+    let res = DashboardApp::run(client, network, listen_addr_for_peers).await;
 
     match res {
         Err(err) => {

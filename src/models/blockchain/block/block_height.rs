@@ -7,7 +7,7 @@ use std::{
 };
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct BlockHeight(BFieldElement);
 
 // Assuming a block time of 10 minutes, and a halving every three years,
@@ -29,6 +29,10 @@ impl BlockHeight {
 
     pub fn genesis() -> Self {
         Self(BFieldElement::zero())
+    }
+
+    pub fn is_genesis(&self) -> bool {
+        self.0.is_zero()
     }
 }
 
@@ -87,5 +91,18 @@ impl PartialOrd for BlockHeight {
 impl Display for BlockHeight {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod block_height_tests {
+    use super::*;
+    use tracing_test::traced_test;
+
+    #[traced_test]
+    #[tokio::test]
+    async fn genesis_test() {
+        assert!(BlockHeight::genesis().is_genesis());
+        assert!(!BlockHeight::genesis().next().is_genesis());
     }
 }

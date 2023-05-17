@@ -1,14 +1,14 @@
+use itertools::Itertools;
 use num_traits::{One, Zero};
-use secp256k1::ecdsa;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::{amount::u32s::U32s, shared_math::rescue_prime_digest::Digest};
+use twenty_first::{amount::u32s::U32s, shared_math::digest::Digest};
 
 pub mod block_body;
 pub mod block_header;
@@ -22,9 +22,12 @@ use self::block_height::BlockHeight;
 use self::mutator_set_update::MutatorSetUpdate;
 use self::transfer_block::TransferBlock;
 use super::digest::ordered_digest::OrderedDigest;
+use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::{amount::Amount, Transaction};
+use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::shared::Hash;
+use crate::models::state::wallet::WalletSecret;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
@@ -67,42 +70,45 @@ impl Block {
         let empty_mutator_set = MutatorSetAccumulator::default();
         let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
-        // This is just the UNIX timestamp when this code was written
-        let timestamp: BFieldElement = BFieldElement::new(1655916990u64);
-        let authority_proof: Option<ecdsa::Signature> = None;
+
+        // This is the UNIX timestamp in ms when this code was written the 1st time
+        let timestamp: BFieldElement = BFieldElement::new(1655916990000u64);
 
         let mut genesis_coinbase_tx = Transaction {
-            inputs: vec![],
-            outputs: vec![],
-            public_scripts: vec![],
-            fee: 0u32.into(),
-            timestamp,
-            authority_proof,
+            kernel: TransactionKernel {
+                inputs: vec![],
+                outputs: vec![],
+                fee: 0u32.into(),
+                timestamp,
+                pubscript_hashes_and_inputs: vec![],
+            },
+            witness: super::transaction::Witness::Faith,
         };
 
-        for premine_utxo in Self::premine_utxos() {
-            // A commitment to the pre-mine UTXO
-            let utxo_commitment = Hash::hash(&premine_utxo);
+        for (receiving_address, amount) in Self::premine_distribution() {
+            // generate utxo
+            let utxo = Utxo::new_native_coin(receiving_address.lock_script(), amount);
+            let utxo_digest = Hash::hash(&utxo);
 
-            // This isn't random.
+            // generate "randomness" for mutator set commitment
+            // Sender randomness cannot be random because there is
+            // no sender.
             let bad_randomness = Digest::default();
+            let receiver_digest = receiving_address.privacy_digest;
 
             // Add pre-mine UTXO to MutatorSet
-            let addition_record = genesis_mutator_set.commit(&utxo_commitment, &bad_randomness);
-            ms_update.additions.push(addition_record.clone());
+            let addition_record = commit::<Hash>(&utxo_digest, &bad_randomness, &receiver_digest);
+            ms_update.additions.push(addition_record);
             genesis_mutator_set.add(&addition_record);
 
             // Add pre-mine UTXO + commitment to coinbase transaction
-            genesis_coinbase_tx
-                .outputs
-                .push((premine_utxo, bad_randomness))
+            genesis_coinbase_tx.kernel.outputs.push(addition_record)
         }
 
         let body: BlockBody = BlockBody {
             transaction: genesis_coinbase_tx,
             next_mutator_set_accumulator: genesis_mutator_set.clone(),
             previous_mutator_set_accumulator: empty_mutator_set,
-            mutator_set_update: ms_update,
             stark_proof: vec![],
         };
 
@@ -128,14 +134,12 @@ impl Block {
         Self::new(header, body)
     }
 
-    pub fn premine_utxos() -> Vec<Utxo> {
+    pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, Amount)> {
         // The premine UTXOs can be hardcoded here.
-        // let devnet_authority_wallet = Wallet::devnet_authority_wallet();
-        vec![Utxo::new_from_hex(
-            20000.into(),
-            "02b64811839de445c7715368051d4006aa01f03107444bd0c2f551089f80fe1f1b",
-            // &devnet_authority_wallet.get_public_key().to_string(),
-        )]
+        let authority_wallet = WalletSecret::devnet_authority_wallet();
+        let authority_receiving_address =
+            authority_wallet.nth_generation_spending_key(0).to_address();
+        vec![(authority_receiving_address, 20000.into())]
     }
 
     pub fn new(header: BlockHeader, body: BlockBody) -> Self {
@@ -143,24 +147,16 @@ impl Block {
         Self { hash, header, body }
     }
 
-    /// Merge a transaction into this block's transaction using the authority signature on the transaction
-    /// Mutator set data must be valid in all inputs.
-    pub fn authority_merge_transaction(&mut self, transaction: Transaction) {
+    /// Merge a transaction into this block's transaction.
+    /// The mutator set data must be valid in all inputs.
+    pub fn accumulate_transaction(&mut self, transaction: Transaction) {
+        // merge
         let new_transaction = self.body.transaction.clone().merge_with(transaction);
 
-        let mut additions = Vec::with_capacity(new_transaction.outputs.len());
-        let mut removals = Vec::with_capacity(new_transaction.inputs.len());
+        // accumulate
+        let additions = new_transaction.kernel.outputs.clone();
+        let removals = new_transaction.kernel.inputs.clone();
         let mut next_mutator_set_accumulator = self.body.previous_mutator_set_accumulator.clone();
-
-        for (output_utxo, randomness) in new_transaction.outputs.iter() {
-            let addition_record =
-                next_mutator_set_accumulator.commit(&Hash::hash(output_utxo), randomness);
-            additions.push(addition_record);
-        }
-
-        for devnet_input in new_transaction.inputs.iter() {
-            removals.push(devnet_input.removal_record.clone());
-        }
 
         let mutator_set_update = MutatorSetUpdate::new(removals, additions);
 
@@ -173,7 +169,6 @@ impl Block {
             transaction: new_transaction,
             next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
             previous_mutator_set_accumulator: self.body.previous_mutator_set_accumulator.clone(),
-            mutator_set_update,
             stark_proof: vec![],
         };
 
@@ -181,7 +176,9 @@ impl Block {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Got bad time timestamp in mining process")
-                .as_secs(),
+                .as_millis()
+                .try_into()
+                .expect("Must call this function before 584 million years from genesis."),
         );
 
         let block_header = BlockHeader {
@@ -204,14 +201,6 @@ impl Block {
         self.header = block_header;
     }
 
-    fn count_outputs(&self) -> usize {
-        self.body.transaction.outputs.len()
-    }
-
-    fn count_inputs(&self) -> usize {
-        self.body.transaction.inputs.len()
-    }
-
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
@@ -231,10 +220,7 @@ impl Block {
         // (with coinbase UTXO flag set)
         //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
         //   b) Verify that MS removal record is valid, done against `previous_mutator_set_accumulator`,
-        //   c) verify that all transactions are represented in mutator_set_update
-        //     i) Verify that all input UTXOs are present in `removals`
-        //     ii) Verify that all output UTXOs are present in `additions`
-        //     iii) That there are no entries in `mutator_set_update` not present in a transaction.
+        //   c) Verify that all removal records have unique index sets
         //   d) verify that adding `mutator_set_update` to `previous_mutator_set_accumulator`
         //      gives `next_mutator_set_accumulator`,
         //   e) transaction timestamp <= block timestamp
@@ -260,65 +246,48 @@ impl Block {
             return false;
         }
 
-        for (i, input) in block_copy.body.transaction.inputs.iter().enumerate() {
-            // 1.a) Verify validity of membership proofs
-            if !block_copy.body.previous_mutator_set_accumulator.verify(
-                &Hash::hash(&input.utxo),
-                &input.membership_proof.clone().into(),
-            ) {
-                warn!("Invalid membership proof found in block for input {}", i);
-                return false;
-            }
-        }
-
         // 1.b) Verify validity of removal records: That their MMR MPs match the SWBF, and
-        // that at least one of their bits is not set yet.
-        // TODO
-
-        // 1.c) Verify that transactions and mutator_set_update agree
-        if block_copy.count_inputs() != block_copy.body.mutator_set_update.removals.len() {
-            warn!("Bad removal record count");
-            return false;
-        }
-
-        if block_copy.count_outputs() != block_copy.body.mutator_set_update.additions.len() {
-            warn!("Bad addition record count");
-            return false;
-        }
-
-        // Go over all input UTXOs and verify that the removal record is found at the same index
-        // in the `mutator_set_update` data structure
-        let mut i = 0;
-        for input in block_copy.body.transaction.inputs.iter() {
-            if input.removal_record != block_copy.body.mutator_set_update.removals[i] {
-                warn!("Invalid removal record found in block");
-                return false;
-            }
-            i += 1;
-        }
-
-        // Go over all output UTXOs and verify that the addition record is found at the same index
-        // in the `mutator_set_update` data structure
-        i = 0;
-        for (utxo, randomness) in block_copy.body.transaction.outputs.iter() {
-            let expected_commitment = Hash::hash_pair(&Hash::hash(utxo), &randomness.to_owned());
-            if block_copy.body.mutator_set_update.additions[i].canonical_commitment
-                != expected_commitment
+        // that at least one of their listed indices is absent.
+        for removal_record in block_copy.body.transaction.kernel.inputs.iter() {
+            if !block_copy
+                .body
+                .previous_mutator_set_accumulator
+                .kernel
+                .can_remove(removal_record)
             {
-                warn!("Bad commitment found in addition record");
+                warn!("Removal record cannot be removed from mutator set");
                 return false;
             }
-            i += 1;
+        }
+
+        // 1.c) Verify that the removal records do not contain duplicate `AbsoluteIndexSet`s
+        let mut absolute_index_sets = block_copy
+            .body
+            .transaction
+            .kernel
+            .inputs
+            .iter()
+            .map(|removal_record| removal_record.absolute_indices.to_vec())
+            .collect_vec();
+        absolute_index_sets.sort();
+        absolute_index_sets.dedup();
+        if absolute_index_sets.len() != block_copy.body.transaction.kernel.inputs.len() {
+            warn!("Removal records contain duplicates");
+            return false;
         }
 
         // 1.d) Verify that the two mutator sets, previous and current, are
         // consistent with the transactions.
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
+        let mutator_set_update = MutatorSetUpdate::new(
+            block_copy.body.transaction.kernel.inputs.clone(),
+            block_copy.body.transaction.kernel.outputs.clone(),
+        );
         let mut ms = block_copy.body.previous_mutator_set_accumulator.clone();
-        let ms_update_result = block_copy.body.mutator_set_update.apply(&mut ms);
+        let ms_update_result = mutator_set_update.apply(&mut ms);
         match ms_update_result {
-            Ok(_) => (),
+            Ok(()) => (),
             Err(err) => {
                 warn!("Failed to apply mutator set update: {}", err);
                 return false;
@@ -343,18 +312,16 @@ impl Block {
         }
 
         // 1.e) verify that the transaction timestamp is less than or equal to the block's timestamp.
-        if block_copy.body.transaction.timestamp.value() > block_copy.header.timestamp.value() {
+        if block_copy.body.transaction.kernel.timestamp.value()
+            > block_copy.header.timestamp.value()
+        {
             warn!("Transaction with invalid timestamp found");
             return false;
         }
 
-        // 1.f) Verify transaction
+        // 1.f) Verify transaction, but without relating it to the blockchain tip (that was done above).
         let miner_reward: Amount = Self::get_mining_reward(block_copy.header.height);
-        if !block_copy
-            .body
-            .transaction
-            .is_valid_for_devnet(Some(miner_reward))
-        {
+        if !block_copy.body.transaction.is_valid(Some(miner_reward)) {
             warn!("Invalid transaction found in block");
             return false;
         }
@@ -410,43 +377,51 @@ impl Block {
 mod block_tests {
     use crate::{
         config_models::network::Network,
-        models::state::wallet::{self, WalletSecret},
+        models::{blockchain::transaction::PubScript, state::UtxoReceiverData},
         tests::shared::{get_mock_global_state, make_mock_block},
     };
 
     use super::*;
 
-    use anyhow::Result;
+    use rand::random;
     use tracing_test::traced_test;
 
     #[traced_test]
     #[tokio::test]
-    async fn merge_transaction_test() -> Result<()> {
+    async fn merge_transaction_test() {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let spending_key = global_state
+            .wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let address = spending_key.to_address();
+        let other_wallet_secret = WalletSecret::new(random());
+        let other_address = other_wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address();
         let genesis_block = Block::genesis_block();
-        let mut block_1 = make_mock_block(
-            &genesis_block,
-            None,
-            global_state.wallet_state.wallet_secret.get_public_key(),
-        );
+        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address);
         assert!(
             block_1.is_valid_for_devnet(&genesis_block),
             "Block 1 must be valid with only coinbase output"
         );
 
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
-        let other_wallet = WalletSecret::new(wallet::generate_secret_key());
-        let new_utxo = Utxo {
-            amount: 5.into(),
-            public_key: other_wallet.get_public_key(),
+        let new_utxo = Utxo::new_native_coin(other_address.lock_script(), 10.into());
+        let reciever_data = UtxoReceiverData {
+            pubscript: PubScript(vec![]),
+            pubscript_input: vec![],
+            receiver_privacy_digest: other_address.privacy_digest,
+            sender_randomness: random(),
+            utxo: new_utxo,
         };
         let new_tx = global_state
-            .create_transaction(vec![new_utxo], 1.into())
+            .create_transaction(vec![reciever_data], 1.into())
             .await
             .unwrap();
-        block_1.authority_merge_transaction(new_tx);
+        block_1.accumulate_transaction(new_tx);
         assert!(
             block_1.is_valid_for_devnet(&genesis_block),
             "Block 1 must be valid after adding a transaction"
@@ -455,15 +430,13 @@ mod block_tests {
         // Sanity checks
         assert_eq!(
             3,
-            block_1.body.transaction.outputs.len(),
+            block_1.body.transaction.kernel.outputs.len(),
             "New block must have three outputs: coinbase, transaction, and change"
         );
         assert_eq!(
             1,
-            block_1.body.transaction.inputs.len(),
+            block_1.body.transaction.kernel.inputs.len(),
             "New block must have one input: spending of genesis UTXO"
         );
-
-        Ok(())
     }
 }

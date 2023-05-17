@@ -10,7 +10,7 @@ use super::{
     screen::Screen,
 };
 use crossterm::event::{Event, KeyCode};
-use neptune_core::rpc_server::RPCClient;
+use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
 use tarpc::context;
 use tui::{
     layout::{Alignment, Margin},
@@ -35,10 +35,11 @@ pub struct ReceiveScreen {
     server: Arc<RPCClient>,
     generating: Arc<Mutex<bool>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
+    network: Network,
 }
 
 impl ReceiveScreen {
-    pub fn new(rpc_server: Arc<RPCClient>) -> Self {
+    pub fn new(rpc_server: Arc<RPCClient>, network: Network) -> Self {
         ReceiveScreen {
             active: false,
             fg: Color::Gray,
@@ -48,32 +49,42 @@ impl ReceiveScreen {
             server: rpc_server,
             generating: Arc::new(Mutex::new(false)),
             escalatable_event: Arc::new(std::sync::Mutex::new(None)),
+            network,
         }
     }
 
     fn populate_receiving_address_async(
+        &self,
         rpc_client: Arc<RPCClient>,
         data: Arc<Mutex<Option<String>>>,
     ) {
         if data.lock().unwrap().is_none() {
+            let network = self.network;
             tokio::spawn(async move {
                 // TODO: change to receive most recent wallet
-                let receiving_address =
-                    rpc_client.get_public_key(context::current()).await.unwrap();
-                *data.lock().unwrap() = Some(receiving_address.to_string());
+                let receiving_address = rpc_client
+                    .get_receiving_address(context::current())
+                    .await
+                    .unwrap();
+                *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
             });
         }
     }
 
     fn generate_new_receiving_address_async(
+        &self,
         rpc_client: Arc<RPCClient>,
         data: Arc<Mutex<Option<String>>>,
         generating: Arc<Mutex<bool>>,
     ) {
+        let network = self.network;
         tokio::spawn(async move {
             *generating.lock().unwrap() = true;
-            let receiving_address = rpc_client.get_public_key(context::current()).await.unwrap();
-            *data.lock().unwrap() = Some(receiving_address.to_string());
+            let receiving_address = rpc_client
+                .get_receiving_address(context::current())
+                .await
+                .unwrap();
+            *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
             *generating.lock().unwrap() = false;
         });
     }
@@ -87,7 +98,7 @@ impl ReceiveScreen {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
                 match key.code {
                     KeyCode::Enter => {
-                        Self::generate_new_receiving_address_async(
+                        self.generate_new_receiving_address_async(
                             self.server.clone(),
                             self.data.clone(),
                             self.generating.clone(),
@@ -116,7 +127,7 @@ impl Screen for ReceiveScreen {
         self.active = true;
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
-        Self::populate_receiving_address_async(server_arc, data_arc);
+        self.populate_receiving_address_async(server_arc, data_arc);
     }
 
     fn deactivate(&mut self) {

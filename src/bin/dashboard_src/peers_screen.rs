@@ -168,6 +168,7 @@ impl Widget for PeersScreen {
             "archival",
             "authenticated",
             "alias",
+            "last sanction",
         ];
         let matrix = self
             .data
@@ -175,9 +176,14 @@ impl Widget for PeersScreen {
             .unwrap()
             .iter()
             .map(|pi| {
+                let latest_violation: Option<String> =
+                    pi.standing.latest_sanction.map(|x| x.to_string());
+                let formatted_datetime = DateTime::<Utc>::from(pi.last_seen)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string();
                 vec![
                     pi.connected_address.to_string(),
-                    DateTime::<Utc>::from(pi.last_seen).to_string(),
+                    formatted_datetime,
                     pi.standing.standing.to_string(),
                     if pi.is_archival_node {
                         "✓".to_string()
@@ -185,7 +191,8 @@ impl Widget for PeersScreen {
                         "".to_string()
                     },
                     "✕".to_string(), // no support for authentication yet
-                    "-".to_string(),   // no support for aliases yes
+                    "-".to_string(), // no support for aliases yes
+                    latest_violation.unwrap_or_default(),
                 ]
             })
             .collect_vec();

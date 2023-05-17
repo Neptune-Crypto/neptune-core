@@ -1,59 +1,96 @@
+use crate::models::blockchain::shared::Hash;
+use get_size::GetSize;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use std::str::FromStr;
+use twenty_first::shared_math::tip5::Digest;
 
-use crate::models::blockchain::shared::Hash;
-
-use super::Amount;
+use super::amount::AmountLike;
+use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
+use super::{native_coin, Amount};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 pub const PUBLIC_KEY_LENGTH_IN_BYTES: usize = 33;
 pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Utxo {
-    pub amount: Amount,
-    pub public_key: secp256k1::PublicKey,
+    pub lock_script: LockScript,
+    pub coins: Vec<(Digest, Vec<BFieldElement>)>,
+}
+
+impl GetSize for Utxo {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        // self.lock_script.get_heap_size() + self.coins.len() * (std::mem::size_of::<Digest>())
+        let mut total = self.lock_script.get_heap_size();
+        for v in self.coins.iter() {
+            total += std::mem::size_of::<Digest>();
+            total += v.1.len() * std::mem::size_of::<BFieldElement>();
+        }
+
+        total
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
 }
 
 impl Utxo {
-    pub fn new_from_hex(amount: Amount, public_key: &str) -> Self {
+    pub fn new(lock_script: LockScript, coins: Vec<(Digest, Vec<BFieldElement>)>) -> Self {
+        Self { lock_script, coins }
+    }
+
+    pub fn new_native_coin(lock_script: LockScript, amount: Amount) -> Self {
         Self::new(
-            amount,
-            secp256k1::PublicKey::from_str(public_key).expect("public key decoded from hex string"),
+            lock_script,
+            vec![(
+                native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST,
+                amount.to_sequence(),
+            )],
         )
     }
 
-    pub fn new(amount: Amount, public_key: secp256k1::PublicKey) -> Self {
-        Self { amount, public_key }
-    }
-
-    pub fn matches_pubkey(&self, public_key: secp256k1::PublicKey) -> bool {
-        self.public_key == public_key
+    pub fn get_native_coin_amount(&self) -> Amount {
+        self.coins
+            .iter()
+            .filter(|(type_script_hash, _state)| *type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+            .map(|(_type_script_hash, state)| Amount::from_bfes(state))
+            .sum()
     }
 }
 
 impl Hashable for Utxo {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        let amount_bfes: Vec<BFieldElement> = self.amount.to_sequence();
+        let lock_script_bfes: Vec<BFieldElement> = self.lock_script.to_sequence();
 
-        let mut pk_bfes = Vec::with_capacity(PUBLIC_KEY_LENGTH_IN_BFES);
-        let pk_bfe_bytes: [u8; PUBLIC_KEY_LENGTH_IN_BYTES] = self.public_key.serialize();
-        pk_bfes.push(convert::<7>(&pk_bfe_bytes[0..7]));
-        pk_bfes.push(convert::<7>(&pk_bfe_bytes[7..14]));
-        pk_bfes.push(convert::<7>(&pk_bfe_bytes[14..21]));
-        pk_bfes.push(convert::<7>(&pk_bfe_bytes[21..28]));
-        pk_bfes.push(convert::<5>(&pk_bfe_bytes[28..33]));
+        let coins_bfes = self
+            .coins
+            .iter()
+            .flat_map(|(d, s)| {
+                [
+                    vec![BFieldElement::new(d.to_sequence().len() as u64)],
+                    d.to_sequence(),
+                    vec![BFieldElement::new(s.len() as u64)],
+                    s.clone(),
+                ]
+                .concat()
+            })
+            .collect_vec();
 
-        vec![amount_bfes, pk_bfes].concat()
+        [
+            vec![BFieldElement::new(lock_script_bfes.len() as u64)],
+            lock_script_bfes,
+            vec![BFieldElement::new(coins_bfes.len() as u64)],
+            coins_bfes,
+        ]
+        .concat()
     }
-}
-
-fn convert<const N: usize>(bytes: &[u8]) -> BFieldElement {
-    let mut u64_input: [u8; 8] = [0; 8];
-    u64_input[..N].copy_from_slice(bytes);
-    BFieldElement::new(u64::from_le_bytes(u64_input))
 }
 
 /// Make `Utxo` hashable with `StdHash` for using it in `HashMap`.
@@ -67,32 +104,94 @@ impl StdHash for Utxo {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockScript(pub Vec<BFieldElement>);
+
+impl GetSize for LockScript {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        std::mem::size_of::<BFieldElement>() * self.0.len()
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
+
+impl Hashable for LockScript {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        self.0.clone()
+    }
+}
+
+impl LockScript {
+    /// Extract the public key from a standard lockscript, and compare it
+    /// to a secret input which should be provided through `preimage`
+    pub fn mock_verify_standard(&self, preimage: Digest) -> bool {
+        // TODO: Delete this function once TVM is imported
+        if self.0.len() != 27 {
+            return false;
+        }
+
+        let elem4 = self.0[12];
+        let elem3 = self.0[14];
+        let elem2 = self.0[16];
+        let elem1 = self.0[18];
+        let elem0 = self.0[20];
+
+        let public_key = Digest::new([elem0, elem1, elem2, elem3, elem4]);
+
+        preimage.vmhash::<Hash>() == public_key
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TypeScript(pub Vec<BFieldElement>);
+
+impl Hashable for TypeScript {
+    fn to_sequence(&self) -> Vec<BFieldElement> {
+        self.0.clone()
+    }
+}
+
 #[cfg(test)]
 mod utxo_tests {
-    use tracing_test::traced_test;
 
-    use crate::tests::shared::new_random_wallet;
+    use rand::{thread_rng, Rng};
+    use tracing_test::traced_test;
+    use twenty_first::shared_math::other::random_elements;
 
     use super::*;
 
+    fn make_random_utxo() -> Utxo {
+        let mut rng = thread_rng();
+        let lock_script = LockScript(random_elements(rng.gen_range(1..20)));
+        let num_coins = rng.gen_range(0..10);
+        let mut coins = vec![];
+        for _i in 0..num_coins {
+            let type_script = TypeScript(random_elements(rng.gen_range(10..100)));
+            let state: Vec<BFieldElement> = random_elements(rng.gen_range(0..10));
+            coins.push((Hash::hash(&type_script), state));
+        }
+
+        Utxo { lock_script, coins }
+    }
+
     #[test]
     fn hash_utxo_test() {
-        let wallet = new_random_wallet();
-        let amount = Amount::from(42);
-        let public_key = wallet.get_public_key();
-        let output = Utxo { amount, public_key };
+        let output = make_random_utxo();
         let _digest = Hash::hash(&output);
     }
 
     #[traced_test]
     #[test]
     fn serialization_test() {
-        // Document how to serialize a UTXO as JSON
-        let amount: Amount = 11.into();
-        let utxo: Utxo = Utxo::new_from_hex(
-            amount,
-            "0399bb06fa556962201e1647a7c5b231af6ff6dd6d1c1a8599309caa126526422e",
-        );
-        let _serialized: String = serde_json::to_string(&utxo).unwrap();
+        let utxo = make_random_utxo();
+        let serialized: String = serde_json::to_string(&utxo).unwrap();
+        let utxo_again: Utxo = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(utxo, utxo_again);
     }
 }

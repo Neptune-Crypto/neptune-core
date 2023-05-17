@@ -1,6 +1,9 @@
 use std::{collections::VecDeque, time::Duration};
 
-use crate::{models::state::archival_state::ArchivalState, Hash};
+use crate::{
+    models::{blockchain::block::block_height::BlockHeight, state::archival_state::ArchivalState},
+    Hash,
+};
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 use twenty_first::{shared_math::tip5::Digest, util_types::storage_schema::RustyValue};
@@ -17,10 +20,10 @@ pub struct MonitoredUtxo {
     pub number_of_mps_per_utxo: usize,
 
     // hash of the block, if any, in which this UTXO was spent
-    pub spent_in_block: Option<(Digest, Duration)>,
+    pub spent_in_block: Option<(Digest, Duration, BlockHeight)>,
 
     // hash of the block, if any, in which this UTXO was confirmed
-    pub confirmed_in_block: Option<(Digest, Duration)>,
+    pub confirmed_in_block: Option<(Digest, Duration, BlockHeight)>,
 }
 
 impl MonitoredUtxo {
@@ -73,7 +76,7 @@ impl MonitoredUtxo {
         archival_state: &ArchivalState,
     ) -> bool {
         match self.confirmed_in_block {
-            Some((confirm_block, _)) => {
+            Some((confirm_block, _, _)) => {
                 let confirm_block_header = archival_state
                     .get_block_header(confirm_block)
                     .await

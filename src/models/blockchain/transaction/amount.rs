@@ -6,15 +6,20 @@ use std::{
 };
 
 use anyhow::bail;
+use get_size::GetSize;
+use itertools::Itertools;
 use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
+    amount::u32s::U32s,
+    shared_math::{b_field_element::BFieldElement, tip5::Digest},
     util_types::algebraic_hasher::Hashable,
 };
 
-pub trait AmountLike<'a>:
+use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
+
+pub trait AmountLike:
     Add
     + Sum
     + CheckedSub
@@ -28,10 +33,14 @@ pub trait AmountLike<'a>:
     + Display
     + Copy
     + Serialize
-    + Deserialize<'a>
+    + DeserializeOwned
     + From<i32>
+    + From<u32>
+    + From<u64>
     + Hashable
 {
+    fn from_bfes(bfes: &[BFieldElement]) -> Self;
+    fn scalar_mul(&self, factor: u64) -> Self;
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,6 +54,43 @@ pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq)]
 pub struct Amount(pub U32s<AMOUNT_SIZE_FOR_U32>);
 
+impl GetSize for Amount {
+    fn get_stack_size() -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn get_heap_size(&self) -> usize {
+        0
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
+}
+
+impl AmountLike for Amount {
+    fn from_bfes(bfes: &[BFieldElement]) -> Self {
+        let limbs: [u32; AMOUNT_SIZE_FOR_U32] = bfes
+            .iter()
+            .map(|b| b.value() as u32)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        Amount(U32s::new(limbs))
+    }
+
+    fn scalar_mul(&self, factor: u64) -> Self {
+        let factor_as_u32s: U32s<AMOUNT_SIZE_FOR_U32> = factor.try_into().unwrap();
+        Amount(factor_as_u32s * self.0)
+    }
+}
+
+impl Ord for Amount {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
 impl Amount {
     /// Return the element that corresponds to 1. Use in tests only.
     pub fn one() -> Amount {
@@ -55,6 +101,12 @@ impl Amount {
 
     pub fn div_two(&mut self) {
         self.0.div_two();
+    }
+
+    pub fn to_native_coins(&self) -> Vec<(Digest, Vec<BFieldElement>)> {
+        let dictionary: Vec<(Digest, Vec<BFieldElement>)> =
+            vec![(NATIVE_COIN_TYPESCRIPT_DIGEST, self.to_sequence())];
+        dictionary
     }
 }
 
@@ -176,15 +228,25 @@ impl From<u32> for Amount {
     }
 }
 
+impl From<u64> for Amount {
+    fn from(value: u64) -> Self {
+        let mut limbs = [0u32; AMOUNT_SIZE_FOR_U32];
+        limbs[0] = (value & (u32::MAX as u64)) as u32;
+        limbs[1] = (value >> 32) as u32;
+        Amount(U32s::new(limbs))
+    }
+}
+
 #[cfg(test)]
 mod amount_tests {
     use std::str::FromStr;
 
+    use get_size::GetSize;
     use itertools::Itertools;
-    use rand::{thread_rng, RngCore};
-    use twenty_first::amount::u32s::U32s;
+    use rand::{thread_rng, Rng, RngCore};
+    use twenty_first::{amount::u32s::U32s, util_types::algebraic_hasher::Hashable};
 
-    use crate::models::blockchain::transaction::amount::Amount;
+    use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
 
     use super::AMOUNT_SIZE_FOR_U32;
 
@@ -205,5 +267,66 @@ mod amount_tests {
 
             assert_eq!(amount, reconstructed_amount);
         }
+    }
+
+    #[test]
+    fn test_bfe_conversion() {
+        let mut rng = thread_rng();
+
+        for _ in 0..100 {
+            let limbs: [u32; AMOUNT_SIZE_FOR_U32] = (0..AMOUNT_SIZE_FOR_U32)
+                .map(|_| rng.next_u32())
+                .collect_vec()
+                .try_into()
+                .unwrap();
+            let amount = Amount(U32s::new(limbs));
+            let bfes = amount.to_sequence();
+            let reconstructed_amount = Amount::from_bfes(&bfes);
+
+            assert_eq!(amount, reconstructed_amount);
+        }
+    }
+
+    #[test]
+    fn from_u64_conversion_simple_test() {
+        let a: u64 = u32::MAX as u64;
+        let b: u64 = 100u64;
+        let a_amount: Amount = a.into();
+        let b_amount: Amount = b.into();
+        assert_eq!(a_amount + b_amount, (a + b).into());
+    }
+
+    #[test]
+    fn from_u64_conversion_pbt() {
+        let mut rng = thread_rng();
+        let a: u64 = rng.gen_range(0..(1 << 63));
+        let b: u64 = rng.gen_range(0..(1 << 63));
+        let a_amount: Amount = a.into();
+        let b_amount: Amount = b.into();
+        assert_eq!(a_amount + b_amount, (a + b).into());
+    }
+
+    #[test]
+    fn amount_simple_scalar_mul_test() {
+        let fourteen: Amount = 14.into();
+        let fourtytwo: Amount = 42.into();
+        assert_eq!(fourtytwo, fourteen.scalar_mul(3));
+    }
+
+    #[test]
+    fn amount_scalar_mul_pbt() {
+        let mut rng = thread_rng();
+        let a: u64 = rng.gen_range(0..u32::MAX as u64);
+        let b: u64 = rng.gen_range(0..u32::MAX as u64);
+        let prod_checked: Amount = (a * b).into();
+        let mut prod_calculated: Amount = Into::<Amount>::into(a);
+        prod_calculated = prod_calculated.scalar_mul(b);
+        assert_eq!(prod_checked, prod_calculated);
+    }
+
+    #[test]
+    fn get_size_test() {
+        let fourteen: Amount = 14.into();
+        assert_eq!(4 * 4, fourteen.get_size())
     }
 }

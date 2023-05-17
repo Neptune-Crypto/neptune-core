@@ -9,6 +9,7 @@ use crate::models::peer::{
 };
 use crate::models::state::mempool::MempoolInternal;
 use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
+use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::GlobalState;
 use anyhow::Result;
 use rand::prelude::{IteratorRandom, SliceRandom};
@@ -33,6 +34,8 @@ const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 10;
 const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
 const MP_RESYNC_INTERVAL_IN_SECS: u64 = 59;
+const UTXO_NOTIFICATION_POOL_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
+
 const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 4;
 const POTENTIAL_PEER_MAX_COUNT_AS_A_FACTOR_OF_MAX_PEERS: usize = 20;
 const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
@@ -295,16 +298,12 @@ fn stay_in_sync_mode(
 impl MainLoopHandler {
     async fn handle_miner_thread_message(&self, msg: MinerToMain) -> Result<()> {
         match msg {
-            MinerToMain::NewBlock(new_block) => {
+            MinerToMain::NewBlockFound(new_block_info) => {
                 // When receiving a block from the miner thread, we assume it is valid
                 // and we assume it is the longest chain even though we could have received
                 // a block from a peer thread before this event is triggered.
+                let new_block = new_block_info.block;
                 info!("Miner found new block: {}", new_block.header.height);
-                self.main_to_peer_broadcast_tx
-                .send(MainToPeerThread::BlockFromMiner(new_block.clone()))
-                .expect(
-                    "Peer handler broadcast channel prematurely closed. This should never happen.",
-                );
 
                 // Store block in database
                 // Acquire all locks before updating
@@ -376,6 +375,20 @@ impl MainLoopHandler {
                         .unwrap()
                         .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)?;
 
+                    // Notify wallet to expect the coinbase UTXO, as we mined this block
+                    self.global_state
+                        .wallet_state
+                        .expected_utxos
+                        .write()
+                        .unwrap()
+                        .add_expected_utxo(
+                            new_block_info.coinbase_utxo_info.utxo,
+                            new_block_info.coinbase_utxo_info.sender_randomness,
+                            new_block_info.coinbase_utxo_info.receiver_preimage,
+                            UtxoNotifier::OwnMiner,
+                        )
+                        .expect("UTXO notification from miner must be accepted");
+
                     // update wallet state with relevant UTXOs from this block
                     self.global_state
                         .wallet_state
@@ -387,7 +400,7 @@ impl MainLoopHandler {
                         .mempool
                         .update_with_block(&new_block, &mut mempool_write_lock);
 
-                    *light_state_locked = *new_block;
+                    *light_state_locked = *new_block.clone();
                 }
 
                 // Flush databases
@@ -397,6 +410,13 @@ impl MainLoopHandler {
                 // to mine the next block
                 self.main_to_miner_tx
                     .send(MainToMiner::ReadyToMineNextBlock)?;
+
+                // Share block with peers
+                self.main_to_peer_broadcast_tx
+                    .send(MainToPeerThread::Block(new_block.clone()))
+                    .expect(
+                        "Peer handler broadcast channel prematurely closed. This should never happen.",
+                    );
             }
         }
 
@@ -607,17 +627,34 @@ impl MainLoopHandler {
                     );
                 }
             }
-            PeerThreadToMain::Transaction(transaction) => {
+            PeerThreadToMain::Transaction(pt2m_transaction) => {
                 debug!(
                     "`main` received following transaction from `peer`: {:?}",
-                    transaction
+                    pt2m_transaction
                 );
 
+                if pt2m_transaction.confirmable_for_block
+                    != self
+                        .global_state
+                        .chain
+                        .light_state
+                        .latest_block
+                        .lock()
+                        .await
+                        .hash
+                {
+                    warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
+                    return Ok(());
+                }
+
                 // Insert into mempool
-                self.global_state.mempool.insert(&transaction);
+                self.global_state
+                    .mempool
+                    .insert(&pt2m_transaction.transaction);
 
                 // send notification to peers
-                let transaction_notification: TransactionNotification = transaction.into();
+                let transaction_notification: TransactionNotification =
+                    pt2m_transaction.transaction.into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(
                         transaction_notification,
@@ -836,17 +873,62 @@ impl MainLoopHandler {
         let mempool_cleanup_timer = time::sleep(mempool_cleanup_timer_interval);
         tokio::pin!(mempool_cleanup_timer);
 
+        // Set removal of stale notifications for incoming UTXOs
+        let utxo_notification_cleanup_timer_interval =
+            Duration::from_secs(UTXO_NOTIFICATION_POOL_PRUNE_INTERVAL_IN_SECS);
+        let utxo_notification_cleanup_timer = time::sleep(utxo_notification_cleanup_timer_interval);
+        tokio::pin!(utxo_notification_cleanup_timer);
+
+        // Set restoration of membership proofs to run every Q seconds
         let mp_resync_timer_interval = Duration::from_secs(MP_RESYNC_INTERVAL_IN_SECS);
         let mp_resync_timer = time::sleep(mp_resync_timer_interval);
         tokio::pin!(mp_resync_timer);
 
-        loop {
-            // Set a timer to run peer discovery process every N seconds
+        // Handle SIGTERM and SIGINT signals on Unix systems
+        #[cfg(unix)]
+        let (sigterm, sigint) = {
+            use tokio::signal::unix::{signal, SignalKind};
+            let sigterm = signal(SignalKind::terminate())?;
+            let sigint = signal(SignalKind::interrupt())?;
+            (Some(sigterm), Some(sigint))
+        };
+        #[cfg(not(unix))]
+        let (mut sigterm, mut sigint) = (None, None);
 
-            // Set a timer for synchronization handling, but only if we are in synchronization mod
+        // Spawn threads to monitor for SIGTERM and SIGINT
+        let (tx_term, mut rx_term) = tokio::sync::mpsc::channel(2);
+        if let Some(mut sigterm_stream) = sigterm {
+            tokio::spawn(async move {
+                if sigterm_stream.recv().await.is_some() {
+                    println!("Received SIGTERM");
+                    tx_term.send(()).await.unwrap();
+                }
+            });
+        }
+        let (tx_int, mut rx_int) = tokio::sync::mpsc::channel(2);
+        if let Some(mut sigint_stream) = sigint {
+            tokio::spawn(async move {
+                if sigint_stream.recv().await.is_some() {
+                    println!("Received SIGINT");
+                    tx_int.send(()).await.unwrap();
+                }
+            });
+        }
+
+        loop {
             select! {
                 Ok(()) = signal::ctrl_c() => {
                     info!("Detected Ctrl+c signal.");
+                    break;
+                }
+
+                // Monitor for SIGTERM and SIGINT
+                Some(_) = rx_term.recv() => {
+                    info!("Detected SIGTERM signal.");
+                    break;
+                }
+                Some(_) = rx_int.recv() => {
+                    info!("Detected SIGINT signal.");
                     break;
                 }
 
@@ -890,7 +972,8 @@ impl MainLoopHandler {
 
                 // Handle messages from rpc server thread
                 Some(rpc_server_message) = rpc_server_to_main_rx.recv() => {
-                    if self.handle_rpc_server_message(rpc_server_message.clone()).await? {
+                    let shutdown_after_execution = self.handle_rpc_server_message(rpc_server_message.clone()).await?;
+                    if shutdown_after_execution {
                         break
                     }
                 }
@@ -924,6 +1007,14 @@ impl MainLoopHandler {
                     mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
                 }
 
+                // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
+                _ = &mut utxo_notification_cleanup_timer => {
+                    debug!("Running UTXO notification pool cleanup job");
+                    self.global_state.wallet_state.expected_utxos.write().unwrap().prune_stale_utxo_notifications();
+
+                    utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
+                }
+
                 // Handle membership proof resynchronization
                 _ = &mut mp_resync_timer => {
                     debug!("Running Membership proof resync job");
@@ -936,6 +1027,7 @@ impl MainLoopHandler {
 
         self.graceful_shutdown().await?;
         info!("Shutdown completed.");
+
         Ok(())
     }
 
@@ -974,6 +1066,8 @@ impl MainLoopHandler {
         // Ok(())
     }
 
+    /// Handle messages from the RPC server. Returns `true` iff the client should shut down
+    /// after handling this message.
     async fn handle_rpc_server_message(&self, msg: RPCServerToMain) -> Result<bool> {
         match msg {
             RPCServerToMain::Send(transaction) => {
@@ -983,7 +1077,7 @@ impl MainLoopHandler {
                 );
 
                 // send notification to peers
-                let notification: TransactionNotification = transaction.clone().into();
+                let notification: TransactionNotification = transaction.as_ref().clone().into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(notification))?;
 

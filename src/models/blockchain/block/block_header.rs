@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use twenty_first::shared_math::rescue_prime_digest::Digest;
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::Hashable;
 
 use twenty_first::amount::u32s::U32s;
@@ -19,6 +19,7 @@ pub struct BlockHeader {
     pub prev_block_digest: Digest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
+    // number of milliseconds since unix epoch
     pub timestamp: BFieldElement,
 
     // TODO: Consider making a type for `nonce`
