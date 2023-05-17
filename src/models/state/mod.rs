@@ -83,8 +83,6 @@ impl GlobalState {
         receiver_data: Vec<UtxoReceiverData>,
         fee: Amount,
     ) -> Result<Transaction> {
-        // TODO: Spending key should probably be input to this function
-        // acquire a lock on `WalletState` to prevent it from being updated
         let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
 
         // Get the block tip as the transaction is made relative to it

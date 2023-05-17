@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 
 use neptune_core::config_models::network::Network;
-use neptune_core::models::blockchain::address::generation_address;
 use neptune_core::models::blockchain::transaction::amount::Amount;
+use neptune_core::models::state::wallet::address::generation_address;
 use num_bigint::BigUint;
 use std::net::IpAddr;
 use std::net::SocketAddr;

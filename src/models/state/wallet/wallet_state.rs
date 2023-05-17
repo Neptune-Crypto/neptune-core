@@ -641,6 +641,7 @@ impl WalletState {
         requested_amount: Amount,
         block: &Block,
     ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
+        // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
         let wallet_status: WalletStatus = self.get_wallet_status_from_lock(lock, block);

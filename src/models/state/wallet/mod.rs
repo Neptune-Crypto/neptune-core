@@ -1,3 +1,4 @@
+pub mod address;
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
 pub mod utxo_notification_pool;
@@ -15,9 +16,10 @@ use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
-use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::Hash;
+
+use self::address::generation_address;
 
 pub const WALLET_DIRECTORY: &str = "wallet";
 pub const WALLET_SECRET_FILE_NAME: &str = "wallet.dat";

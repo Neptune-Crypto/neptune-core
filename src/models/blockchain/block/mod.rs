@@ -25,8 +25,8 @@ use super::digest::ordered_digest::OrderedDigest;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::{amount::Amount, Transaction};
-use crate::models::blockchain::address::generation_address;
 use crate::models::blockchain::shared::Hash;
+use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::WalletSecret;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

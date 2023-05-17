@@ -8,7 +8,7 @@ use super::{
 use crossterm::event::{Event, KeyCode};
 use neptune_core::{
     config_models::network::Network,
-    models::blockchain::{address::generation_address, transaction::amount::Amount},
+    models::{blockchain::transaction::amount::Amount, state::wallet::address::generation_address},
     rpc_server::RPCClient,
 };
 

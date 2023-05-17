@@ -458,7 +458,6 @@ mod test_generation_addresses {
     use crate::{
         config_models::network::Network,
         models::blockchain::{
-            address::generation_address::{bfes_to_bytes, bytes_to_bfes},
             shared::Hash,
             transaction::{amount::Amount, utxo::Utxo},
         },
