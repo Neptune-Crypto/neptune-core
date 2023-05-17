@@ -13,6 +13,7 @@ use rand::thread_rng;
 use rand::Rng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use triton_opcodes::shortcuts::*;
 use twenty_first::shared_math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::{
@@ -369,27 +370,40 @@ impl ReceivingAddress {
     /// identical to `verify_unlock`.
     pub fn lock_script(&self) -> LockScript {
         // currently this script is just a placeholder
-        const DIVINE: BFieldElement = BFieldElement::new(8);
-        const HASH: BFieldElement = BFieldElement::new(48);
-        const POP: BFieldElement = BFieldElement::new(2);
-        const PUSH: BFieldElement = BFieldElement::new(1);
-        const ASSERT_VECTOR: BFieldElement = BFieldElement::new(64);
-        const READ_IO: BFieldElement = BFieldElement::new(128);
-        let mut push_digest = vec![];
-        for elem in self.spending_lock.values().iter().rev() {
-            push_digest.append(&mut vec![PUSH, *elem]);
-        }
-        let instrs = vec![
-            vec![
-                DIVINE, DIVINE, DIVINE, DIVINE, DIVINE, HASH, POP, POP, POP, POP, POP,
-            ],
-            push_digest,
-            vec![ASSERT_VECTOR],
-            vec![READ_IO, READ_IO, READ_IO, READ_IO, READ_IO],
+        // const DIVINE: BFieldElement = BFieldElement::new(8);
+        // const HASH: BFieldElement = BFieldElement::new(48);
+        // const POP: BFieldElement = BFieldElement::new(2);
+        // const PUSH: BFieldElement = BFieldElement::new(1);
+        // const ASSERT_VECTOR: BFieldElement = BFieldElement::new(64);
+        // const READ_IO: BFieldElement = BFieldElement::new(128);
+        // let mut push_digest = vec![];
+        // for elem in self.spending_lock.values().iter().rev() {
+        //     push_digest.append(&mut vec![PUSH, *elem]);
+        // }
+        // let instrs = vec![
+        //     vec![
+        //         DIVINE, DIVINE, DIVINE, DIVINE, DIVINE, HASH, POP, POP, POP, POP, POP,
+        //     ],
+        //     push_digest,
+        //     vec![ASSERT_VECTOR],
+        //     vec![READ_IO, READ_IO, READ_IO, READ_IO, READ_IO],
+        // ]
+        // .concat();
+
+        let mut instructions = vec![
+            vec![divine(); DIGEST_LENGTH],
+            vec![hash()],
+            vec![pop(); DIGEST_LENGTH],
         ]
         .concat();
+        for elem in self.spending_lock.values().iter().rev() {
+            instructions.push(push(elem.value()));
+        }
+        instructions.push(assert_vector());
+        instructions.append(&mut vec![read_io(); DIGEST_LENGTH]);
+        instructions.push(halt());
 
-        LockScript(instrs)
+        instructions.into()
     }
 
     fn get_hrp(network: Network) -> String {

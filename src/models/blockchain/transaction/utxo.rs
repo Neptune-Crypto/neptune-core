@@ -3,7 +3,10 @@ use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use twenty_first::shared_math::tip5::Digest;
+use triton_opcodes::instruction::LabelledInstruction;
+use triton_opcodes::program::Program;
+use triton_opcodes::shortcuts::{halt, read_io};
+use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 
 use super::amount::AmountLike;
 use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
@@ -104,47 +107,42 @@ impl StdHash for Utxo {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LockScript(pub Vec<BFieldElement>);
-
-impl GetSize for LockScript {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
-
-    fn get_heap_size(&self) -> usize {
-        std::mem::size_of::<BFieldElement>() * self.0.len()
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+pub struct LockScript {
+    pub program: Program,
 }
 
 impl Hashable for LockScript {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.clone()
+        self.program.to_sequence()
+    }
+}
+
+impl From<Vec<LabelledInstruction>> for LockScript {
+    fn from(instrs: Vec<LabelledInstruction>) -> Self {
+        Self {
+            program: Program::new(&instrs),
+        }
+    }
+}
+
+impl From<&[LabelledInstruction]> for LockScript {
+    fn from(instrs: &[LabelledInstruction]) -> Self {
+        Self {
+            program: Program::new(instrs),
+        }
     }
 }
 
 impl LockScript {
-    /// Extract the public key from a standard lockscript, and compare it
-    /// to a secret input which should be provided through `preimage`
-    pub fn mock_verify_standard(&self, preimage: Digest) -> bool {
-        // TODO: Delete this function once TVM is imported
-        if self.0.len() != 27 {
-            return false;
+    pub fn new(program: Program) -> Self {
+        Self { program }
+    }
+
+    pub fn anyone_can_spend() -> Self {
+        Self {
+            program: Program::new(&vec![vec![read_io(); DIGEST_LENGTH], vec![halt()]].concat()),
         }
-
-        let elem4 = self.0[12];
-        let elem3 = self.0[14];
-        let elem2 = self.0[16];
-        let elem1 = self.0[18];
-        let elem0 = self.0[20];
-
-        let public_key = Digest::new([elem0, elem1, elem2, elem3, elem4]);
-
-        preimage.vmhash::<Hash>() == public_key
     }
 }
 
@@ -168,7 +166,7 @@ mod utxo_tests {
 
     fn make_random_utxo() -> Utxo {
         let mut rng = thread_rng();
-        let lock_script = LockScript(random_elements(rng.gen_range(1..20)));
+        let lock_script = LockScript::anyone_can_spend();
         let num_coins = rng.gen_range(0..10);
         let mut coins = vec![];
         for _i in 0..num_coins {

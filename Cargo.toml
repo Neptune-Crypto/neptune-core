@@ -19,7 +19,7 @@ twenty-first = "0.22.0"
 # twenty-first = { path = "../twenty-first/twenty-first" }
 # mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }
 mutator-set-tf = { path = "../mutator-set-tf" }
-triton-vm = "0.21.0"
+# triton-vm = "0.21.0"
 anyhow = "1"
 bincode = "1"
 bytes = "1"
@@ -36,6 +36,7 @@ rusty-leveldb = "1"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
+tarpc = { version = "0.30", features = ["tokio1", "serde-transport", "tcp"] }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-serde = { version = "0.8", features = ["bincode", "json"] }
 tokio-util = { version = "0.7", features = ["codec"] }
@@ -47,7 +48,8 @@ tracing-subscriber = { version = "0.3", features = [
     "fmt",
 ] }
 tracing-test = "0"
-tarpc = { version = "0.30", features = ["tokio1", "serde-transport", "tcp"] }
+triton-vm = {path = "../triton-vm/triton-vm"}
+triton-opcodes = {path = "../triton-vm/triton-opcodes"}
 priority-queue = "1.2"
 get-size = { version = "^0.1", features = ["derive"] }
 num-rational = "0.4"

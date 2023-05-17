@@ -13,7 +13,7 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::warn;
+use tracing::{debug, warn};
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
@@ -292,18 +292,30 @@ impl Transaction {
                     .iter()
                     .zip(primitive_witness.lock_script_witnesses.iter())
                 {
+                    // The lock script is satisfied if it halts gracefully (i.e.,
+                    // without crashing). We do not care about the output.
                     let program = input_utxo.lock_script.clone();
-                    let _vm_output: Vec<BFieldElement> = vec![];
-                    let _public_input = Hash::hash(&self.kernel).to_sequence();
-                    // verify (program, std_input, secret_input, std_output)
+                    let public_input = Hash::hash(&self.kernel).to_sequence();
 
-                    // std_lockscript_reference_verify_unlock();
-                    if !program.mock_verify_standard(Digest::new(
-                        secret_input.to_vec().try_into().unwrap(),
-                    )) {
-                        warn!("Failed to verify lock script of transaction");
-                        return false;
-                    }
+                    debug!("attempting to validate program:\n {}\n\n Public input is: {}\n\n Secret input: {}\n\n, ", program.program, public_input.iter().join(","), secret_input.iter().join(","));
+                    debug!(
+                        "Hash of secret input is: {}",
+                        Digest::new(secret_input.to_vec().try_into().unwrap())
+                            .vmhash::<Hash>()
+                            .values()
+                            .iter()
+                            .map(|x| x.to_string())
+                            .join(",")
+                    );
+
+                    match triton_vm::vm::run(&program.program, public_input, secret_input.to_vec())
+                    {
+                        Ok(_) => (),
+                        Err(err) => {
+                            warn!("Failed to verify lock script of transaction. Got: \"{err}\"");
+                            return false;
+                        }
+                    };
                 }
 
                 // verify removal records
@@ -491,7 +503,7 @@ mod transaction_tests {
     fn tx_get_timestamp_test() {
         let output_1 = Utxo {
             coins: Into::<Amount>::into(42).to_native_coins(),
-            lock_script: LockScript(vec![]),
+            lock_script: LockScript::anyone_can_spend(),
         };
         let ar = commit::<Hash>(&Hash::hash(&output_1), &random(), &random());
 

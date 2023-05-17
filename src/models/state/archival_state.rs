@@ -908,7 +908,7 @@ mod archival_state_tests {
                         sender_randomness: random(),
                         utxo: Utxo {
                             coins: Into::<Amount>::into(4).to_native_coins(),
-                            lock_script: LockScript(vec![]),
+                            lock_script: LockScript::anyone_can_spend(),
                         },
                     }],
                     Into::<Amount>::into(2),
@@ -988,7 +988,7 @@ mod archival_state_tests {
         let receiver_data = vec![
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: LockScript(vec![]),
+                    lock_script: LockScript::anyone_can_spend(),
                     coins: one_money.clone(),
                 },
                 sender_randomness: random(),
@@ -998,7 +998,7 @@ mod archival_state_tests {
             },
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: LockScript(vec![]),
+                    lock_script: LockScript::anyone_can_spend(),
                     coins: one_money,
                 },
                 sender_randomness: random(),
@@ -1113,7 +1113,7 @@ mod archival_state_tests {
             let receiver_data = vec![
                 UtxoReceiverData {
                     utxo: Utxo {
-                        lock_script: LockScript(vec![]),
+                        lock_script: LockScript::anyone_can_spend(),
                         coins: some_money.clone(),
                     },
                     sender_randomness: random(),
@@ -1123,7 +1123,7 @@ mod archival_state_tests {
                 },
                 UtxoReceiverData {
                     utxo: Utxo {
-                        lock_script: LockScript(vec![]),
+                        lock_script: LockScript::anyone_can_spend(),
                         coins: some_money.clone(),
                     },
                     sender_randomness: random(),
@@ -1307,7 +1307,7 @@ mod archival_state_tests {
             sender_randomness: random(),
             utxo: Utxo {
                 coins: one_money.to_native_coins(),
-                lock_script: LockScript(vec![]),
+                lock_script: LockScript::anyone_can_spend(),
             },
         };
         let sender_tx = global_state

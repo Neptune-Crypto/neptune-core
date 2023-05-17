@@ -421,6 +421,7 @@ mod block_tests {
             .create_transaction(vec![reciever_data], 1.into())
             .await
             .unwrap();
+        assert!(new_tx.is_valid(None), "Created tx must be valid");
         block_1.accumulate_transaction(new_tx);
         assert!(
             block_1.is_valid_for_devnet(&genesis_block),

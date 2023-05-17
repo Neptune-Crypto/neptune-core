@@ -94,6 +94,8 @@ impl GlobalState {
             .map(|x| x.utxo.get_native_coin_amount())
             .sum::<Amount>()
             + fee;
+
+        // todo: accomodate a future change whereby this function also returns the matching spending keys
         let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
             .wallet_state
             .allocate_sufficient_input_funds_from_lock(&mut wallet_db_lock, total_spend, &bc_tip)?;
@@ -187,8 +189,7 @@ impl GlobalState {
             timestamp: BFieldElement::new(timestamp.try_into().unwrap()),
         };
 
-        // TODO: This needs to be fetched from monitored UTXOs. Can be different for each
-        // input UTXO for this transaction
+        // TODO: The spending key can be different for each UTXO, and therefore must be supplied by `spendable_utxos_and_mps`.
         let spending_key = self
             .wallet_state
             .wallet_secret
@@ -208,12 +209,14 @@ impl GlobalState {
             .map(|rd| rd.pubscript.clone())
             .collect_vec();
 
+        // When reading a digest from secret and standard-in, the digest's
+        // zeroth element must be on top of the stack. So the secret-in
+        // is here the spending key reversed.
+        let mut secret_input = spending_key.unlock_key.to_sequence();
+        secret_input.reverse();
         let witness = PrimitiveWitness {
             input_utxos,
-            lock_script_witnesses: vec![
-                spending_key.unlock_key.to_sequence();
-                spendable_utxos_and_mps.len()
-            ],
+            lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
             output_utxos: output_utxos.clone(),
             pubscripts,

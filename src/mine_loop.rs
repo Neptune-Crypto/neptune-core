@@ -397,7 +397,7 @@ mod mine_loop_tests {
         let pubscript_input: Vec<BFieldElement> = vec![];
         let tx_output = Utxo {
             coins: four_neptune_coins,
-            lock_script: LockScript(vec![]),
+            lock_script: LockScript::anyone_can_spend(),
         };
         let tx_by_preminer = premine_receiver_global_state
             .create_transaction(

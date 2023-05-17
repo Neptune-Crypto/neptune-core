@@ -639,7 +639,7 @@ mod wallet_tests {
         let msa_tip = next_block.body.next_mutator_set_accumulator.clone();
         let receiver_data = vec![UtxoReceiverData {
             utxo: Utxo {
-                lock_script: LockScript(vec![]),
+                lock_script: LockScript::anyone_can_spend(),
                 coins: Into::<Amount>::into(200).to_native_coins(),
             },
             sender_randomness: random(),

@@ -1350,7 +1350,7 @@ dependencies = [
  "serde-big-array",
  "serde_derive",
  "serde_json",
- "twenty-first 0.22.0",
+ "twenty-first",
 ]
 
 [[package]]
@@ -1408,9 +1408,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "triton-opcodes",
  "triton-vm",
  "tui",
- "twenty-first 0.22.0",
+ "twenty-first",
  "unicode-width",
 ]
 
@@ -2670,37 +2671,34 @@ dependencies = [
 [[package]]
 name = "triton-opcodes"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e1f54ac352a3024e7441d72e86f73b52d56ca53da660f42e05a403cdc86efad"
 dependencies = [
  "anyhow",
+ "get-size",
  "itertools",
  "nom",
  "num-traits",
  "rand 0.8.5",
+ "serde",
+ "serde_derive",
  "strum",
  "strum_macros",
- "twenty-first 0.21.3",
+ "twenty-first",
 ]
 
 [[package]]
 name = "triton-profiler"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca300f4bcbaf59df87aeac38ed0165b8cc82c50c739fdd224526e225d63db62c"
 dependencies = [
  "colored",
  "criterion",
  "rand 0.8.5",
- "twenty-first 0.21.3",
+ "twenty-first",
  "unicode-width",
 ]
 
 [[package]]
 name = "triton-vm"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94b5eced14751eeac5848140b94e13370cc8ddcb1e55d30fd604bd88afbb5748"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2715,7 +2713,7 @@ dependencies = [
  "strum_macros",
  "triton-opcodes",
  "triton-profiler",
- "twenty-first 0.21.3",
+ "twenty-first",
 ]
 
 [[package]]
@@ -2729,46 +2727,6 @@ dependencies = [
  "crossterm",
  "unicode-segmentation",
  "unicode-width",
-]
-
-[[package]]
-name = "twenty-first"
-version = "0.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3996172c0de585f5f93ea06d7a68ecef52a7f26e3731a7becf16ce3a621da6fe"
-dependencies = [
- "anyhow",
- "bincode",
- "blake3",
- "byteorder",
- "colored",
- "console",
- "emojihash-rs",
- "get-size",
- "hashbrown 0.13.2",
- "itertools",
- "keccak",
- "nom",
- "num-bigint",
- "num-traits",
- "parity-scale-codec",
- "paw",
- "phf",
- "primitive-types",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rand_distr",
- "rand_pcg",
- "rayon",
- "ring",
- "rusty-leveldb",
- "serde",
- "serde-big-array",
- "serde_derive",
- "serde_json",
- "serde_with",
- "structopt",
- "unroll",
 ]
 
 [[package]]
