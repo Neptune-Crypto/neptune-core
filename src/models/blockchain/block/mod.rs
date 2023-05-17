@@ -411,7 +411,7 @@ mod block_tests {
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
         let new_utxo = Utxo::new_native_coin(other_address.lock_script(), 10.into());
         let reciever_data = UtxoReceiverData {
-            pubscript: PubScript(vec![]),
+            pubscript: PubScript::default(),
             pubscript_input: vec![],
             receiver_privacy_digest: other_address.privacy_digest,
             sender_randomness: random(),

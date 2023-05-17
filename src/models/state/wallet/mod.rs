@@ -707,7 +707,7 @@ mod wallet_tests {
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
 
         let receiver_data_12_to_other = UtxoReceiverData {
-            pubscript: vec![].into(),
+            pubscript: PubScript::default(),
             pubscript_input: vec![],
             receiver_privacy_digest: own_address.privacy_digest,
             sender_randomness: premine_receiver_global_state
@@ -723,7 +723,7 @@ mod wallet_tests {
             },
         };
         let receiver_data_one_to_other = UtxoReceiverData {
-            pubscript: vec![].into(),
+            pubscript: PubScript::default(),
             pubscript_input: vec![],
             receiver_privacy_digest: own_address.privacy_digest,
             sender_randomness: premine_receiver_global_state
@@ -999,7 +999,7 @@ mod wallet_tests {
             make_mock_block(&block_2_b, Some(100.into()), own_address);
 
         let receiver_data_six = UtxoReceiverData {
-            pubscript: vec![].into(),
+            pubscript: PubScript::default(),
             pubscript_input: vec![],
             receiver_privacy_digest: own_address.privacy_digest,
             utxo: Utxo {

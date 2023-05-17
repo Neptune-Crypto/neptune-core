@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
+use triton_opcodes::instruction::LabelledInstruction;
+use triton_opcodes::program::Program;
+use triton_opcodes::shortcuts::halt;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
@@ -31,38 +34,38 @@ use self::utxo::Utxo;
 use super::block::Block;
 use super::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct PubScript(pub Vec<BFieldElement>);
-
-impl From<Vec<BFieldElement>> for PubScript {
-    fn from(value: Vec<BFieldElement>) -> Self {
-        Self(value)
-    }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+pub struct PubScript {
+    pub program: Program,
 }
 
-impl From<PubScript> for Vec<BFieldElement> {
-    fn from(value: PubScript) -> Self {
-        value.0
+impl Default for PubScript {
+    fn default() -> Self {
+        Self {
+            program: Program::new(&[halt()]),
+        }
     }
 }
 
 impl Hashable for PubScript {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.clone()
+        self.program.to_sequence()
     }
 }
 
-impl GetSize for PubScript {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
+impl From<Vec<LabelledInstruction>> for PubScript {
+    fn from(instrs: Vec<LabelledInstruction>) -> Self {
+        Self {
+            program: Program::new(&instrs),
+        }
     }
+}
 
-    fn get_heap_size(&self) -> usize {
-        self.0.len() * std::mem::size_of::<BFieldElement>()
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
+impl From<&[LabelledInstruction]> for PubScript {
+    fn from(instrs: &[LabelledInstruction]) -> Self {
+        Self {
+            program: Program::new(instrs),
+        }
     }
 }
 
@@ -327,6 +330,7 @@ impl Transaction {
                     .zip(self.kernel.inputs.iter())
                 {
                     let item = Hash::hash(input_utxo);
+                    // TODO: write this function in tasm
                     let indices = get_swbf_indices::<Hash>(
                         &item,
                         &msmp.sender_randomness,
@@ -381,11 +385,27 @@ impl Transaction {
                         return false;
                     }
 
-                    let _program = pubscript;
-                    let _public_input = pubscript_input;
-                    let _secret_input: Vec<BFieldElement> = vec![];
-                    let _vm_output: Vec<BFieldElement> = vec![];
-                    // verify claim (program, public input, secret_input, vm output)
+                    let secret_input: Vec<BFieldElement> = vec![];
+
+                    debug!(
+                        "attempting to validate program:\n {}\n\n Public input is: {}\n\n",
+                        pubscript.program,
+                        pubscript_input.iter().join(",")
+                    );
+                    // The pubscript is satisfied if it halts gracefully without crashing.
+                    match triton_vm::vm::run(
+                        &pubscript.program,
+                        pubscript_input.to_vec(),
+                        secret_input,
+                    ) {
+                        Ok(_) => (),
+                        Err(err) => {
+                            warn!(
+                                "Could not verify pubscript for transaction; got err: \"{err}\"."
+                            );
+                            return false;
+                        }
+                    }
                 }
 
                 true

@@ -49,16 +49,7 @@ pub struct ReceivingAddress {
 }
 
 fn pubscript_input_is_marked(pubscript_input: &[BFieldElement]) -> bool {
-    const OPCODE_FOR_HALT: BFieldElement = BFieldElement::new(0u64);
-    match pubscript_input.get(0) {
-        Some(&OPCODE_FOR_HALT) => match pubscript_input.get(1) {
-            Some(&GENERATION_FLAG) => true,
-            Some(_) => false,
-            None => false,
-        },
-        Some(_) => false,
-        None => false,
-    }
+    matches!(pubscript_input.get(0), Some(&GENERATION_FLAG))
 }
 
 fn derive_receiver_id(seed: Digest) -> BFieldElement {
@@ -66,9 +57,9 @@ fn derive_receiver_id(seed: Digest) -> BFieldElement {
 }
 
 fn receiver_identifier_from_pubscript_input(
-    public_script: &[BFieldElement],
+    public_script_input: &[BFieldElement],
 ) -> Result<BFieldElement> {
-    match public_script.get(2) {
+    match public_script_input.get(1) {
         Some(id) => Ok(*id),
         None => bail!("Public script does not contain receiver ID"),
     }
@@ -77,10 +68,10 @@ fn receiver_identifier_from_pubscript_input(
 fn ciphertext_from_pubscript_input(
     pubscript_input: &[BFieldElement],
 ) -> Result<Vec<BFieldElement>> {
-    if pubscript_input.len() <= 3 {
+    if pubscript_input.len() <= 2 {
         bail!("Public script does not contain ciphertext.");
     }
-    Ok(pubscript_input[3..].to_vec())
+    Ok(pubscript_input[2..].to_vec())
 }
 
 /// Encodes a slice of bytes to a vec of BFieldElements. This
@@ -354,14 +345,12 @@ impl ReceivingAddress {
         utxo: &Utxo,
         sender_randomness: Digest,
     ) -> Result<(PubScript, Vec<BFieldElement>)> {
-        let mut ciphertext = vec![HALT, GENERATION_FLAG, self.receiver_identifier];
+        let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
         ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
-        const READ_IO: BFieldElement = BFieldElement::new(128);
-        const HALT: BFieldElement = BFieldElement::new(0);
 
-        let pubscript = vec![vec![READ_IO; ciphertext.len()], vec![HALT]].concat();
+        let pubscript = vec![vec![read_io(); ciphertext.len()], vec![halt()]].concat();
 
-        Ok((PubScript(pubscript), ciphertext))
+        Ok((pubscript.into(), ciphertext))
     }
 
     /// Generate a lock script from the spending lock. Satisfaction

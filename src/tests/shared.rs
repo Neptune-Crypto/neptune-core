@@ -754,7 +754,13 @@ pub fn make_mock_block(
             fee: Amount::zero(),
             timestamp,
         },
-        witness: transaction::Witness::Faith,
+        witness: transaction::Witness::Primitive(PrimitiveWitness {
+            input_utxos: vec![],
+            lock_script_witnesses: vec![],
+            input_membership_proofs: vec![],
+            output_utxos: vec![coinbase_utxo.clone()],
+            pubscripts: vec![],
+        }),
     };
 
     let block_body: BlockBody = BlockBody {

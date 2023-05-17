@@ -993,7 +993,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: random(),
-                pubscript: PubScript(vec![]),
+                pubscript: PubScript::default(),
                 pubscript_input: vec![],
             },
             UtxoReceiverData {
@@ -1003,7 +1003,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: random(),
-                pubscript: PubScript(vec![]),
+                pubscript: PubScript::default(),
                 pubscript_input: vec![],
             },
         ];
@@ -1118,7 +1118,7 @@ mod archival_state_tests {
                     },
                     sender_randomness: random(),
                     receiver_privacy_digest: random(),
-                    pubscript: PubScript(vec![]),
+                    pubscript: PubScript::default(),
                     pubscript_input: vec![],
                 },
                 UtxoReceiverData {
@@ -1128,7 +1128,7 @@ mod archival_state_tests {
                     },
                     sender_randomness: random(),
                     receiver_privacy_digest: random(),
-                    pubscript: PubScript(vec![]),
+                    pubscript: PubScript::default(),
                     pubscript_input: vec![],
                 },
             ];

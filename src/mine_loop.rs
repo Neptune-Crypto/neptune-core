@@ -2,13 +2,13 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
-use crate::models::blockchain::block::*;
 use crate::models::blockchain::digest::ordered_digest::*;
 use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
+use crate::models::blockchain::{block::*, transaction};
 use crate::models::channel::*;
 use crate::models::shared::SIZE_1MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
@@ -185,7 +185,13 @@ fn make_coinbase_transaction(
     (
         Transaction {
             kernel,
-            witness: Witness::Faith,
+            witness: transaction::Witness::Primitive(PrimitiveWitness {
+                input_utxos: vec![],
+                lock_script_witnesses: vec![],
+                input_membership_proofs: vec![],
+                output_utxos: vec![coinbase_utxo.clone()],
+                pubscripts: vec![],
+            }),
         },
         sender_randomness,
     )
@@ -393,7 +399,7 @@ mod mine_loop_tests {
         let four_neptune_coins = Amount::from(4).to_native_coins();
         let receiver_privacy_digest = Digest::default();
         let sender_randomness = Digest::default();
-        let pubscript: PubScript = PubScript(vec![]);
+        let pubscript: PubScript = PubScript::default();
         let pubscript_input: Vec<BFieldElement> = vec![];
         let tx_output = Utxo {
             coins: four_neptune_coins,
