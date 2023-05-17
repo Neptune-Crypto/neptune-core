@@ -642,7 +642,7 @@ mod tests {
         // Ensure that both wallets have a non-zero balance
         let genesis_block = Block::genesis_block();
         let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
-            make_mock_block(&genesis_block, None, other_receiver_address.clone());
+            make_mock_block(&genesis_block, None, other_receiver_address);
 
         // Update both states with block 1
         premine_receiver_global_state
@@ -734,7 +734,7 @@ mod tests {
         m.insert(&tx_by_other_original);
 
         // Create next block which includes preminer's transaction
-        let (mut block_2, _, _) = make_mock_block(&block_1, None, premine_receiver_address.clone());
+        let (mut block_2, _, _) = make_mock_block(&block_1, None, premine_receiver_address);
         block_2.accumulate_transaction(tx_by_preminer);
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
@@ -748,7 +748,7 @@ mod tests {
             m.get_transactions_for_block(usize::MAX)[0].clone();
 
         let (block_3_with_no_input, _, _) =
-            make_mock_block(&block_2, None, premine_receiver_address.clone());
+            make_mock_block(&block_2, None, premine_receiver_address);
         let mut block_3_with_updated_tx = block_3_with_no_input.clone();
 
         block_3_with_updated_tx.accumulate_transaction(tx_by_other_updated.clone());
@@ -762,8 +762,7 @@ mod tests {
         // valid.
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
-            let (next_block, _, _) =
-                make_mock_block(&previous_block, None, other_receiver_address.clone());
+            let (next_block, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
             m.update_with_block(&next_block, &mut m.internal.write().unwrap());
             previous_block = next_block;
         }

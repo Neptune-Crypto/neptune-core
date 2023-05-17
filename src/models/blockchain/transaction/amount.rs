@@ -104,8 +104,8 @@ impl Amount {
     }
 
     pub fn to_native_coins(&self) -> Vec<(Digest, Vec<BFieldElement>)> {
-        let mut dictionary: Vec<(Digest, Vec<BFieldElement>)> = vec![];
-        dictionary.push((NATIVE_COIN_TYPESCRIPT_DIGEST, self.to_sequence()));
+        let dictionary: Vec<(Digest, Vec<BFieldElement>)> =
+            vec![(NATIVE_COIN_TYPESCRIPT_DIGEST, self.to_sequence())];
         dictionary
     }
 }

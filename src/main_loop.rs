@@ -899,7 +899,7 @@ impl MainLoopHandler {
         let (tx_term, mut rx_term) = tokio::sync::mpsc::channel(2);
         if let Some(mut sigterm_stream) = sigterm {
             tokio::spawn(async move {
-                if let Some(_) = sigterm_stream.recv().await {
+                if sigterm_stream.recv().await.is_some() {
                     println!("Received SIGTERM");
                     tx_term.send(()).await.unwrap();
                 }
@@ -908,7 +908,7 @@ impl MainLoopHandler {
         let (tx_int, mut rx_int) = tokio::sync::mpsc::channel(2);
         if let Some(mut sigint_stream) = sigint {
             tokio::spawn(async move {
-                if let Some(_) = sigint_stream.recv().await {
+                if sigint_stream.recv().await.is_some() {
                     println!("Received SIGINT");
                     tx_int.send(()).await.unwrap();
                 }
@@ -1077,7 +1077,7 @@ impl MainLoopHandler {
                 );
 
                 // send notification to peers
-                let notification: TransactionNotification = transaction.clone().into();
+                let notification: TransactionNotification = transaction.as_ref().clone().into();
                 self.main_to_peer_broadcast_tx
                     .send(MainToPeerThread::TransactionNotification(notification))?;
 

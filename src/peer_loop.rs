@@ -1388,26 +1388,26 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address.clone());
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
         let (block_2_a, _, _) = make_mock_block(
             &block_1,
             Some(U32s::new([2_000_000, 0, 0, 0, 0])),
-            a_recipient_address.clone(),
+            a_recipient_address,
         );
         let (block_3_a, _, _) = make_mock_block(
             &block_2_a,
             Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address.clone(),
+            a_recipient_address,
         ); // <--- canonical
         let (block_2_b, _, _) = make_mock_block(
             &block_1,
             Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address.clone(),
+            a_recipient_address,
         );
         let (block_3_b, _, _) = make_mock_block(
             &block_2_b,
             Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address.clone(),
+            a_recipient_address,
         );
 
         add_block(&state, block_1.clone()).await?;
@@ -1485,21 +1485,21 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address.clone());
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
         let (block_2_a, _, _) = make_mock_block(
             &block_1,
             Some(U32s::new([2_000_000, 0, 0, 0, 0])),
-            a_recipient_address.clone(),
+            a_recipient_address,
         );
         let (block_3_a, _, _) = make_mock_block(
             &block_2_a,
             Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address.clone(),
+            a_recipient_address,
         ); // <--- canonical
         let (block_2_b, _, _) = make_mock_block(
             &block_1,
             Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address.clone(),
+            a_recipient_address,
         );
         let (block_3_b, _, _) = make_mock_block(
             &block_2_b,
@@ -1615,7 +1615,7 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address.clone());
+        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
         let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
 
         let mock = Mock::new(vec![
@@ -1694,12 +1694,9 @@ mod peer_loop_tests {
             .wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
-        let (block_1, _, _) =
-            make_mock_block(&genesis_block.clone(), None, own_recipient_address.clone());
-        let (block_2, _, _) =
-            make_mock_block(&block_1.clone(), None, own_recipient_address.clone());
-        let (block_3, _, _) =
-            make_mock_block(&block_2.clone(), None, own_recipient_address.clone());
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, own_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, own_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, own_recipient_address);
         let (block_4, _, _) = make_mock_block(&block_3.clone(), None, own_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
@@ -1767,10 +1764,9 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) =
-            make_mock_block(&genesis_block.clone(), None, a_recipient_address.clone());
-        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address.clone());
-        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address.clone());
+        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
         let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
@@ -2103,7 +2099,6 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
             get_test_genesis_setup(Network::Main, 1).await?;
 
-        let genesis_block = Block::genesis_block();
         let transaction_1 = make_mock_transaction(vec![], vec![]);
 
         // Build the resulting transaction notification

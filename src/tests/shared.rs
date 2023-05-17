@@ -610,8 +610,8 @@ pub fn make_mock_transaction_with_generation_key(
         .unwrap();
 
     let kernel = TransactionKernel {
-        inputs: inputs,
-        outputs: outputs,
+        inputs,
+        outputs,
         pubscript_hashes_and_inputs,
         fee,
         timestamp: BFieldElement::new(timestamp),
@@ -637,7 +637,7 @@ pub fn make_mock_transaction_with_generation_key(
         .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let witness = PrimitiveWitness {
-        input_utxos: input_utxos.clone(),
+        input_utxos,
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
         output_utxos,
@@ -682,7 +682,7 @@ pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord<Hash>>,
     outputs: Vec<AdditionRecord>,
     fee: Amount,
-    wallet_state: &WalletState,
+    _wallet_state: &WalletState,
     timestamp: Option<BFieldElement>,
 ) -> Transaction {
     let timestamp = match timestamp {
@@ -704,12 +704,10 @@ pub fn make_mock_transaction_with_wallet(
         timestamp,
     };
 
-    let transaction = Transaction {
+    Transaction {
         kernel,
         witness: transaction::Witness::Faith,
-    };
-
-    transaction
+    }
 }
 
 /// Build a fake block with a random hash, containing *one* output UTXO in the form
@@ -804,8 +802,10 @@ pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) ->
         None => WalletSecret::devnet_authority_wallet(),
     };
 
-    let mut cli_args: cli_args::Args = Default::default();
-    cli_args.number_of_mps_per_utxo = 30;
+    let cli_args: cli_args::Args = cli_args::Args {
+        number_of_mps_per_utxo: 30,
+        ..Default::default()
+    };
     WalletState::new_from_wallet_secret(None, wallet_secret, &cli_args).await
 }
 

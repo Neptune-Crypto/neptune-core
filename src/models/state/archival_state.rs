@@ -1413,7 +1413,7 @@ mod archival_state_tests {
 
         // Update chain states
         for state in [&genesis_state, &alice_state, &bob_state] {
-            add_block(&state, block_1.clone()).await.unwrap();
+            add_block(state, block_1.clone()).await.unwrap();
             state
                 .chain
                 .archival_state
@@ -1605,7 +1605,7 @@ mod archival_state_tests {
 
         // Update chain states
         for state in [&genesis_state, &alice_state, &bob_state] {
-            add_block(&state, block_2.clone()).await.unwrap();
+            add_block(state, block_2.clone()).await.unwrap();
             state
                 .chain
                 .archival_state

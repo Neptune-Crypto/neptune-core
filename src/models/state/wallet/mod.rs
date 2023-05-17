@@ -327,7 +327,7 @@ mod wallet_tests {
         for _ in 0..12 {
             let previous_block = next_block;
             let (nb, _coinbase_utxo, _sender_randomness) =
-                make_mock_block(&previous_block, None, other_receiver_address.clone());
+                make_mock_block(&previous_block, None, other_receiver_address);
             next_block = nb;
             wallet_state_premine_recipient.update_wallet_state_with_new_block(
                 &next_block,
@@ -435,7 +435,7 @@ mod wallet_tests {
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address.clone());
+        let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address);
         let (block_3, _, _) = make_mock_block(&block_2, None, other_recipient_address);
         monitored_utxos = get_monitored_utxos(&wallet_state).await;
         {
@@ -647,7 +647,7 @@ mod wallet_tests {
         }];
         let input_utxos_mps_keys = two_utxos
             .into_iter()
-            .map(|(utxo, mp)| (utxo, mp, own_spending_key.clone()))
+            .map(|(utxo, mp)| (utxo, mp, own_spending_key))
             .collect_vec();
         let tx = make_mock_transaction_with_generation_key(
             input_utxos_mps_keys,

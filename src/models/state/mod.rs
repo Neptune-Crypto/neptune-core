@@ -211,7 +211,7 @@ impl GlobalState {
             .collect_vec();
 
         let witness = PrimitiveWitness {
-            input_utxos: input_utxos.clone(),
+            input_utxos,
             lock_script_witnesses: vec![
                 spending_key.unlock_key.to_sequence();
                 spendable_utxos_and_mps.len()
@@ -680,7 +680,7 @@ mod global_state_tests {
             .get_latest_block()
             .await;
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
-            make_mock_block(&genesis_block, None, own_receiving_address.clone());
+            make_mock_block(&genesis_block, None, own_receiving_address);
         {
             let mut block_db_lock = global_state
                 .chain
@@ -733,8 +733,7 @@ mod global_state_tests {
             .to_address();
         let mut parent_block = genesis_block;
         for _ in 0..5 {
-            let (next_block, _, _) =
-                make_mock_block(&parent_block, None, other_receiving_address.clone());
+            let (next_block, _, _) = make_mock_block(&parent_block, None, other_receiving_address);
             let mut block_db_lock = global_state
                 .chain
                 .archival_state
@@ -872,7 +871,7 @@ mod global_state_tests {
         let mut fork_a_block = mock_block_1a.clone();
         for _ in 0..100 {
             let (next_a_block, _, _) =
-                make_mock_block(&fork_a_block, None, other_receiving_address.clone());
+                make_mock_block(&fork_a_block, None, other_receiving_address);
             let mut block_db_lock = global_state
                 .chain
                 .archival_state
@@ -911,7 +910,7 @@ mod global_state_tests {
         let mut fork_b_block = mock_block_1a.clone();
         for _ in 0..100 {
             let (next_b_block, _, _) =
-                make_mock_block(&fork_b_block, None, other_receiving_address.clone());
+                make_mock_block(&fork_b_block, None, other_receiving_address);
             let mut block_db_lock = global_state
                 .chain
                 .archival_state
@@ -975,7 +974,7 @@ mod global_state_tests {
         let mut fork_c_block = genesis_block.clone();
         for _ in 0..100 {
             let (next_c_block, _, _) =
-                make_mock_block(&fork_c_block, None, other_receiving_address.clone());
+                make_mock_block(&fork_c_block, None, other_receiving_address);
             let mut block_db_lock = global_state
                 .chain
                 .archival_state

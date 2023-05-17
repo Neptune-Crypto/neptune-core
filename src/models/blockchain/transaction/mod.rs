@@ -9,6 +9,7 @@ use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,7 +28,6 @@ use self::amount::Amount;
 use self::native_coin::native_coin_typescript;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
-use super::block::block_height::BlockHeight;
 use super::block::Block;
 use super::shared::Hash;
 
@@ -42,7 +42,7 @@ impl From<Vec<BFieldElement>> for PubScript {
 
 impl From<PubScript> for Vec<BFieldElement> {
     fn from(value: PubScript) -> Self {
-        value.0.clone()
+        value.0
     }
 }
 
@@ -272,8 +272,7 @@ impl Transaction {
     }
 
     pub fn get_timestamp(&self) -> Result<SystemTime> {
-        Ok(std::time::UNIX_EPOCH
-            + std::time::Duration::from_millis(self.kernel.timestamp.value().try_into()?))
+        Ok(std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.kernel.timestamp.value()))
     }
 
     /// Validate Transaction
@@ -294,8 +293,8 @@ impl Transaction {
                     .zip(primitive_witness.lock_script_witnesses.iter())
                 {
                     let program = input_utxo.lock_script.clone();
-                    let std_input = Hash::hash(&self.kernel).to_sequence();
-                    let std_output: Vec<BFieldElement> = vec![];
+                    let _vm_output: Vec<BFieldElement> = vec![];
+                    let _public_input = Hash::hash(&self.kernel).to_sequence();
                     // verify (program, std_input, secret_input, std_output)
 
                     // std_lockscript_reference_verify_unlock();
@@ -308,6 +307,7 @@ impl Transaction {
                 }
 
                 // verify removal records
+                // We only check internal consistency not removability relative to a given mutator set accumulator.
                 for ((input_utxo, msmp), removal_record) in primitive_witness
                     .input_utxos
                     .iter()
@@ -334,18 +334,27 @@ impl Transaction {
 
                         // verify H(type_script) == type_script_hash
 
-                        let program = type_script;
-                        let input = Hash::hash(&self.kernel);
-                        let output: Vec<BFieldElement> = vec![];
-                        let secret_input = output_utxo
+                        let allowed_inflation = match coinbase_amount {
+                            Some(amount) => amount,
+                            None => Amount::zero(),
+                        };
+
+                        let _program = type_script;
+                        let _public_input = [
+                            Hash::hash(&self.kernel).to_sequence(),
+                            allowed_inflation.to_sequence(),
+                        ]
+                        .concat();
+                        let _vm_output: Vec<BFieldElement> = vec![];
+                        let _secret_input = output_utxo
                             .coins
                             .iter()
-                            .find(|(d, s)| *d == *type_script_hash)
+                            .find(|(d, _s)| *d == *type_script_hash)
                             .unwrap()
                             .to_owned();
 
                         // verify
-                        // (program, input, secret_input, output)
+                        // (program, public input, secret_input, vm output)
                     }
                 }
 
@@ -360,11 +369,11 @@ impl Transaction {
                         return false;
                     }
 
-                    let program = pubscript;
-                    let input = pubscript_input;
-                    let secret_input: Vec<BFieldElement> = vec![];
-                    let output: Vec<BFieldElement> = vec![];
-                    // verify claim (program, standard input, secret_input, standard output)
+                    let _program = pubscript;
+                    let _public_input = pubscript_input;
+                    let _secret_input: Vec<BFieldElement> = vec![];
+                    let _vm_output: Vec<BFieldElement> = vec![];
+                    // verify claim (program, public input, secret_input, vm output)
                 }
 
                 true
@@ -437,12 +446,10 @@ impl Transaction {
             }
         };
 
-        let merged_transaction = Transaction {
+        Transaction {
             kernel: merged_kernel,
             witness: merged_witness,
-        };
-
-        merged_transaction
+        }
     }
 
     /// Calculates a fraction representing the fee-density, defined as:
@@ -474,18 +481,10 @@ mod transaction_tests {
     use std::time::Duration;
 
     use super::{utxo::LockScript, *};
-    use crate::{
-        config_models::network::Network,
-        models::state::{
-            wallet::{self, generate_secret_key},
-            UtxoReceiverData,
-        },
-        tests::shared::{get_mock_global_state, make_mock_block, make_mock_transaction},
-    };
+    use crate::tests::shared::make_mock_transaction;
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
     use rand::random;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::other::random_elements_array;
 
     #[traced_test]
     #[test]

@@ -200,7 +200,7 @@ impl UtxoNotificationPool {
     ) -> Result<AdditionRecord> {
         // Check if UTXO notification exceeds peer's max number of allowed notifications
         if let UtxoNotifier::PeerUnsigned((peer_id, peer_socket), _cred) = &received_from {
-            if let Some(expected_utxos_for_peer) = self.peer_id_to_expected_utxos.get(&peer_id) {
+            if let Some(expected_utxos_for_peer) = self.peer_id_to_expected_utxos.get(peer_id) {
                 if expected_utxos_for_peer.len() >= self.max_unconfirmed_notification_count_per_peer
                 {
                     warn!("Stored {} expected UTXOs for peer {peer_id}, exceeds capacity. Checking if any are confirmed...", self.max_unconfirmed_notification_count_per_peer);
@@ -509,7 +509,7 @@ mod wallet_state_tests {
             .unwrap();
         notification_pool
             .add_expected_utxo(
-                mock_utxo.clone(),
+                mock_utxo,
                 random(),
                 random(),
                 UtxoNotifier::PeerUnsigned(

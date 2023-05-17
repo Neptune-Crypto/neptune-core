@@ -263,7 +263,7 @@ impl RPC for NeptuneRPCServer {
         // 2. Send transaction message to main
         let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
             self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(transaction.clone())),
+                .send(RPCServerToMain::Send(Box::new(transaction.clone()))),
         );
 
         future::ready(if response.is_ok() {

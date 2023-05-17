@@ -95,6 +95,6 @@ impl PeerThreadToMain {
 
 #[derive(Clone, Debug)]
 pub enum RPCServerToMain {
-    Send(Transaction),
+    Send(Box<Transaction>),
     Shutdown(),
 }

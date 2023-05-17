@@ -7,7 +7,6 @@ use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockBody {
     pub transaction: Transaction,
