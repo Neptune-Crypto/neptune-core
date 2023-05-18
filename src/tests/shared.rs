@@ -615,6 +615,7 @@ pub fn make_mock_transaction_with_generation_key(
         pubscript_hashes_and_inputs,
         fee,
         timestamp: BFieldElement::new(timestamp),
+        coinbase: None,
     };
 
     let input_utxos = input_utxos_mps_keys
@@ -672,6 +673,7 @@ pub fn make_mock_transaction(
             pubscript_hashes_and_inputs: vec![],
             fee: 1.into(),
             timestamp,
+            coinbase: None,
         },
         witness: transaction::Witness::Faith,
     }
@@ -702,6 +704,7 @@ pub fn make_mock_transaction_with_wallet(
         pubscript_hashes_and_inputs: vec![],
         fee,
         timestamp,
+        coinbase: None,
     };
 
     Transaction {
@@ -753,6 +756,7 @@ pub fn make_mock_block(
             pubscript_hashes_and_inputs: vec![],
             fee: Amount::zero(),
             timestamp,
+            coinbase: Some(coinbase_amount),
         },
         witness: transaction::Witness::Primitive(PrimitiveWitness {
             input_utxos: vec![],

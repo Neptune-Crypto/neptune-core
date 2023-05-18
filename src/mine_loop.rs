@@ -4,7 +4,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::digest::ordered_digest::*;
 use crate::models::blockchain::shared::*;
-use crate::models::blockchain::transaction::amount::Amount;
+use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
@@ -159,6 +159,13 @@ fn make_coinbase_transaction(
 ) -> (Transaction, Digest) {
     let sender_randomness: Digest =
         wallet_secret.generate_sender_randomness(block_height, *receiver_digest);
+
+    let coinbase_amount = coinbase_utxo
+        .coins
+        .iter()
+        .filter(|(type_script_hash, _state)| *type_script_hash == TypeScript::native_coin().hash())
+        .map(|(_native_coin_typescript_hash, amount)| Amount::from_bfes(amount))
+        .sum();
     let coinbase_addition_record = commit::<Hash>(
         &Hash::hash(coinbase_utxo),
         &sender_randomness,
@@ -180,6 +187,7 @@ fn make_coinbase_transaction(
         pubscript_hashes_and_inputs: vec![],
         fee: Amount::zero(),
         timestamp,
+        coinbase: Some(coinbase_amount),
     };
 
     (

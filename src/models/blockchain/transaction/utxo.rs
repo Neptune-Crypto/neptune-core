@@ -9,7 +9,7 @@ use triton_opcodes::shortcuts::{halt, read_io};
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 
 use super::amount::AmountLike;
-use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
+use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
 use super::{native_coin, Amount};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
@@ -146,12 +146,46 @@ impl LockScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TypeScript(pub Vec<BFieldElement>);
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+pub struct TypeScript {
+    pub program: Program,
+}
 
 impl Hashable for TypeScript {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.clone()
+        self.program.to_sequence()
+    }
+}
+
+impl From<Vec<LabelledInstruction>> for TypeScript {
+    fn from(instrs: Vec<LabelledInstruction>) -> Self {
+        Self {
+            program: Program::new(&instrs),
+        }
+    }
+}
+
+impl From<&[LabelledInstruction]> for TypeScript {
+    fn from(instrs: &[LabelledInstruction]) -> Self {
+        Self {
+            program: Program::new(instrs),
+        }
+    }
+}
+
+impl TypeScript {
+    pub fn new(program: Program) -> Self {
+        Self { program }
+    }
+
+    pub fn hash(&self) -> Digest {
+        Hash::hash_varlen(&self.program.to_bwords())
+    }
+
+    pub fn native_coin() -> Self {
+        Self {
+            program: native_coin_program(),
+        }
     }
 }
 
@@ -170,7 +204,7 @@ mod utxo_tests {
         let num_coins = rng.gen_range(0..10);
         let mut coins = vec![];
         for _i in 0..num_coins {
-            let type_script = TypeScript(random_elements(rng.gen_range(10..100)));
+            let type_script = TypeScript::native_coin();
             let state: Vec<BFieldElement> = random_elements(rng.gen_range(0..10));
             coins.push((Hash::hash(&type_script), state));
         }

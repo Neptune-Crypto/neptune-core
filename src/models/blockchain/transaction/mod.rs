@@ -9,7 +9,6 @@ use itertools::Itertools;
 use mutator_set_tf::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
-use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,6 +17,7 @@ use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -28,7 +28,7 @@ use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::digest::Digest;
 
 use self::amount::Amount;
-use self::native_coin::native_coin_typescript;
+use self::native_coin::native_coin_program;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::Utxo;
 use super::block::Block;
@@ -286,7 +286,7 @@ impl Transaction {
     /// When a transaction occurs in a mined block, `coinbase_amount` is
     /// derived from that block. When a transaction is received from a peer,
     /// and is not yet mined, the coinbase amount is None.
-    pub fn is_valid(&self, coinbase_amount: Option<Amount>) -> bool {
+    pub fn is_valid(&self) -> bool {
         match &self.witness {
             Witness::Primitive(primitive_witness) => {
                 // verify lock scripts
@@ -297,10 +297,10 @@ impl Transaction {
                 {
                     // The lock script is satisfied if it halts gracefully (i.e.,
                     // without crashing). We do not care about the output.
-                    let program = input_utxo.lock_script.clone();
+                    let lock_script = input_utxo.lock_script.clone();
                     let public_input = Hash::hash(&self.kernel).to_sequence();
 
-                    debug!("attempting to validate program:\n {}\n\n Public input is: {}\n\n Secret input: {}\n\n, ", program.program, public_input.iter().join(","), secret_input.iter().join(","));
+                    debug!("attempting to validate program:\n {}\n\n Public input is: {}\n\n Secret input: {}\n\n, ", lock_script.program, public_input.iter().join(","), secret_input.iter().join(","));
                     debug!(
                         "Hash of secret input is: {}",
                         Digest::new(secret_input.to_vec().try_into().unwrap())
@@ -311,8 +311,11 @@ impl Transaction {
                             .join(",")
                     );
 
-                    match triton_vm::vm::run(&program.program, public_input, secret_input.to_vec())
-                    {
+                    match triton_vm::vm::run(
+                        &lock_script.program,
+                        public_input,
+                        secret_input.to_vec(),
+                    ) {
                         Ok(_) => (),
                         Err(err) => {
                             warn!("Failed to verify lock script of transaction. Got: \"{err}\"");
@@ -343,35 +346,50 @@ impl Transaction {
                     }
                 }
 
-                // verify type scripts
-                for output_utxo in primitive_witness.output_utxos.iter() {
-                    for (type_script_hash, _state) in output_utxo.coins.iter() {
-                        let type_script = native_coin_typescript();
-
-                        // verify H(type_script) == type_script_hash
-
-                        let allowed_inflation = match coinbase_amount {
-                            Some(amount) => amount,
-                            None => Amount::zero(),
-                        };
-
-                        let _program = type_script;
-                        let _public_input = [
-                            Hash::hash(&self.kernel).to_sequence(),
-                            allowed_inflation.to_sequence(),
-                        ]
-                        .concat();
-                        let _vm_output: Vec<BFieldElement> = vec![];
-                        let _secret_input = output_utxo
-                            .coins
+                // collect type scripts
+                let type_scripts = primitive_witness
+                    .output_utxos
+                    .iter()
+                    .flat_map(|utxo| {
+                        utxo.coins
                             .iter()
-                            .find(|(d, _s)| *d == *type_script_hash)
-                            .unwrap()
-                            .to_owned();
+                            .map(|(type_script_hash, _state)| *type_script_hash)
+                    })
+                    .sorted_by_key(|d| d.values().map(|b| b.value()))
+                    .dedup()
+                    .collect_vec();
 
-                        // verify
-                        // (program, public input, secret_input, vm output)
-                    }
+                // verify type scripts
+                for type_script_hash in type_scripts {
+                    let type_script = if type_script_hash
+                        != Hash::hash_varlen(&native_coin_program().to_bwords())
+                    {
+                        warn!("Observed non-native type script: {} Non-native type scripts are not supported yet.", type_script_hash.emojihash());
+                        continue;
+                    } else {
+                        native_coin_program()
+                    };
+
+                    let public_input = self.kernel.mast_hash().to_sequence();
+                    let secret_input = self
+                        .kernel
+                        .mast_sequences()
+                        .into_iter()
+                        .flatten()
+                        .collect_vec();
+
+                    // The type script is satisfied if it halts gracefully,
+                    // i.e., without panicking. So there is no input
+                    match triton_vm::vm::run(&type_script, public_input, secret_input) {
+                        Ok(_) => (),
+                        Err(_) => {
+                            warn!(
+                                "Type script {} not satisfied for transaction.",
+                                type_script_hash.emojihash()
+                            );
+                            return false;
+                        }
+                    };
                 }
 
                 // verify pubscripts
@@ -426,6 +444,14 @@ impl Transaction {
                 .as_millis() as u64,
         );
 
+        let merged_coinbase = match self.kernel.coinbase {
+            Some(own_coinbase) => match other.kernel.coinbase {
+                Some(other_coinbase) => Some(own_coinbase + other_coinbase),
+                None => self.kernel.coinbase,
+            },
+            None => other.kernel.coinbase,
+        };
+
         let merged_kernel = TransactionKernel {
             inputs: vec![self.kernel.inputs, other.kernel.inputs].concat(),
             outputs: vec![self.kernel.outputs, other.kernel.outputs].concat(),
@@ -435,6 +461,7 @@ impl Transaction {
             ]
             .concat(),
             fee: self.kernel.fee + other.kernel.fee,
+            coinbase: merged_coinbase,
             timestamp,
         };
 

@@ -71,6 +71,12 @@ impl Block {
         let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
 
+        let premine_distribution = Self::premine_distribution();
+        let total_premine_amount = premine_distribution
+            .iter()
+            .map(|(_receiving_address, amount)| *amount)
+            .sum();
+
         // This is the UNIX timestamp in ms when this code was written the 1st time
         let timestamp: BFieldElement = BFieldElement::new(1655916990000u64);
 
@@ -81,18 +87,18 @@ impl Block {
                 fee: 0u32.into(),
                 timestamp,
                 pubscript_hashes_and_inputs: vec![],
+                coinbase: Some(total_premine_amount),
             },
             witness: super::transaction::Witness::Faith,
         };
 
-        for (receiving_address, amount) in Self::premine_distribution() {
+        for (receiving_address, amount) in premine_distribution {
             // generate utxo
             let utxo = Utxo::new_native_coin(receiving_address.lock_script(), amount);
             let utxo_digest = Hash::hash(&utxo);
 
-            // generate "randomness" for mutator set commitment
-            // Sender randomness cannot be random because there is
-            // no sender.
+            // generate randomness for mutator set commitment
+            // Sender randomness cannot be random because there is no sender.
             let bad_randomness = Digest::default();
             let receiver_digest = receiving_address.privacy_digest;
 
@@ -217,14 +223,14 @@ impl Block {
         //   c) Next mutator set of previous block matches previous MS of current block
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
-        // (with coinbase UTXO flag set)
         //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
         //   b) Verify that MS removal record is valid, done against `previous_mutator_set_accumulator`,
         //   c) Verify that all removal records have unique index sets
         //   d) verify that adding `mutator_set_update` to `previous_mutator_set_accumulator`
         //      gives `next_mutator_set_accumulator`,
         //   e) transaction timestamp <= block timestamp
-        //   f) call: `transaction.devnet_is_valid()`
+        //   f) transaction coinbase <= miner reward
+        //   g) transaction is valid (internally consistent)
 
         // 0.a) Block height is previous plus one
         if previous_block.header.height.next() != block_copy.header.height {
@@ -319,9 +325,18 @@ impl Block {
             return false;
         }
 
-        // 1.f) Verify transaction, but without relating it to the blockchain tip (that was done above).
+        // 1.f) Verify that the coinbase claimed by the transaction does not exceed
+        // the allowed coinbase based on block height, epoch, etc.
         let miner_reward: Amount = Self::get_mining_reward(block_copy.header.height);
-        if !block_copy.body.transaction.is_valid(Some(miner_reward)) {
+        if let Some(claimed_reward) = block_copy.body.transaction.kernel.coinbase {
+            if claimed_reward > miner_reward {
+                warn!("Block is invalid because the claimed miner reward is too high relative to current network parameters");
+                return false;
+            }
+        }
+
+        // 1.g) Verify transaction, but without relating it to the blockchain tip (that was done above).
+        if !block_copy.body.transaction.is_valid() {
             warn!("Invalid transaction found in block");
             return false;
         }
@@ -421,7 +436,7 @@ mod block_tests {
             .create_transaction(vec![reciever_data], 1.into())
             .await
             .unwrap();
-        assert!(new_tx.is_valid(None), "Created tx must be valid");
+        assert!(new_tx.is_valid(), "Created tx must be valid");
         block_1.accumulate_transaction(new_tx);
         assert!(
             block_1.is_valid_for_devnet(&genesis_block),

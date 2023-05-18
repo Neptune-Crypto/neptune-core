@@ -187,6 +187,7 @@ impl GlobalState {
             pubscript_hashes_and_inputs,
             fee,
             timestamp: BFieldElement::new(timestamp.try_into().unwrap()),
+            coinbase: None,
         };
 
         // TODO: The spending key can be different for each UTXO, and therefore must be supplied by `spendable_utxos_and_mps`.
@@ -527,7 +528,7 @@ mod global_state_tests {
             .await
             .unwrap();
 
-        assert!(tx.is_valid(None));
+        assert!(tx.is_valid());
         assert_eq!(
             2,
             tx.kernel.outputs.len(),
@@ -570,7 +571,7 @@ mod global_state_tests {
             .create_transaction(other_receiver_data, 1.into())
             .await
             .unwrap();
-        assert!(new_tx.is_valid(None));
+        assert!(new_tx.is_valid());
         assert_eq!(
             4,
             new_tx.kernel.outputs.len(),
