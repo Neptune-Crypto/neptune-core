@@ -163,8 +163,8 @@ fn make_coinbase_transaction(
     let coinbase_amount = coinbase_utxo
         .coins
         .iter()
-        .filter(|(type_script_hash, _state)| *type_script_hash == TypeScript::native_coin().hash())
-        .map(|(_native_coin_typescript_hash, amount)| Amount::from_bfes(amount))
+        .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
+        .map(|coin| Amount::from_bfes(&coin.state))
         .sum();
     let coinbase_addition_record = commit::<Hash>(
         &Hash::hash(coinbase_utxo),

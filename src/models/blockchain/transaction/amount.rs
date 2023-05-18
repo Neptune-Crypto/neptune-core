@@ -12,12 +12,11 @@ use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use twenty_first::{
-    amount::u32s::U32s,
-    shared_math::{b_field_element::BFieldElement, tip5::Digest},
+    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
     util_types::algebraic_hasher::Hashable,
 };
 
-use super::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
+use super::{native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
 
 pub trait AmountLike:
     Add
@@ -103,9 +102,11 @@ impl Amount {
         self.0.div_two();
     }
 
-    pub fn to_native_coins(&self) -> Vec<(Digest, Vec<BFieldElement>)> {
-        let dictionary: Vec<(Digest, Vec<BFieldElement>)> =
-            vec![(NATIVE_COIN_TYPESCRIPT_DIGEST, self.to_sequence())];
+    pub fn to_native_coins(&self) -> Vec<Coin> {
+        let dictionary = vec![Coin {
+            type_script_hash: NATIVE_COIN_TYPESCRIPT_DIGEST,
+            state: self.to_sequence(),
+        }];
         dictionary
     }
 }

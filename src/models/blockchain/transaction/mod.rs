@@ -350,11 +350,7 @@ impl Transaction {
                 let type_scripts = primitive_witness
                     .output_utxos
                     .iter()
-                    .flat_map(|utxo| {
-                        utxo.coins
-                            .iter()
-                            .map(|(type_script_hash, _state)| *type_script_hash)
-                    })
+                    .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
                     .sorted_by_key(|d| d.values().map(|b| b.value()))
                     .dedup()
                     .collect_vec();

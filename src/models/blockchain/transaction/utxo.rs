@@ -1,4 +1,5 @@
 use crate::models::blockchain::shared::Hash;
+use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,7 @@ use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::{halt, read_io};
+use triton_vm::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 
 use super::amount::AmountLike;
@@ -18,9 +20,39 @@ pub const PUBLIC_KEY_LENGTH_IN_BYTES: usize = 33;
 pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Coin {
+    pub type_script_hash: Digest,
+    pub state: Vec<BFieldElement>,
+}
+
+impl BFieldCodec for Coin {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if sequence.len() < DIGEST_LENGTH {
+            bail!("Cannot decode coin: could not parse type script hash.");
+        }
+
+        let digest = Digest::decode(&sequence[0..DIGEST_LENGTH])?;
+        let seq = Vec::<BFieldElement>::decode(&sequence[DIGEST_LENGTH..])?;
+
+        if seq[0].value() as usize != seq.len() - 1 {
+            bail!("Cannot decode coin: state is not validly length-prepended.");
+        }
+
+        Ok(Box::new(Self {
+            type_script_hash: *digest,
+            state: seq[1..].to_vec(),
+        }))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        vec![self.type_script_hash.encode(), self.state.encode()].concat()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Utxo {
     pub lock_script: LockScript,
-    pub coins: Vec<(Digest, Vec<BFieldElement>)>,
+    pub coins: Vec<Coin>,
 }
 
 impl GetSize for Utxo {
@@ -33,7 +65,7 @@ impl GetSize for Utxo {
         let mut total = self.lock_script.get_heap_size();
         for v in self.coins.iter() {
             total += std::mem::size_of::<Digest>();
-            total += v.1.len() * std::mem::size_of::<BFieldElement>();
+            total += v.state.len() * std::mem::size_of::<BFieldElement>();
         }
 
         total
@@ -45,25 +77,25 @@ impl GetSize for Utxo {
 }
 
 impl Utxo {
-    pub fn new(lock_script: LockScript, coins: Vec<(Digest, Vec<BFieldElement>)>) -> Self {
+    pub fn new(lock_script: LockScript, coins: Vec<Coin>) -> Self {
         Self { lock_script, coins }
     }
 
     pub fn new_native_coin(lock_script: LockScript, amount: Amount) -> Self {
         Self::new(
             lock_script,
-            vec![(
-                native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST,
-                amount.to_sequence(),
-            )],
+            vec![Coin {
+                type_script_hash: native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST,
+                state: amount.to_sequence(),
+            }],
         )
     }
 
     pub fn get_native_coin_amount(&self) -> Amount {
         self.coins
             .iter()
-            .filter(|(type_script_hash, _state)| *type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
-            .map(|(_type_script_hash, state)| Amount::from_bfes(state))
+            .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+            .map(|coin| Amount::from_bfes(&coin.state))
             .sum()
     }
 }
@@ -75,12 +107,14 @@ impl Hashable for Utxo {
         let coins_bfes = self
             .coins
             .iter()
-            .flat_map(|(d, s)| {
+            .flat_map(|coin| {
                 [
-                    vec![BFieldElement::new(d.to_sequence().len() as u64)],
-                    d.to_sequence(),
-                    vec![BFieldElement::new(s.len() as u64)],
-                    s.clone(),
+                    vec![BFieldElement::new(
+                        coin.type_script_hash.to_sequence().len() as u64,
+                    )],
+                    coin.type_script_hash.to_sequence(),
+                    vec![BFieldElement::new(coin.state.len() as u64)],
+                    coin.state.clone(),
                 ]
                 .concat()
             })
@@ -104,6 +138,47 @@ impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
         let neptune_hash = Hash::hash(self);
         StdHash::hash(&neptune_hash, state);
+    }
+}
+
+impl BFieldCodec for Utxo {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        let lock_script_length = match sequence.get(0) {
+            Some(result) => result.value() as usize,
+            None => bail!("Could not get lock script length in UTXO"),
+        };
+        let num_coins = match sequence.get(lock_script_length + 1) {
+            Some(result) => result.value(),
+            None => bail!("Could not get number of coins in UTXO."),
+        };
+
+        // we don't care about decoding lock scripts right now
+        let lock_script = LockScript::anyone_can_spend();
+
+        let mut coins = vec![];
+        let mut read_index = lock_script_length + 2;
+        for _ in 0..num_coins {
+            let coin_sequence_length = match sequence.get(read_index) {
+                Some(result) => result.value() as usize,
+                None => bail!("Could not get coin sequence length in UTXO."),
+            };
+            read_index += 1;
+            if sequence.len() < read_index + coin_sequence_length {
+                bail!("Format error when decoding coins.");
+            }
+            let coin_sequence = &sequence[read_index..read_index + coin_sequence_length];
+            coins.push(*Coin::decode(coin_sequence)?);
+        }
+        Ok(Box::new(Self { lock_script, coins }))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        let mut sequence = self.lock_script.encode();
+        sequence.push(BFieldElement::new(self.coins.len() as u64));
+        for coin in self.coins.iter() {
+            sequence.append(&mut coin.encode());
+        }
+        sequence
     }
 }
 
@@ -131,6 +206,16 @@ impl From<&[LabelledInstruction]> for LockScript {
         Self {
             program: Program::new(instrs),
         }
+    }
+}
+
+impl BFieldCodec for LockScript {
+    fn decode(_sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        panic!() // should not get here
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.program.to_bwords()
     }
 }
 
@@ -206,7 +291,10 @@ mod utxo_tests {
         for _i in 0..num_coins {
             let type_script = TypeScript::native_coin();
             let state: Vec<BFieldElement> = random_elements(rng.gen_range(0..10));
-            coins.push((Hash::hash(&type_script), state));
+            coins.push(Coin {
+                type_script_hash: Hash::hash(&type_script),
+                state,
+            });
         }
 
         Utxo { lock_script, coins }

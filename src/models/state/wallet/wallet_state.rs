@@ -338,9 +338,8 @@ impl WalletState {
                     block.header.height,
                     utxo.coins
                         .iter()
-                        .filter(|(type_script_hash, _state)| *type_script_hash
-                            == NATIVE_COIN_TYPESCRIPT_DIGEST)
-                        .map(|(_type_script_hash, state)| Amount::from_bfes(state))
+                        .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+                        .map(|coin| Amount::from_bfes(&coin.state))
                         .sum::<Amount>(),
                 );
                 let utxo_digest = Hash::hash(&utxo);
