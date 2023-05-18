@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use anyhow::bail;
 use num_traits::Zero;
 use triton_opcodes::{program::Program, shortcuts::halt};
-use triton_vm::bfield_codec::BFieldCodec;
+use triton_vm::bfield_codec::{decode_vec, BFieldCodec};
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, tip5::Digest},
     util_types::{
@@ -38,7 +38,7 @@ pub fn native_coin_program() -> Program {
 pub fn native_coin_reference(
     public_input: &mut VecDeque<BFieldElement>,
     secret_input: &mut VecDeque<BFieldElement>,
-    _output: &mut [BFieldElement],
+    _output: &mut VecDeque<BFieldElement>,
 ) -> anyhow::Result<()> {
     // public input is kernel mast hash
 
@@ -53,73 +53,30 @@ pub fn native_coin_reference(
     //  - Digest::default().
     // The sequences are provided through secret_in.
 
+    // read secret input
+    let mut read_secret_input = vec![secret_input.pop_front().unwrap()];
+    let secret_input_length = read_secret_input[0].value() as usize;
+    for _ in 0..secret_input_length {
+        read_secret_input.push(secret_input.pop_front().unwrap());
+    }
+
     // parse secret input
-    let mut input_sequence = vec![secret_input.pop_front().unwrap()];
-    let input_sequence_length = input_sequence[0].value() as u32;
-    for _ in 0..input_sequence_length {
-        input_sequence.push(secret_input.pop_front().unwrap());
-    }
+    let sequences: Vec<Vec<BFieldElement>> = *decode_vec(&read_secret_input)?;
+    let input_sequence = &sequences[0];
+    let output_sequence = &sequences[1];
+    let pubscript_sequence = &sequences[2];
+    let fee_sequence = &sequences[3];
+    let coinbase_sequence = &sequences[4];
+    let timestamp_sequence = &sequences[5];
 
-    let mut output_sequence = vec![secret_input.pop_front().unwrap()];
-    let output_sequence_length = output_sequence[0].value() as u32;
-    for _ in 0..output_sequence_length {
-        output_sequence.push(secret_input.pop_front().unwrap());
-    }
+    // parse utxos
+    let input_utxos: Vec<Utxo> = *decode_vec(input_sequence)?;
+    let output_utxos: Vec<Utxo> = *decode_vec(output_sequence)?;
 
-    let mut pubscript_sequence = vec![secret_input.pop_front().unwrap()];
-    let pubscript_sequence_length = pubscript_sequence[0].value() as u32;
-    for _ in 0..pubscript_sequence_length {
-        pubscript_sequence.push(secret_input.pop_front().unwrap());
-    }
-
-    let mut fee_sequence = vec![secret_input.pop_front().unwrap()];
-    let fee_sequence_length = fee_sequence[0].value() as u32;
-    for _ in 0..fee_sequence_length {
-        fee_sequence.push(secret_input.pop_front().unwrap());
-    }
-
-    let mut coinbase_sequence = vec![secret_input.pop_front().unwrap()];
-    let coinbase_sequence_length = coinbase_sequence[0].value() as u32;
-    for _ in 0..coinbase_sequence_length {
-        coinbase_sequence.push(secret_input.pop_front().unwrap());
-    }
-
-    let mut timestamp_sequence = vec![secret_input.pop_front().unwrap()];
-    let timestamp_sequence_length = timestamp_sequence[0].value() as u32;
-    for _ in 0..timestamp_sequence_length {
-        timestamp_sequence.push(secret_input.pop_front().unwrap());
-    }
-
-    // parse input sequence as UTXOs
-    let _num_input_utxos = output_sequence[0].value();
-    let mut input_utxos = vec![];
-    let mut read_index = 1;
-    while read_index < output_sequence.len() {
-        let utxo_length = output_sequence[read_index].value() as usize;
-        read_index += 1;
-        let utxo = *Utxo::decode(&output_sequence[read_index..read_index + utxo_length])?;
-        read_index += utxo_length;
-        input_utxos.push(utxo);
-    }
-
-    // parse output sequence as UTXOs
-    let _num_output_utxos = output_sequence[0].value();
-    let mut output_utxos = vec![];
-    read_index = 1;
-    while read_index < output_sequence.len() {
-        let utxo_length = output_sequence[read_index].value() as usize;
-        read_index += 1;
-        let utxo = *Utxo::decode(&output_sequence[read_index..read_index + utxo_length])?;
-        read_index += utxo_length;
-        output_utxos.push(utxo);
-    }
-
-    // parse fee sequence as amount
-    let fee = Amount::from_bfes(&fee_sequence);
-
-    // parse coinbase sequence as amount
+    // parse amounts
+    let fee = *Amount::decode(fee_sequence)?;
     let coinbase = if coinbase_sequence[0].value() == 1 {
-        Amount::from_bfes(&coinbase_sequence)
+        *Amount::decode(coinbase_sequence)?
     } else {
         Amount::zero()
     };
@@ -145,18 +102,18 @@ pub fn native_coin_reference(
         .sum();
 
     // assert non-inflation
-    if total_inputs + coinbase > total_outputs + fee {
+    if total_inputs + coinbase < total_outputs + fee {
         bail!("Native coin logic error: transaction inflates money supply.")
     }
 
     // verify parsed secret input against digest provided in public input
     let leafs = [
-        Hash::hash_varlen(&input_sequence),
-        Hash::hash_varlen(&output_sequence),
-        Hash::hash_varlen(&pubscript_sequence),
-        Hash::hash_varlen(&fee_sequence),
-        Hash::hash_varlen(&coinbase_sequence),
-        Hash::hash_varlen(&timestamp_sequence),
+        Hash::hash_varlen(input_sequence),
+        Hash::hash_varlen(output_sequence),
+        Hash::hash_varlen(pubscript_sequence),
+        Hash::hash_varlen(fee_sequence),
+        Hash::hash_varlen(coinbase_sequence),
+        Hash::hash_varlen(timestamp_sequence),
         Digest::default(),
         Digest::default(),
     ];

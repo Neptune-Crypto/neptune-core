@@ -11,6 +11,7 @@ use itertools::Itertools;
 use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use triton_vm::bfield_codec::BFieldCodec;
 use twenty_first::{
     amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
     util_types::algebraic_hasher::Hashable,
@@ -235,6 +236,27 @@ impl From<u64> for Amount {
         limbs[0] = (value & (u32::MAX as u64)) as u32;
         limbs[1] = (value >> 32) as u32;
         Amount(U32s::new(limbs))
+    }
+}
+
+impl BFieldCodec for Amount {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if sequence.len() != AMOUNT_SIZE_FOR_U32 {
+            bail!("Cannot parse amount: wrong sequence length");
+        }
+        Ok(Box::new(Amount(U32s::new(
+            sequence
+                .iter()
+                .take(AMOUNT_SIZE_FOR_U32)
+                .map(|b| b.value() as u32)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        ))))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.0.to_sequence()
     }
 }
 
