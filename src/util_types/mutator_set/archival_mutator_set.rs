@@ -77,7 +77,7 @@ where
         }
     }
 
-    fn hash(&mut self) -> Digest {
+    fn hash(&self) -> Digest {
         let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
         let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
         let active_swbf_bagged = H::hash(&self.kernel.swbf_active);

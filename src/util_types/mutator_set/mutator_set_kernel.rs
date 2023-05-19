@@ -525,7 +525,7 @@ mod accumulation_scheme_tests {
     fn mutator_set_hash_test() {
         type H = Tip5;
 
-        let mut empty_set = MutatorSetAccumulator::<H>::default();
+        let empty_set = MutatorSetAccumulator::<H>::default();
         let empty_hash = empty_set.hash();
 
         // Add one element to append-only commitment list

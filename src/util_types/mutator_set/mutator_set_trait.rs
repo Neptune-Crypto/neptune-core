@@ -51,5 +51,5 @@ pub trait MutatorSet<H: AlgebraicHasher> {
 
     /// hash
     /// Return single hash digest that commits to the entire mutator set
-    fn hash(&mut self) -> Digest;
+    fn hash(&self) -> Digest;
 }
