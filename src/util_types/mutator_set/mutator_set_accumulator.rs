@@ -1,3 +1,4 @@
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -11,7 +12,7 @@ use super::{
     mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
 pub struct MutatorSetAccumulator<H: AlgebraicHasher> {
     pub kernel: MutatorSetKernel<H, MmrAccumulator<H>>,
 }

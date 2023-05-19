@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::{error::Error, fmt};
 
+use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
@@ -37,7 +38,7 @@ pub enum MutatorSetKernelError {
     RestoreMembershipProofDidNotFindChunkForChunkIndex,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
 pub struct MutatorSetKernel<H: AlgebraicHasher, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,

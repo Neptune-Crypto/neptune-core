@@ -1,3 +1,4 @@
+use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -7,7 +8,7 @@ use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 
-#[derive(Clone, Debug, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize)]
 pub struct ActiveWindow<H: AlgebraicHasher> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     pub sbf: Vec<u32>,
