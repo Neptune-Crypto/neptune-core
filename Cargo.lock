@@ -2702,6 +2702,7 @@ version = "0.21.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "get-size",
  "itertools",
  "ndarray",
  "num-traits",

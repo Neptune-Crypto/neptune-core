@@ -586,7 +586,7 @@ mod test_generation_addresses {
         let spending_key = SpendingKey::derive_from_seed(seed);
         let receiving_address = ReceivingAddress::from_spending_key(&spending_key);
         let utxo = Utxo {
-            lock_script: receiving_address.lock_script(),
+            lock_script_hash: receiving_address.lock_script().hash(),
             coins: Into::<Amount>::into(10).to_native_coins(),
         };
         let sender_randomness: Digest = random();

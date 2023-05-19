@@ -401,6 +401,7 @@ mod block_tests {
 
     use rand::random;
     use tracing_test::traced_test;
+    use twenty_first::util_types::emojihash_trait::Emojihash;
 
     #[traced_test]
     #[tokio::test]
@@ -418,6 +419,7 @@ mod block_tests {
             .nth_generation_spending_key(0)
             .to_address();
         let genesis_block = Block::genesis_block();
+
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address);
         assert!(
             block_1.is_valid_for_devnet(&genesis_block),
@@ -438,10 +440,21 @@ mod block_tests {
             .await
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");
+
         block_1.accumulate_transaction(new_tx);
         assert!(
             block_1.is_valid_for_devnet(&genesis_block),
-            "Block 1 must be valid after adding a transaction"
+            "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
+            block_1
+                .body
+                .previous_mutator_set_accumulator
+                .hash()
+                .emojihash(),
+                block_1
+                    .body
+                    .next_mutator_set_accumulator
+                    .hash()
+                    .emojihash()
         );
 
         // Sanity checks

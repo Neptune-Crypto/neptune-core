@@ -507,11 +507,15 @@ mod tests {
         },
     };
     use anyhow::Result;
+    use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use num_bigint::BigInt;
     use num_traits::Zero;
     use rand::random;
+    use tracing::debug;
     use tracing_test::traced_test;
-    use twenty_first::shared_math::b_field_element::BFieldElement;
+    use twenty_first::{
+        shared_math::b_field_element::BFieldElement, util_types::emojihash_trait::Emojihash,
+    };
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
@@ -692,7 +696,7 @@ mod tests {
             let amount: Amount = i.into();
             let new_utxo = Utxo {
                 coins: amount.to_native_coins(),
-                lock_script: premine_receiver_address.lock_script(),
+                lock_script_hash: premine_receiver_address.lock_script().hash(),
             };
 
             output_utxos_generated_by_me.push(UtxoReceiverData {
@@ -720,7 +724,7 @@ mod tests {
         let output_utxo_data_by_miner = vec![UtxoReceiverData {
             utxo: Utxo {
                 coins: Into::<Amount>::into(68).to_native_coins(),
-                lock_script: other_receiver_address.lock_script(),
+                lock_script_hash: other_receiver_address.lock_script().hash(),
             },
             sender_randomness: random(),
             receiver_privacy_digest: other_receiver_address.privacy_digest,
@@ -751,6 +755,27 @@ mod tests {
             make_mock_block(&block_2, None, premine_receiver_address);
         let mut block_3_with_updated_tx = block_3_with_no_input.clone();
 
+        debug!(
+            "Just made block with previous mutator set hash {}",
+            block_3_with_updated_tx
+                .body
+                .previous_mutator_set_accumulator
+                .hash()
+                .emojihash()
+        );
+        debug!(
+            "Just made block with next mutator set hash {}",
+            block_3_with_updated_tx
+                .body
+                .next_mutator_set_accumulator
+                .hash()
+                .emojihash()
+        );
+
+        debug!(
+            "tx_by_other_updated has mutator set hash: {}",
+            tx_by_other_updated.mutator_set_hash.emojihash()
+        );
         block_3_with_updated_tx.accumulate_transaction(tx_by_other_updated.clone());
         assert!(
             block_3_with_updated_tx.is_valid_for_devnet(&block_2),
@@ -795,7 +820,7 @@ mod tests {
         // Create a transaction and insert it into the mempool
         let utxo = Utxo {
             coins: Into::<Amount>::into(1).to_native_coins(),
-            lock_script: premine_address.lock_script(),
+            lock_script_hash: premine_address.lock_script().hash(),
         };
         let receiver_data = UtxoReceiverData {
             utxo,

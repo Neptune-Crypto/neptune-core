@@ -156,6 +156,7 @@ fn make_coinbase_transaction(
     receiver_digest: &Digest,
     wallet_secret: &WalletSecret,
     block_height: BlockHeight,
+    mutator_set_accumulator: MutatorSetAccumulator<Hash>,
 ) -> (Transaction, Digest) {
     let sender_randomness: Digest =
         wallet_secret.generate_sender_randomness(block_height, *receiver_digest);
@@ -190,18 +191,21 @@ fn make_coinbase_transaction(
         coinbase: Some(coinbase_amount),
     };
 
+    let mutator_set_hash = mutator_set_accumulator.hash();
+
     (
         Transaction {
             kernel,
             witness: transaction::Witness::Primitive(PrimitiveWitness {
                 input_utxos: vec![],
+                input_lock_scripts: vec![],
                 lock_script_witnesses: vec![],
                 input_membership_proofs: vec![],
                 output_utxos: vec![coinbase_utxo.clone()],
                 pubscripts: vec![],
-                mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
+                mutator_set_accumulator,
             }),
-            mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
+            mutator_set_hash,
         },
         sender_randomness,
     )
@@ -242,6 +246,16 @@ fn create_block_transaction(
         &receiving_address.privacy_digest,
         &state.wallet_state.wallet_secret,
         next_block_height,
+        latest_block.body.next_mutator_set_accumulator.clone(),
+    );
+
+    debug!(
+        "Creating block transaction with mutator set hash: {}",
+        latest_block
+            .body
+            .next_mutator_set_accumulator
+            .hash()
+            .emojihash()
     );
 
     // Merge incoming transactions with the coinbase transaction
@@ -413,7 +427,7 @@ mod mine_loop_tests {
         let pubscript_input: Vec<BFieldElement> = vec![];
         let tx_output = Utxo {
             coins: four_neptune_coins,
-            lock_script: LockScript::anyone_can_spend(),
+            lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
         let tx_by_preminer = premine_receiver_global_state
             .create_transaction(

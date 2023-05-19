@@ -908,7 +908,7 @@ mod archival_state_tests {
                         sender_randomness: random(),
                         utxo: Utxo {
                             coins: Into::<Amount>::into(4).to_native_coins(),
-                            lock_script: LockScript::anyone_can_spend(),
+                            lock_script_hash: LockScript::anyone_can_spend().hash(),
                         },
                     }],
                     Into::<Amount>::into(2),
@@ -988,7 +988,7 @@ mod archival_state_tests {
         let receiver_data = vec![
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: LockScript::anyone_can_spend(),
+                    lock_script_hash: LockScript::anyone_can_spend().hash(),
                     coins: one_money.clone(),
                 },
                 sender_randomness: random(),
@@ -998,7 +998,7 @@ mod archival_state_tests {
             },
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: LockScript::anyone_can_spend(),
+                    lock_script_hash: LockScript::anyone_can_spend().hash(),
                     coins: one_money,
                 },
                 sender_randomness: random(),
@@ -1113,7 +1113,7 @@ mod archival_state_tests {
             let receiver_data = vec![
                 UtxoReceiverData {
                     utxo: Utxo {
-                        lock_script: LockScript::anyone_can_spend(),
+                        lock_script_hash: LockScript::anyone_can_spend().hash(),
                         coins: some_money.clone(),
                     },
                     sender_randomness: random(),
@@ -1123,7 +1123,7 @@ mod archival_state_tests {
                 },
                 UtxoReceiverData {
                     utxo: Utxo {
-                        lock_script: LockScript::anyone_can_spend(),
+                        lock_script_hash: LockScript::anyone_can_spend().hash(),
                         coins: some_money.clone(),
                     },
                     sender_randomness: random(),
@@ -1307,7 +1307,7 @@ mod archival_state_tests {
             sender_randomness: random(),
             utxo: Utxo {
                 coins: one_money.to_native_coins(),
-                lock_script: LockScript::anyone_can_spend(),
+                lock_script_hash: LockScript::anyone_can_spend().hash(),
             },
         };
         let sender_tx = global_state
@@ -1357,7 +1357,7 @@ mod archival_state_tests {
                 receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
-                    lock_script: alice_spending_key.to_address().lock_script(),
+                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(41).to_native_coins(),
                 },
             },
@@ -1367,7 +1367,7 @@ mod archival_state_tests {
                 receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
-                    lock_script: alice_spending_key.to_address().lock_script(),
+                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(59).to_native_coins(),
                 },
             },
@@ -1380,7 +1380,7 @@ mod archival_state_tests {
                 receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
-                    lock_script: bob_spending_key.to_address().lock_script(),
+                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(141).to_native_coins(),
                 },
             },
@@ -1390,7 +1390,7 @@ mod archival_state_tests {
                 receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
-                    lock_script: bob_spending_key.to_address().lock_script(),
+                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(59).to_native_coins(),
                 },
             },
@@ -1530,7 +1530,7 @@ mod archival_state_tests {
         let receiver_data_from_alice = vec![
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: genesis_spending_key.to_address().lock_script(),
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(50).to_native_coins(),
                 },
                 sender_randomness: random(),
@@ -1540,7 +1540,7 @@ mod archival_state_tests {
             },
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: genesis_spending_key.to_address().lock_script(),
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(49).to_native_coins(),
                 },
                 sender_randomness: random(),
@@ -1556,7 +1556,7 @@ mod archival_state_tests {
         let receiver_data_from_bob = vec![
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: genesis_spending_key.to_address().lock_script(),
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(50).to_native_coins(),
                 },
                 sender_randomness: random(),
@@ -1566,7 +1566,7 @@ mod archival_state_tests {
             },
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: genesis_spending_key.to_address().lock_script(),
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(50).to_native_coins(),
                 },
                 sender_randomness: random(),
@@ -1576,7 +1576,7 @@ mod archival_state_tests {
             },
             UtxoReceiverData {
                 utxo: Utxo {
-                    lock_script: genesis_spending_key.to_address().lock_script(),
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
                     coins: Into::<Amount>::into(98).to_native_coins(),
                 },
                 sender_randomness: random(),

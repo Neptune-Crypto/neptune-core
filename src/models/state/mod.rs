@@ -8,6 +8,7 @@ use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
+use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
@@ -21,7 +22,7 @@ use self::networking_state::NetworkingState;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
-use super::blockchain::transaction::utxo::Utxo;
+use super::blockchain::transaction::utxo::{LockScript, Utxo};
 use super::blockchain::transaction::{amount::Amount, Transaction};
 use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
@@ -96,7 +97,7 @@ impl GlobalState {
             + fee;
 
         // todo: accomodate a future change whereby this function also returns the matching spending keys
-        let spendable_utxos_and_mps: Vec<(Utxo, MsMembershipProof<Hash>)> = self
+        let spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = self
             .wallet_state
             .allocate_sufficient_input_funds_from_lock(&mut wallet_db_lock, total_spend, &bc_tip)?;
 
@@ -104,7 +105,7 @@ impl GlobalState {
         let msa_tip = bc_tip.body.next_mutator_set_accumulator;
         let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
         let mut input_amount: Amount = Amount::zero();
-        for (spendable_utxo, mp) in spendable_utxos_and_mps.iter() {
+        for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
             let removal_record = msa_tip.kernel.drop(&Hash::hash(spendable_utxo), mp);
             inputs.push(removal_record);
 
@@ -139,9 +140,10 @@ impl GlobalState {
                 .nth_generation_spending_key(0);
             let own_receiving_address = own_spending_key_for_change.to_address();
             let lock_script = own_receiving_address.lock_script();
+            let lock_script_hash = lock_script.hash();
             let change_utxo = Utxo {
                 coins: change_amount.to_native_coins(),
-                lock_script,
+                lock_script_hash,
             };
             let receiver_digest = own_receiving_address.privacy_digest;
             let change_sender_randomness = self
@@ -197,14 +199,36 @@ impl GlobalState {
             .nth_generation_spending_key(0);
         let input_utxos = spendable_utxos_and_mps
             .iter()
-            .map(|(utxo, _mp)| utxo)
+            .map(|(utxo, _lock_script, _mp)| utxo)
             .cloned()
+            .collect_vec();
+        let input_lock_scripts = spendable_utxos_and_mps
+            .iter()
+            .map(|(_utxo, lock_script, _mp)| lock_script.to_owned())
             .collect_vec();
         let input_membership_proofs = spendable_utxos_and_mps
             .iter()
-            .map(|(_utxo, mp)| mp)
+            .map(|(_utxo, _lock_script, mp)| mp)
             .cloned()
             .collect_vec();
+
+        // sanity check: test membership proofs
+        for (utxo, membership_proof) in input_utxos.iter().zip(input_membership_proofs.iter()) {
+            let item = Hash::hash(utxo);
+            assert!(self.chain.light_state.get_latest_block().await.body.next_mutator_set_accumulator.verify(&item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
+            debug!(
+                "Have valid membership proofs relative to {}",
+                self.chain
+                    .light_state
+                    .get_latest_block()
+                    .await
+                    .body
+                    .next_mutator_set_accumulator
+                    .hash()
+                    .emojihash()
+            );
+        }
+
         let pubscripts = receiver_data
             .iter()
             .map(|rd| rd.pubscript.clone())
@@ -226,6 +250,7 @@ impl GlobalState {
         secret_input.reverse();
         let witness = PrimitiveWitness {
             input_utxos,
+            input_lock_scripts,
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
             output_utxos: output_utxos.clone(),
@@ -520,7 +545,7 @@ mod global_state_tests {
         let main_lock_script = recipient_address.lock_script();
         let output_utxo = Utxo {
             coins: twenty_coins,
-            lock_script: main_lock_script,
+            lock_script_hash: main_lock_script.hash(),
         };
         let sender_randomness = Digest::default();
         let receiver_privacy_digest = recipient_address.privacy_digest;
@@ -561,7 +586,7 @@ mod global_state_tests {
             let lock_script = receiving_address.lock_script();
             let utxo = Utxo {
                 coins: that_many_coins,
-                lock_script,
+                lock_script_hash: lock_script.hash(),
             };
             let other_sender_randomness = Digest::default();
             let other_receiver_digest = receiving_address.privacy_digest;

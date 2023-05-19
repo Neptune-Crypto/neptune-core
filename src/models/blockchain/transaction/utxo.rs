@@ -51,7 +51,7 @@ impl BFieldCodec for Coin {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Utxo {
-    pub lock_script: LockScript,
+    pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
 }
 
@@ -62,7 +62,7 @@ impl GetSize for Utxo {
 
     fn get_heap_size(&self) -> usize {
         // self.lock_script.get_heap_size() + self.coins.len() * (std::mem::size_of::<Digest>())
-        let mut total = self.lock_script.get_heap_size();
+        let mut total = self.lock_script_hash.get_heap_size();
         for v in self.coins.iter() {
             total += std::mem::size_of::<Digest>();
             total += v.state.len() * std::mem::size_of::<BFieldElement>();
@@ -78,7 +78,10 @@ impl GetSize for Utxo {
 
 impl Utxo {
     pub fn new(lock_script: LockScript, coins: Vec<Coin>) -> Self {
-        Self { lock_script, coins }
+        Self {
+            lock_script_hash: lock_script.hash(),
+            coins,
+        }
     }
 
     pub fn new_native_coin(lock_script: LockScript, amount: Amount) -> Self {
@@ -102,7 +105,7 @@ impl Utxo {
 
 impl Hashable for Utxo {
     fn to_sequence(&self) -> Vec<BFieldElement> {
-        let lock_script_bfes: Vec<BFieldElement> = self.lock_script.to_sequence();
+        let lock_script_bfes: Vec<BFieldElement> = self.lock_script_hash.values().to_vec();
 
         let coins_bfes = self
             .coins
@@ -143,20 +146,19 @@ impl StdHash for Utxo {
 
 impl BFieldCodec for Utxo {
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        let lock_script_length = match sequence.get(0) {
-            Some(result) => result.value() as usize,
-            None => bail!("Could not get lock script length in UTXO"),
-        };
-        let num_coins = match sequence.get(lock_script_length + 1) {
+        if sequence.len() < DIGEST_LENGTH + 1 {
+            bail!("Cannot decode UTXO from Vec of BFieldElements because length too small.");
+        }
+
+        let lock_script_hash = *Digest::decode(&sequence[0..DIGEST_LENGTH])?;
+
+        let num_coins = match sequence.get(DIGEST_LENGTH) {
             Some(result) => result.value(),
             None => bail!("Could not get number of coins in UTXO."),
         };
 
-        // we don't care about decoding lock scripts right now
-        let lock_script = LockScript::anyone_can_spend();
-
         let mut coins = vec![];
-        let mut read_index = lock_script_length + 2;
+        let mut read_index = DIGEST_LENGTH + 1;
         for _ in 0..num_coins {
             let coin_sequence_length = match sequence.get(read_index) {
                 Some(result) => result.value() as usize,
@@ -169,11 +171,14 @@ impl BFieldCodec for Utxo {
             let coin_sequence = &sequence[read_index..read_index + coin_sequence_length];
             coins.push(*Coin::decode(coin_sequence)?);
         }
-        Ok(Box::new(Self { lock_script, coins }))
+        Ok(Box::new(Self {
+            lock_script_hash,
+            coins,
+        }))
     }
 
     fn encode(&self) -> Vec<BFieldElement> {
-        let mut sequence = self.lock_script.encode();
+        let mut sequence = self.lock_script_hash.values().to_vec();
         sequence.push(BFieldElement::new(self.coins.len() as u64));
         for coin in self.coins.iter() {
             sequence.append(&mut coin.encode());
@@ -185,12 +190,6 @@ impl BFieldCodec for Utxo {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct LockScript {
     pub program: Program,
-}
-
-impl Hashable for LockScript {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.program.to_sequence()
-    }
 }
 
 impl From<Vec<LabelledInstruction>> for LockScript {
@@ -228,6 +227,10 @@ impl LockScript {
         Self {
             program: Program::new(&vec![vec![read_io(); DIGEST_LENGTH], vec![halt()]].concat()),
         }
+    }
+
+    pub fn hash(&self) -> Digest {
+        Hash::hash_varlen(&self.program.to_bwords())
     }
 }
 
@@ -286,6 +289,7 @@ mod utxo_tests {
     fn make_random_utxo() -> Utxo {
         let mut rng = thread_rng();
         let lock_script = LockScript::anyone_can_spend();
+        let lock_script_hash = lock_script.hash();
         let num_coins = rng.gen_range(0..10);
         let mut coins = vec![];
         for _i in 0..num_coins {
@@ -297,7 +301,10 @@ mod utxo_tests {
             });
         }
 
-        Utxo { lock_script, coins }
+        Utxo {
+            lock_script_hash,
+            coins,
+        }
     }
 
     #[test]

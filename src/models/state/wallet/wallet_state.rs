@@ -30,7 +30,7 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
-use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::Hash;
@@ -639,7 +639,7 @@ impl WalletState {
         lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
         requested_amount: Amount,
         block: &Block,
-    ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
+    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
@@ -655,12 +655,22 @@ impl WalletState {
                 block.hash.emojihash());
         }
 
-        let mut ret: Vec<(Utxo, MsMembershipProof<Hash>)> = vec![];
+        let mut ret: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = vec![];
         let mut allocated_amount = Amount::zero();
+        let lock_script = self
+            .wallet_secret
+            .nth_generation_spending_key(0)
+            .to_address()
+            .lock_script();
         while allocated_amount < requested_amount {
-            let next_elem = wallet_status.synced_unspent[ret.len()].clone();
-            allocated_amount = allocated_amount + next_elem.0 .1.get_native_coin_amount();
-            ret.push((next_elem.0 .1, next_elem.1));
+            let (wallet_status_element, membership_proof) =
+                wallet_status.synced_unspent[ret.len()].clone();
+            allocated_amount = allocated_amount + wallet_status_element.1.get_native_coin_amount();
+            ret.push((
+                wallet_status_element.1,
+                lock_script.clone(),
+                membership_proof,
+            ));
         }
 
         Ok(ret)
@@ -672,7 +682,7 @@ impl WalletState {
         &self,
         requested_amount: Amount,
         block: &Block,
-    ) -> Result<Vec<(Utxo, MsMembershipProof<Hash>)>> {
+    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         let mut lock = self.wallet_db.lock().await;
         self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, block)
     }

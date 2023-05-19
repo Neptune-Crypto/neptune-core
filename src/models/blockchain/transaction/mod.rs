@@ -15,6 +15,7 @@ use tracing::{debug, warn};
 use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
+use triton_vm::Claim;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -29,7 +30,7 @@ use twenty_first::shared_math::digest::Digest;
 use self::amount::Amount;
 use self::native_coin::native_coin_program;
 use self::transaction_kernel::TransactionKernel;
-use self::utxo::Utxo;
+use self::utxo::{LockScript, Utxo};
 use super::block::Block;
 use super::shared::Hash;
 
@@ -96,6 +97,7 @@ impl GetSize for Proof {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct PrimitiveWitness {
     pub input_utxos: Vec<Utxo>,
+    pub input_lock_scripts: Vec<LockScript>,
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
     pub output_utxos: Vec<Utxo>,
@@ -148,6 +150,38 @@ pub enum Witness {
     LinkedProofs(LinkedProofs),
     SingleProof(SingleProof),
     Faith,
+}
+
+/// WitnessableClaim is a helper struct for ValiditySequence. It
+/// encodes a Claim with an optional witness.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+pub struct WitnessableClaim {
+    pub claim: Claim,
+    pub witness: Option<Vec<BFieldElement>>,
+}
+
+/// ValidityConditions is a helper struct. It contains a sequence of
+/// claims with optional witnesses. If all claims a true, then the
+/// transaction is valid.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+pub struct ValidityConditions {
+    // program: lock_script, input: tx kernel hash, witness: secret spending key, output: []
+    pub lock_script_halts: Vec<WitnessableClaim>,
+
+    // program: todo, input: hash of inputs, witness: input utxos, utxo mast auth path, output: lock scripts
+    pub inputs_to_lock_scripts: WitnessableClaim,
+
+    // program: todo, input: hash of kernel, witness: kernel mast auth path, output: hash of inputs
+    pub kernel_to_inputs: WitnessableClaim,
+
+    // program: verify+drop, input: hash of inputs + mutator set hash, witness: inputs + mutator set accumulator, output: removal records
+    pub removal_records_integrity: WitnessableClaim,
+
+    // program: todo, input: hash of kernel, witness: outputs + kernel mast auth path + coins, output: type scripts
+    pub kernel_to_typescripts: WitnessableClaim,
+
+    // program: type script, input: inputs hash + outputs hash + coinbase + fee, witness: inputs + outputs + any, output: []
+    pub type_script_halts: Vec<WitnessableClaim>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
@@ -206,8 +240,9 @@ impl StdHash for Transaction {
 
 impl Transaction {
     /// Update mutator set data in a transaction to update its
-    /// compatibility with a new block. Note that this will
-    /// invalidate the proof, requiring an update.
+    /// compatibility with a new block. Note that for SingleProof witnesses, this will
+    /// invalidate the proof, requiring an update. For LinkedProofs or PrimitiveWitness
+    /// witnesses the witness data can be and is updated.
     pub fn update_mutator_set_records(&mut self, block: &Block) -> Result<()> {
         let mut msa_state: MutatorSetAccumulator<Hash> =
             block.body.previous_mutator_set_accumulator.to_owned();
@@ -237,6 +272,20 @@ impl Transaction {
             )
             .expect("MS removal record update from add must succeed in wallet handler");
 
+            // Batch update primitive witness membership proofs
+            if let Witness::Primitive(witness) = &mut self.witness {
+                let membership_proofs =
+                    &mut witness.input_membership_proofs.iter_mut().collect_vec();
+                let own_items = witness.input_utxos.iter().map(Hash::hash).collect_vec();
+                MsMembershipProof::batch_update_from_addition(
+                    membership_proofs,
+                    &own_items,
+                    &msa_state.kernel,
+                    &block_addition_record,
+                )
+                .expect("MS MP update from add must succeed in wallet handler");
+            }
+
             msa_state.add(&block_addition_record);
         }
 
@@ -252,6 +301,14 @@ impl Transaction {
                 removal_record,
             )
             .expect("MS removal record update from remove must succeed in wallet handler");
+
+            // Batch update primitive witness membership proofs
+            if let Witness::Primitive(witness) = &mut self.witness {
+                let membership_proofs =
+                    &mut witness.input_membership_proofs.iter_mut().collect_vec();
+                MsMembershipProof::batch_update_from_remove(membership_proofs, removal_record)
+                    .expect("MS MP update from remove must succeed in wallet handler");
+            }
 
             msa_state.remove(removal_record);
         }
@@ -292,26 +349,14 @@ impl Transaction {
         match &self.witness {
             Witness::Primitive(primitive_witness) => {
                 // verify lock scripts
-                for (input_utxo, secret_input) in primitive_witness
-                    .input_utxos
+                for (lock_script, secret_input) in primitive_witness
+                    .input_lock_scripts
                     .iter()
                     .zip(primitive_witness.lock_script_witnesses.iter())
                 {
                     // The lock script is satisfied if it halts gracefully (i.e.,
                     // without crashing). We do not care about the output.
-                    let lock_script = input_utxo.lock_script.clone();
                     let public_input = Hash::hash(&self.kernel).to_sequence();
-
-                    debug!("attempting to validate program:\n {}\n\n Public input is: {}\n\n Secret input: {}\n\n, ", lock_script.program, public_input.iter().join(","), secret_input.iter().join(","));
-                    debug!(
-                        "Hash of secret input is: {}",
-                        Digest::new(secret_input.to_vec().try_into().unwrap())
-                            .vmhash::<Hash>()
-                            .values()
-                            .iter()
-                            .map(|x| x.to_string())
-                            .join(",")
-                    );
 
                     match triton_vm::vm::run(
                         &lock_script.program,
@@ -338,7 +383,22 @@ impl Transaction {
                     .zip(primitive_witness.input_membership_proofs.iter())
                 {
                     let item = Hash::hash(input_utxo);
-                    // TODO: write this function in tasm
+                    // TODO: write these functions in tasm
+                    if !primitive_witness
+                        .mutator_set_accumulator
+                        .verify(&item, msmp)
+                    {
+                        warn!("Cannot generate removal record for an item with an invalid membership proof.");
+                        debug!(
+                            "witness mutator set hash: {}",
+                            primitive_witness.mutator_set_accumulator.hash().emojihash()
+                        );
+                        debug!(
+                            "transaction mutator set hash: {}",
+                            self.mutator_set_hash.emojihash()
+                        );
+                        return false;
+                    }
                     let removal_record =
                         primitive_witness.mutator_set_accumulator.drop(&item, msmp);
                     witnessed_removal_records.push(removal_record);
@@ -386,7 +446,7 @@ impl Transaction {
                     };
                 }
 
-                // Verify that the removal records witnessed from the primitive
+                // Verify that the removal records generated from the primitive
                 // witness correspond to the removal records listed in the
                 // transaction kernel.
                 if witnessed_removal_records
@@ -403,12 +463,48 @@ impl Transaction {
                         .collect_vec()
                 {
                     warn!("Removal records as generated from witness do not match with those listed as inputs in transaction kernel.");
+                    let witnessed_removal_record_hashes = witnessed_removal_records
+                        .iter()
+                        .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                        .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+                        .collect_vec();
+                    let listed_removal_record_hashes = self
+                        .kernel
+                        .inputs
+                        .iter()
+                        .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                        .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+                        .collect_vec();
+                    warn!(
+                        "observed: {}",
+                        witnessed_removal_record_hashes
+                            .iter()
+                            .map(|d| d.emojihash())
+                            .join(",")
+                    );
+                    warn!(
+                        "listed: {}",
+                        listed_removal_record_hashes
+                            .iter()
+                            .map(|d| d.emojihash())
+                            .join(",")
+                    );
                     return false;
                 }
 
-                // Verify that the mutator set accumulator listed in the primitive witness corresponds to the hash listed in the transaction.
+                // Verify that the mutator set accumulator listed in the
+                // primitive witness corresponds to the hash listed in the
+                // transaction.
                 if primitive_witness.mutator_set_accumulator.hash() != self.mutator_set_hash {
                     warn!("Transaction's mutator set hash does not correspond to the mutator set that the removal records were derived from. Therefore: can't verify that the inputs even exist.");
+                    debug!(
+                        "Transaction mutator set hash: {}",
+                        self.mutator_set_hash.emojihash()
+                    );
+                    debug!(
+                        "Witness mutator set hash: {}",
+                        primitive_witness.mutator_set_accumulator.hash().emojihash()
+                    );
                     return false;
                 }
 
@@ -425,11 +521,6 @@ impl Transaction {
 
                     let secret_input: Vec<BFieldElement> = vec![];
 
-                    debug!(
-                        "attempting to validate program:\n {}\n\n Public input is: {}\n\n",
-                        pubscript.program,
-                        pubscript_input.iter().join(",")
-                    );
                     // The pubscript is satisfied if it halts gracefully without crashing.
                     match triton_vm::vm::run(
                         &pubscript.program,
@@ -514,6 +605,11 @@ impl Transaction {
                     ]
                     .concat(),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
+                    input_lock_scripts: [
+                        self_witness.input_lock_scripts.clone(),
+                        other_witness.input_lock_scripts.clone(),
+                    ]
+                    .concat(),
                 })
             }
             (Witness::Faith, Witness::Primitive(prim_witness)) => {
@@ -572,7 +668,7 @@ mod transaction_tests {
     fn tx_get_timestamp_test() {
         let output_1 = Utxo {
             coins: Into::<Amount>::into(42).to_native_coins(),
-            lock_script: LockScript::anyone_can_spend(),
+            lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
         let ar = commit::<Hash>(&Hash::hash(&output_1), &random(), &random());
 

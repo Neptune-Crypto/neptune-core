@@ -632,6 +632,10 @@ pub fn make_mock_transaction_with_generation_key(
         .iter()
         .map(|(_utxo, _mp, sk)| sk.unlock_key.to_sequence())
         .collect_vec();
+    let input_lock_scripts = input_utxos_mps_keys
+        .iter()
+        .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
+        .collect_vec();
     let pubscripts = receiver_data
         .iter()
         .map(|rd| rd.pubscript.to_owned())
@@ -639,17 +643,18 @@ pub fn make_mock_transaction_with_generation_key(
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let witness = PrimitiveWitness {
         input_utxos,
+        input_lock_scripts,
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
         output_utxos,
         pubscripts,
-        mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
+        mutator_set_accumulator: tip_msa.clone(),
     };
 
     Transaction {
         kernel,
         witness: Witness::Primitive(witness),
-        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
+        mutator_set_hash: tip_msa.hash(),
     }
 }
 
@@ -735,8 +740,8 @@ pub fn make_mock_block(
     let coinbase_output_randomness: Digest = Digest::new(random_elements_array());
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
-    let mut new_ms = previous_block.body.next_mutator_set_accumulator.clone();
-    let previous_ms = new_ms.clone();
+    let mut next_mutator_set = previous_block.body.next_mutator_set_accumulator.clone();
+    let previous_mutator_set = next_mutator_set.clone();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
     let coinbase_addition_record: AdditionRecord = commit::<Hash>(
@@ -744,7 +749,7 @@ pub fn make_mock_block(
         &coinbase_output_randomness,
         &receiver_digest,
     );
-    new_ms.add(&coinbase_addition_record);
+    next_mutator_set.add(&coinbase_addition_record);
 
     let timestamp: BFieldElement = BFieldElement::new(
         SystemTime::now()
@@ -768,16 +773,17 @@ pub fn make_mock_block(
             input_membership_proofs: vec![],
             output_utxos: vec![coinbase_utxo.clone()],
             pubscripts: vec![],
-            mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
+            mutator_set_accumulator: previous_mutator_set.clone(),
+            input_lock_scripts: vec![],
         }),
-        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
+        mutator_set_hash: previous_mutator_set.hash(),
     };
 
     let block_body: BlockBody = BlockBody {
         transaction,
-        next_mutator_set_accumulator: new_ms.clone(),
+        next_mutator_set_accumulator: next_mutator_set.clone(),
 
-        previous_mutator_set_accumulator: previous_ms,
+        previous_mutator_set_accumulator: previous_mutator_set,
         stark_proof: vec![],
     };
 
@@ -788,7 +794,7 @@ pub fn make_mock_block(
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
-        mutator_set_hash: new_ms.hash(),
+        mutator_set_hash: next_mutator_set.hash(),
         prev_block_digest: previous_block.hash,
         timestamp: block_body.transaction.kernel.timestamp,
         nonce: [zero, zero, zero],

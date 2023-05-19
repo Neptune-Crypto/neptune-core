@@ -304,7 +304,7 @@ mod wallet_tests {
         let premine_receiver_address = premine_receiver_spending_key.to_address();
         let expected_premine_utxo = Utxo {
             coins: Block::premine_distribution()[0].1.to_native_coins(),
-            lock_script: premine_receiver_address.lock_script(),
+            lock_script_hash: premine_receiver_address.lock_script().hash(),
         };
         assert_eq!(
             expected_premine_utxo, monitored_utxos_premine_wallet[0].utxo,
@@ -639,7 +639,7 @@ mod wallet_tests {
         let msa_tip = next_block.body.next_mutator_set_accumulator.clone();
         let receiver_data = vec![UtxoReceiverData {
             utxo: Utxo {
-                lock_script: LockScript::anyone_can_spend(),
+                lock_script_hash: LockScript::anyone_can_spend().hash(),
                 coins: Into::<Amount>::into(200).to_native_coins(),
             },
             sender_randomness: random(),
@@ -649,7 +649,7 @@ mod wallet_tests {
         }];
         let input_utxos_mps_keys = two_utxos
             .into_iter()
-            .map(|(utxo, mp)| (utxo, mp, own_spending_key))
+            .map(|(utxo, _lock_script, mp)| (utxo, mp, own_spending_key))
             .collect_vec();
         let tx = make_mock_transaction_with_generation_key(
             input_utxos_mps_keys,
@@ -719,7 +719,7 @@ mod wallet_tests {
                 ),
             utxo: Utxo {
                 coins: Into::<Amount>::into(12).to_native_coins(),
-                lock_script: own_address.lock_script(),
+                lock_script_hash: own_address.lock_script().hash(),
             },
         };
         let receiver_data_one_to_other = UtxoReceiverData {
@@ -735,7 +735,7 @@ mod wallet_tests {
                 ),
             utxo: Utxo {
                 coins: Into::<Amount>::into(1).to_native_coins(),
-                lock_script: own_address.lock_script(),
+                lock_script_hash: own_address.lock_script().hash(),
             },
         };
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
@@ -1004,7 +1004,7 @@ mod wallet_tests {
             receiver_privacy_digest: own_address.privacy_digest,
             utxo: Utxo {
                 coins: Into::<Amount>::into(6).to_native_coins(),
-                lock_script: own_address.lock_script(),
+                lock_script_hash: own_address.lock_script().hash(),
             },
             sender_randomness: random(),
         };

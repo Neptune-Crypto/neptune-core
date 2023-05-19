@@ -369,7 +369,7 @@ mod wallet_state_tests {
         assert!(notification_pool.is_empty());
         assert!(notification_pool.len().is_zero());
         let mock_utxo = Utxo {
-            lock_script: LockScript::anyone_can_spend(),
+            lock_script_hash: LockScript::anyone_can_spend().hash(),
             coins: Into::<Amount>::into(10).to_native_coins(),
         };
         let sender_randomness: Digest = random();
@@ -432,7 +432,7 @@ mod wallet_state_tests {
 
         let spamming_peer: InstanceId = random();
         let mock_utxo = Utxo {
-            lock_script: LockScript::anyone_can_spend(),
+            lock_script_hash: LockScript::anyone_can_spend().hash(),
             coins: Into::<Amount>::into(14).to_native_coins(),
         };
         let receiver_preimage: Digest = random();
@@ -547,7 +547,7 @@ mod wallet_state_tests {
     async fn prune_stale_utxo_notifications_test() {
         let mut notification_pool = UtxoNotificationPool::new(ByteSize::mb(1), 100);
         let mock_utxo = Utxo {
-            lock_script: LockScript::anyone_can_spend(),
+            lock_script_hash: LockScript::anyone_can_spend().hash(),
             coins: Into::<Amount>::into(14).to_native_coins(),
         };
 
