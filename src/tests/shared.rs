@@ -643,6 +643,7 @@ pub fn make_mock_transaction_with_generation_key(
         input_membership_proofs,
         output_utxos,
         pubscripts,
+        mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
     };
 
     Transaction {
@@ -764,6 +765,7 @@ pub fn make_mock_block(
             input_membership_proofs: vec![],
             output_utxos: vec![coinbase_utxo.clone()],
             pubscripts: vec![],
+            mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
         }),
     };
 

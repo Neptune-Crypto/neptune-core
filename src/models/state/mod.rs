@@ -221,6 +221,13 @@ impl GlobalState {
             input_membership_proofs,
             output_utxos: output_utxos.clone(),
             pubscripts,
+            mutator_set_accumulator: self
+                .chain
+                .light_state
+                .get_latest_block()
+                .await
+                .body
+                .next_mutator_set_accumulator,
         };
 
         let transaction = Transaction {

@@ -6,7 +6,6 @@ pub mod utxo;
 use anyhow::Result;
 use get_size::GetSize;
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
@@ -101,6 +100,7 @@ pub struct PrimitiveWitness {
     pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
     pub output_utxos: Vec<Utxo>,
     pub pubscripts: Vec<PubScript>,
+    pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
 }
 
 /// Linked proofs are one abstraction level above raw witness. They
@@ -324,26 +324,22 @@ impl Transaction {
                     };
                 }
 
-                // verify removal records
-                // We only check internal consistency not removability relative to a given mutator set accumulator.
-                for ((input_utxo, msmp), removal_record) in primitive_witness
+                // Verify correct computation of removal records. Also, collect
+                // the removal records' hashes in order to validate them against
+                // those provided in the transaction kernel later.
+                // We only check internal consistency not removability relative
+                // to a given mutator set accumulator.
+                let mut witnessed_removal_records = vec![];
+                for (input_utxo, msmp) in primitive_witness
                     .input_utxos
                     .iter()
                     .zip(primitive_witness.input_membership_proofs.iter())
-                    .zip(self.kernel.inputs.iter())
                 {
                     let item = Hash::hash(input_utxo);
                     // TODO: write this function in tasm
-                    let indices = get_swbf_indices::<Hash>(
-                        &item,
-                        &msmp.sender_randomness,
-                        &msmp.receiver_preimage,
-                        msmp.auth_path_aocl.leaf_index,
-                    );
-
-                    if removal_record.absolute_indices.to_array() != indices {
-                        return false;
-                    }
+                    let removal_record =
+                        primitive_witness.mutator_set_accumulator.drop(&item, msmp);
+                    witnessed_removal_records.push(removal_record);
                 }
 
                 // collect type scripts
@@ -374,8 +370,8 @@ impl Transaction {
                         .flatten()
                         .collect_vec();
 
-                    // The type script is satisfied if it halts gracefully,
-                    // i.e., without panicking. So there is no input
+                    // The type script is satisfied if it halts gracefully, i.e.,
+                    // without panicking. So we don't care about the output
                     match triton_vm::vm::run(&type_script, public_input, secret_input) {
                         Ok(_) => (),
                         Err(_) => {
@@ -387,6 +383,8 @@ impl Transaction {
                         }
                     };
                 }
+
+                // Verify that the UTXOs in the primitive witness correspond to those in the kernel.
 
                 // verify pubscripts
                 for ((pubscript_hash, pubscript_input), pubscript) in self
@@ -489,6 +487,7 @@ impl Transaction {
                         other_witness.pubscripts.clone(),
                     ]
                     .concat(),
+                    mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
                 })
             }
             (Witness::Faith, Witness::Primitive(prim_witness)) => {

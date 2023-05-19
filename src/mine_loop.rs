@@ -199,6 +199,7 @@ fn make_coinbase_transaction(
                 input_membership_proofs: vec![],
                 output_utxos: vec![coinbase_utxo.clone()],
                 pubscripts: vec![],
+                mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
             }),
         },
         sender_randomness,
