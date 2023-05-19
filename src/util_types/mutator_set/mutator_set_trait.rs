@@ -31,7 +31,7 @@ pub trait MutatorSet<H: AlgebraicHasher> {
     fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool;
 
     /// Generates a removal record with which to update the set commitment.
-    fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
+    fn drop(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H>;
 
     /// Updates the set-commitment with an addition record.
     fn add(&mut self, addition_record: &AdditionRecord);

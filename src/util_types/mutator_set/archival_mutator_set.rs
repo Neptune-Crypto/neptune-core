@@ -50,7 +50,7 @@ where
         self.kernel.verify(item, membership_proof)
     }
 
-    fn drop(&mut self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
+    fn drop(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         self.kernel.drop(item, membership_proof)
     }
 
