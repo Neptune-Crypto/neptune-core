@@ -210,6 +210,15 @@ impl GlobalState {
             .map(|rd| rd.pubscript.clone())
             .collect_vec();
 
+        let mutator_set_accumulator = self
+            .chain
+            .light_state
+            .get_latest_block()
+            .await
+            .body
+            .next_mutator_set_accumulator;
+        let mutator_set_hash = mutator_set_accumulator.hash();
+
         // When reading a digest from secret and standard-in, the digest's
         // zeroth element must be on top of the stack. So the secret-in
         // is here the spending key reversed.
@@ -221,18 +230,13 @@ impl GlobalState {
             input_membership_proofs,
             output_utxos: output_utxos.clone(),
             pubscripts,
-            mutator_set_accumulator: self
-                .chain
-                .light_state
-                .get_latest_block()
-                .await
-                .body
-                .next_mutator_set_accumulator,
+            mutator_set_accumulator,
         };
 
         let transaction = Transaction {
             kernel,
             witness: Witness::Primitive(witness),
+            mutator_set_hash,
         };
 
         Ok(transaction)

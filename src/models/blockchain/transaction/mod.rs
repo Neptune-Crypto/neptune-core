@@ -155,6 +155,8 @@ pub struct Transaction {
     pub kernel: TransactionKernel,
 
     pub witness: Witness,
+
+    pub mutator_set_hash: Digest,
 }
 
 impl Hashable for Transaction {
@@ -384,7 +386,31 @@ impl Transaction {
                     };
                 }
 
-                // Verify that the UTXOs in the primitive witness correspond to those in the kernel.
+                // Verify that the removal records witnessed from the primitive
+                // witness correspond to the removal records listed in the
+                // transaction kernel.
+                if witnessed_removal_records
+                    .iter()
+                    .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                    .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+                    .collect_vec()
+                    != self
+                        .kernel
+                        .inputs
+                        .iter()
+                        .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                        .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
+                        .collect_vec()
+                {
+                    warn!("Removal records as generated from witness do not match with those listed as inputs in transaction kernel.");
+                    return false;
+                }
+
+                // Verify that the mutator set accumulator listed in the primitive witness corresponds to the hash listed in the transaction.
+                if primitive_witness.mutator_set_accumulator.hash() != self.mutator_set_hash {
+                    warn!("Transaction's mutator set hash does not correspond to the mutator set that the removal records were derived from. Therefore: can't verify that the inputs even exist.");
+                    return false;
+                }
 
                 // verify pubscripts
                 for ((pubscript_hash, pubscript_input), pubscript) in self
@@ -503,6 +529,7 @@ impl Transaction {
         Transaction {
             kernel: merged_kernel,
             witness: merged_witness,
+            mutator_set_hash: self.mutator_set_hash,
         }
     }
 

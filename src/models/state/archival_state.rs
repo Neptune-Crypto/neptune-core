@@ -686,7 +686,7 @@ impl ArchivalState {
 
         // Sanity check that archival mutator set has been updated consistently with the new block
         debug!("sanity check: was AMS updated consistently with new block?");
-        let mut new_block_copy = new_block.clone();
+        let new_block_copy = new_block.clone();
         assert_eq!(
             new_block_copy
                 .body

@@ -201,6 +201,7 @@ fn make_coinbase_transaction(
                 pubscripts: vec![],
                 mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
             }),
+            mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
         },
         sender_randomness,
     )

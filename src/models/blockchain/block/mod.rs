@@ -90,6 +90,7 @@ impl Block {
                 coinbase: Some(total_premine_amount),
             },
             witness: super::transaction::Witness::Faith,
+            mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
         };
 
         for (receiving_address, amount) in premine_distribution {
@@ -213,7 +214,7 @@ impl Block {
     pub(crate) fn is_valid_for_devnet(&self, previous_block: &Block) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
-        let mut block_copy = self.to_owned();
+        let block_copy = self.to_owned();
         // What belongs here are the things that would otherwise
         // be verified by the block validity proof.
 

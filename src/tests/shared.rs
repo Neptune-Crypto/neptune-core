@@ -649,6 +649,7 @@ pub fn make_mock_transaction_with_generation_key(
     Transaction {
         kernel,
         witness: Witness::Primitive(witness),
+        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
     }
 }
 
@@ -677,6 +678,7 @@ pub fn make_mock_transaction(
             coinbase: None,
         },
         witness: transaction::Witness::Faith,
+        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
     }
 }
 
@@ -711,6 +713,7 @@ pub fn make_mock_transaction_with_wallet(
     Transaction {
         kernel,
         witness: transaction::Witness::Faith,
+        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
     }
 }
 
@@ -767,6 +770,7 @@ pub fn make_mock_block(
             pubscripts: vec![],
             mutator_set_accumulator: MutatorSetAccumulator::<Hash>::new(),
         }),
+        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
     };
 
     let block_body: BlockBody = BlockBody {
