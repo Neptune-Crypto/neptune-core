@@ -6,9 +6,9 @@ use itertools::Itertools;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::poseidon::DIGEST_LENGTH;
-use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable, SpongeHasher};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
+use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, SpongeHasher};
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -54,17 +54,18 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
 ) -> [u128; NUM_TRIALS as usize] {
     let batch_index: u128 = aocl_leaf_index as u128 / BATCH_SIZE as u128;
     let batch_offset: u128 = batch_index * CHUNK_SIZE as u128;
-    let leaf_index_bfes = aocl_leaf_index.to_sequence();
+    let leaf_index_bfes = aocl_leaf_index.encode();
     let leaf_index_bfes_len = leaf_index_bfes.len();
     let input = [
-        item.to_sequence(),
-        sender_randomness.to_sequence(),
-        receiver_preimage.to_sequence(),
+        item.encode(),
+        sender_randomness.encode(),
+        receiver_preimage.encode(),
         leaf_index_bfes,
         // Pad with zeros until length is a multiple of RATE; according to spec
         vec![BFieldElement::zero(); DIGEST_LENGTH - leaf_index_bfes_len],
     ]
     .concat();
+    assert_eq!(input.len() % DIGEST_LENGTH, 0);
     let mut sponge = <H as SpongeHasher>::init();
     H::absorb_repeatedly(&mut sponge, input.iter());
     H::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
@@ -500,7 +501,7 @@ mod accumulation_scheme_tests {
         for i in 0..BATCH_SIZE {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             mutator_set.add(&addition_record);
             assert_eq!(
                 0,
@@ -512,7 +513,7 @@ mod accumulation_scheme_tests {
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
         mutator_set.add(&addition_record);
         assert_eq!(
             1,
@@ -653,7 +654,7 @@ mod accumulation_scheme_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             let membership_proof: MsMembershipProof<H> =
                 mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
             mutator_set.add_helper(&addition_record);
@@ -674,7 +675,7 @@ mod accumulation_scheme_tests {
         let addition_record = commit::<H>(
             &own_item,
             &sender_randomness,
-            &receiver_preimage.vmhash::<H>(),
+            &receiver_preimage.hash::<H>(),
         );
         let mut membership_proof =
             mutator_set.prove(&own_item, &sender_randomness, &receiver_preimage);
@@ -685,7 +686,7 @@ mod accumulation_scheme_tests {
         let new_addition_record = commit::<H>(
             &new_item,
             &new_sender_randomness,
-            &new_receiver_preimage.vmhash::<H>(),
+            &new_receiver_preimage.hash::<H>(),
         );
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
@@ -728,7 +729,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn membership_proof_updating_from_add_pbt() {
-        type H = blake3::Hasher;
+        type H = Tip5;
         let mut rng = thread_rng();
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
@@ -746,7 +747,7 @@ mod accumulation_scheme_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             let membership_proof = mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
             // Update all membership proofs
@@ -780,11 +781,8 @@ mod accumulation_scheme_tests {
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let (item0, sender_randomness0, receiver_preimage0) = make_item_and_randomnesses();
 
-        let addition_record = commit::<H>(
-            &item0,
-            &sender_randomness0,
-            &receiver_preimage0.vmhash::<H>(),
-        );
+        let addition_record =
+            commit::<H>(&item0, &sender_randomness0, &receiver_preimage0.hash::<H>());
         let membership_proof = mutator_set.prove(&item0, &sender_randomness0, &receiver_preimage0);
 
         assert!(!mutator_set.verify(&item0, &membership_proof));
@@ -795,11 +793,8 @@ mod accumulation_scheme_tests {
 
         // Insert a new item and verify that this still works
         let (item1, sender_randomness1, receiver_preimage1) = make_item_and_randomnesses();
-        let addition_record = commit::<H>(
-            &item1,
-            &sender_randomness1,
-            &receiver_preimage1.vmhash::<H>(),
-        );
+        let addition_record =
+            commit::<H>(&item1, &sender_randomness1, &receiver_preimage1.hash::<H>());
         let membership_proof = mutator_set.prove(&item1, &sender_randomness1, &receiver_preimage1);
         assert!(!mutator_set.verify(&item1, &membership_proof));
 
@@ -813,7 +808,7 @@ mod accumulation_scheme_tests {
         for _ in 0..2 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             let membership_proof = mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
             assert!(!mutator_set.verify(&item, &membership_proof));
 
@@ -850,7 +845,7 @@ mod accumulation_scheme_tests {
                 let addition_record = commit::<H>(
                     &new_item,
                     &sender_randomness,
-                    &receiver_preimage.vmhash::<H>(),
+                    &receiver_preimage.hash::<H>(),
                 );
                 let membership_proof =
                     mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);
@@ -906,7 +901,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_multiple_adds() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
@@ -920,7 +915,7 @@ mod accumulation_scheme_tests {
             let addition_record = commit::<H>(
                 &new_item,
                 &sender_randomness,
-                &receiver_preimage.vmhash::<H>(),
+                &receiver_preimage.hash::<H>(),
             );
             let membership_proof =
                 mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);

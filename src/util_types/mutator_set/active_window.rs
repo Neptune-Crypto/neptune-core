@@ -1,9 +1,12 @@
+use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::ops::Range;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
@@ -175,12 +178,38 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
     }
 }
 
-impl<H: AlgebraicHasher> Hashable for ActiveWindow<H> {
-    fn to_sequence(&self) -> Vec<twenty_first::shared_math::b_field_element::BFieldElement> {
-        self.sbf
+impl<H: AlgebraicHasher> BFieldCodec for ActiveWindow<H> {
+    fn encode(&self) -> Vec<BFieldElement> {
+        [
+            vec![BFieldElement::new(self.sbf.len() as u64)],
+            self.sbf.iter().flat_map(|i| i.encode()).collect(),
+        ]
+        .concat()
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if sequence.is_empty() {
+            bail!("Could not decode empty sequence of BFieldElements as active window.");
+        }
+        let num_indices = sequence[0].value() as usize;
+        if sequence.len() != 1 + num_indices {
+            bail!("Could not decode sequence of BFieldElements as active window because of length prepending mismatch.");
+        }
+        if !sequence
             .iter()
-            .flat_map(|u128| u128.to_sequence())
-            .collect()
+            .skip(1)
+            .all(|b| b.value() <= u32::MAX as u64)
+        {
+            bail!("Could not decode sequence of BFieldElements as active window because some are too large.");
+        }
+        Ok(Box::new(Self {
+            sbf: sequence
+                .iter()
+                .skip(1)
+                .map(|b| b.value() as u32)
+                .collect_vec(),
+            _hasher: PhantomData,
+        }))
     }
 }
 
@@ -333,5 +362,20 @@ mod active_window_tests {
         let json_aw0 = serde_json::to_string(&aw0).unwrap();
         let aw0_back = serde_json::from_str::<ActiveWindow<H>>(&json_aw0).unwrap();
         assert_eq!(aw0.sbf, aw0_back.sbf);
+    }
+
+    #[test]
+    fn test_active_window_decode() {
+        type H = Tip5;
+        let mut rng = thread_rng();
+
+        let mut aw0 = ActiveWindow::<H>::new();
+        for _ in 0..37 {
+            aw0.insert(rng.next_u32() % WINDOW_SIZE);
+        }
+        let encoded = aw0.encode();
+        let decoded = *ActiveWindow::decode(&encoded).unwrap();
+
+        assert_eq!(aw0, decoded);
     }
 }

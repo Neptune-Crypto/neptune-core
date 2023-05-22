@@ -1,3 +1,4 @@
+use anyhow::bail;
 use get_size::GetSize;
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
@@ -9,8 +10,9 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk_dictionary::ChunkDictionary;
 use super::mutator_set_kernel::MutatorSetKernel;
@@ -310,14 +312,33 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
     }
 }
 
-impl<H: AlgebraicHasher> Hashable for RemovalRecord<H> {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
+impl<H: AlgebraicHasher> BFieldCodec for RemovalRecord<H> {
+    fn encode(&self) -> Vec<BFieldElement> {
         self.absolute_indices
             .to_array()
             .iter()
-            .flat_map(|bi| bi.to_sequence())
-            .chain(self.target_chunks.to_sequence())
+            .flat_map(|bi| bi.encode())
+            .chain(self.target_chunks.encode())
             .collect()
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if sequence.len() < 4 * NUM_TRIALS as usize {
+            bail!("Cannot decode sequence of BFieldElements as RemovalRecord because sequence is too short.");
+        }
+        let mut absolute_indices = [0u128; NUM_TRIALS as usize];
+        for i in 0..NUM_TRIALS as usize {
+            let subsequence = &sequence[4 * i..4 * (i + 1)];
+            let index = *u128::decode(subsequence)?;
+            absolute_indices[i] = index;
+        }
+
+        let target_chunks = *ChunkDictionary::decode(&sequence[4 * NUM_TRIALS as usize..])?;
+
+        Ok(Box::new(RemovalRecord {
+            absolute_indices: AbsoluteIndexSet(absolute_indices),
+            target_chunks,
+        }))
     }
 }
 
@@ -328,7 +349,7 @@ mod removal_record_tests {
     use rand::{thread_rng, Rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::test_shared::mutator_set::make_item_and_randomnesses;
+    use crate::test_shared::mutator_set::{make_item_and_randomnesses, random_removal_record};
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -420,7 +441,7 @@ mod removal_record_tests {
     }
 
     #[test]
-    fn serialization_test() {
+    fn removal_record_serialization_test() {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
@@ -441,7 +462,7 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
         let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
         assert!(
@@ -476,7 +497,7 @@ mod removal_record_tests {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
                 let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
                 // Update all removal records from addition, then add the element
@@ -565,7 +586,7 @@ mod removal_record_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             // Update all removal records from addition, then add the element
@@ -672,5 +693,16 @@ mod removal_record_tests {
             serde_json::from_str(&serialized_indexset).unwrap();
 
         assert_eq!(original_indexset, reconstructed_indexset);
+    }
+
+    #[test]
+    fn test_removal_record_decode() {
+        type H = Tip5;
+        for _ in 0..100 {
+            let removal_record = random_removal_record::<H>();
+            let encoded = removal_record.encode();
+            let decoded = *RemovalRecord::decode(&encoded).unwrap();
+            assert_eq!(removal_record, decoded);
+        }
     }
 }

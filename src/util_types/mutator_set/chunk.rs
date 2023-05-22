@@ -1,8 +1,8 @@
+use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::Hashable;
+use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 use super::shared::CHUNK_SIZE;
 
@@ -107,12 +107,21 @@ impl Chunk {
     }
 }
 
-impl Hashable for Chunk {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
+impl BFieldCodec for Chunk {
+    fn encode(&self) -> Vec<BFieldElement> {
         self.relative_indices
             .iter()
-            .flat_map(|&val| val.to_sequence())
+            .flat_map(|&val| val.encode())
             .collect()
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if !sequence.iter().all(|b| b.value() < u32::MAX as u64) {
+            bail!("Could not decode sequence of BFieldElements as Chunk because some BFieldElements are too large.");
+        }
+        Ok(Box::new(Chunk {
+            relative_indices: sequence.iter().map(|b| b.value() as u32).collect(),
+        }))
     }
 }
 
@@ -207,19 +216,19 @@ mod chunk_tests {
     #[test]
     fn chunk_hashpreimage_test() {
         let zero_chunk = Chunk::empty_chunk();
-        let zero_chunk_preimage = zero_chunk.to_sequence();
+        let zero_chunk_preimage = zero_chunk.encode();
         assert!(zero_chunk_preimage.iter().all(|elem| elem.is_zero()));
 
         let mut one_chunk = Chunk::empty_chunk();
         one_chunk.insert(32);
-        let one_chunk_preimage = one_chunk.to_sequence();
+        let one_chunk_preimage = one_chunk.encode();
 
         assert_ne!(zero_chunk_preimage, one_chunk_preimage);
 
         let mut two_ones_chunk = Chunk::empty_chunk();
         two_ones_chunk.insert(32);
         two_ones_chunk.insert(33);
-        let two_ones_preimage = two_ones_chunk.to_sequence();
+        let two_ones_preimage = two_ones_chunk.encode();
 
         assert_ne!(two_ones_preimage, one_chunk_preimage);
         assert_ne!(two_ones_preimage, zero_chunk_preimage);
@@ -229,7 +238,7 @@ mod chunk_tests {
         for i in 0..CHUNK_SIZE {
             let mut chunk = Chunk::empty_chunk();
             chunk.insert(i);
-            assert!(previous_values.insert(chunk.to_sequence()));
+            assert!(previous_values.insert(chunk.encode()));
         }
     }
 
@@ -301,5 +310,21 @@ mod chunk_tests {
         let reconstructed_chunk = Chunk::from_indices(&indices);
 
         assert_eq!(chunk, reconstructed_chunk);
+    }
+
+    #[test]
+    fn test_chunk_decode() {
+        let mut chunk = Chunk::empty_chunk();
+        let mut rng = thread_rng();
+        let num_insertions = 100;
+        for _ in 0..num_insertions {
+            let index = rng.next_u32() % (CHUNK_SIZE);
+            chunk.insert(index);
+        }
+
+        let encoded = chunk.encode();
+        let decoded = *Chunk::decode(&encoded).unwrap();
+
+        assert_eq!(chunk, decoded);
     }
 }

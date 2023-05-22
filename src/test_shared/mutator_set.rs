@@ -1,22 +1,67 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rand::Rng;
+use itertools::Itertools;
+use rand::{thread_rng, Rng};
+use rand_core::RngCore;
 use rusty_leveldb::DB;
 
+use twenty_first::shared_math::other::random_elements;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_vec::{RustyLevelDbVec, StorageVec};
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
+use crate::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::mutator_set_trait::commit;
-use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
+use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
+
+pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
+    let mut rng = thread_rng();
+
+    let mut dictionary = HashMap::new();
+    for _ in 0..37 {
+        let key = rng.next_u64();
+        let authpath: Vec<Digest> = random_elements(rng.next_u32() as usize % 6);
+        let chunk: Vec<u32> = random_elements(rng.next_u32() as usize % 17);
+
+        dictionary.insert(
+            key,
+            (
+                MmrMembershipProof::new(key, authpath),
+                Chunk {
+                    relative_indices: chunk,
+                },
+            ),
+        );
+    }
+    ChunkDictionary::<H>::new(dictionary)
+}
+
+pub fn random_removal_record<H: AlgebraicHasher>() -> RemovalRecord<H> {
+    let mut rng = thread_rng();
+    let absolute_indices = AbsoluteIndexSet::new(
+        &(0..NUM_TRIALS as usize)
+            .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+            .collect_vec()
+            .try_into()
+            .unwrap(),
+    );
+    let target_chunks = random_chunk_dictionary();
+
+    RemovalRecord {
+        absolute_indices,
+        target_chunks,
+    }
+}
 
 pub fn get_all_indices_with_duplicates<
     H: AlgebraicHasher,
@@ -80,7 +125,7 @@ pub fn insert_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
     let addition_record = commit::<H>(
         &new_item,
         &sender_randomness,
-        &receiver_preimage.vmhash::<H>(),
+        &receiver_preimage.hash::<H>(),
     );
     let membership_proof = mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);
     mutator_set.add_helper(&addition_record);

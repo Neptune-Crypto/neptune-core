@@ -385,7 +385,7 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             let membership_proof =
                 archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -761,7 +761,7 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             let membership_proof =
                 archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -808,7 +808,7 @@ mod archival_mutator_set_tests {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
                 let membership_proof =
                     archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -878,7 +878,7 @@ mod archival_mutator_set_tests {
         let sender_randomness: Digest = rng.gen();
         let receiver_preimage: Digest = rng.gen();
         let addition_record =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
         let membership_proof =
             archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 
@@ -894,7 +894,7 @@ mod archival_mutator_set_tests {
     ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
         let membership_proof =
             archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
 

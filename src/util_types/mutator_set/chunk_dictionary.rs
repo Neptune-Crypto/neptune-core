@@ -1,26 +1,20 @@
+use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq)]
 pub struct ChunkDictionary<H: AlgebraicHasher> {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
     pub dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>,
 }
-
-impl<H: AlgebraicHasher> PartialEq for ChunkDictionary<H> {
-    fn eq(&self, other: &Self) -> bool {
-        self.dictionary == other.dictionary
-    }
-}
-
-impl<H: AlgebraicHasher> Eq for ChunkDictionary<H> {}
 
 impl<H: AlgebraicHasher> ChunkDictionary<H> {
     pub fn new(dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>) -> Self {
@@ -36,25 +30,67 @@ impl<H: AlgebraicHasher> Default for ChunkDictionary<H> {
     }
 }
 
-impl<H: AlgebraicHasher> Hashable for ChunkDictionary<H> {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.dictionary
-            .keys()
-            .sorted()
-            .flat_map(|key| {
-                [
-                    key.to_sequence(),
-                    self.dictionary[key].0.to_sequence(),
-                    self.dictionary[key].1.to_sequence(),
-                ]
-            })
-            .flatten()
-            .collect()
+impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
+    fn encode(&self) -> Vec<BFieldElement> {
+        let mut string = vec![BFieldElement::new(self.dictionary.keys().len() as u64)];
+        for key in self.dictionary.keys().sorted() {
+            string.append(&mut key.encode());
+            let mut membership_proof_encoded = self.dictionary[key].0.encode();
+            string.push(BFieldElement::new(membership_proof_encoded.len() as u64));
+            string.append(&mut membership_proof_encoded);
+            let mut chunk_encoded = self.dictionary[key].1.encode();
+            string.push(BFieldElement::new(chunk_encoded.len() as u64));
+            string.append(&mut chunk_encoded);
+        }
+        string
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if sequence.is_empty() {
+            bail!("Cannot decode empty sequence of BFieldElements as ChunkDictionary");
+        }
+        let num_entries = sequence[0].value() as usize;
+        let mut read_index = 1;
+        let mut dictionary = HashMap::new();
+        for _ in 0..num_entries {
+            // read key
+            let key_length = 2;
+            if sequence.len() < read_index + key_length {
+                bail!("Cannot decode sequence of BFieldElements as ChunkDictionary: missing key");
+            }
+            let key = *u64::decode(&sequence[read_index..read_index + key_length])?;
+            read_index += key_length;
+
+            // read membership proof
+            if sequence.len() <= read_index {
+                bail!("Cannot decode sequence of BFieldElements as ChunkDictionary: missing membership proof");
+            }
+            let memproof_length = sequence[read_index].value() as usize;
+            read_index += 1;
+            let membership_proof = *MmrMembershipProof::<H>::decode(
+                &sequence[read_index..read_index + memproof_length],
+            )?;
+            read_index += memproof_length;
+
+            // read chunk
+            if sequence.len() <= read_index {
+                bail!("Cannot decode sequence of BFieldElements as ChunkDictionary: missing chunk");
+            }
+            let chunk_length = sequence[read_index].value() as usize;
+            read_index += 1;
+            let chunk = *Chunk::decode(&sequence[read_index..read_index + chunk_length])?;
+            read_index += chunk_length;
+
+            dictionary.insert(key, (membership_proof, chunk));
+        }
+
+        Ok(Box::new(ChunkDictionary { dictionary }))
     }
 }
 
 #[cfg(test)]
 mod chunk_dict_tests {
+    use crate::test_shared::mutator_set::random_chunk_dictionary;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
 
     use twenty_first::shared_math::other::random_elements;
@@ -75,7 +111,7 @@ mod chunk_dict_tests {
         // Insert elements
         let num_leaves = 3;
         let leaf_hashes: Vec<Digest> = random_elements(num_leaves);
-        let mut archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
+        let archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
 
         let key1: u64 = 898989;
         let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
@@ -151,7 +187,7 @@ mod chunk_dict_tests {
         // Build a non-empty chunk dict and verify that it still works
         let key: u64 = 898989;
         let leaf_hashes: Vec<Digest> = random_elements(3);
-        let mut archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
+        let archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
             relative_indices: (0..CHUNK_SIZE).collect(),
@@ -165,5 +201,16 @@ mod chunk_dict_tests {
         assert!(!s_back_non_empty.dictionary.is_empty());
         assert!(s_back_non_empty.dictionary.contains_key(&key));
         assert_eq!((mp, chunk), s_back_non_empty.dictionary[&key]);
+    }
+
+    #[test]
+    fn test_chunk_dictionary_decode() {
+        type H = Tip5;
+        let chunk_dictionary = random_chunk_dictionary::<H>();
+
+        let encoded = chunk_dictionary.encode();
+        let decoded = *ChunkDictionary::decode(&encoded).unwrap();
+
+        assert_eq!(chunk_dictionary, decoded);
     }
 }

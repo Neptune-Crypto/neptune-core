@@ -7,6 +7,7 @@ use std::fmt;
 use std::ops::IndexMut;
 use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
@@ -40,24 +41,13 @@ pub enum MembershipProofError {
 }
 
 // In order to store this structure in the database, it needs to be serializable.
-#[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize)]
 pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
-    pub auth_path_aocl: mmr::mmr_membership_proof::MmrMembershipProof<H>,
+    pub auth_path_aocl: MmrMembershipProof<H>,
     pub target_chunks: ChunkDictionary<H>,
 }
-
-impl<H: AlgebraicHasher> PartialEq for MsMembershipProof<H> {
-    fn eq(&self, other: &Self) -> bool {
-        self.sender_randomness == other.sender_randomness
-            && self.receiver_preimage == other.receiver_preimage
-            && self.auth_path_aocl == other.auth_path_aocl
-            && self.target_chunks == other.target_chunks
-    }
-}
-
-impl<H: AlgebraicHasher> Eq for MsMembershipProof<H> {}
 
 impl<H: AlgebraicHasher> MsMembershipProof<H> {
     /// Compute the indices that will be added to the SWBF if this item is removed.
@@ -641,7 +631,7 @@ mod ms_proof_tests {
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
 
             for (oi, mp) in membership_proofs.iter_mut() {
                 mp.update_from_addition(oi, &archival_mutator_set.accumulator(), &addition_record)
@@ -767,7 +757,7 @@ mod ms_proof_tests {
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
@@ -850,7 +840,7 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
                 MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect_vec(),
                     &items,
@@ -902,7 +892,7 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
                 msa.add(&addition_record);
             }
 
@@ -913,7 +903,7 @@ mod ms_proof_tests {
             let own_addition_record = commit::<H>(
                 &own_item,
                 &own_sender_randomness,
-                &own_receiver_preimage.vmhash::<H>(),
+                &own_receiver_preimage.hash::<H>(),
             );
             let mut own_mp = msa.prove(&own_item, &own_sender_randomness, &own_receiver_preimage);
             msa.add(&own_addition_record);
@@ -925,7 +915,7 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
                 own_mp
                     .update_from_addition(&own_item, &msa, &addition_record)
                     .unwrap();
@@ -944,7 +934,7 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
                 own_mp
                     .update_from_addition(&own_item, &msa, &addition_record)
                     .unwrap();
@@ -988,7 +978,7 @@ mod ms_proof_tests {
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             addition_records.push(addition_record);
 
             let membership_proof =
@@ -1108,7 +1098,7 @@ mod ms_proof_tests {
 
                 // generate addition record
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
 
                 // record membership proof
                 let membership_proof =

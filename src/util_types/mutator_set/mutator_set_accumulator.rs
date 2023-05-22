@@ -97,6 +97,7 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
 mod ms_accumulator_tests {
     use itertools::Itertools;
     use proptest::prelude::Rng;
+    use twenty_first::shared_math::tip5::Tip5;
 
     use crate::{
         test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses},
@@ -119,7 +120,7 @@ mod ms_accumulator_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
             let membership_proof = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
@@ -179,7 +180,7 @@ mod ms_accumulator_tests {
         // This function mixes both archival and accumulator testing.
         // It *may* be considered bad style to do it this way, but there is a
         // lot of code duplication that is avoided by doing that.
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (mut archival_after_remove, _) = empty_rustyleveldbvec_ams();
@@ -219,7 +220,7 @@ mod ms_accumulator_tests {
                     let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
-                        commit::<H>(&item, &sender_randomness, &receiver_preimage.vmhash::<H>());
+                        commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
                     let membership_proof_acc =
                         accumulator.prove(&item, &sender_randomness, &receiver_preimage);
 
