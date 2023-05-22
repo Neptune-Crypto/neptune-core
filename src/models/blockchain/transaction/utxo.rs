@@ -7,7 +7,7 @@ use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::{halt, read_io};
-use triton_vm::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 
 use super::amount::AmountLike;
@@ -15,9 +15,6 @@ use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
 use super::{native_coin, Amount};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
-
-pub const PUBLIC_KEY_LENGTH_IN_BYTES: usize = 33;
-pub const PUBLIC_KEY_LENGTH_IN_BFES: usize = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Coin {
@@ -100,36 +97,6 @@ impl Utxo {
             .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
             .map(|coin| Amount::from_bfes(&coin.state))
             .sum()
-    }
-}
-
-impl Hashable for Utxo {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        let lock_script_bfes: Vec<BFieldElement> = self.lock_script_hash.values().to_vec();
-
-        let coins_bfes = self
-            .coins
-            .iter()
-            .flat_map(|coin| {
-                [
-                    vec![BFieldElement::new(
-                        coin.type_script_hash.to_sequence().len() as u64,
-                    )],
-                    coin.type_script_hash.to_sequence(),
-                    vec![BFieldElement::new(coin.state.len() as u64)],
-                    coin.state.clone(),
-                ]
-                .concat()
-            })
-            .collect_vec();
-
-        [
-            vec![BFieldElement::new(lock_script_bfes.len() as u64)],
-            lock_script_bfes,
-            vec![BFieldElement::new(coins_bfes.len() as u64)],
-            coins_bfes,
-        ]
-        .concat()
     }
 }
 
@@ -320,5 +287,16 @@ mod utxo_tests {
         let serialized: String = serde_json::to_string(&utxo).unwrap();
         let utxo_again: Utxo = serde_json::from_str(&serialized).unwrap();
         assert_eq!(utxo, utxo_again);
+    }
+
+    #[traced_test]
+    #[test]
+    fn codec_test() {
+        for _ in 0..10 {
+            let utxo = make_random_utxo();
+            let encoded = utxo.encode();
+            let decoded = *Utxo::decode(&encoded).unwrap();
+            assert_eq!(utxo, decoded);
+        }
     }
 }
