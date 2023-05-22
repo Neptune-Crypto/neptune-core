@@ -12,10 +12,7 @@ use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use triton_vm::bfield_codec::BFieldCodec;
-use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
-    util_types::algebraic_hasher::Hashable,
-};
+use twenty_first::{amount::u32s::U32s, shared_math::b_field_element::BFieldElement};
 
 use super::{native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
 
@@ -37,7 +34,7 @@ pub trait AmountLike:
     + From<i32>
     + From<u32>
     + From<u64>
-    + Hashable
+    + BFieldCodec
 {
     fn from_bfes(bfes: &[BFieldElement]) -> Self;
     fn scalar_mul(&self, factor: u64) -> Self;
@@ -203,9 +200,13 @@ impl FromStr for Amount {
     }
 }
 
-impl Hashable for Amount {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.to_sequence()
+impl BFieldCodec for Amount {
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.0.encode()
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        Ok(Box::new(U32s::<AMOUNT_SIZE_FOR_U32>::decode(sequence)?))
     }
 }
 
@@ -267,7 +268,7 @@ mod amount_tests {
     use get_size::GetSize;
     use itertools::Itertools;
     use rand::{thread_rng, Rng, RngCore};
-    use twenty_first::{amount::u32s::U32s, util_types::algebraic_hasher::Hashable};
+    use twenty_first::amount::u32s::U32s;
 
     use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
 

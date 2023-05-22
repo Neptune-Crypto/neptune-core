@@ -16,7 +16,8 @@ use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
 use triton_vm::Claim;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
@@ -47,9 +48,13 @@ impl Default for PubScript {
     }
 }
 
-impl Hashable for PubScript {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.program.to_sequence()
+impl BFieldCodec for PubScript {
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        Self(*Program::decode(sequence)?)
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.program.encode()
     }
 }
 
@@ -69,28 +74,28 @@ impl From<&[LabelledInstruction]> for PubScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Proof(pub Vec<BFieldElement>);
+// #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+// pub struct Proof(pub Vec<BFieldElement>);
 
-impl Hashable for Proof {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.clone()
-    }
-}
+// impl BFieldCodec for Proof {
+//     // fn to_sequence(&self) -> Vec<BFieldElement> {
+//     //     self.0.clone()
+//     // }
+// }
 
-impl GetSize for Proof {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
+// impl GetSize for Proof {
+//     fn get_stack_size() -> usize {
+//         std::mem::size_of::<Self>()
+//     }
 
-    fn get_heap_size(&self) -> usize {
-        self.0.len() * std::mem::size_of::<BFieldElement>()
-    }
+//     fn get_heap_size(&self) -> usize {
+//         self.0.len() * std::mem::size_of::<BFieldElement>()
+//     }
 
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
-}
+//     fn get_size(&self) -> usize {
+//         Self::get_stack_size() + GetSize::get_heap_size(self)
+//     }
+// }
 
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.

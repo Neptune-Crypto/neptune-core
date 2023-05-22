@@ -1337,6 +1337,7 @@ dependencies = [
 name = "mutator-set-tf"
 version = "0.8.0"
 dependencies = [
+ "anyhow",
  "bincode",
  "blake3",
  "get-size",
@@ -2732,9 +2733,9 @@ dependencies = [
 
 [[package]]
 name = "twenty-first"
-version = "0.22.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84604d80e1275181e88220cdbdeeb226ada042578801f3952ce38115a782d84d"
+checksum = "bd6e2c04b6cc6d267a92f946d7d8d19cbb3c115f5d54e59c341658da63c9a957"
 dependencies = [
  "anyhow",
  "bincode",
