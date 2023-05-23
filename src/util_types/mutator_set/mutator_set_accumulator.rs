@@ -1,5 +1,6 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::{
@@ -93,6 +94,19 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
     }
 }
 
+impl<H: AlgebraicHasher> BFieldCodec for MutatorSetAccumulator<H> {
+    fn decode(
+        sequence: &[twenty_first::shared_math::b_field_element::BFieldElement],
+    ) -> anyhow::Result<Box<Self>> {
+        let kernel = *MutatorSetKernel::decode(sequence)?;
+        Ok(Box::new(Self { kernel }))
+    }
+
+    fn encode(&self) -> Vec<twenty_first::shared_math::b_field_element::BFieldElement> {
+        self.kernel.encode()
+    }
+}
+
 #[cfg(test)]
 mod ms_accumulator_tests {
     use itertools::Itertools;
@@ -100,7 +114,9 @@ mod ms_accumulator_tests {
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::{
-        test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses},
+        test_shared::mutator_set::{
+            empty_rustyleveldbvec_ams, make_item_and_randomnesses, random_mutator_set_accumulator,
+        },
         util_types::mutator_set::mutator_set_trait::commit,
     };
 
@@ -401,6 +417,18 @@ mod ms_accumulator_tests {
                     assert_eq!(mp_batch, mp_seq);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_mutator_set_accumulator_decode() {
+        type H = Tip5;
+        for _ in 0..100 {
+            let msa = random_mutator_set_accumulator::<H>();
+            let encoded = msa.encode();
+            let decoded: MutatorSetAccumulator<H> =
+                *MutatorSetAccumulator::decode(&encoded).unwrap();
+            assert_eq!(msa, decoded);
         }
     }
 }

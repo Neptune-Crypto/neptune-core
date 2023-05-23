@@ -10,6 +10,7 @@ use twenty_first::shared_math::other::random_elements;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_vec::{RustyLevelDbVec, StorageVec};
@@ -19,10 +20,11 @@ use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
 use crate::util_types::mutator_set::chunk::Chunk;
 use crate::util_types::mutator_set::chunk_dictionary::ChunkDictionary;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
-use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
+use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE};
 
 pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
     let mut rng = thread_rng();
@@ -140,4 +142,41 @@ pub fn remove_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
 ) {
     let removal_record: RemovalRecord<H> = mutator_set.drop(item, mp);
     mutator_set.remove_helper(&removal_record);
+}
+
+/// Generate a random MSA. For serialization testing. Might not be a consistent or valid object.
+pub fn random_mutator_set_accumulator<H: AlgebraicHasher>() -> MutatorSetAccumulator<H> {
+    let kernel = random_mutator_set_kernel();
+    MutatorSetAccumulator { kernel }
+}
+
+/// Generate a random MSK. For serialization testing. Might not be a consistent or valid object.
+pub fn random_mutator_set_kernel<H: AlgebraicHasher>() -> MutatorSetKernel<H, MmrAccumulator<H>> {
+    let aocl = random_mmra();
+    let swbf_inactive = random_mmra();
+    let swbf_active = random_swbf_active();
+    MutatorSetKernel {
+        aocl,
+        swbf_inactive,
+        swbf_active,
+    }
+}
+
+/// Generate a random MMRA. For serialization testing. Might not be a consistent or valid object.
+pub fn random_mmra<H: AlgebraicHasher>() -> MmrAccumulator<H> {
+    let leaf_count = thread_rng().next_u32() as u64;
+    let peaks: Vec<Digest> = random_elements((thread_rng().next_u32() % 10) as usize);
+    MmrAccumulator::init(peaks, leaf_count)
+}
+
+pub fn random_swbf_active<H: AlgebraicHasher>() -> ActiveWindow<H> {
+    let mut rng = thread_rng();
+    let num_indices = 10 + (rng.next_u32() % 100) as usize;
+
+    let mut aw = ActiveWindow::<H>::new();
+    for _ in 0..num_indices {
+        aw.insert(rng.next_u32() % WINDOW_SIZE);
+    }
+
+    aw
 }

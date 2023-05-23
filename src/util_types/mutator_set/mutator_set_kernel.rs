@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::{error::Error, fmt};
 
+use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::bfield_codec::{decode_field_length_prepended, BFieldCodec};
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, SpongeHasher};
 use twenty_first::util_types::mmr;
@@ -465,6 +466,42 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
         }
 
         have_absent_index
+    }
+}
+
+impl<H: AlgebraicHasher, MMR: Mmr<H> + BFieldCodec> BFieldCodec for MutatorSetKernel<H, MMR> {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        let (aocl, sequence) = decode_field_length_prepended(sequence)?;
+        let (swbf_inactive, sequence) = decode_field_length_prepended(&sequence)?;
+        let (swbf_active, sequence) = decode_field_length_prepended(&sequence)?;
+        if !sequence.is_empty() {
+            bail!("After decoding sequence of BFieldElements as MutatorSetKernel, sequence should be empty.");
+        }
+        Ok(Box::new(MutatorSetKernel {
+            aocl,
+            swbf_inactive,
+            swbf_active,
+        }))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        let aocl_encoded = self.aocl.encode();
+        let swbf_inactive_encoded = self.swbf_inactive.encode();
+        let swbf_active_encoded = self.swbf_active.encode();
+
+        let aocl_len = BFieldElement::new(aocl_encoded.len() as u64);
+        let swbf_inactive_len = BFieldElement::new(swbf_inactive_encoded.len() as u64);
+        let swbf_active_len = BFieldElement::new(swbf_active_encoded.len() as u64);
+
+        [
+            vec![aocl_len],
+            aocl_encoded,
+            vec![swbf_inactive_len],
+            swbf_inactive_encoded,
+            vec![swbf_active_len],
+            swbf_active_encoded,
+        ]
+        .concat()
     }
 }
 
