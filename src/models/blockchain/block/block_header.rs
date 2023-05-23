@@ -155,3 +155,36 @@ impl BFieldCodec for BlockHeader {
         }))
     }
 }
+
+#[cfg(test)]
+mod block_header_tests {
+    use rand::{thread_rng, Rng, RngCore};
+    use twenty_first::shared_math::other::random_elements;
+
+    use super::*;
+
+    pub fn random_block_header() -> BlockHeader {
+        let mut rng = thread_rng();
+        BlockHeader {
+            version: rng.gen(),
+            height: BlockHeight::from(rng.gen::<u64>()),
+            mutator_set_hash: rng.gen(),
+            prev_block_digest: rng.gen(),
+            timestamp: rng.gen(),
+            nonce: rng.gen(),
+            max_block_size: rng.gen(),
+            proof_of_work_line: rng.gen(),
+            proof_of_work_family: rng.gen(),
+            target_difficulty: rng.gen(),
+            block_body_merkle_root: rng.gen(),
+            uncles: random_elements((rng.next_u32() % 3) as usize),
+        }
+    }
+    #[test]
+    pub fn test_block_header_decode() {
+        let block_header = random_block_header();
+        let encoded = block_header.encode();
+        let decoded = *BlockHeader::decode(&encoded).unwrap();
+        assert_eq!(block_header, decoded);
+    }
+}
