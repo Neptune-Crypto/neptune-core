@@ -180,7 +180,7 @@ impl BFieldCodec for LockScript {
     }
 
     fn encode(&self) -> Vec<BFieldElement> {
-        self.program.to_bwords()
+        self.program.encode()
     }
 }
 

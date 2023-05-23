@@ -97,10 +97,12 @@ impl BFieldCodec for PrimitiveWitness {
             decode_field_length_prepended(sequence)?;
         let (input_lock_scripts, sequence): (Vec<LockScript>, Vec<BFieldElement>) =
             decode_field_length_prepended(&sequence)?;
-        let (lock_script_witnesses, sequence): (Vec<BFieldElement>, Vec<BFieldElement>) =
+        let (lock_script_witnesses, sequence): (Vec<Vec<BFieldElement>>, Vec<BFieldElement>) =
             decode_field_length_prepended(&sequence)?;
-        let (input_membership_proofs, sequence): (MsMembershipProof<Hash>, Vec<BFieldElement>) =
-            decode_field_length_prepended(&sequence)?;
+        let (input_membership_proofs, sequence): (
+            Vec<MsMembershipProof<Hash>>,
+            Vec<BFieldElement>,
+        ) = decode_field_length_prepended(&sequence)?;
         let (output_utxos, sequence): (Vec<Utxo>, Vec<BFieldElement>) =
             decode_field_length_prepended(&sequence)?;
         let (pubscripts, sequence): (Vec<PubScript>, Vec<BFieldElement>) =
@@ -506,7 +508,7 @@ impl Transaction {
                 // verify type scripts
                 for type_script_hash in type_scripts {
                     let type_script = if type_script_hash
-                        != Hash::hash_varlen(&native_coin_program().to_bwords())
+                        != Hash::hash_varlen(&native_coin_program().encode())
                     {
                         warn!("Observed non-native type script: {} Non-native type scripts are not supported yet.", type_script_hash.emojihash());
                         continue;
@@ -514,7 +516,7 @@ impl Transaction {
                         native_coin_program()
                     };
 
-                    let public_input = self.kernel.mast_hash().to_sequence();
+                    let public_input = self.kernel.mast_hash().encode();
                     let secret_input = self
                         .kernel
                         .mast_sequences()
@@ -756,11 +758,11 @@ mod witness_tests {
             input_membership_proofs: vec![],
             output_utxos: vec![],
             pubscripts: vec![],
-            mutator_set_accumulator: vec![],
+            mutator_set_accumulator: MutatorSetAccumulator::new(),
         };
 
         let encoded = primitive_witness.encode();
-        let decoded = PrimitiveWitness::decode(&encoded).unwrap();
+        let decoded = *PrimitiveWitness::decode(&encoded).unwrap();
         assert_eq!(primitive_witness, decoded);
     }
 }
