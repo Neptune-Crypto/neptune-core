@@ -130,7 +130,7 @@ impl BFieldCodec for PrimitiveWitness {
         let input_mps_bfes = encode_vec(&self.input_membership_proofs);
         let output_utxos_bfes = encode_vec(&self.output_utxos);
         let pubscripts_bfes = encode_vec(&self.pubscripts);
-        let mutator_set_acc_bfes = mutator_set_accumulator.encode();
+        let mutator_set_acc_bfes = self.mutator_set_accumulator.encode();
 
         vec![
             vec![BFieldElement::new(input_utxo_bfes.len() as u64)],
@@ -446,7 +446,7 @@ impl Transaction {
                 {
                     // The lock script is satisfied if it halts gracefully (i.e.,
                     // without crashing). We do not care about the output.
-                    let public_input = Hash::hash(&self.kernel).to_sequence();
+                    let public_input = Hash::hash(&self.kernel).reversed().encode();
 
                     match triton_vm::vm::run(
                         &lock_script.program,

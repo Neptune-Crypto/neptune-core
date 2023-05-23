@@ -24,6 +24,7 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -629,7 +630,7 @@ pub fn make_mock_transaction_with_generation_key(
         .collect_vec();
     let spending_key_unlock_keys = input_utxos_mps_keys
         .iter()
-        .map(|(_utxo, _mp, sk)| sk.unlock_key.to_sequence())
+        .map(|(_utxo, _mp, sk)| sk.unlock_key.encode())
         .collect_vec();
     let input_lock_scripts = input_utxos_mps_keys
         .iter()

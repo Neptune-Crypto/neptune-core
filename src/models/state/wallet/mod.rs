@@ -10,6 +10,7 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -146,7 +147,7 @@ impl WalletSecret {
         // in case you don't know with what counter you made the address
         let key_seed = Hash::hash_varlen(
             &[
-                self.secret_seed.to_sequence(),
+                self.secret_seed.encode(),
                 vec![
                     generation_address::GENERATION_FLAG,
                     BFieldElement::new(counter.try_into().unwrap()),
@@ -167,12 +168,12 @@ impl WalletSecret {
         const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
         Hash::hash_varlen(
             &[
-                self.secret_seed.to_sequence(),
+                self.secret_seed.encode(),
                 vec![
                     BFieldElement::new(SENDER_RANDOMNESS_FLAG),
                     block_height.into(),
                 ],
-                receiver_digest.to_sequence(),
+                receiver_digest.encode(),
             ]
             .concat(),
         )

@@ -1,6 +1,5 @@
 use anyhow::bail;
 use get_size::GetSize;
-use itertools::Itertools;
 use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -196,7 +195,9 @@ impl BFieldCodec for Amount {
     }
 
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        Ok(Box::new(U32s::<AMOUNT_SIZE_FOR_U32>::decode(sequence)?))
+        Ok(Box::new(Self(*U32s::<AMOUNT_SIZE_FOR_U32>::decode(
+            sequence,
+        )?)))
     }
 }
 
@@ -227,35 +228,6 @@ impl From<u64> for Amount {
         limbs[0] = (value & (u32::MAX as u64)) as u32;
         limbs[1] = (value >> 32) as u32;
         Amount(U32s::new(limbs))
-    }
-}
-
-impl BFieldCodec for Amount {
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if sequence.len() != AMOUNT_SIZE_FOR_U32 {
-            bail!("Cannot parse amount: wrong sequence length");
-        }
-
-        // Check that all BFEs have a value below `1 << 32`
-        if sequence.iter().any(|x| x > u32::MAX) {
-            bail!(
-                "Cannot parse amount: Element value outside of valid u32 value. Got: {sequence:?}"
-            );
-        }
-
-        Ok(Box::new(Amount(U32s::new(
-            sequence
-                .iter()
-                .take(AMOUNT_SIZE_FOR_U32)
-                .map(|b| b.value() as u32)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        ))))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.0.encode()
     }
 }
 
@@ -301,7 +273,7 @@ mod amount_tests {
                 .unwrap();
             let amount = Amount(U32s::new(limbs));
             let bfes = amount.encode();
-            let reconstructed_amount = Amount::decode(&bfes);
+            let reconstructed_amount = *Amount::decode(&bfes).unwrap();
 
             assert_eq!(amount, reconstructed_amount);
         }
