@@ -1,9 +1,7 @@
-use std::collections::VecDeque;
-
 use anyhow::bail;
 use num_traits::Zero;
+use std::collections::VecDeque;
 use triton_opcodes::{program::Program, shortcuts::halt};
-use triton_vm::bfield_codec::{decode_vec, BFieldCodec};
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, tip5::Digest},
     util_types::{
@@ -12,6 +10,7 @@ use twenty_first::{
     },
 };
 
+use super::amount::AmountLike;
 use crate::models::blockchain::{
     shared::Hash,
     transaction::{
@@ -19,8 +18,6 @@ use crate::models::blockchain::{
         utxo::{TypeScript, Utxo},
     },
 };
-
-use super::amount::AmountLike;
 
 pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
     BFieldElement::new(0xf00ba12u64),

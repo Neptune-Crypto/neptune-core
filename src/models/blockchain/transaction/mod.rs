@@ -3,7 +3,7 @@ pub mod native_coin;
 pub mod transaction_kernel;
 pub mod utxo;
 
-use anyhow::Result;
+use anyhow::{bail, Ok, Result};
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::{BigInt, BigUint};
@@ -15,8 +15,10 @@ use tracing::{debug, warn};
 use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
+use triton_vm::proof::Proof;
 use triton_vm::Claim;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -73,29 +75,6 @@ impl From<&[LabelledInstruction]> for PubScript {
         }
     }
 }
-
-// #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-// pub struct Proof(pub Vec<BFieldElement>);
-
-// impl BFieldCodec for Proof {
-//     // fn to_sequence(&self) -> Vec<BFieldElement> {
-//     //     self.0.clone()
-//     // }
-// }
-
-// impl GetSize for Proof {
-//     fn get_stack_size() -> usize {
-//         std::mem::size_of::<Self>()
-//     }
-
-//     fn get_heap_size(&self) -> usize {
-//         self.0.len() * std::mem::size_of::<BFieldElement>()
-//     }
-
-//     fn get_size(&self) -> usize {
-//         Self::get_stack_size() + GetSize::get_heap_size(self)
-//     }
-// }
 
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
@@ -198,37 +177,80 @@ pub struct Transaction {
     pub mutator_set_hash: Digest,
 }
 
-impl Hashable for Transaction {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        let inputs_preimage = self
-            .kernel
-            .inputs
-            .iter()
-            .flat_map(|input| input.to_sequence());
+impl BFieldCodec for Transaction {
+    fn encode(&self) -> Vec<BFieldElement> {
+        // let inputs_preimage = self
+        //     .kernel
+        //     .inputs
+        //     .iter()
+        //     .flat_map(|input| input.to_sequence());
 
-        let outputs_preimage = self
-            .kernel
-            .outputs
-            .iter()
-            .flat_map(|output| output.to_sequence());
+        // let outputs_preimage = self
+        //     .kernel
+        //     .outputs
+        //     .iter()
+        //     .flat_map(|output| output.to_sequence());
 
-        // If public scripts are not padded or end with a specific instruction, then it might
-        // be possible to find a collission for this digest. If that's the case, each public script
-        // can be padded with a B field element that's not a valid VM instruction.
-        let public_scripts_preimage = self
-            .kernel
-            .pubscript_hashes_and_inputs
-            .iter()
-            .flat_map(|(psh, psi)| [psh.to_sequence(), psi.to_vec()].concat());
-        let fee_preimage = self.kernel.fee.to_sequence().into_iter();
-        let timestamp_preimage = vec![self.kernel.timestamp].into_iter();
+        // // If public scripts are not padded or end with a specific instruction, then it might
+        // // be possible to find a collission for this digest. If that's the case, each public script
+        // // can be padded with a B field element that's not a valid VM instruction.
+        // let public_scripts_preimage = self
+        //     .kernel
+        //     .pubscript_hashes_and_inputs
+        //     .iter()
+        //     .flat_map(|(psh, psi)| [psh.to_sequence(), psi.to_vec()].concat());
+        // let fee_preimage = self.kernel.fee.to_sequence().into_iter();
+        // let timestamp_preimage = vec![self.kernel.timestamp].into_iter();
 
-        inputs_preimage
-            .chain(outputs_preimage)
-            .chain(public_scripts_preimage)
-            .chain(fee_preimage)
-            .chain(timestamp_preimage)
-            .collect_vec()
+        // inputs_preimage
+        //     .chain(outputs_preimage)
+        //     .chain(public_scripts_preimage)
+        //     .chain(fee_preimage)
+        //     .chain(timestamp_preimage)
+        //     .collect_vec()
+        let kernel_bfes = self.kernel.encode();
+        let witness_bfes = self.witness.encode();
+
+        vec![
+            vec![BFieldElement::new(kernel_bfes.len() as u64)],
+            kernel_bfes,
+            vec![BFieldElement::new(witness_bfes.len() as u64)],
+            witness_bfes,
+            self.mutator_set_hash.encode(),
+        ]
+        .concat()
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        if sequence.is_empty() {
+            bail!("Cannot decode empty BFE slice into Transaction");
+        }
+
+        let claimed_kernel_length: usize = sequence[0].value().try_into().unwrap();
+        let claimed_witness_length: usize = sequence[claimed_kernel_length + 1]
+            .value()
+            .try_into()
+            .unwrap();
+
+        let indicated_total_length =
+            claimed_kernel_length + claimed_witness_length + 2 + DIGEST_LENGTH;
+        if sequence.len() != indicated_total_length {
+            bail!("Cannot decode BFE slice into Transaction as its length does not match indicated value. Indicated length was {indicated_total_length}, actual length was {}", sequence.len());
+        }
+
+        let kernel = *TransactionKernel::decode(sequence[1..claimed_kernel_length + 1])?;
+        let witness = *Witness::decode(
+            sequence
+                [claimed_kernel_length + 2..=claimed_kernel_length + 2 + claimed_witness_length],
+        )?;
+        let mutator_set_hash =
+            *Digest::decode(&sequence[claimed_kernel_length + 2 + claimed_witness_length..])?;
+
+        Ok(Box::new(Self {
+            kernel,
+            witness,
+            mutator_set_hash,
+        }))
     }
 }
 
@@ -660,13 +682,13 @@ impl Transaction {
 
 #[cfg(test)]
 mod transaction_tests {
-    use std::time::Duration;
-
-    use super::{utxo::LockScript, *};
-    use crate::tests::shared::make_mock_transaction;
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
     use rand::random;
+    use std::time::Duration;
     use tracing_test::traced_test;
+
+    use super::*;
+    use crate::tests::shared::make_mock_transaction;
 
     #[traced_test]
     #[test]
@@ -686,6 +708,14 @@ mod transaction_tests {
                 .unwrap()
                 < Duration::from_secs(10)
         );
+    }
+
+    #[test]
+    fn encode_decode_empty_tx_test() {
+        let empty_tx = make_mock_transaction(vec![], vec![]);
+        let encoded = empty_tx.encode();
+        let decoded = *Transaction::decode(&encoded).unwrap();
+        assert_eq!(empty_tx, decoded);
     }
 
     // #[traced_test]
