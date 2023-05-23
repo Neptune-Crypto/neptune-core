@@ -17,7 +17,9 @@ use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
 use triton_vm::proof::Proof;
 use triton_vm::Claim;
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::bfield_codec::{
+    decode_field_length_prepended, encode_vec, BFieldCodec,
+};
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
@@ -87,6 +89,67 @@ pub struct PrimitiveWitness {
     pub output_utxos: Vec<Utxo>,
     pub pubscripts: Vec<PubScript>,
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+}
+
+impl BFieldCodec for PrimitiveWitness {
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        let (input_utxos, sequence): (Vec<Utxo>, Vec<BFieldElement>) =
+            decode_field_length_prepended(sequence)?;
+        let (input_lock_scripts, sequence): (Vec<LockScript>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+        let (lock_script_witnesses, sequence): (Vec<BFieldElement>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+        let (input_membership_proofs, sequence): (MsMembershipProof<Hash>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+        let (output_utxos, sequence): (Vec<Utxo>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+        let (pubscripts, sequence): (Vec<PubScript>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+        let (mutator_set_accumulator, sequence): (MutatorSetAccumulator<Hash>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+
+        if !sequence.is_empty() {
+            bail!("Remaining BFEs after decoding PrimitiveWitness")
+        }
+
+        Ok(Box::new(Self {
+            input_utxos,
+            input_lock_scripts,
+            lock_script_witnesses,
+            input_membership_proofs,
+            output_utxos,
+            pubscripts,
+            mutator_set_accumulator,
+        }))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        let input_utxo_bfes = encode_vec(&self.input_utxos);
+        let input_lock_scripts_bfes = encode_vec(&self.input_lock_scripts);
+        let lock_script_witnesses_bfes = encode_vec(&self.lock_script_witnesses);
+        let input_mps_bfes = encode_vec(&self.input_membership_proofs);
+        let output_utxos_bfes = encode_vec(&self.output_utxos);
+        let pubscripts_bfes = encode_vec(&self.pubscripts);
+        let mutator_set_acc_bfes = mutator_set_accumulator.encode();
+
+        vec![
+            vec![BFieldElement::new(input_utxo_bfes.len() as u64)],
+            input_utxo_bfes,
+            vec![BFieldElement::new(input_lock_scripts_bfes.len() as u64)],
+            input_lock_scripts_bfes,
+            vec![BFieldElement::new(lock_script_witnesses_bfes.len() as u64)],
+            lock_script_witnesses_bfes,
+            vec![BFieldElement::new(input_mps_bfes.len() as u64)],
+            input_mps_bfes,
+            vec![BFieldElement::new(output_utxos_bfes.len() as u64)],
+            output_utxos_bfes,
+            vec![BFieldElement::new(pubscripts_bfes.len() as u64)],
+            pubscripts_bfes,
+            vec![BFieldElement::new(mutator_set_acc_bfes.len() as u64)],
+            mutator_set_acc_bfes,
+        ]
+        .concat()
+    }
 }
 
 /// Linked proofs are one abstraction level above raw witness. They
@@ -238,7 +301,7 @@ impl BFieldCodec for Transaction {
             bail!("Cannot decode BFE slice into Transaction as its length does not match indicated value. Indicated length was {indicated_total_length}, actual length was {}", sequence.len());
         }
 
-        let kernel = *TransactionKernel::decode(sequence[1..claimed_kernel_length + 1])?;
+        let kernel = *TransactionKernel::decode(&sequence[1..claimed_kernel_length + 1])?;
         let witness = *Witness::decode(
             sequence
                 [claimed_kernel_length + 2..=claimed_kernel_length + 2 + claimed_witness_length],
@@ -677,6 +740,28 @@ impl Transaction {
             .inputs
             .iter()
             .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
+    }
+}
+
+#[cfg(test)]
+mod witness_tests {
+    use super::*;
+
+    #[test]
+    fn decode_encode_test_empty() {
+        let primitive_witness = PrimitiveWitness {
+            input_utxos: vec![],
+            input_lock_scripts: vec![],
+            lock_script_witnesses: vec![],
+            input_membership_proofs: vec![],
+            output_utxos: vec![],
+            pubscripts: vec![],
+            mutator_set_accumulator: vec![],
+        };
+
+        let encoded = primitive_witness.encode();
+        let decoded = PrimitiveWitness::decode(&encoded).unwrap();
+        assert_eq!(primitive_witness, decoded);
     }
 }
 
