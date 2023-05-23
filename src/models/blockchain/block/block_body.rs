@@ -1,8 +1,8 @@
+use anyhow::bail;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::shared_math::bfield_codec::{decode_field_length_prepended, BFieldCodec};
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
@@ -15,29 +15,46 @@ pub struct BlockBody {
     pub stark_proof: Vec<BFieldElement>,
 }
 
-impl Hashable for BlockBody {
-    // FIXME: This .to_sequence() currently creates three digests and serializes those,
-    // rather than return the concatenated serialization of the three. For more predictable
-    // hashing behavior, consider changing `mutator_set.get_commitment()` into Hashable?
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        let transaction_digest = Hash::hash(&self.transaction);
+impl BFieldCodec for BlockBody {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        let (transaction, sequence) = decode_field_length_prepended(sequence)?;
+        let (next_mutator_set_accumulator, sequence) = decode_field_length_prepended(sequence)?;
+        let (previous_mutator_set_accumulator, sequence) = decode_field_length_prepended(sequence)?;
+        let (stark_proof, sequence) = decode_field_length_prepended(sequence)?;
+        if !sequence.is_empty() {
+            bail!("After decoding sequence of field elements as block body, sequence should be empty.");
+        }
+        Ok(Box::new(BlockBody {
+            transaction,
+            next_mutator_set_accumulator,
+            previous_mutator_set_accumulator,
+            stark_proof,
+        }))
+    }
 
-        // Append mutator set's commitment
-        //
-        // Mutable copy necessary here because `.get_commitment(&mut self)`.
-        //
-        // It's not necessary to hash `previous_mutator_set_accumulator` and `ms_update_digest` here,
-        // as they are fully determined by `next_ms_acc_digest` assuming a good hash function.
-        let block_body_copy: BlockBody = self.to_owned();
-        let next_ms_acc_digest = block_body_copy.next_mutator_set_accumulator.hash();
+    fn encode(&self) -> Vec<BFieldElement> {
+        let transaction_encoded = self.transaction.encode();
+        let next_mutator_set_accumulator_encoded = self.next_mutator_set_accumulator.encode();
+        let previous_mutator_set_accumulator_encoded =
+            self.previous_mutator_set_accumulator.encode();
+        let stark_proof_encoded = self.stark_proof.encode();
 
-        // Append digest of STARK proof
-        let stark_proof_digest = Hash::hash_varlen(&self.stark_proof);
+        let transaction_len = BFieldElement::new(transaction_encoded.len() as u64);
+        let next_mutator_set_accumulator_len =
+            BFieldElement::new(next_mutator_set_accumulator_encoded.len() as u64);
+        let previous_mutator_set_accumulator_len =
+            BFieldElement::new(previous_mutator_set_accumulator_encoded.len() as u64);
+        let stark_proof_len = BFieldElement::new(stark_proof_encoded.len() as u64);
 
         [
-            transaction_digest.to_sequence(),
-            next_ms_acc_digest.to_sequence(),
-            stark_proof_digest.to_sequence(),
+            vec![transaction_len],
+            transaction_encoded,
+            vec![next_mutator_set_accumulator_len],
+            next_mutator_set_accumulator_encoded,
+            vec![previous_mutator_set_accumulator_len],
+            previous_mutator_set_accumulator_encoded,
+            vec![stark_proof_len],
+            stark_proof_encoded,
         ]
         .concat()
     }
