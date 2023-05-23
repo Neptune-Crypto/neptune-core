@@ -18,9 +18,10 @@ pub struct BlockBody {
 impl BFieldCodec for BlockBody {
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
         let (transaction, sequence) = decode_field_length_prepended(sequence)?;
-        let (next_mutator_set_accumulator, sequence) = decode_field_length_prepended(sequence)?;
-        let (previous_mutator_set_accumulator, sequence) = decode_field_length_prepended(sequence)?;
-        let (stark_proof, sequence) = decode_field_length_prepended(sequence)?;
+        let (next_mutator_set_accumulator, sequence) = decode_field_length_prepended(&sequence)?;
+        let (previous_mutator_set_accumulator, sequence) =
+            decode_field_length_prepended(&sequence)?;
+        let (stark_proof, sequence) = decode_field_length_prepended(&sequence)?;
         if !sequence.is_empty() {
             bail!("After decoding sequence of field elements as block body, sequence should be empty.");
         }

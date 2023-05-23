@@ -1,3 +1,4 @@
+use anyhow::bail;
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -5,10 +6,26 @@ use std::{
     fmt::Display,
     ops::{Add, Sub},
 };
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct BlockHeight(BFieldElement);
+
+impl BFieldCodec for BlockHeight {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if sequence.len() != 1 {
+            bail!(
+                "Cannot decode sequence of {} =/= 1 BFieldElement as BlockHeight",
+                sequence.len()
+            );
+        }
+        Ok(Box::new(Self(sequence[0])))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        vec![self.0]
+    }
+}
 
 // Assuming a block time of 10 minutes, and a halving every three years,
 // the number of blocks per halving cycle is 157680.

@@ -31,7 +31,7 @@ mod ordered_digest_tests {
         // Verify that a difficulty of 2 accepts half of the digests
         let difficulty: u32 = 2;
         let difficulty_u32s = U32s::<5>::from(difficulty);
-        let threshold_for_difficulty_two: Digest = Digest::to_digest_threshold(difficulty_u32s);
+        let threshold_for_difficulty_two: Digest = to_digest_threshold(difficulty_u32s);
 
         for elem in threshold_for_difficulty_two.values() {
             assert_eq!(BFieldElement::MAX / u64::from(difficulty), elem.value());
@@ -39,7 +39,7 @@ mod ordered_digest_tests {
 
         // Verify that a difficulty of BFieldElement::MAX accepts all digests where the last BFieldElement is zero
         let some_difficulty = U32s::<5>::new([1, u32::MAX, 0, 0, 0]);
-        let some_threshold_actual: Digest = Digest::to_digest_threshold(some_difficulty);
+        let some_threshold_actual: Digest = to_digest_threshold(some_difficulty);
 
         let bfe_max_elem = BFieldElement::new(BFieldElement::MAX);
         let some_threshold_expected = Digest::new([

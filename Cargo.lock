@@ -1351,7 +1351,7 @@ dependencies = [
  "serde-big-array",
  "serde_derive",
  "serde_json",
- "twenty-first 0.24.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "twenty-first 0.24.0",
 ]
 
 [[package]]

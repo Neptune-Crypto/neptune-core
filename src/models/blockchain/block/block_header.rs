@@ -65,7 +65,7 @@ impl BFieldCodec for BlockHeader {
         let mutator_set_hash_encoded = self.mutator_set_hash.encode();
         let prev_block_digest_encoded = self.prev_block_digest.encode();
         let timestamp_encoded = self.timestamp.encode();
-        let nonce_encoded = self.nonce.encode();
+        let nonce_encoded = self.nonce.to_vec();
         let max_block_size_encoded = self.max_block_size.encode();
         let proof_of_work_line_encoded = self.proof_of_work_line.encode();
         let proof_of_work_family_encoded = self.proof_of_work_family.encode();
@@ -118,17 +118,24 @@ impl BFieldCodec for BlockHeader {
 
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
         let (version, sequence) = decode_field_length_prepended(sequence)?;
-        let (height, sequence) = decode_field_length_prepended(sequence)?;
-        let (mutator_set_hash, sequence) = decode_field_length_prepended(sequence)?;
-        let (prev_block_digest, sequence) = decode_field_length_prepended(sequence)?;
-        let (timestamp, sequence) = decode_field_length_prepended(sequence)?;
-        let (nonce, sequence) = decode_field_length_prepended(sequence)?;
-        let (max_block_size, sequence) = decode_field_length_prepended(sequence)?;
-        let (proof_of_work_line, sequence) = decode_field_length_prepended(sequence)?;
-        let (proof_of_work_family, sequence) = decode_field_length_prepended(sequence)?;
-        let (target_difficulty, sequence) = decode_field_length_prepended(sequence)?;
-        let (block_body_merkle_root, sequence) = decode_field_length_prepended(sequence)?;
-        let (uncles, sequence) = decode_field_length_prepended(sequence)?;
+        let (height, sequence) = decode_field_length_prepended(&sequence)?;
+        let (mutator_set_hash, sequence) = decode_field_length_prepended(&sequence)?;
+        let (prev_block_digest, sequence) = decode_field_length_prepended(&sequence)?;
+        let (timestamp, sequence) = decode_field_length_prepended(&sequence)?;
+        let (nonce_vec, sequence): (Vec<BFieldElement>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+        let nonce: [BFieldElement; 3] = match nonce_vec.try_into() {
+            Ok(n) => n,
+            Err(e) => bail!(
+                "Could not parse sequence of BFieldElements as BlockHeader: nonce format is wrong"
+            ),
+        };
+        let (max_block_size, sequence) = decode_field_length_prepended(&sequence)?;
+        let (proof_of_work_line, sequence) = decode_field_length_prepended(&sequence)?;
+        let (proof_of_work_family, sequence) = decode_field_length_prepended(&sequence)?;
+        let (target_difficulty, sequence) = decode_field_length_prepended(&sequence)?;
+        let (block_body_merkle_root, sequence) = decode_field_length_prepended(&sequence)?;
+        let (uncles, sequence) = decode_field_length_prepended(&sequence)?;
         if !sequence.is_empty() {
             bail!("After decoding sequence of BFieldElements as BlockHeader, sequence should be empty!");
         }
