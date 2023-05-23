@@ -14,7 +14,7 @@ use super::amount::AmountLike;
 use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
 use super::{native_coin, Amount};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Coin {
@@ -206,9 +206,13 @@ pub struct TypeScript {
     pub program: Program,
 }
 
-impl Hashable for TypeScript {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.program.to_sequence()
+impl BFieldCodec for TypeScript {
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.program.encode()
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        Ok(Box::new(*Program::decode(sequence)?));
     }
 }
 
@@ -249,6 +253,7 @@ mod utxo_tests {
 
     use rand::{thread_rng, Rng};
     use tracing_test::traced_test;
+    use triton_opcodes::parser::parser_tests::program_gen;
     use twenty_first::shared_math::other::random_elements;
 
     use super::*;
@@ -298,5 +303,15 @@ mod utxo_tests {
             let decoded = *Utxo::decode(&encoded).unwrap();
             assert_eq!(utxo, decoded);
         }
+    }
+
+    #[test]
+    fn test_type_script_encode() {
+        let program = program_gen(63);
+        let program = Program::from_code(&program).unwrap();
+        let type_script = TypeScript { program };
+
+        let encodede = type_script.encode();
+        let decoded = *TypeScript::decode(&encodede)?;
     }
 }
