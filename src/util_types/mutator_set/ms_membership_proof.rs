@@ -1,3 +1,4 @@
+use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::bfield_codec::{decode_field_length_prepended, BFieldCodec};
 use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -505,11 +508,55 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
     }
 }
 
+impl<H: AlgebraicHasher> BFieldCodec for MsMembershipProof<H> {
+    fn decode(
+        sequence: &[twenty_first::shared_math::b_field_element::BFieldElement],
+    ) -> anyhow::Result<Box<Self>> {
+        let (sender_randomness, sequence) = decode_field_length_prepended(sequence)?;
+        let (receiver_preimage, sequence) = decode_field_length_prepended(&sequence)?;
+        let (auth_path_aocl, sequence) = decode_field_length_prepended(&sequence)?;
+        let (target_chunks, sequence) = decode_field_length_prepended(&sequence)?;
+        if !sequence.is_empty() {
+            bail!("Cannot decode sequence of BFieldElements as MsMembershipProof: sequence at end must be empty!");
+        }
+        Ok(Box::new(MsMembershipProof {
+            sender_randomness,
+            receiver_preimage,
+            auth_path_aocl,
+            target_chunks,
+        }))
+    }
+
+    fn encode(&self) -> Vec<twenty_first::shared_math::b_field_element::BFieldElement> {
+        let sender_randomness_encoded = self.sender_randomness.encode();
+        let sender_randomness_len = BFieldElement::new(sender_randomness_encoded.len() as u64);
+        let receiver_preimage_encoded = self.receiver_preimage.encode();
+        let receiver_preimage_len = BFieldElement::new(receiver_preimage_encoded.len() as u64);
+        let auth_path_aocl_encoded = self.auth_path_aocl.encode();
+        let auth_path_aocl_len = BFieldElement::new(auth_path_aocl_encoded.len() as u64);
+        let target_chunks_encoded = self.target_chunks.encode();
+        let target_chunks_len = BFieldElement::new(target_chunks_encoded.len() as u64);
+        [
+            vec![sender_randomness_len],
+            sender_randomness_encoded,
+            vec![receiver_preimage_len],
+            receiver_preimage_encoded,
+            vec![auth_path_aocl_len],
+            auth_path_aocl_encoded,
+            vec![target_chunks_len],
+            target_chunks_encoded,
+        ]
+        .concat()
+    }
+}
+
 #[cfg(test)]
 mod ms_proof_tests {
 
     use super::*;
-    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses};
+    use crate::test_shared::mutator_set::{
+        empty_rustyleveldbvec_ams, make_item_and_randomnesses, random_mutator_set_membership_proof,
+    };
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -1301,6 +1348,17 @@ mod ms_proof_tests {
                     "seed: {seed_integer} / n: {n}",
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_decode_mutator_set_membership_proof() {
+        type H = Tip5;
+        for _ in 0..100 {
+            let msmp = random_mutator_set_membership_proof::<H>();
+            let encoded = msmp.encode();
+            let decoded: MsMembershipProof<H> = *MsMembershipProof::decode(&encoded).unwrap();
+            assert_eq!(msmp, decoded);
         }
     }
 }

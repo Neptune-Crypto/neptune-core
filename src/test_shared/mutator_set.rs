@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
-use rand::{thread_rng, Rng};
+use rand::{random, thread_rng, Rng};
 use rand_core::RngCore;
 use rusty_leveldb::DB;
 
@@ -179,4 +180,28 @@ pub fn random_swbf_active<H: AlgebraicHasher>() -> ActiveWindow<H> {
     }
 
     aw
+}
+
+pub fn random_mmr_membership_proof<H: AlgebraicHasher>() -> MmrMembershipProof<H> {
+    let leaf_index: u64 = random();
+    let authentication_path: Vec<Digest> = random_elements((thread_rng().next_u32() % 15) as usize);
+    MmrMembershipProof {
+        leaf_index,
+        authentication_path,
+        _hasher: PhantomData,
+    }
+}
+
+/// Generate a random MsMembershipProof. For serialization testing. Might not be a consistent or valid object.
+pub fn random_mutator_set_membership_proof<H: AlgebraicHasher>() -> MsMembershipProof<H> {
+    let sender_randomness: Digest = random();
+    let receiver_preimage: Digest = random();
+    let auth_path_aocl: MmrMembershipProof<H> = random_mmr_membership_proof::<H>();
+    let target_chunks: ChunkDictionary<H> = random_chunk_dictionary();
+    MsMembershipProof {
+        sender_randomness,
+        receiver_preimage,
+        auth_path_aocl,
+        target_chunks,
+    }
 }
