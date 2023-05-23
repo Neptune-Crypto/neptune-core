@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use twenty_first::{
     shared_math::{
         b_field_element::BFieldElement,
-        bfield_codec::{decode_vec, encode_vec, BFieldCodec},
+        bfield_codec::{
+            decode_field_length_prepended, decode_vec_length_prepended, encode_vec, BFieldCodec,
+        },
         tip5::Digest,
     },
     util_types::{
@@ -62,95 +64,21 @@ impl BFieldCodec for TransactionKernel {
     }
 
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        let mut read_index = 0;
+        let (inputs, sequence) = decode_vec_length_prepended(sequence)?;
+        let (outputs, sequence) = decode_vec_length_prepended(&sequence)?;
+        let (pubscript_hashes_and_inputs, sequence) = decode_vec_length_prepended(&sequence)?;
+        let (fee, sequence) = decode_field_length_prepended(&sequence)?;
+        let (coinbase, sequence) = decode_field_length_prepended(&sequence)?;
+        let (timestamp, sequence) = decode_field_length_prepended(&sequence)?;
 
-        // read inputs
-        if sequence.len() < read_index + 1 {
-            bail!("Cannot decode empty sequence of BFieldElements to TransactionKernel.");
-        }
-        let inputs_length = sequence[0].value() as usize;
-        read_index += 1;
-        if sequence.len() < read_index + inputs_length {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: input length mismatch");
-        }
-        let inputs: Vec<RemovalRecord<Hash>> =
-            *decode_vec(&sequence[read_index..read_index + inputs_length])?;
-        read_index += inputs_length;
-
-        // read outputs
-        if sequence.len() <= read_index {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: cannot read length of outputs");
-        }
-        let outputs_length = sequence[0].value() as usize;
-        read_index += 1;
-        if sequence.len() < read_index + outputs_length {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: output length mismatch");
-        }
-        let outputs: Vec<AdditionRecord> =
-            *decode_vec(&sequence[read_index..read_index + outputs_length])?;
-        read_index += outputs_length;
-
-        // read public scripts
-        if sequence.len() < read_index + 1 {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: cannot read public scripts length");
-        }
-        let pubscripts_length = sequence[0].value() as usize;
-        read_index += 1;
-        if sequence.len() < read_index + pubscripts_length {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: pubscripts length mismatch");
-        }
-        let pubscripts: Vec<(Digest, Vec<BFieldElement>)> =
-            *decode_vec(&sequence[read_index..read_index + pubscripts_length])?;
-        read_index += pubscripts_length;
-
-        // read fee
-        if sequence.len() < read_index + 1 {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: cannot read fee length");
-        }
-        let fee_length = sequence[0].value() as usize;
-        read_index += 1;
-        if sequence.len() < read_index + fee_length {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: fee length mismatch");
-        }
-        let fee = *Amount::decode(&sequence[read_index..read_index + fee_length])?;
-        read_index += fee_length;
-
-        // read coinbase
-        if sequence.len() < read_index + 1 {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: cannot read coinbase length");
-        }
-        let coinbase_length = sequence[0].value() as usize;
-        read_index += 1;
-        if sequence.len() < read_index + coinbase_length {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: coinbase length mismatch");
-        }
-        let coinbase =
-            *Option::<Amount>::decode(&sequence[read_index..read_index + coinbase_length])?;
-        read_index += coinbase_length;
-
-        // read timestamp
-        if sequence.len() < read_index + 1 {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: cannot read timestamp length");
-        }
-        let timestamp_length = sequence[0].value() as usize;
-        read_index += 1;
-        if sequence.len() < read_index + timestamp_length {
-            bail!("Cannot decode sequence of BFieldElements to TransactionKernel: timestamp length mismatch");
-        }
-        let timestamp =
-            *BFieldElement::decode(&sequence[read_index..read_index + timestamp_length])?;
-        read_index += timestamp_length;
-
-        if read_index != sequence.len() {
-            bail!(
-                "Cannot decode sequence of BFieldElements to TransactionKernel: length mismatch."
-            );
+        if !sequence.is_empty() {
+            bail!("Cannot decode sequence of BFieldElements as TransactionKernel: sequence should be empty afterwards.");
         }
 
         Ok(Box::new(TransactionKernel {
             inputs,
             outputs,
-            pubscript_hashes_and_inputs: pubscripts,
+            pubscript_hashes_and_inputs,
             fee,
             coinbase,
             timestamp,
@@ -160,15 +88,15 @@ impl BFieldCodec for TransactionKernel {
 
 impl TransactionKernel {
     pub fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
-        let mut input_utxos_sequence = encode_vec(&self.inputs);
+        let input_utxos_sequence = encode_vec(&self.inputs);
 
-        let mut output_utxos_sequence = encode_vec(&self.outputs);
+        let output_utxos_sequence = encode_vec(&self.outputs);
 
-        let mut pubscript_sequence = encode_vec(&self.pubscript_hashes_and_inputs);
+        let pubscript_sequence = encode_vec(&self.pubscript_hashes_and_inputs);
 
-        let mut fee_sequence = self.fee.encode();
+        let fee_sequence = self.fee.encode();
 
-        let mut coinbase_sequence = self.coinbase.encode();
+        let coinbase_sequence = self.coinbase.encode();
 
         let timestamp_sequence = self.timestamp.encode();
 
@@ -227,8 +155,7 @@ pub mod transaction_kernel_tests {
 
     pub fn random_amount() -> Amount {
         let number: [u32; 4] = random();
-        let amount = Amount(U32s::new(number));
-        amount
+        Amount(U32s::new(number))
     }
 
     pub fn random_option<T>(thing: T) -> Option<T> {

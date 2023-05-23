@@ -263,14 +263,11 @@ fn create_block_transaction(
     );
 
     // Merge incoming transactions with the coinbase transaction
-    let mut merged_transaction = transactions_to_include
+    let merged_transaction = transactions_to_include
         .into_iter()
         .fold(coinbase_transaction, |acc, transaction| {
             Transaction::merge_with(acc, transaction)
         });
-
-    // Then set fee to zero as we've already sent it all to ourself in the coinbase output
-    merged_transaction.kernel.fee = Amount::zero();
 
     let utxo_info_for_coinbase = ExpectedUtxo::new(
         coinbase_utxo,

@@ -47,10 +47,10 @@ tracing-subscriber = { version = "0.3", features = [
     "fmt",
 ] }
 tracing-test = "0"
-# triton-vm = {path = "../triton-vm/triton-vm"}
-# triton-opcodes = {path = "../triton-vm/triton-opcodes"}
-triton-vm = "0.24.0"
-triton-opcodes = "0.24.0"
+triton-vm = {path = "../triton-vm/triton-vm"}
+triton-opcodes = {path = "../triton-vm/triton-opcodes"}
+# triton-vm = "0.24.0"
+# triton-opcodes = "0.24.0"
 priority-queue = "1.2"
 get-size = { version = "^0.1", features = ["derive"] }
 num-rational = "0.4"

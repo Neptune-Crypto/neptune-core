@@ -327,11 +327,12 @@ impl Block {
         }
 
         // 1.f) Verify that the coinbase claimed by the transaction does not exceed
-        // the allowed coinbase based on block height, epoch, etc.
-        let miner_reward: Amount = Self::get_mining_reward(block_copy.header.height);
+        // the allowed coinbase based on block height, epoch, etc., and fee
+        let miner_reward: Amount =
+            Self::get_mining_reward(block_copy.header.height) + self.body.transaction.kernel.fee;
         if let Some(claimed_reward) = block_copy.body.transaction.kernel.coinbase {
             if claimed_reward > miner_reward {
-                warn!("Block is invalid because the claimed miner reward is too high relative to current network parameters");
+                warn!("Block is invalid because the claimed miner reward is too high relative to current network parameters.");
                 return false;
             }
         }

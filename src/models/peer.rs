@@ -50,6 +50,7 @@ pub enum PeerSanctionReason {
     BlockRequestUnknownHeight,
     // Be careful about using this too much as it's bad for log opportunities
     InvalidMessage,
+    NonMinedTransactionHasCoinbase,
     TooShortBlockBatch,
     ReceivedBatchBlocksOutsideOfSync,
     BatchBlocksInvalidStartHeight,
@@ -78,6 +79,9 @@ impl Display for PeerSanctionReason {
             PeerSanctionReason::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
             PeerSanctionReason::InvalidTransaction => "invalid transaction",
             PeerSanctionReason::UnconfirmableTransaction => "unconfirmable transaction",
+            PeerSanctionReason::NonMinedTransactionHasCoinbase => {
+                "non-mined transaction has coinbase"
+            }
         };
         write!(f, "{string}")
     }
@@ -126,6 +130,7 @@ impl PeerSanctionReason {
             PeerSanctionReason::BlockRequestUnknownHeight => UNKNOWN_BLOCK_HEIGHT,
             PeerSanctionReason::InvalidTransaction => INVALID_TRANSACTION,
             PeerSanctionReason::UnconfirmableTransaction => UNCONFIRMABLE_TRANSACTION,
+            PeerSanctionReason::NonMinedTransactionHasCoinbase => INVALID_TRANSACTION,
         }
     }
 }

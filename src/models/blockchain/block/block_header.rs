@@ -127,7 +127,7 @@ impl BFieldCodec for BlockHeader {
         let nonce: [BFieldElement; 3] = match nonce_vec.try_into() {
             Ok(n) => n,
             Err(e) => bail!(
-                "Could not parse sequence of BFieldElements as BlockHeader: nonce format is wrong"
+                "Could not parse sequence of BFieldElements as BlockHeader: nonce format is wrong. Got error: {:?}", e
             ),
         };
         let (max_block_size, sequence) = decode_field_length_prepended(&sequence)?;
