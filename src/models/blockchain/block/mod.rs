@@ -21,7 +21,7 @@ use self::block_header::BlockHeader;
 use self::block_height::BlockHeight;
 use self::mutator_set_update::MutatorSetUpdate;
 use self::transfer_block::TransferBlock;
-use super::digest::ordered_digest::OrderedDigest;
+use super::digest::ordered_digest::to_digest_threshold;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::{amount::Amount, Transaction};
@@ -370,9 +370,7 @@ impl Block {
     /// The archival-version of block validation. Archival nodes should run this version.
     pub fn archival_is_valid(&self, previous_block: &Block) -> bool {
         // check that hash is below threshold
-        if Into::<OrderedDigest>::into(self.hash)
-            > OrderedDigest::to_digest_threshold(self.header.target_difficulty)
-        {
+        if Into::<Digest>::into(self.hash) > to_digest_threshold(self.header.target_difficulty) {
             warn!("Block digest exceeds target difficulty");
             return false;
         }
