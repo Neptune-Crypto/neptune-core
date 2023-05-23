@@ -26,7 +26,6 @@ use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::algebraic_hasher::Hashable;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;

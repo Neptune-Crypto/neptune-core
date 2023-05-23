@@ -28,7 +28,7 @@ use super::WalletSecret;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
+use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};

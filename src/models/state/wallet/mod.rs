@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::shared_math::other::random_elements_array;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 

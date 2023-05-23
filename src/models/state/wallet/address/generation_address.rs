@@ -18,7 +18,7 @@ use twenty_first::shared_math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, fips202::shake256, lattice, tip5::Digest},
-    util_types::algebraic_hasher::{AlgebraicHasher, Hashable},
+    util_types::algebraic_hasher::AlgebraicHasher,
 };
 
 use crate::config_models::network::Network;

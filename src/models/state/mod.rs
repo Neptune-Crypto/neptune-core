@@ -14,7 +14,7 @@ use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
