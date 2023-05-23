@@ -53,7 +53,7 @@ fn pubscript_input_is_marked(pubscript_input: &[BFieldElement]) -> bool {
 }
 
 fn derive_receiver_id(seed: Digest) -> BFieldElement {
-    Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(2)]].concat()).values()[0]
+    Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(2)]].concat()).values()[0]
 }
 
 fn receiver_identifier_from_pubscript_input(
@@ -134,7 +134,7 @@ pub fn std_lockscript_reference_verify_unlock(
     _bind_to: Digest,
     witness_data: [BFieldElement; DIGEST_LENGTH],
 ) -> bool {
-    spending_lock == Digest::new(witness_data).vmhash::<Hash>()
+    spending_lock == Digest::new(witness_data).hash::<Hash>()
 }
 
 impl SpendingKey {
@@ -143,7 +143,7 @@ impl SpendingKey {
             .try_into()
             .unwrap();
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = self.privacy_preimage.vmhash::<Hash>();
+        let privacy_digest = self.privacy_preimage.hash::<Hash>();
         ReceivingAddress {
             receiver_identifier: self.receiver_identifier,
             encryption_key: pk,
@@ -191,7 +191,7 @@ impl SpendingKey {
             // and join those with the receiver digest to get a commitment
             // Note: the commitment is computed in the same way as in the mutator set.
             let receiver_preimage = self.privacy_preimage;
-            let receiver_digest = receiver_preimage.vmhash::<Hash>();
+            let receiver_digest = receiver_preimage.hash::<Hash>();
             let addition_record =
                 commit::<Hash>(&Hash::hash(&utxo), &sender_randomness, &receiver_digest);
 
@@ -209,9 +209,9 @@ impl SpendingKey {
 
     pub fn derive_from_seed(seed: Digest) -> Self {
         let privacy_preimage =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(0)]].concat());
+            Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
-            Hash::hash_varlen(&[seed.to_sequence(), vec![BFieldElement::new(1)]].concat());
+            Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(1)]].concat());
         let randomness: [u8; 32] = shake256(&bincode::serialize(&seed).unwrap(), 32)
             .try_into()
             .unwrap();
@@ -272,7 +272,7 @@ impl SpendingKey {
     }
 
     fn generate_spending_lock(&self) -> Digest {
-        self.unlock_key.vmhash::<Hash>()
+        self.unlock_key.hash::<Hash>()
     }
 
     /// Unlock the UTXO binding it to some transaction by its kernel hash.
@@ -291,7 +291,7 @@ impl ReceivingAddress {
             .try_into()
             .unwrap();
         let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = spending_key.privacy_preimage.vmhash::<Hash>();
+        let privacy_digest = spending_key.privacy_preimage.hash::<Hash>();
         Self {
             receiver_identifier,
             encryption_key: pk,
