@@ -37,9 +37,9 @@ pub struct TransactionKernel {
 
 impl BFieldCodec for TransactionKernel {
     fn encode(&self) -> Vec<BFieldElement> {
-        let inputs = encode_vec(self.inputs);
-        let outputs = encode_vec(self.outputs);
-        let pubscripts = encode_vec(self.pubscript_hashes_and_inputs);
+        let inputs = encode_vec(&self.inputs);
+        let outputs = encode_vec(&self.outputs);
+        let pubscripts = encode_vec(&self.pubscript_hashes_and_inputs);
         let fee = self.fee.encode();
         let coinbase = self.coinbase.encode();
         let timestamp = self.timestamp.encode();
@@ -73,8 +73,8 @@ impl BFieldCodec for TransactionKernel {
         if sequence.len() < read_index + inputs_length {
             bail!("Cannot decode sequence of BFieldElements to TransactionKernel: input length mismatch");
         }
-        let inputs: Vec<RemovalRecord> =
-            *decode_vec(sequence[read_index..read_index + inputs_length])?;
+        let inputs: Vec<RemovalRecord<Hash>> =
+            *decode_vec(&sequence[read_index..read_index + inputs_length])?;
         read_index += inputs_length;
 
         // read outputs
@@ -87,7 +87,7 @@ impl BFieldCodec for TransactionKernel {
             bail!("Cannot decode sequence of BFieldElements to TransactionKernel: output length mismatch");
         }
         let outputs: Vec<AdditionRecord> =
-            *decode_vec(sequence[read_index..read_index + outputs_length])?;
+            *decode_vec(&sequence[read_index..read_index + outputs_length])?;
         read_index += outputs_length;
 
         // read public scripts
@@ -100,7 +100,7 @@ impl BFieldCodec for TransactionKernel {
             bail!("Cannot decode sequence of BFieldElements to TransactionKernel: pubscripts length mismatch");
         }
         let pubscripts: Vec<(Digest, Vec<BFieldElement>)> =
-            *decode_vec(sequence[read_index..read_index + pubscripts_length])?;
+            *decode_vec(&sequence[read_index..read_index + pubscripts_length])?;
         read_index += pubscripts_length;
 
         // read fee
@@ -112,7 +112,7 @@ impl BFieldCodec for TransactionKernel {
         if sequence.len() < read_index + fee_length {
             bail!("Cannot decode sequence of BFieldElements to TransactionKernel: fee length mismatch");
         }
-        let fee = *Amount::decode(sequence[read_index..read_index + fee_length])?;
+        let fee = *Amount::decode(&sequence[read_index..read_index + fee_length])?;
         read_index += fee_length;
 
         // read coinbase
@@ -125,7 +125,7 @@ impl BFieldCodec for TransactionKernel {
             bail!("Cannot decode sequence of BFieldElements to TransactionKernel: coinbase length mismatch");
         }
         let coinbase =
-            *Option::<Amount>::decode(sequence[read_index..read_index + coinbase_length])?;
+            *Option::<Amount>::decode(&sequence[read_index..read_index + coinbase_length])?;
         read_index += coinbase_length;
 
         // read timestamp
@@ -138,7 +138,7 @@ impl BFieldCodec for TransactionKernel {
             bail!("Cannot decode sequence of BFieldElements to TransactionKernel: timestamp length mismatch");
         }
         let timestamp =
-            *BFieldElement::decode(sequence[read_index..read_index + timestamp_length])?;
+            *BFieldElement::decode(&sequence[read_index..read_index + timestamp_length])?;
         read_index += timestamp_length;
 
         if read_index != sequence.len() {
@@ -160,42 +160,17 @@ impl BFieldCodec for TransactionKernel {
 
 impl TransactionKernel {
     pub fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
-        let mut input_utxos_sequence = vec![BFieldElement::new(self.inputs.len() as u64)];
-        for input in self.inputs.iter() {
-            let mut input_sequence = input.to_sequence();
-            input_utxos_sequence.push(BFieldElement::new(input_sequence.len() as u64));
-            input_utxos_sequence.append(&mut input_sequence);
-        }
+        let mut input_utxos_sequence = encode_vec(&self.inputs);
 
-        let mut output_utxos_sequence = vec![BFieldElement::new(self.outputs.len() as u64)];
-        for output in self.outputs.iter() {
-            let mut output_sequence = output.to_sequence();
-            output_utxos_sequence.push(BFieldElement::new(output_sequence.len() as u64));
-            output_utxos_sequence.append(&mut output_sequence);
-        }
+        let mut output_utxos_sequence = encode_vec(&self.outputs);
 
-        let mut pubscript_sequence = vec![BFieldElement::new(
-            self.pubscript_hashes_and_inputs.len() as u64,
-        )];
-        for (pubscript_hash, pubscript_input) in self.pubscript_hashes_and_inputs.iter() {
-            pubscript_sequence.append(&mut pubscript_hash.to_sequence());
-            pubscript_sequence.push(BFieldElement::new(pubscript_input.len() as u64));
-            pubscript_sequence.append(&mut pubscript_sequence.clone());
-        }
+        let mut pubscript_sequence = encode_vec(&self.pubscript_hashes_and_inputs);
 
-        let mut fee_sequence = vec![BFieldElement::new(self.fee.to_sequence().len() as u64)];
-        fee_sequence.append(&mut self.fee.to_sequence());
+        let mut fee_sequence = self.fee.encode();
 
-        let mut coinbase_as_bfes = match self.coinbase {
-            Some(amount) => amount.to_sequence(),
-            None => {
-                vec![]
-            }
-        };
-        let mut coinbase_sequence = vec![BFieldElement::new(coinbase_as_bfes.len() as u64)];
-        coinbase_sequence.append(&mut coinbase_as_bfes);
+        let mut coinbase_sequence = self.coinbase.encode();
 
-        let timestamp_sequence = vec![BFieldElement::new(1u64), self.timestamp];
+        let timestamp_sequence = self.timestamp.encode();
 
         vec![
             input_utxos_sequence,
@@ -213,7 +188,7 @@ impl TransactionKernel {
 
         // pad until power of two
         while sequences.len() & (sequences.len() - 1) != 0 {
-            sequences.push(Digest::default().to_sequence());
+            sequences.push(Digest::default().encode());
         }
 
         // compute Merkle tree and return hash
@@ -230,14 +205,16 @@ impl TransactionKernel {
 #[cfg(test)]
 pub mod transaction_kernel_tests {
     use mutator_set_tf::test_shared::mutator_set::{self};
-    use rand::{random, thread_rng, RngCore};
-    use twenty_first::shared_math::other::random_elements;
+    use rand::{random, thread_rng, Rng, RngCore};
+    use twenty_first::{amount::u32s::U32s, shared_math::other::random_elements};
 
     use super::*;
 
     pub fn random_addition_record() -> AdditionRecord {
         let ar: Digest = random();
-        ar
+        AdditionRecord {
+            canonical_commitment: ar,
+        }
     }
 
     pub fn random_pubscript_tuple() -> (Digest, Vec<BFieldElement>) {
@@ -250,7 +227,7 @@ pub mod transaction_kernel_tests {
 
     pub fn random_amount() -> Amount {
         let number: [u32; 4] = random();
-        let amount = Amount(number.into());
+        let amount = Amount(U32s::new(number));
         amount
     }
 
@@ -269,12 +246,14 @@ pub mod transaction_kernel_tests {
         let num_pubscripts = (rng.next_u32() % 5) as usize;
 
         let inputs = (0..num_inputs)
-            .map(|_| random_addition_record())
-            .collect_vec();
-        let outputs = (0..num_outputs)
             .map(|_| mutator_set::random_removal_record())
             .collect_vec();
-        let pubscripts = (0..num_pubscripts).map(|_| random_pubscript_tuple());
+        let outputs = (0..num_outputs)
+            .map(|_| random_addition_record())
+            .collect_vec();
+        let pubscripts = (0..num_pubscripts)
+            .map(|_| random_pubscript_tuple())
+            .collect_vec();
         let fee = random_amount();
         let coinbase = random_option(random_amount());
         let timestamp: BFieldElement = random();
@@ -293,7 +272,7 @@ pub mod transaction_kernel_tests {
     pub fn test_decode_transaction_kernel() {
         let kernel = random_transaction_kernel();
         let encoded = kernel.encode();
-        let decoded = *TransactionKernel::decode(encoded).unwrap();
+        let decoded = *TransactionKernel::decode(&encoded).unwrap();
         assert_eq!(kernel, decoded);
     }
 }
