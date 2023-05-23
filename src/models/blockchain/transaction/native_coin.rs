@@ -3,14 +3,17 @@ use num_traits::Zero;
 use std::collections::VecDeque;
 use triton_opcodes::{program::Program, shortcuts::halt};
 use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, tip5::Digest},
+    shared_math::{
+        b_field_element::BFieldElement,
+        bfield_codec::{decode_vec, BFieldCodec},
+        tip5::Digest,
+    },
     util_types::{
         algebraic_hasher::AlgebraicHasher, merkle_tree::CpuParallel,
         merkle_tree_maker::MerkleTreeMaker,
     },
 };
 
-use super::amount::AmountLike;
 use crate::models::blockchain::{
     shared::Hash,
     transaction::{
@@ -85,7 +88,10 @@ pub fn native_coin_reference(
             utxo.coins
                 .iter()
                 .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
-                .map(|coin| Amount::from_bfes(&coin.state))
+                .map(|coin| {
+                    *Amount::decode(&coin.state)
+                        .expect("Native coin reference: failed to parse coin state as amount (1).")
+                })
         })
         .sum();
     let total_outputs: Amount = output_utxos
@@ -94,7 +100,10 @@ pub fn native_coin_reference(
             utxo.coins
                 .iter()
                 .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
-                .map(|coin| Amount::from_bfes(&coin.state))
+                .map(|coin| {
+                    *Amount::decode(&coin.state)
+                        .expect("Native coin reference: failed to parse coin state as amount (2).")
+                })
         })
         .sum();
 

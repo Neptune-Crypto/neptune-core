@@ -1,7 +1,6 @@
 use crate::models::blockchain::shared::Hash;
 use anyhow::bail;
 use get_size::GetSize;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use triton_opcodes::instruction::LabelledInstruction;
@@ -10,13 +9,13 @@ use triton_opcodes::shortcuts::{halt, read_io};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 
-use super::amount::AmountLike;
 use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
 use super::{native_coin, Amount};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
@@ -197,7 +196,7 @@ impl LockScript {
     }
 
     pub fn hash(&self) -> Digest {
-        Hash::hash_varlen(&self.program.to_bwords())
+        Hash::hash_varlen(&self.program.encode())
     }
 }
 
@@ -212,7 +211,7 @@ impl BFieldCodec for TypeScript {
     }
 
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        Ok(Box::new(*Program::decode(sequence)?));
+        Ok(Box::new(*Program::decode(sequence)?))
     }
 }
 
@@ -238,7 +237,7 @@ impl TypeScript {
     }
 
     pub fn hash(&self) -> Digest {
-        Hash::hash_varlen(&self.program.to_bwords())
+        Hash::hash_varlen(&self.program.encode())
     }
 
     pub fn native_coin() -> Self {
@@ -312,6 +311,6 @@ mod utxo_tests {
         let type_script = TypeScript { program };
 
         let encodede = type_script.encode();
-        let decoded = *TypeScript::decode(&encodede)?;
+        let decoded = *TypeScript::decode(&encodede).unwrap();
     }
 }
