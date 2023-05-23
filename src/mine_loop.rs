@@ -2,9 +2,8 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
-use crate::models::blockchain::digest::ordered_digest::*;
 use crate::models::blockchain::shared::*;
-use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
+use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
@@ -101,8 +100,8 @@ async fn mine_block(
         block_body.transaction.kernel.outputs.len()
     );
     // Mining takes place here
-    while Into::<OrderedDigest>::into(Hash::hash(&block_header))
-        >= OrderedDigest::to_digest_threshold(block_header.target_difficulty)
+    while Into::<Digest>::into(Hash::hash(&block_header))
+        >= Digest::to_digest_threshold(block_header.target_difficulty)
     {
         // If the sender is cancelled, the parent to this thread most
         // likely received a new block, and this thread hasn't been stopped
