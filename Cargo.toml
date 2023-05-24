@@ -32,8 +32,8 @@ serde = { version = "1", features = ["derive"] }
 serde-big-array = "0"
 serde_derive = "1"
 serde_json = "1"
-# twenty-first = "0.24.0"
-twenty-first = { path = "../twenty-first/twenty-first" }
+twenty-first = "0.25.1"
+# twenty-first = { path = "../twenty-first/twenty-first" }
 
 [profile.dev]
 opt-level = 0
