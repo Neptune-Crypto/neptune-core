@@ -2,13 +2,14 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
+use crate::models::blockchain::block::*;
 use crate::models::blockchain::digest::ordered_digest::to_digest_threshold;
 use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
+use crate::models::blockchain::transaction::validity::ValidityLogic;
 use crate::models::blockchain::transaction::*;
-use crate::models::blockchain::{block::*, transaction};
 use crate::models::channel::*;
 use crate::models::shared::SIZE_1MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
@@ -197,18 +198,20 @@ fn make_coinbase_transaction(
 
     let mutator_set_hash = mutator_set_accumulator.hash();
 
+    let primitive_witness = PrimitiveWitness {
+        input_utxos: vec![],
+        input_lock_scripts: vec![],
+        lock_script_witnesses: vec![],
+        input_membership_proofs: vec![],
+        output_utxos: vec![coinbase_utxo.clone()],
+        pubscripts: vec![],
+        mutator_set_accumulator,
+    };
+    let validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &kernel);
     (
         Transaction {
             kernel,
-            witness: transaction::Witness::Primitive(PrimitiveWitness {
-                input_utxos: vec![],
-                input_lock_scripts: vec![],
-                lock_script_witnesses: vec![],
-                input_membership_proofs: vec![],
-                output_utxos: vec![coinbase_utxo.clone()],
-                pubscripts: vec![],
-                mutator_set_accumulator,
-            }),
+            witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
             mutator_set_hash,
         },
         sender_randomness,

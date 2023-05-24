@@ -58,10 +58,8 @@ impl WalletSecret {
         }
     }
 
-    /// Create a `Wallet` for signing merged `Transaction`s on devnet
-    ///
-    /// This is a placeholder for STARK proofs
-    pub fn devnet_authority_wallet() -> Self {
+    /// Create a `Wallet` with a fixed digest
+    pub fn devnet_wallet() -> Self {
         let secret_seed = Digest::new([
             BFieldElement::new(12063201067205522823),
             BFieldElement::new(1529663126377206632),
@@ -1133,16 +1131,15 @@ mod wallet_tests {
     }
 
     #[test]
-    fn get_authority_spending_public_key() {
+    fn get_devnet_wallet_info() {
         // Helper function/test to print the public key associated with the authority signatures
-        let authority_wallet = WalletSecret::devnet_authority_wallet();
+        let devnet_wallet = WalletSecret::devnet_wallet();
+        let spending_key = devnet_wallet.nth_generation_spending_key(0);
+        let address = spending_key.to_address();
         println!(
-            "_authority_wallet pub key: {}",
-            authority_wallet
-                .nth_generation_spending_key(0)
-                .to_address()
-                .to_bech32m(Network::Main)
-                .unwrap()
+            "_authority_wallet address: {}",
+            address.to_bech32m(Network::Main).unwrap()
         );
+        println!("_authority_wallet spending_lock: {}", address.spending_lock);
     }
 }
