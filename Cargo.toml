@@ -25,7 +25,6 @@ itertools = "0"
 get-size = { version = "^0.1", features = ["derive"] }
 num-traits = "0"
 rand = "0.8"
-rand_core = "0"
 rayon = "1"
 rusty-leveldb = "1"
 serde = { version = "1", features = ["derive"] }

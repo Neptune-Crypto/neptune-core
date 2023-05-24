@@ -3,8 +3,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
-use rand::{random, thread_rng, Rng};
-use rand_core::RngCore;
+use rand::{random, thread_rng, Rng, RngCore};
 use rusty_leveldb::DB;
 
 use twenty_first::shared_math::other::random_elements;
@@ -203,5 +202,24 @@ pub fn random_mutator_set_membership_proof<H: AlgebraicHasher>() -> MsMembership
         receiver_preimage,
         auth_path_aocl,
         target_chunks,
+    }
+}
+
+#[cfg(test)]
+mod shared_tests_test {
+    use twenty_first::shared_math::tip5::Tip5;
+
+    use super::*;
+
+    #[test]
+    fn can_call() {
+        type H = Tip5;
+        let rcd = random_chunk_dictionary::<H>();
+        assert!(!rcd.dictionary.is_empty());
+        let _ = random_removal_record::<H>();
+        let (mut ams, _) = empty_rustyleveldbvec_ams::<H>();
+        let _ = get_all_indices_with_duplicates(&mut ams);
+        let _ = make_item_and_randomnesses();
+        let _ = insert_mock_item(&mut ams.kernel);
     }
 }
