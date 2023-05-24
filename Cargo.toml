@@ -66,7 +66,7 @@ pin-project-lite = "0.2"
 tokio-test = "0.4"
 
 [profile.test]
-opt-level = 3
+opt-level = 0 # change to 3 for shorter test running times but much longer test compilation time
 debug = true
 debug-assertions = true
 overflow-checks = true
