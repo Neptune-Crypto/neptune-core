@@ -15,10 +15,10 @@ version = "1"
 aead = "0.5.2"
 aes-gcm = "0.10.1"
 bech32 = "0.9.1"
-# twenty-first = "0.24.0"
-twenty-first = { path = "../twenty-first/twenty-first" }
-# mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }
-mutator-set-tf = { path = "../mutator-set-tf" }
+twenty-first = "0.25.1"
+# twenty-first = { path = "../twenty-first/twenty-first" }
+mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }
+# mutator-set-tf = { path = "../mutator-set-tf" }
 anyhow = "1"
 bincode = "1"
 bytes = "1"
@@ -47,10 +47,10 @@ tracing-subscriber = { version = "0.3", features = [
     "fmt",
 ] }
 tracing-test = "0"
-triton-vm = {path = "../triton-vm/triton-vm"}
-triton-opcodes = {path = "../triton-vm/triton-opcodes"}
-# triton-vm = "0.24.0"
-# triton-opcodes = "0.24.0"
+# triton-vm = {path = "../triton-vm/triton-vm"}
+# triton-opcodes = {path = "../triton-vm/triton-opcodes"}
+triton-vm = "0.25.1"
+triton-opcodes = "0.25.1"
 priority-queue = "1.2"
 get-size = { version = "^0.1", features = ["derive"] }
 num-rational = "0.4"
