@@ -24,6 +24,7 @@ use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
+use super::blockchain::transaction::validity::ValidityLogic;
 use super::blockchain::transaction::{amount::Amount, Transaction};
 use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
@@ -249,7 +250,7 @@ impl GlobalState {
         // is here the spending key reversed.
         let mut secret_input = spending_key.unlock_key.encode();
         secret_input.reverse();
-        let witness = PrimitiveWitness {
+        let mut primitive_witness = PrimitiveWitness {
             input_utxos,
             input_lock_scripts,
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
@@ -259,13 +260,22 @@ impl GlobalState {
             mutator_set_accumulator,
         };
 
-        let transaction = Transaction {
-            kernel,
-            witness: Witness::Primitive(witness),
-            mutator_set_hash,
-        };
+        // Convert the secret-supported claim to a proof
+        let mut validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &kernel);
+        for lsh in validity_logic.lock_script_halts.iter_mut() {
+            ValidityLogic::prove_lock_script_halts(lsh).expect(
+                "Triton VM proving must succeed. Failed for validity logic:\n {validity_logic:?}",
+            );
+        }
 
-        Ok(transaction)
+        // Remove lock script witness from primitive witness to not leak spending keys
+        primitive_witness.lock_script_witnesses = vec![];
+
+        Ok(Transaction {
+            kernel,
+            witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
+            mutator_set_hash,
+        })
     }
 
     // Storing IP addresses is, according to this answer, not a violation of GDPR:

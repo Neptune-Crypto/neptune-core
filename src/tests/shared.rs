@@ -49,6 +49,7 @@ use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::ValidityLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::Witness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
@@ -641,7 +642,7 @@ pub fn make_mock_transaction_with_generation_key(
         .map(|rd| rd.pubscript.to_owned())
         .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
-    let witness = PrimitiveWitness {
+    let primitive_witness = PrimitiveWitness {
         input_utxos,
         input_lock_scripts,
         lock_script_witnesses: spending_key_unlock_keys,
@@ -650,10 +651,11 @@ pub fn make_mock_transaction_with_generation_key(
         pubscripts,
         mutator_set_accumulator: tip_msa.clone(),
     };
+    let validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &kernel);
 
     Transaction {
         kernel,
-        witness: Witness::Primitive(witness),
+        witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
         mutator_set_hash: tip_msa.hash(),
     }
 }
@@ -758,25 +760,30 @@ pub fn make_mock_block(
             .as_secs(),
     );
 
+    let tx_kernel = TransactionKernel {
+        inputs: vec![],
+        outputs: vec![coinbase_addition_record],
+        pubscript_hashes_and_inputs: vec![],
+        fee: Amount::zero(),
+        timestamp,
+        coinbase: Some(coinbase_amount),
+    };
+
+    let primitive_witness = PrimitiveWitness {
+        input_utxos: vec![],
+        lock_script_witnesses: vec![],
+        input_membership_proofs: vec![],
+        output_utxos: vec![coinbase_utxo.clone()],
+        pubscripts: vec![],
+        mutator_set_accumulator: previous_mutator_set.clone(),
+        input_lock_scripts: vec![],
+    };
+    let validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &tx_kernel);
+
     let transaction = Transaction {
-        kernel: TransactionKernel {
-            inputs: vec![],
-            outputs: vec![coinbase_addition_record],
-            pubscript_hashes_and_inputs: vec![],
-            fee: Amount::zero(),
-            timestamp,
-            coinbase: Some(coinbase_amount),
-        },
-        witness: transaction::Witness::Primitive(PrimitiveWitness {
-            input_utxos: vec![],
-            lock_script_witnesses: vec![],
-            input_membership_proofs: vec![],
-            output_utxos: vec![coinbase_utxo.clone()],
-            pubscripts: vec![],
-            mutator_set_accumulator: previous_mutator_set.clone(),
-            input_lock_scripts: vec![],
-        }),
+        witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),
         mutator_set_hash: previous_mutator_set.hash(),
+        kernel: tx_kernel,
     };
 
     let block_body: BlockBody = BlockBody {
@@ -821,7 +828,7 @@ pub fn make_mock_block(
 pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) -> WalletState {
     let wallet_secret = match maybe_wallet_secret {
         Some(wallet) => wallet,
-        None => WalletSecret::devnet_authority_wallet(),
+        None => WalletSecret::devnet_wallet(),
     };
 
     let cli_args: cli_args::Args = cli_args::Args {

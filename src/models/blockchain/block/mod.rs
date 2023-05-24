@@ -143,7 +143,7 @@ impl Block {
 
     pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, Amount)> {
         // The premine UTXOs can be hardcoded here.
-        let authority_wallet = WalletSecret::devnet_authority_wallet();
+        let authority_wallet = WalletSecret::devnet_wallet();
         let authority_receiving_address =
             authority_wallet.nth_generation_spending_key(0).to_address();
         vec![(authority_receiving_address, 20000.into())]

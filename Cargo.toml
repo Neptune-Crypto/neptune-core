@@ -64,3 +64,13 @@ strum_macros = "0.24"
 [dev-dependencies]
 pin-project-lite = "0.2"
 tokio-test = "0.4"
+
+[profile.test]
+opt-level = 3
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+incremental = true
+codegen-units = 256
+rpath = false
