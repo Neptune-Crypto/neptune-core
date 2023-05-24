@@ -1,11 +1,13 @@
-use std::collections::VecDeque;
-
 use anyhow::bail;
 use num_traits::Zero;
+use std::collections::VecDeque;
 use triton_opcodes::{program::Program, shortcuts::halt};
-use triton_vm::bfield_codec::{decode_vec, BFieldCodec};
 use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, tip5::Digest},
+    shared_math::{
+        b_field_element::BFieldElement,
+        bfield_codec::{decode_vec, BFieldCodec},
+        tip5::Digest,
+    },
     util_types::{
         algebraic_hasher::AlgebraicHasher, merkle_tree::CpuParallel,
         merkle_tree_maker::MerkleTreeMaker,
@@ -20,14 +22,12 @@ use crate::models::blockchain::{
     },
 };
 
-use super::amount::AmountLike;
-
 pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
-    BFieldElement::new(0xf00ba12u64),
-    BFieldElement::new(0xdeadbeefu64),
-    BFieldElement::new(0xb0000b5u64),
-    BFieldElement::new(0xdeadbeefu64),
-    BFieldElement::new(0xdeadbeefu64),
+    BFieldElement::new(12960675664441692999),
+    BFieldElement::new(1713263139658829986),
+    BFieldElement::new(4953090415653761319),
+    BFieldElement::new(10232794718978818029),
+    BFieldElement::new(15162962915077700302),
 ]);
 
 pub fn native_coin_program() -> Program {
@@ -88,7 +88,10 @@ pub fn native_coin_reference(
             utxo.coins
                 .iter()
                 .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
-                .map(|coin| Amount::from_bfes(&coin.state))
+                .map(|coin| {
+                    *Amount::decode(&coin.state)
+                        .expect("Native coin reference: failed to parse coin state as amount (1).")
+                })
         })
         .sum();
     let total_outputs: Amount = output_utxos
@@ -97,7 +100,10 @@ pub fn native_coin_reference(
             utxo.coins
                 .iter()
                 .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
-                .map(|coin| Amount::from_bfes(&coin.state))
+                .map(|coin| {
+                    *Amount::decode(&coin.state)
+                        .expect("Native coin reference: failed to parse coin state as amount (2).")
+                })
         })
         .sum();
 
@@ -130,4 +136,15 @@ pub fn native_coin_reference(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests_native_coin {
+    use super::*;
+
+    #[test]
+    fn hash_is_really_hash() {
+        let calculated_digest = Hash::hash_varlen(&native_coin_program().encode());
+        assert_eq!(calculated_digest, NATIVE_COIN_TYPESCRIPT_DIGEST);
+    }
 }

@@ -2,9 +2,9 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
-use crate::models::blockchain::digest::ordered_digest::*;
+use crate::models::blockchain::digest::ordered_digest::to_digest_threshold;
 use crate::models::blockchain::shared::*;
-use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
+use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::*;
@@ -26,6 +26,7 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
@@ -101,8 +102,8 @@ async fn mine_block(
         block_body.transaction.kernel.outputs.len()
     );
     // Mining takes place here
-    while Into::<OrderedDigest>::into(Hash::hash(&block_header))
-        >= OrderedDigest::to_digest_threshold(block_header.target_difficulty)
+    while Into::<Digest>::into(Hash::hash(&block_header))
+        >= to_digest_threshold(block_header.target_difficulty)
     {
         // If the sender is cancelled, the parent to this thread most
         // likely received a new block, and this thread hasn't been stopped
@@ -165,7 +166,10 @@ fn make_coinbase_transaction(
         .coins
         .iter()
         .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
-        .map(|coin| Amount::from_bfes(&coin.state))
+        .map(|coin| {
+            *Amount::decode(&coin.state)
+                .expect("Make coinbase transaction: failed to parse coin state as amount.")
+        })
         .sum();
     let coinbase_addition_record = commit::<Hash>(
         &Hash::hash(coinbase_utxo),
@@ -259,14 +263,11 @@ fn create_block_transaction(
     );
 
     // Merge incoming transactions with the coinbase transaction
-    let mut merged_transaction = transactions_to_include
+    let merged_transaction = transactions_to_include
         .into_iter()
         .fold(coinbase_transaction, |acc, transaction| {
             Transaction::merge_with(acc, transaction)
         });
-
-    // Then set fee to zero as we've already sent it all to ourself in the coinbase output
-    merged_transaction.kernel.fee = Amount::zero();
 
     let utxo_info_for_coinbase = ExpectedUtxo::new(
         coinbase_utxo,

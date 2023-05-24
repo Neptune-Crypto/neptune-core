@@ -13,6 +13,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
@@ -28,7 +29,7 @@ use super::WalletSecret;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::amount::{AmountLike, Sign};
+use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
@@ -339,7 +340,8 @@ impl WalletState {
                     utxo.coins
                         .iter()
                         .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
-                        .map(|coin| Amount::from_bfes(&coin.state))
+                        .map(|coin| *Amount::decode(&coin.state)
+                            .expect("Failed to decode coin state as amount"))
                         .sum::<Amount>(),
                 );
                 let utxo_digest = Hash::hash(&utxo);

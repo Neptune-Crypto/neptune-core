@@ -1336,14 +1336,15 @@ dependencies = [
 [[package]]
 name = "mutator-set-tf"
 version = "0.8.0"
+source = "git+ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git#f1af193c637530c2d2182945c7383c2447c030a6"
 dependencies = [
+ "anyhow",
  "bincode",
  "blake3",
  "get-size",
  "itertools",
  "num-traits",
  "rand 0.8.5",
- "rand_core 0.6.4",
  "rayon",
  "rusty-leveldb",
  "serde",
@@ -2670,7 +2671,9 @@ dependencies = [
 
 [[package]]
 name = "triton-opcodes"
-version = "0.21.0"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cdd93c9cb13370cdff1449e793151fac223774803aae2de3ce4dc44cf3ae5f5"
 dependencies = [
  "anyhow",
  "get-size",
@@ -2687,7 +2690,9 @@ dependencies = [
 
 [[package]]
 name = "triton-profiler"
-version = "0.21.0"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "730856a3312f6a627b0882ce9054c1ec71976fb1ac641599e6e51f6e5502b00d"
 dependencies = [
  "colored",
  "criterion",
@@ -2698,7 +2703,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.21.0"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24383925927d56b2ae0b15bd7a5658bb49f162c8af814db15052e4baff848b17"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2732,9 +2739,9 @@ dependencies = [
 
 [[package]]
 name = "twenty-first"
-version = "0.22.0"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84604d80e1275181e88220cdbdeeb226ada042578801f3952ce38115a782d84d"
+checksum = "4211c0b5cb23ac622e62809d6913e73de5dfaafda4ae31b8a895cb344b2a4d9c"
 dependencies = [
  "anyhow",
  "bincode",

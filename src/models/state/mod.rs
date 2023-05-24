@@ -8,13 +8,14 @@ use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
@@ -246,7 +247,7 @@ impl GlobalState {
         // When reading a digest from secret and standard-in, the digest's
         // zeroth element must be on top of the stack. So the secret-in
         // is here the spending key reversed.
-        let mut secret_input = spending_key.unlock_key.to_sequence();
+        let mut secret_input = spending_key.unlock_key.encode();
         secret_input.reverse();
         let witness = PrimitiveWitness {
             input_utxos,

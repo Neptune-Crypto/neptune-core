@@ -3,7 +3,7 @@ pub mod native_coin;
 pub mod transaction_kernel;
 pub mod utxo;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::{BigInt, BigUint};
@@ -11,12 +11,16 @@ use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
+use triton_vm::proof::Proof;
 use triton_vm::Claim;
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Hashable};
+use twenty_first::shared_math::bfield_codec::{
+    decode_field_length_prepended, decode_vec_length_prepended, encode_vec, BFieldCodec,
+};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
@@ -47,9 +51,15 @@ impl Default for PubScript {
     }
 }
 
-impl Hashable for PubScript {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.program.to_sequence()
+impl BFieldCodec for PubScript {
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        Ok(Box::new(PubScript {
+            program: *Program::decode(sequence)?,
+        }))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.program.encode()
     }
 }
 
@@ -69,29 +79,6 @@ impl From<&[LabelledInstruction]> for PubScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Proof(pub Vec<BFieldElement>);
-
-impl Hashable for Proof {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.clone()
-    }
-}
-
-impl GetSize for Proof {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
-
-    fn get_heap_size(&self) -> usize {
-        self.0.len() * std::mem::size_of::<BFieldElement>()
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
-}
-
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
@@ -103,6 +90,69 @@ pub struct PrimitiveWitness {
     pub output_utxos: Vec<Utxo>,
     pub pubscripts: Vec<PubScript>,
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+}
+
+impl BFieldCodec for PrimitiveWitness {
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        let (input_utxos, sequence): (Vec<Utxo>, Vec<BFieldElement>) =
+            decode_vec_length_prepended(sequence)?;
+        let (input_lock_scripts, sequence): (Vec<LockScript>, Vec<BFieldElement>) =
+            decode_vec_length_prepended(&sequence)?;
+        let (lock_script_witnesses, sequence): (Vec<Vec<BFieldElement>>, Vec<BFieldElement>) =
+            decode_vec_length_prepended(&sequence)?;
+        let (input_membership_proofs, sequence): (
+            Vec<MsMembershipProof<Hash>>,
+            Vec<BFieldElement>,
+        ) = decode_vec_length_prepended(&sequence)?;
+        let (output_utxos, sequence): (Vec<Utxo>, Vec<BFieldElement>) =
+            decode_vec_length_prepended(&sequence)?;
+        let (pubscripts, sequence): (Vec<PubScript>, Vec<BFieldElement>) =
+            decode_vec_length_prepended(&sequence)?;
+        let (mutator_set_accumulator, sequence): (MutatorSetAccumulator<Hash>, Vec<BFieldElement>) =
+            decode_field_length_prepended(&sequence)?;
+
+        if !sequence.is_empty() {
+            bail!("Remaining BFEs after decoding PrimitiveWitness")
+        }
+
+        Ok(Box::new(Self {
+            input_utxos,
+            input_lock_scripts,
+            lock_script_witnesses,
+            input_membership_proofs,
+            output_utxos,
+            pubscripts,
+            mutator_set_accumulator,
+        }))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        let input_utxo_bfes = encode_vec(&self.input_utxos);
+        let input_lock_scripts_bfes = encode_vec(&self.input_lock_scripts);
+        let lock_script_witnesses_bfes = encode_vec(&self.lock_script_witnesses);
+        let input_mps_bfes = encode_vec(&self.input_membership_proofs);
+        let output_utxos_bfes = encode_vec(&self.output_utxos);
+        let pubscripts_bfes = encode_vec(&self.pubscripts);
+        let mutator_set_acc_bfes = self.mutator_set_accumulator.encode();
+
+        vec![
+            vec![BFieldElement::new(input_utxo_bfes.len() as u64)],
+            input_utxo_bfes,
+            vec![BFieldElement::new(input_lock_scripts_bfes.len() as u64)],
+            input_lock_scripts_bfes,
+            vec![BFieldElement::new(lock_script_witnesses_bfes.len() as u64)],
+            lock_script_witnesses_bfes,
+            vec![BFieldElement::new(input_mps_bfes.len() as u64)],
+            input_mps_bfes,
+            vec![BFieldElement::new(output_utxos_bfes.len() as u64)],
+            output_utxos_bfes,
+            vec![BFieldElement::new(pubscripts_bfes.len() as u64)],
+            pubscripts_bfes,
+            vec![BFieldElement::new(mutator_set_acc_bfes.len() as u64)],
+            mutator_set_acc_bfes,
+        ]
+        .concat()
+    }
 }
 
 /// Linked proofs are one abstraction level above raw witness. They
@@ -152,6 +202,25 @@ pub enum Witness {
     Faith,
 }
 
+impl BFieldCodec for Witness {
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        if sequence.is_empty() {
+            Ok(Box::new(Self::Faith))
+        } else {
+            Ok(Box::new(Self::Primitive(*PrimitiveWitness::decode(
+                sequence,
+            )?)))
+        }
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        match self {
+            Witness::Primitive(pw) => pw.encode(),
+            _ => vec![],
+        }
+    }
+}
+
 /// WitnessableClaim is a helper struct for ValiditySequence. It
 /// encodes a Claim with an optional witness.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
@@ -193,37 +262,37 @@ pub struct Transaction {
     pub mutator_set_hash: Digest,
 }
 
-impl Hashable for Transaction {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        let inputs_preimage = self
-            .kernel
-            .inputs
-            .iter()
-            .flat_map(|input| input.to_sequence());
+impl BFieldCodec for Transaction {
+    fn encode(&self) -> Vec<BFieldElement> {
+        let kernel_bfes = self.kernel.encode();
+        let witness_bfes = self.witness.encode();
+        let mutator_set_hash_bfes = self.mutator_set_hash.encode();
 
-        let outputs_preimage = self
-            .kernel
-            .outputs
-            .iter()
-            .flat_map(|output| output.to_sequence());
+        vec![
+            vec![BFieldElement::new(kernel_bfes.len() as u64)],
+            kernel_bfes,
+            vec![BFieldElement::new(witness_bfes.len() as u64)],
+            witness_bfes,
+            vec![BFieldElement::new(mutator_set_hash_bfes.len() as u64)],
+            mutator_set_hash_bfes,
+        ]
+        .concat()
+    }
 
-        // If public scripts are not padded or end with a specific instruction, then it might
-        // be possible to find a collission for this digest. If that's the case, each public script
-        // can be padded with a B field element that's not a valid VM instruction.
-        let public_scripts_preimage = self
-            .kernel
-            .pubscript_hashes_and_inputs
-            .iter()
-            .flat_map(|(psh, psi)| [psh.to_sequence(), psi.to_vec()].concat());
-        let fee_preimage = self.kernel.fee.to_sequence().into_iter();
-        let timestamp_preimage = vec![self.kernel.timestamp].into_iter();
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        let (kernel, sequence) = decode_field_length_prepended(sequence)?;
+        let (witness, sequence) = decode_field_length_prepended(&sequence)?;
+        let (mutator_set_hash, sequence) = decode_field_length_prepended(&sequence)?;
 
-        inputs_preimage
-            .chain(outputs_preimage)
-            .chain(public_scripts_preimage)
-            .chain(fee_preimage)
-            .chain(timestamp_preimage)
-            .collect_vec()
+        if !sequence.is_empty() {
+            bail!("Cannot decode sequence of BFieldElements as Transaction: sequence should be empty afterwards!");
+        }
+
+        Ok(Box::new(Self {
+            kernel,
+            witness,
+            mutator_set_hash,
+        }))
     }
 }
 
@@ -356,7 +425,7 @@ impl Transaction {
                 {
                     // The lock script is satisfied if it halts gracefully (i.e.,
                     // without crashing). We do not care about the output.
-                    let public_input = Hash::hash(&self.kernel).to_sequence();
+                    let public_input = Hash::hash(&self.kernel).reversed().encode();
 
                     match triton_vm::vm::run(
                         &lock_script.program,
@@ -416,7 +485,7 @@ impl Transaction {
                 // verify type scripts
                 for type_script_hash in type_scripts {
                     let type_script = if type_script_hash
-                        != Hash::hash_varlen(&native_coin_program().to_bwords())
+                        != Hash::hash_varlen(&native_coin_program().encode())
                     {
                         warn!("Observed non-native type script: {} Non-native type scripts are not supported yet.", type_script_hash.emojihash());
                         continue;
@@ -424,7 +493,7 @@ impl Transaction {
                         native_coin_program()
                     };
 
-                    let public_input = self.kernel.mast_hash().to_sequence();
+                    let public_input = self.kernel.mast_hash().encode();
                     let secret_input = self
                         .kernel
                         .mast_sequences()
@@ -434,16 +503,14 @@ impl Transaction {
 
                     // The type script is satisfied if it halts gracefully, i.e.,
                     // without panicking. So we don't care about the output
-                    match triton_vm::vm::run(&type_script, public_input, secret_input) {
-                        Ok(_) => (),
-                        Err(_) => {
-                            warn!(
-                                "Type script {} not satisfied for transaction.",
-                                type_script_hash.emojihash()
-                            );
-                            return false;
-                        }
-                    };
+                    if let Err(e) = triton_vm::vm::run(&type_script, public_input, secret_input) {
+                        warn!(
+                            "Type script {} not satisfied for transaction: {}",
+                            type_script_hash.emojihash(),
+                            e
+                        );
+                        return false;
+                    }
                 }
 
                 // Verify that the removal records generated from the primitive
@@ -451,28 +518,28 @@ impl Transaction {
                 // transaction kernel.
                 if witnessed_removal_records
                     .iter()
-                    .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                    .map(|rr| Hash::hash_varlen(&rr.encode()))
                     .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
                     .collect_vec()
                     != self
                         .kernel
                         .inputs
                         .iter()
-                        .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                        .map(|rr| Hash::hash_varlen(&rr.encode()))
                         .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
                         .collect_vec()
                 {
                     warn!("Removal records as generated from witness do not match with those listed as inputs in transaction kernel.");
                     let witnessed_removal_record_hashes = witnessed_removal_records
                         .iter()
-                        .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                        .map(|rr| Hash::hash_varlen(&rr.encode()))
                         .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
                         .collect_vec();
                     let listed_removal_record_hashes = self
                         .kernel
                         .inputs
                         .iter()
-                        .map(|rr| Hash::hash_varlen(&rr.to_sequence()))
+                        .map(|rr| Hash::hash_varlen(&rr.encode()))
                         .sorted_by_key(|d| d.values().iter().map(|b| b.value()).collect_vec())
                         .collect_vec();
                     warn!(
@@ -522,18 +589,13 @@ impl Transaction {
                     let secret_input: Vec<BFieldElement> = vec![];
 
                     // The pubscript is satisfied if it halts gracefully without crashing.
-                    match triton_vm::vm::run(
+                    if let Err(err) = triton_vm::vm::run(
                         &pubscript.program,
                         pubscript_input.to_vec(),
                         secret_input,
                     ) {
-                        Ok(_) => (),
-                        Err(err) => {
-                            warn!(
-                                "Could not verify pubscript for transaction; got err: \"{err}\"."
-                            );
-                            return false;
-                        }
+                        warn!("Could not verify pubscript for transaction; got err: \"{err}\".");
+                        return false;
                     }
                 }
 
@@ -556,8 +618,11 @@ impl Transaction {
         );
 
         let merged_coinbase = match self.kernel.coinbase {
-            Some(own_coinbase) => match other.kernel.coinbase {
-                Some(other_coinbase) => Some(own_coinbase + other_coinbase),
+            Some(_) => match other.kernel.coinbase {
+                Some(_) => {
+                    error!("Cannot merge two transactions with non-empty coinbase fields.");
+                    return self;
+                }
                 None => self.kernel.coinbase,
             },
             None => other.kernel.coinbase,
@@ -654,14 +719,36 @@ impl Transaction {
 }
 
 #[cfg(test)]
-mod transaction_tests {
-    use std::time::Duration;
+mod witness_tests {
+    use super::*;
 
-    use super::{utxo::LockScript, *};
-    use crate::tests::shared::make_mock_transaction;
+    #[test]
+    fn decode_encode_test_empty() {
+        let primitive_witness = PrimitiveWitness {
+            input_utxos: vec![],
+            input_lock_scripts: vec![],
+            lock_script_witnesses: vec![],
+            input_membership_proofs: vec![],
+            output_utxos: vec![],
+            pubscripts: vec![],
+            mutator_set_accumulator: MutatorSetAccumulator::new(),
+        };
+
+        let encoded = primitive_witness.encode();
+        let decoded = *PrimitiveWitness::decode(&encoded).unwrap();
+        assert_eq!(primitive_witness, decoded);
+    }
+}
+
+#[cfg(test)]
+mod transaction_tests {
     use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
     use rand::random;
+    use std::time::Duration;
     use tracing_test::traced_test;
+
+    use super::*;
+    use crate::tests::shared::make_mock_transaction;
 
     #[traced_test]
     #[test]
@@ -681,6 +768,14 @@ mod transaction_tests {
                 .unwrap()
                 < Duration::from_secs(10)
         );
+    }
+
+    #[test]
+    fn encode_decode_empty_tx_test() {
+        let empty_tx = make_mock_transaction(vec![], vec![]);
+        let encoded = empty_tx.encode();
+        let decoded = *Transaction::decode(&encoded).unwrap();
+        assert_eq!(empty_tx, decoded);
     }
 
     // #[traced_test]

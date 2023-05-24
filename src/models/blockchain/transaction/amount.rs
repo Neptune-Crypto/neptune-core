@@ -1,20 +1,17 @@
+use anyhow::bail;
+use get_size::GetSize;
+use num_bigint::BigInt;
+use num_traits::{CheckedSub, Signed, Zero};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt::Display,
     iter::Sum,
     ops::{Add, Neg, Sub},
     str::FromStr,
 };
-
-use anyhow::bail;
-use get_size::GetSize;
-use itertools::Itertools;
-use num_bigint::BigInt;
-use num_traits::{CheckedSub, Signed, Zero};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use triton_vm::bfield_codec::BFieldCodec;
 use twenty_first::{
-    amount::u32s::U32s, shared_math::b_field_element::BFieldElement,
-    util_types::algebraic_hasher::Hashable,
+    amount::u32s::U32s,
+    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
 };
 
 use super::{native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
@@ -37,9 +34,8 @@ pub trait AmountLike:
     + From<i32>
     + From<u32>
     + From<u64>
-    + Hashable
+    + BFieldCodec
 {
-    fn from_bfes(bfes: &[BFieldElement]) -> Self;
     fn scalar_mul(&self, factor: u64) -> Self;
 }
 
@@ -69,16 +65,6 @@ impl GetSize for Amount {
 }
 
 impl AmountLike for Amount {
-    fn from_bfes(bfes: &[BFieldElement]) -> Self {
-        let limbs: [u32; AMOUNT_SIZE_FOR_U32] = bfes
-            .iter()
-            .map(|b| b.value() as u32)
-            .collect_vec()
-            .try_into()
-            .unwrap();
-        Amount(U32s::new(limbs))
-    }
-
     fn scalar_mul(&self, factor: u64) -> Self {
         let factor_as_u32s: U32s<AMOUNT_SIZE_FOR_U32> = factor.try_into().unwrap();
         Amount(factor_as_u32s * self.0)
@@ -106,7 +92,7 @@ impl Amount {
     pub fn to_native_coins(&self) -> Vec<Coin> {
         let dictionary = vec![Coin {
             type_script_hash: NATIVE_COIN_TYPESCRIPT_DIGEST,
-            state: self.to_sequence(),
+            state: self.encode(),
         }];
         dictionary
     }
@@ -203,9 +189,15 @@ impl FromStr for Amount {
     }
 }
 
-impl Hashable for Amount {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        self.0.to_sequence()
+impl BFieldCodec for Amount {
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.0.encode()
+    }
+
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        Ok(Box::new(Self(*U32s::<AMOUNT_SIZE_FOR_U32>::decode(
+            sequence,
+        )?)))
     }
 }
 
@@ -239,39 +231,16 @@ impl From<u64> for Amount {
     }
 }
 
-impl BFieldCodec for Amount {
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if sequence.len() != AMOUNT_SIZE_FOR_U32 {
-            bail!("Cannot parse amount: wrong sequence length");
-        }
-        Ok(Box::new(Amount(U32s::new(
-            sequence
-                .iter()
-                .take(AMOUNT_SIZE_FOR_U32)
-                .map(|b| b.value() as u32)
-                .collect_vec()
-                .try_into()
-                .unwrap(),
-        ))))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.0.to_sequence()
-    }
-}
-
 #[cfg(test)]
 mod amount_tests {
-    use std::str::FromStr;
-
     use get_size::GetSize;
     use itertools::Itertools;
     use rand::{thread_rng, Rng, RngCore};
-    use twenty_first::{amount::u32s::U32s, util_types::algebraic_hasher::Hashable};
+    use std::str::FromStr;
 
     use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
 
-    use super::AMOUNT_SIZE_FOR_U32;
+    use super::*;
 
     #[test]
     fn test_string_conversion() {
@@ -303,8 +272,8 @@ mod amount_tests {
                 .try_into()
                 .unwrap();
             let amount = Amount(U32s::new(limbs));
-            let bfes = amount.to_sequence();
-            let reconstructed_amount = Amount::from_bfes(&bfes);
+            let bfes = amount.encode();
+            let reconstructed_amount = *Amount::decode(&bfes).unwrap();
 
             assert_eq!(amount, reconstructed_amount);
         }

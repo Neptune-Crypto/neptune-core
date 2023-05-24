@@ -1,13 +1,10 @@
 use anyhow::{bail, Result};
-use itertools::Itertools;
 
 use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
 use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use serde::{Deserialize, Serialize};
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::Hashable;
 
 use crate::models::blockchain::shared::Hash;
 
@@ -17,22 +14,6 @@ pub struct MutatorSetUpdate {
     // the block.
     pub removals: Vec<RemovalRecord<Hash>>,
     pub additions: Vec<AdditionRecord>,
-}
-
-impl Hashable for MutatorSetUpdate {
-    fn to_sequence(&self) -> Vec<BFieldElement> {
-        let additions_preimage = self
-            .additions
-            .iter()
-            .flat_map(|addition| addition.to_sequence());
-
-        let removals_preimage = self
-            .removals
-            .iter()
-            .flat_map(|removal| removal.to_sequence());
-
-        additions_preimage.chain(removals_preimage).collect_vec()
-    }
 }
 
 impl MutatorSetUpdate {

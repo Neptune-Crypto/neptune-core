@@ -677,6 +677,15 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                // If transaction has coinbase, punish.
+                // Transactions received from peers have not been mined yet.
+                // Only the miner is allowed to produce transactions with non-empty coinbase fields.
+                if transaction.kernel.coinbase.is_some() {
+                    warn!("Received non-mined transaction with coinbase.");
+                    self.punish(PeerSanctionReason::NonMinedTransactionHasCoinbase)?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
                 // if transaction is not confirmable, punish
                 let latest_block = self.state.chain.light_state.get_latest_block().await;
                 if !transaction
