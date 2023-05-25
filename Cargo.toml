@@ -65,12 +65,25 @@ strum_macros = "0.24"
 pin-project-lite = "0.2"
 tokio-test = "0.4"
 
-[profile.test]
-opt-level = 0 # change to 3 for shorter test running times but much longer test compilation time
-debug = true
-debug-assertions = true
-overflow-checks = true
-lto = false
-incremental = true
-codegen-units = 256
-rpath = false
+# needed because it otherwise takes too long to sign transaction with STARK proofs
+[profile.dev.package.triton-vm]
+opt-level = 3
+
+[profile.release.package.triton-vm]
+opt-level = 3
+
+[profile.bench.package.triton-vm]
+opt-level = 3
+
+[profile.test.package.triton-vm]
+opt-level = 3
+
+# [profile.test]
+# opt-level = 0 # change to 3 for shorter test running times but much longer test compilation time
+# debug = true
+# debug-assertions = true
+# overflow-checks = true
+# lto = false
+# incremental = true
+# codegen-units = 256
+# rpath = false
