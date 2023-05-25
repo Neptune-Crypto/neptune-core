@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
+use tracing::info;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -38,6 +39,8 @@ pub struct DashBoardOverviewDataFromClient {
 
 #[tarpc::service]
 pub trait RPC {
+    /* READ DATA */
+    // Place all methods that only read here
     // Return which network the client is running
     async fn get_network() -> Network;
 
@@ -59,34 +62,6 @@ pub trait RPC {
 
     async fn get_header(hash: Digest) -> Option<BlockHeader>;
 
-    /// Clears standing for all peers, connected or not
-    async fn clear_all_standings();
-
-    /// Clears standing for ip, whether connected or not
-    async fn clear_ip_standing(ip: IpAddr);
-
-    /// Send coins
-    async fn send(
-        amount: Amount,
-        address: generation_address::ReceivingAddress,
-        fee: Amount,
-    ) -> Option<Digest>;
-
-    /// Determine whether the user-supplied string is a valid address
-    async fn validate_address(
-        address: String,
-        network: Network,
-    ) -> Option<generation_address::ReceivingAddress>;
-
-    /// Determine whether the user-supplied string is a valid amount
-    async fn validate_amount(amount: String) -> Option<Amount>;
-
-    /// Determine whether the given amount is less than (or equal to) the balance
-    async fn amount_leq_balance(amount: Amount) -> bool;
-
-    // Gracious shutdown.
-    async fn shutdown() -> bool;
-
     // Get sum of unspent UTXOs.
     async fn get_balance() -> Amount;
 
@@ -102,6 +77,42 @@ pub trait RPC {
     async fn get_mempool_size() -> usize;
 
     async fn get_dashboard_overview_data() -> DashBoardOverviewDataFromClient;
+
+    /// Determine whether the user-supplied string is a valid address
+    async fn validate_address(
+        address: String,
+        network: Network,
+    ) -> Option<generation_address::ReceivingAddress>;
+
+    /// Determine whether the user-supplied string is a valid amount
+    async fn validate_amount(amount: String) -> Option<Amount>;
+
+    /// Determine whether the given amount is less than (or equal to) the balance
+    async fn amount_leq_balance(amount: Amount) -> bool;
+
+    /* CHANGE THINGS */
+    // Place all things that change state here
+    // Gracious shutdown.
+    async fn shutdown() -> bool;
+
+    /// Clears standing for all peers, connected or not
+    async fn clear_all_standings();
+
+    /// Clears standing for ip, whether connected or not
+    async fn clear_ip_standing(ip: IpAddr);
+
+    /// Send coins
+    async fn send(
+        amount: Amount,
+        address: generation_address::ReceivingAddress,
+        fee: Amount,
+    ) -> Option<Digest>;
+
+    // Stop miner if running
+    async fn pause_miner();
+
+    // Start miner if not running
+    async fn restart_miner();
 }
 
 #[derive(Clone)]
@@ -134,6 +145,8 @@ impl RPC for NeptuneRPCServer {
     type GetMempoolSizeFut = Ready<usize>;
     type GetHistoryFut = Ready<Vec<(Duration, Amount, Sign)>>;
     type GetDashboardOverviewDataFut = Ready<DashBoardOverviewDataFromClient>;
+    type PauseMinerFut = Ready<()>;
+    type RestartMinerFut = Ready<()>;
 
     fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
         let network = self.state.cli.network;
@@ -192,103 +205,6 @@ impl RPC for NeptuneRPCServer {
         future::ready(peer_map)
     }
 
-    fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
-        let mut peers = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-
-        // iterates and modifies standing field for all connected peers
-        peers.iter_mut().for_each(|(_, peerinfo)| {
-            peerinfo.standing.clear_standing();
-        });
-        executor::block_on(self.state.clear_all_standings_in_database());
-        future::ready(())
-    }
-
-    fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
-        let mut peers = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-        peers.iter_mut().for_each(|(socketaddr, peerinfo)| {
-            if socketaddr.ip() == ip {
-                peerinfo.standing.clear_standing();
-            }
-        });
-        //Also clears this IP's standing in database, whether it is connected or not.
-        executor::block_on(self.state.clear_ip_standing_in_database(ip));
-        future::ready(())
-    }
-
-    fn send(
-        self,
-        _ctx: context::Context,
-        amount: Amount,
-        address: generation_address::ReceivingAddress,
-        fee: Amount,
-    ) -> Self::SendFut {
-        let span = tracing::debug_span!("Constructing transaction objects");
-        let _enter = span.enter();
-
-        let coins = amount.to_native_coins();
-        let utxo = Utxo::new(address.lock_script(), coins);
-        let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
-            .header
-            .height;
-        let receiver_privacy_digest = address.privacy_digest;
-        let sender_randomness = self
-            .state
-            .wallet_state
-            .wallet_secret
-            .generate_sender_randomness(block_height, receiver_privacy_digest);
-
-        // 1. Build transaction object
-        // TODO: Allow user to set fee here. Don't set it automatically as we want the user
-        // to be in control of this. But we could add an endpoint to get recommended fee
-        // density.
-        let (pubscript, pubscript_input) =
-            match address.generate_pubscript_and_input(&utxo, sender_randomness) {
-                Ok((ps, inp)) => (ps, inp),
-                Err(_) => {
-                    tracing::error!(
-                        "Failed to generate transaction because could not encrypt to address."
-                    );
-                    return future::ready(None);
-                }
-            };
-        let receiver_data = [(UtxoReceiverData {
-            utxo,
-            sender_randomness,
-            receiver_privacy_digest,
-            pubscript,
-            pubscript_input,
-        })]
-        .to_vec();
-        let transaction_result =
-            executor::block_on(self.state.create_transaction(receiver_data, fee));
-        let transaction = match transaction_result {
-            Ok(tx) => tx,
-            Err(err) => panic!("Could not create transaction: {}", err),
-        };
-
-        // 2. Send transaction message to main
-        let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
-            self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(Box::new(transaction.clone()))),
-        );
-
-        future::ready(if response.is_ok() {
-            Some(Hash::hash(&transaction))
-        } else {
-            None
-        })
-    }
-
     fn validate_address(
         self,
         _ctx: context::Context,
@@ -333,15 +249,6 @@ impl RPC for NeptuneRPCServer {
         // test inequality
         let balance = executor::block_on(self.state.wallet_state.get_balance());
         future::ready(amount <= balance)
-    }
-
-    fn shutdown(self, _: context::Context) -> Self::ShutdownFut {
-        // 1. Send shutdown message to main
-        let response =
-            executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::Shutdown()));
-
-        // 2. Send acknowledgement to client.
-        future::ready(response.is_ok())
     }
 
     fn get_balance(self, _context: tarpc::context::Context) -> Self::GetBalanceFut {
@@ -440,6 +347,136 @@ impl RPC for NeptuneRPCServer {
             mempool_tx_count,
             peer_count,
         })
+    }
+
+    // endpoints for changing stuff
+
+    fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
+        let mut peers = self
+            .state
+            .net
+            .peer_map
+            .lock()
+            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+
+        // iterates and modifies standing field for all connected peers
+        peers.iter_mut().for_each(|(_, peerinfo)| {
+            peerinfo.standing.clear_standing();
+        });
+        executor::block_on(self.state.clear_all_standings_in_database());
+        future::ready(())
+    }
+
+    fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
+        let mut peers = self
+            .state
+            .net
+            .peer_map
+            .lock()
+            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+        peers.iter_mut().for_each(|(socketaddr, peerinfo)| {
+            if socketaddr.ip() == ip {
+                peerinfo.standing.clear_standing();
+            }
+        });
+        //Also clears this IP's standing in database, whether it is connected or not.
+        executor::block_on(self.state.clear_ip_standing_in_database(ip));
+        future::ready(())
+    }
+
+    fn send(
+        self,
+        _ctx: context::Context,
+        amount: Amount,
+        address: generation_address::ReceivingAddress,
+        fee: Amount,
+    ) -> Self::SendFut {
+        let span = tracing::debug_span!("Constructing transaction objects");
+        let _enter = span.enter();
+
+        let coins = amount.to_native_coins();
+        let utxo = Utxo::new(address.lock_script(), coins);
+        let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
+            .header
+            .height;
+        let receiver_privacy_digest = address.privacy_digest;
+        let sender_randomness = self
+            .state
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(block_height, receiver_privacy_digest);
+
+        // 1. Build transaction object
+        // TODO: Allow user to set fee here. Don't set it automatically as we want the user
+        // to be in control of this. But we could add an endpoint to get recommended fee
+        // density.
+        let (pubscript, pubscript_input) =
+            match address.generate_pubscript_and_input(&utxo, sender_randomness) {
+                Ok((ps, inp)) => (ps, inp),
+                Err(_) => {
+                    tracing::error!(
+                        "Failed to generate transaction because could not encrypt to address."
+                    );
+                    return future::ready(None);
+                }
+            };
+        let receiver_data = [(UtxoReceiverData {
+            utxo,
+            sender_randomness,
+            receiver_privacy_digest,
+            pubscript,
+            pubscript_input,
+        })]
+        .to_vec();
+
+        let transaction_result =
+            executor::block_on(self.state.create_transaction(receiver_data, fee));
+        let transaction = match transaction_result {
+            Ok(tx) => tx,
+            Err(err) => panic!("Could not create transaction: {}", err),
+        };
+
+        // 2. Send transaction message to main
+        let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
+            self.rpc_server_to_main_tx
+                .send(RPCServerToMain::Send(Box::new(transaction.clone()))),
+        );
+
+        future::ready(if response.is_ok() {
+            Some(Hash::hash(&transaction))
+        } else {
+            None
+        })
+    }
+
+    fn shutdown(self, _: context::Context) -> Self::ShutdownFut {
+        // 1. Send shutdown message to main
+        let response =
+            executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::Shutdown));
+
+        // 2. Send acknowledgement to client.
+        future::ready(response.is_ok())
+    }
+
+    fn pause_miner(self, _context: tarpc::context::Context) -> Self::PauseMinerFut {
+        if self.state.cli.mine {
+            let _ = executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::StopMiner));
+        } else {
+            info!("Cannot pause miner since it was never started");
+        }
+
+        future::ready(())
+    }
+
+    fn restart_miner(self, _context: tarpc::context::Context) -> Self::RestartMinerFut {
+        if self.state.cli.mine {
+            let _ =
+                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::StartMiner));
+        } else {
+            info!("Cannot restart miner since it was never started");
+        }
+
+        future::ready(())
     }
 }
 

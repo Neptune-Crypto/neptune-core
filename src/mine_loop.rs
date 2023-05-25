@@ -288,10 +288,14 @@ pub async fn mock_regtest_mine(
     mut latest_block: Block,
     state: GlobalState,
 ) -> Result<()> {
+    let mut pause_mine = false;
     loop {
         let (sender, receiver) = oneshot::channel::<NewBlockFound>();
         let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
             info!("Not mining because we are syncing");
+            None
+        } else if pause_mine {
+            info!("Not mining because it was paused");
             None
         } else {
             // Build the block template and spawn the worker thread to mine on it
@@ -336,6 +340,20 @@ pub async fn mock_regtest_mine(
                     MainToMiner::Empty => (),
                     MainToMiner::ReadyToMineNextBlock => {
                         debug!("Got {:?} from `main_loop`", MainToMiner::ReadyToMineNextBlock);
+                    }
+                    MainToMiner::StopMining => {
+                        debug!("Miner shutting down.");
+
+                        pause_mine = true;
+
+                        if let Some(mt) = miner_thread {
+                            mt.abort();
+                        }
+                    }
+                    MainToMiner::StartMining => {
+                        debug!("Starting miner");
+
+                        pause_mine = false;
                     }
                 }
             }
