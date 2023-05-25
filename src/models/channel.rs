@@ -98,8 +98,8 @@ impl PeerThreadToMain {
 pub enum RPCServerToMain {
     Send(Box<Transaction>),
     Shutdown,
-    StopMiner,
-    StartMiner,
+    PauseMiner,
+    RestartMiner,
 }
 
 impl RPCServerToMain {
@@ -107,8 +107,8 @@ impl RPCServerToMain {
         match self {
             RPCServerToMain::Send(_) => "initiate transaction".to_string(),
             RPCServerToMain::Shutdown => "shutdown".to_string(),
-            RPCServerToMain::StopMiner => "stop miner".to_owned(),
-            RPCServerToMain::StartMiner => "start miner".to_owned(),
+            RPCServerToMain::PauseMiner => "pause miner".to_owned(),
+            RPCServerToMain::RestartMiner => "restart miner".to_owned(),
         }
     }
 }

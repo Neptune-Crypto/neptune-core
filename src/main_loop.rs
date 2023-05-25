@@ -1111,13 +1111,13 @@ impl MainLoopHandler {
                 // do not shut down
                 Ok(false)
             }
-            RPCServerToMain::StopMiner => {
+            RPCServerToMain::PauseMiner => {
                 info!("Received RPC request to stop miner");
 
                 self.main_to_miner_tx.send(MainToMiner::StopMining)?;
                 Ok(false)
             }
-            RPCServerToMain::StartMiner => {
+            RPCServerToMain::RestartMiner => {
                 info!("Received RPC request to start miner");
                 self.main_to_miner_tx.send(MainToMiner::StartMining)?;
                 Ok(false)

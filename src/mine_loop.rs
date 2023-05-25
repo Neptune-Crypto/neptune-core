@@ -293,9 +293,11 @@ pub async fn mock_regtest_mine(
         let (sender, receiver) = oneshot::channel::<NewBlockFound>();
         let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
             info!("Not mining because we are syncing");
+            *state.mining.write().unwrap() = false;
             None
         } else if pause_mine {
-            info!("Not mining because it was paused");
+            info!("Not mining because mining was paused");
+            *state.mining.write().unwrap() = false;
             None
         } else {
             // Build the block template and spawn the worker thread to mine on it
@@ -308,6 +310,7 @@ pub async fn mock_regtest_mine(
                 state.clone(),
                 coinbase_utxo_info,
             );
+            *state.mining.write().unwrap() = true;
             Some(tokio::spawn(miner_task))
         };
 
