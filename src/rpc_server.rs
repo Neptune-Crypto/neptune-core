@@ -35,6 +35,9 @@ pub struct DashBoardOverviewDataFromClient {
 
     // `None` symbolizes failure in getting peer count
     pub peer_count: Option<usize>,
+
+    // `None` symbolizes failure to get mining status
+    pub is_mining: Option<bool>,
 }
 
 #[tarpc::service]
@@ -339,6 +342,11 @@ impl RPC for NeptuneRPCServer {
             Err(_) => None,
         };
 
+        let is_mining = match self.state.mining.read() {
+            Ok(is_mining) => Some(is_mining.to_owned()),
+            Err(_) => None,
+        };
+
         future::ready(DashBoardOverviewDataFromClient {
             tip_header,
             syncing,
@@ -346,6 +354,7 @@ impl RPC for NeptuneRPCServer {
             mempool_size,
             mempool_tx_count,
             peer_count,
+            is_mining,
         })
     }
 
