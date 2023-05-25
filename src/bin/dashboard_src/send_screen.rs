@@ -1,4 +1,9 @@
-use std::{cmp::max, error::Error, sync::Arc, time::Duration};
+use std::{
+    cmp::max,
+    error::Error,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use super::{
     dashboard_app::{ConsoleIO, DashboardEvent},
@@ -119,8 +124,13 @@ impl SendScreen {
 
         // TODO: Let user specify this number
         let fee = Amount::zero();
+
+        // Allow the generation of proves to take some time...
+        let mut send_ctx = context::current();
+        const SEND_DEADLINE_IN_SECONDS: u64 = 40;
+        send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
         let send_result = rpc_client
-            .send(context::current(), valid_amount, valid_address, fee)
+            .send(send_ctx, valid_amount, valid_address, fee)
             .await
             .unwrap();
 
