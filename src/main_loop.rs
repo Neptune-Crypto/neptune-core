@@ -479,6 +479,10 @@ impl MainLoopHandler {
                     let block_is_new = light_state_locked.header.proof_of_work_family
                         < last_block.header.proof_of_work_family;
                     if !block_is_new {
+                        warn!("Blocks were not new. Not storing blocks.");
+
+                        // TODO: Consider fixing deep reorganization problem described above.
+                        // Alternatively set the `max_number_of_blocks_before_syncing` value higher
                         return Ok(());
                     }
 
@@ -775,7 +779,8 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    async fn sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
+    /// Logic for requesting the batch-download of blocks from peers
+    async fn block_sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         // Check if we are in sync mode
         if !self.global_state.net.syncing.read().unwrap().to_owned() {
             return Ok(());
@@ -789,7 +794,10 @@ impl MainLoopHandler {
 
             // If we can't acquire lock on latest block header, don't block. Just exit and try again next
             // time.
-            Err(_) => return Ok(()),
+            Err(_) => {
+                warn!("Could not read current block. Aborting block synchronization");
+                return Ok(());
+            }
         };
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
@@ -803,10 +811,12 @@ impl MainLoopHandler {
         }
 
         if !try_new_request {
+            info!("Waiting for last sync to complete.");
             return Ok(());
         }
 
         // Create the next request from the reported
+        info!("Creating new sync request");
 
         // Pick a random peer that has reported to have relevant blocks
         let candidate_peers = main_loop_state
@@ -829,10 +839,19 @@ impl MainLoopHandler {
             .unwrap()
             .get_ancestor_block_digests(tip_digest, STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE)
             .await;
+
+        // List of digests, ordered after which block we would like to find descendents from,
+        // from highest to lowest.
         let most_canonical_digests = vec![vec![tip_digest], most_canonical_digests].concat();
 
         // Send message to the relevant peer loop to request the blocks
         let chosen_peer = chosen_peer.unwrap();
+        info!(
+            "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
+            chosen_peer,
+            current_block.hash.emojihash(),
+            current_block.header.height
+        );
         self.main_to_peer_broadcast_tx
             .send(MainToPeerThread::RequestBlockBatch(
                 most_canonical_digests,
@@ -992,7 +1011,7 @@ impl MainLoopHandler {
                 // Handle synchronization (i.e. batch-downloading of blocks)
                 _ = &mut synchronization_timer => {
                     debug!("Running block-synchronization job");
-                    self.sync(&mut main_loop_state).await?;
+                    self.block_sync(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in M seconds
                     synchronization_timer.as_mut().reset(tokio::time::Instant::now() + sync_timer_interval);

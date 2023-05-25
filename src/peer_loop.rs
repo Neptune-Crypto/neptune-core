@@ -405,18 +405,19 @@ impl PeerLoopHandler {
                             .await
                         {
                             peers_most_canonical_block = Some(block_candidate);
-                            debug!("Found block {}", digest);
+                            debug!("Found block in canonical chain: {}", digest);
                             break;
                         }
                     }
                 }
 
-                if peers_most_canonical_block.is_none() {
-                    self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)?;
-                    return Ok(false);
-                }
-
-                let peers_most_canonical_block = peers_most_canonical_block.unwrap();
+                let peers_most_canonical_block = match peers_most_canonical_block {
+                    Some(mcb) => mcb,
+                    None => {
+                        self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)?;
+                        return Ok(false);
+                    }
+                };
 
                 // Get the relevant blocks, from the descendant of the peer's most canonical block
                 // to that height plus the batch size.
