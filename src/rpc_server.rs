@@ -438,8 +438,16 @@ impl RPC for NeptuneRPCServer {
         })]
         .to_vec();
 
+        // Pause miner if we are mining
+        let was_mining = self.state.mining.read().unwrap().to_owned();
+        if was_mining {
+            let _ =
+                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
+        }
+
         let transaction_result =
             executor::block_on(self.state.create_transaction(receiver_data, fee));
+
         let transaction = match transaction_result {
             Ok(tx) => tx,
             Err(err) => panic!("Could not create transaction: {}", err),
@@ -450,6 +458,14 @@ impl RPC for NeptuneRPCServer {
             self.rpc_server_to_main_tx
                 .send(RPCServerToMain::Send(Box::new(transaction.clone()))),
         );
+
+        // Restart mining if it was paused
+        if was_mining {
+            let _ = executor::block_on(
+                self.rpc_server_to_main_tx
+                    .send(RPCServerToMain::RestartMiner),
+            );
+        }
 
         future::ready(if response.is_ok() {
             Some(Hash::hash(&transaction))
@@ -469,7 +485,8 @@ impl RPC for NeptuneRPCServer {
 
     fn pause_miner(self, _context: tarpc::context::Context) -> Self::PauseMinerFut {
         if self.state.cli.mine {
-            let _ = executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::StopMiner));
+            let _ =
+                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
         } else {
             info!("Cannot pause miner since it was never started");
         }
@@ -479,8 +496,10 @@ impl RPC for NeptuneRPCServer {
 
     fn restart_miner(self, _context: tarpc::context::Context) -> Self::RestartMinerFut {
         if self.state.cli.mine {
-            let _ =
-                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::StartMiner));
+            let _ = executor::block_on(
+                self.rpc_server_to_main_tx
+                    .send(RPCServerToMain::RestartMiner),
+            );
         } else {
             info!("Cannot restart miner since it was never started");
         }
