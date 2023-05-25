@@ -28,7 +28,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
-const MINIMUM_BLOCK_BATCH_SIZE: usize = 10;
+const MINIMUM_BLOCK_BATCH_SIZE: usize = 2;
 
 const KEEP_CONNECTION_ALIVE: bool = false;
 const _DISCONNECT_CONNECTION: bool = true;

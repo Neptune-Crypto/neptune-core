@@ -1,6 +1,7 @@
 use anyhow::Result;
 use futures::executor;
 use futures::future::{self, Ready};
+use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -22,6 +23,18 @@ use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::{GlobalState, UtxoReceiverData};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DashBoardOverviewDataFromClient {
+    pub tip_header: BlockHeader,
+    pub syncing: bool,
+    pub balance: Amount,
+    pub mempool_size: usize,
+    pub mempool_tx_count: usize,
+
+    // `None` symbolizes failure in getting peer count
+    pub peer_count: Option<usize>,
+}
 
 #[tarpc::service]
 pub trait RPC {
@@ -87,6 +100,8 @@ pub trait RPC {
 
     // TODO: Change to return current size and max size
     async fn get_mempool_size() -> usize;
+
+    async fn get_dashboard_overview_data() -> DashBoardOverviewDataFromClient;
 }
 
 #[derive(Clone)]
@@ -118,6 +133,7 @@ impl RPC for NeptuneRPCServer {
     type GetMempoolTxCountFut = Ready<usize>;
     type GetMempoolSizeFut = Ready<usize>;
     type GetHistoryFut = Ready<Vec<(Duration, Amount, Sign)>>;
+    type GetDashboardOverviewDataFut = Ready<DashBoardOverviewDataFromClient>;
 
     fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
         let network = self.state.cli.network;
@@ -329,8 +345,8 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_balance(self, _context: tarpc::context::Context) -> Self::GetBalanceFut {
-        let amount = executor::block_on(self.state.wallet_state.get_balance());
-        future::ready(amount)
+        let balance = executor::block_on(self.state.wallet_state.get_balance());
+        future::ready(balance)
     }
 
     fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {
@@ -398,6 +414,32 @@ impl RPC for NeptuneRPCServer {
 
         // return
         future::ready(display_history)
+    }
+
+    fn get_dashboard_overview_data(
+        self,
+        _context: tarpc::context::Context,
+    ) -> Self::GetDashboardOverviewDataFut {
+        let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
+        let balance = executor::block_on(self.state.wallet_state.get_balance());
+        let syncing = self.state.net.syncing.read().unwrap().to_owned();
+        let mempool_size = self.state.mempool.get_size();
+        let mempool_tx_count = self.state.mempool.len();
+
+        // Return `None` if we fail to acquire the lock
+        let peer_count = match self.state.net.peer_map.try_lock() {
+            Ok(pm) => Some(pm.len()),
+            Err(_) => None,
+        };
+
+        future::ready(DashBoardOverviewDataFromClient {
+            tip_header,
+            syncing,
+            balance,
+            mempool_size,
+            mempool_tx_count,
+            peer_count,
+        })
     }
 }
 

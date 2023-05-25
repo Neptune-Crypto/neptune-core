@@ -33,9 +33,10 @@ use super::screen::Screen;
 pub struct OverviewData {
     balance: Option<Amount>,
     confirmations: Option<usize>,
-    synchronization: Option<f64>,
+    synchronization_percentage: Option<f64>,
 
     network: Network,
+    syncing: bool,
     block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
 
@@ -64,8 +65,9 @@ impl OverviewData {
         Self {
             balance: Default::default(),
             confirmations: Default::default(),
-            synchronization: Default::default(),
+            synchronization_percentage: Default::default(),
             network,
+            syncing: Default::default(),
             listen_address,
             block_header: Default::default(),
             block_interval: Default::default(),
@@ -89,10 +91,11 @@ impl OverviewData {
         OverviewData {
             balance: Some(Amount::zero()),
             confirmations: Some(17),
-            synchronization: Some(99.5),
+            synchronization_percentage: Some(99.5),
 
             listen_address: None,
             network: Network::Testnet,
+            syncing: false,
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block().header,
             ),
@@ -176,150 +179,61 @@ impl OverviewScreen {
             };
         }
 
-        setup_poller!(balance);
-        // setup_poller!(confirmations);
-        // setup_poller!(synchronization);
-        setup_poller!(tip_header);
-        // setup_poller!(block_interval);
-        // setup_poller!(difficulty);
-        // setup_poller!(pow_line);
-        // setup_poller!(pow_family);
-        // setup_poller!(archive_size);
-        // setup_poller!(archive_coverage);
-        setup_poller!(mempool_size);
-        setup_poller!(mempool_tx_count);
-        setup_poller!(peer_count);
-        // setup_poller!(cpu_info);
-        // setup_poller!(ram_info);
+        setup_poller!(dashboard_overview_data);
 
         loop {
             select! {
-                _ = &mut balance => {
-                    match rpc_client.get_balance(context::current()).await {
-                        Ok(b) => {
-                            overview_data.lock().unwrap().balance = Some(b);
-                            reset_poller!(balance, Duration::from_secs(10));
-                        },
-                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                    }
-                },
+                _ = &mut dashboard_overview_data => {
+                        match rpc_client.get_dashboard_overview_data(context::current()).await {
+                        Ok(resp) => {
 
-                // _ = &mut confirmations => {
-                //     let cons = rpc_client.get_confirmations(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().confirmations = Some(cons);
-                    // reset_poller!(confirmations, Duration::from_secs(10));
-                // },
+                            {
+                                let mut own_overview_data = overview_data.lock().unwrap();
+                                own_overview_data.block_header = Some(resp.tip_header);
+                                own_overview_data.mempool_size = Some(ByteSize::b(resp.mempool_size.try_into().unwrap()));
+                                own_overview_data.mempool_tx_count = Some(resp.mempool_tx_count.try_into().unwrap());
+                                own_overview_data.peer_count=resp.peer_count;
+                                own_overview_data.authenticated_peer_count=Some(0);
+                                own_overview_data.syncing=resp.syncing;
+                                own_overview_data.balance = Some(resp.balance);
+                            }
 
-                // _ = &mut synchronization => {
-                //     let status = rpc_client.get_synchronization_status(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().synchronization = Some(status);
-                    // reset_poller!(synchronization, Duration::from_secs(10));
-                // },
-
-                _ = &mut tip_header => {
-                    match rpc_client.get_tip_header(context::current()).await {
-                        Ok(header) => {
-
-                            overview_data.lock().unwrap().block_header = Some(header);
-                            reset_poller!(tip_header, Duration::from_secs(10));
-                        },
-                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                    }
-                },
-
-                // _ = &mut block_interval => {
-                //     let bh = rpc_client.block_interval(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().block_interval = Some(bh);
-                    // reset_poller!(block_interval, Duration::from_secs(10));
-                // },
-
-                // _ = &mut difficulty => {
-                //     let bh = rpc_client.difficulty(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().block_interval = Some(bh);
-                    // reset_poller!(difficulty, Duration::from_secs(10));
-
-                // _ = &mut pow_line => {
-                //     let bh = rpc_client.pow_line(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().pow_line = Some(bh);
-                    // reset_poller!(pow_line, Duration::from_secs(10));
-                // },
-
-                // _ = &mut pow_family => {
-                //     let bh = rpc_client.pow_family(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().pow_family = Some(bh);
-                    // reset_poller!(pow_family, Duration::from_secs(10));
-                // },
-
-                // _ = &mut archive_size => {
-                //     let size = rpc_client.archive_size(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().archive_size = Some(size);
-                    // reset_poller!(archive_size, Duration::from_secs(10));
-                // },
-
-                // _ = &mut archive_coverage => {
-                //     let cov = rpc_client.archive_coverage(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().archive_coverage = Some(cov);
-                    // reset_poller!(archive_coverage, Duration::from_secs(10));
-                // },
-
-                _ = &mut mempool_size => {
-                    match rpc_client.get_mempool_size(context::current()).await {
-                        Ok(ms) => {
-                            overview_data.lock().unwrap().mempool_size=Some(ByteSize::b(ms.try_into().unwrap()));
-                            reset_poller!(mempool_size,Duration::from_secs(10));
+                            reset_poller!(dashboard_overview_data, Duration::from_secs(10));
                         },
                         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
                     }
                 }
 
-                _ = &mut mempool_tx_count => {
-                    match rpc_client.get_mempool_tx_count(context::current()).await {
-                        Ok(txc) => {
-                            overview_data.lock().unwrap().mempool_tx_count = Some(txc.try_into().unwrap());
-                            reset_poller!(mempool_tx_count, Duration::from_secs(10));
-                        },
-                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                    }
-                }
-
-                _ = &mut peer_count => {
-                    match rpc_client.get_peer_info(context::current()).await {
-                        Ok(peers) => {
-                            let num_peers=peers.len();
-                            overview_data.lock().unwrap().peer_count=Some(num_peers);
-                            overview_data.lock().unwrap().authenticated_peer_count=Some(0);
-                            reset_poller!(peer_count,Duration::from_secs(5));
-                        },
-                        Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
-                    }
-                }
-
-                // _ = &mut max_peer_count => {
-                //     let mpc = rpc_client.get_max_peer_count(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().max_peer_count = Some(mpc);
-                //     reset_poller!(peer_count, Duration::from_secs(60*60*24));
+                // _ = &mut mempool_size => {
+                //     match rpc_client.get_mempool_size(context::current()).await {
+                //         Ok(ms) => {
+                //             overview_data.lock().unwrap().mempool_size=Some(ByteSize::b(ms.try_into().unwrap()));
+                //             reset_poller!(mempool_size,Duration::from_secs(10));
+                //         },
+                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                //     }
                 // }
 
-                // _ = &mut up_since => {
-                //     let us = rpc_client.up_since(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().up_since = Some(us);
-                //     reset_poller!(up_since, Duration::from_secs(10));
+                // _ = &mut mempool_tx_count => {
+                //     match rpc_client.get_mempool_tx_count(context::current()).await {
+                //         Ok(txc) => {
+                //             overview_data.lock().unwrap().mempool_tx_count = Some(txc.try_into().unwrap());
+                //             reset_poller!(mempool_tx_count, Duration::from_secs(10));
+                //         },
+                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                //     }
                 // }
 
-                // _ = &mut cpu_info => {
-                //     let ci = rpc_client.get_cpu_info(context::current()).await.unwrap();
-                //     overview_data.lock().unwrap().cpu_load = Some(ci.load);
-                //     overview_data.lock().unwrap().cpu_capacity = Some(ci.capacity);
-                //     overview_data.lock().unwrap().cpu_temperature = Some(ci.temperature);
-                //     reset_poller!(cpu_info, Duration::from_secs(10));
-                // }
-
-                // _ = &mut ram_info => {
-                //     let ri = rpc_client.get_ram_info(context::current()).await.unwrap();
-
-                //     overview_data.lock().unwrap().ram_total = Some(ri.total);
-                //     overview_data.lock().unwrap().ram_available = Some(ri.available);
-                //     overview_data.lock().unwrap().ram_used = Some(ri.used);
+                // _ = &mut peer_count => {
+                //     match rpc_client.get_peer_info(context::current()).await {
+                //         Ok(peers) => {
+                //             let num_peers=peers.len();
+                //             overview_data.lock().unwrap().peer_count=Some(num_peers);
+                //             overview_data.lock().unwrap().authenticated_peer_count=Some(0);
+                //             reset_poller!(peer_count,Duration::from_secs(5));
+                //         },
+                //         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
+                //     }
                 // }
             }
         }
@@ -442,7 +356,7 @@ impl Widget for OverviewScreen {
         ));
         lines.push(format!(
             "synchronization: {}",
-            match data.synchronization {
+            match data.synchronization_percentage {
                 Some(s) => format!("{}%", s),
                 None => "-".to_string(),
             }
@@ -455,6 +369,8 @@ impl Widget for OverviewScreen {
         lines = vec![];
 
         lines.push(format!("network: {}", data.network));
+
+        lines.push(format!("synchronizing: {}", data.syncing));
 
         // TODO: Do we want to show the emojihash here?
         let tip_digest = data.block_header.as_ref().map(Hash::hash);

@@ -93,7 +93,7 @@ pub struct Args {
     /// The process running this program should have access to at least the number of blocks
     /// in this field multiplied with the max block size amounts of RAM. Probably 1.5 to 2 times
     /// that amount.
-    #[clap(long, default_value = "500", value_parser(RangedI64ValueParser::<usize>::new().range(10..100000)))]
+    #[clap(long, default_value = "500", value_parser(RangedI64ValueParser::<usize>::new().range(2..100000)))]
     pub max_number_of_blocks_before_syncing: usize,
 
     /// IPs of nodes to connect to, e.g.: --peers 8.8.8.8:9798 --peers 8.8.4.4:1337.
