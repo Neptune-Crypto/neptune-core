@@ -483,6 +483,7 @@ impl MainLoopHandler {
 
                         // TODO: Consider fixing deep reorganization problem described above.
                         // Alternatively set the `max_number_of_blocks_before_syncing` value higher
+                        // if this problem is encountered.
                         return Ok(());
                     }
 
@@ -633,8 +634,10 @@ impl MainLoopHandler {
             }
             PeerThreadToMain::Transaction(pt2m_transaction) => {
                 debug!(
-                    "`main` received following transaction from `peer`: {:?}",
-                    pt2m_transaction
+                    "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
+                    pt2m_transaction.transaction.kernel.inputs.len(),
+                    pt2m_transaction.transaction.kernel.outputs.len(),
+                    pt2m_transaction.transaction.mutator_set_hash
                 );
 
                 if pt2m_transaction.confirmable_for_block
@@ -1091,8 +1094,10 @@ impl MainLoopHandler {
         match msg {
             RPCServerToMain::Send(transaction) => {
                 debug!(
-                    "`main` received following transaction from RPC Server: {:?}",
-                    transaction
+                    "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
+                    transaction.kernel.inputs.len(),
+                    transaction.kernel.outputs.len(),
+                    transaction.mutator_set_hash
                 );
 
                 // send notification to peers
