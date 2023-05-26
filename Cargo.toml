@@ -2,7 +2,7 @@
 authors = ["Triton Software"]
 edition = "2021"
 name = "neptune-core"
-version = "0.7.2"
+version = "0.0.0"
 default-run = "neptune-core"
 publish = false
 
