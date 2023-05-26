@@ -190,12 +190,14 @@ pub async fn get_mock_global_state(
         archival_state: Some(archival_state),
     };
     let mempool = Mempool::new(ByteSize::gb(1));
+    let cli_args: cli_args::Args = Default::default();
     GlobalState {
         chain: blockchain_state,
-        cli: Default::default(),
+        cli: cli_args.clone(),
         net: networking_state,
         wallet_state: get_mock_wallet_state(wallet).await,
         mempool,
+        mining: Arc::new(std::sync::RwLock::new(cli_args.mine)),
     }
 }
 

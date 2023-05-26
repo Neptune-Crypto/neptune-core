@@ -37,6 +37,7 @@ pub struct OverviewData {
 
     network: Network,
     syncing: bool,
+    is_mining: Option<bool>,
     block_header: Option<BlockHeader>,
     block_interval: Option<u64>,
 
@@ -68,6 +69,7 @@ impl OverviewData {
             synchronization_percentage: Default::default(),
             network,
             syncing: Default::default(),
+            is_mining: Default::default(),
             listen_address,
             block_header: Default::default(),
             block_interval: Default::default(),
@@ -95,6 +97,7 @@ impl OverviewData {
 
             listen_address: None,
             network: Network::Testnet,
+            is_mining: Some(false),
             syncing: false,
             block_header: Some(
                 neptune_core::models::blockchain::block::Block::genesis_block().header,
@@ -196,6 +199,7 @@ impl OverviewScreen {
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
                                 own_overview_data.balance = Some(resp.balance);
+                                own_overview_data.is_mining = resp.is_mining;
                             }
 
                             reset_poller!(dashboard_overview_data, Duration::from_secs(10));
@@ -371,6 +375,8 @@ impl Widget for OverviewScreen {
         lines.push(format!("network: {}", data.network));
 
         lines.push(format!("synchronizing: {}", data.syncing));
+
+        lines.push(format!("mining: {}", dashifnotset!(data.is_mining)));
 
         // TODO: Do we want to show the emojihash here?
         let tip_digest = data.block_header.as_ref().map(Hash::hash);

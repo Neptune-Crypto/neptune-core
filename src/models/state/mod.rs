@@ -60,6 +60,9 @@ pub struct GlobalState {
 
     /// The `Mempool` may only be updated by the main thread.
     pub mempool: Mempool,
+
+    // Only the mining thread should write to this, anyone can read.
+    pub mining: std::sync::Arc<std::sync::RwLock<bool>>,
 }
 
 #[derive(Debug, Clone)]

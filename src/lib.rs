@@ -124,6 +124,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         net: networking_state,
         wallet_state,
         mempool,
+        mining: Arc::new(std::sync::RwLock::new(false)),
     };
     let own_handshake_data: HandshakeData = state.get_handshakedata().await;
 

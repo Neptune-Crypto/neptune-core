@@ -19,8 +19,9 @@ pub enum MainToMiner {
     // been processed by `main_loop` and that the mempool thus is in an updated state, ready to
     // mine the next block.
     ReadyToMineNextBlock,
-    // StopMining,
-    // StartMining,
+
+    StopMining,
+    StartMining,
     // SetCoinbasePubkey,
 }
 
@@ -96,5 +97,18 @@ impl PeerThreadToMain {
 #[derive(Clone, Debug)]
 pub enum RPCServerToMain {
     Send(Box<Transaction>),
-    Shutdown(),
+    Shutdown,
+    PauseMiner,
+    RestartMiner,
+}
+
+impl RPCServerToMain {
+    pub fn get_type(&self) -> String {
+        match self {
+            RPCServerToMain::Send(_) => "initiate transaction".to_string(),
+            RPCServerToMain::Shutdown => "shutdown".to_string(),
+            RPCServerToMain::PauseMiner => "pause miner".to_owned(),
+            RPCServerToMain::RestartMiner => "restart miner".to_owned(),
+        }
+    }
 }
