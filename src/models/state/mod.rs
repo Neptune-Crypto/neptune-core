@@ -1,9 +1,5 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use num_traits::{CheckedSub, Zero};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,6 +27,10 @@ use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDBIterator;
 use crate::models::peer::{HandshakeData, PeerStanding};
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::{Hash, VERSION};
 
 pub mod archival_state;

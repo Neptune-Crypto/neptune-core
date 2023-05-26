@@ -2,9 +2,6 @@ use anyhow::{bail, Result};
 use bytesize::ByteSize;
 use get_size::GetSize;
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::{
-    addition_record::AdditionRecord, mutator_set_trait::commit,
-};
 use num_traits::Zero;
 use priority_queue::DoublePriorityQueue;
 use std::{
@@ -14,12 +11,15 @@ use std::{
 use tracing::{error, info, warn};
 use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
-use crate::models::{
-    blockchain::{
-        shared::Hash,
-        transaction::{utxo::Utxo, Transaction},
+use crate::{
+    models::{
+        blockchain::{
+            shared::Hash,
+            transaction::{utxo::Utxo, Transaction},
+        },
+        peer::InstanceId,
     },
-    peer::InstanceId,
+    util_types::mutator_set::{addition_record::AdditionRecord, mutator_set_trait::commit},
 };
 
 pub type Credibility = i32;

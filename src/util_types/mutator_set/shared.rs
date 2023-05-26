@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use twenty_first::shared_math::b_field_element::BFIELD_ZERO;
-use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, SpongeHasher};
+use twenty_first::shared_math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use super::chunk_dictionary::ChunkDictionary;
@@ -26,18 +25,6 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
         });
 
     chunkidx_to_indices_dict
-}
-
-pub fn sponge_from_item_randomness<H: SpongeHasher + AlgebraicHasher>(
-    item: &Digest,
-    randomness: &Digest,
-) -> <H as SpongeHasher>::SpongeState {
-    let mut seed = [BFIELD_ZERO; 10];
-    seed[..DIGEST_LENGTH].copy_from_slice(&item.values());
-    seed[DIGEST_LENGTH..].copy_from_slice(&randomness.values());
-    let mut sponge_state = <H as SpongeHasher>::init();
-    H::absorb(&mut sponge_state, &seed);
-    sponge_state
 }
 
 /// Prepare a batch-modification with necessary authentication data

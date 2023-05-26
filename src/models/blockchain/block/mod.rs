@@ -5,8 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::{amount::u32s::U32s, shared_math::digest::Digest};
 
@@ -28,6 +26,8 @@ use super::transaction::{amount::Amount, Transaction};
 use crate::models::blockchain::shared::Hash;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::WalletSecret;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {

@@ -505,9 +505,9 @@ mod tests {
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
             make_mock_transaction_with_wallet,
         },
+        util_types::mutator_set::mutator_set_trait::MutatorSet,
     };
     use anyhow::Result;
-    use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use num_bigint::BigInt;
     use num_traits::Zero;
     use rand::random;

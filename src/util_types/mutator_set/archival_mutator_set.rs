@@ -363,10 +363,12 @@ mod archival_mutator_set_tests {
     use rand::{Rng, SeedableRng};
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::test_shared::mutator_set::{empty_rustyleveldbvec_ams, make_item_and_randomnesses};
     use crate::util_types::mutator_set::mutator_set_trait::commit;
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
+    use crate::util_types::test_shared::mutator_set::{
+        empty_rustyleveldbvec_ams, make_item_and_randomnesses,
+    };
 
     use super::*;
 

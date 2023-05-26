@@ -1,11 +1,11 @@
 use anyhow::bail;
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::{decode_field_length_prepended, BFieldCodec};
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockBody {

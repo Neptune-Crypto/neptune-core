@@ -249,7 +249,6 @@ mod wallet_tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
-    use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
     use num_traits::CheckedSub;
     use rand::random;
     use tokio::sync::Mutex;
@@ -269,6 +268,7 @@ mod wallet_tests {
         add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
         make_mock_transaction_with_generation_key,
     };
+    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;

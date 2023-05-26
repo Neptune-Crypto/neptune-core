@@ -6,7 +6,6 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fmt;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -121,21 +120,6 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
             ArrayVisitor::<u128, { NUM_TRIALS as usize }>(PhantomData),
         )?))
     }
-}
-
-impl Error for RemovalRecordError {}
-
-impl fmt::Display for RemovalRecordError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-#[derive(PartialEq, Eq, Debug)]
-pub enum RemovalRecordError {
-    AlreadyExistingChunk(u128),
-    MissingChunkOnUpdateFromAdd(u128),
-    MissingChunkOnUpdateFromRemove(u128),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize)]
@@ -349,12 +333,12 @@ mod removal_record_tests {
     use rand::{thread_rng, Rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::test_shared::mutator_set::{make_item_and_randomnesses, random_removal_record};
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
     use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS};
+    use crate::util_types::test_shared::mutator_set::*;
 
     use super::*;
 

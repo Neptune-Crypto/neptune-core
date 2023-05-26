@@ -2,9 +2,9 @@ use std::{collections::VecDeque, time::Duration};
 
 use crate::{
     models::{blockchain::block::block_height::BlockHeight, state::archival_state::ArchivalState},
+    util_types::mutator_set::ms_membership_proof::MsMembershipProof,
     Hash,
 };
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 use twenty_first::{shared_math::tip5::Digest, util_types::storage_schema::RustyValue};
 

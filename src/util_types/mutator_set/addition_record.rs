@@ -75,7 +75,7 @@ mod addition_record_tests {
             "Two addition records with same commitments and same MMR AOCLs must agree."
         );
 
-        let addition_record_1: AdditionRecord = commit::<H>(
+        let addition_record_2: AdditionRecord = commit::<H>(
             &H::hash(&1451u128),
             &H::hash(&1480u128),
             &H::hash(&1481u128),
@@ -84,7 +84,7 @@ mod addition_record_tests {
         // Verify behavior with empty mutator sets. All empty MS' are the same.
         assert_ne!(
             H::hash(&addition_record_0),
-            H::hash(&addition_record_1),
+            H::hash(&addition_record_2),
             "Two addition records with differing commitments but same MMR AOCLs must differ."
         );
     }

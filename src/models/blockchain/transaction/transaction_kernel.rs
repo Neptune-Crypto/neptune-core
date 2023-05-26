@@ -1,9 +1,6 @@
 use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::{
-    addition_record::AdditionRecord, removal_record::RemovalRecord,
-};
 use serde::{Deserialize, Serialize};
 use twenty_first::{
     shared_math::{
@@ -20,7 +17,10 @@ use twenty_first::{
 };
 
 use super::Amount;
-use crate::Hash;
+use crate::{
+    util_types::mutator_set::{addition_record::AdditionRecord, removal_record::RemovalRecord},
+    Hash,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct TransactionKernel {
@@ -132,7 +132,7 @@ impl TransactionKernel {
 
 #[cfg(test)]
 pub mod transaction_kernel_tests {
-    use mutator_set_tf::test_shared::mutator_set::{self};
+    use crate::util_types::test_shared::mutator_set::*;
     use rand::{random, thread_rng, Rng, RngCore};
     use twenty_first::{amount::u32s::U32s, shared_math::other::random_elements};
 
@@ -173,7 +173,7 @@ pub mod transaction_kernel_tests {
         let num_pubscripts = (rng.next_u32() % 5) as usize;
 
         let inputs = (0..num_inputs)
-            .map(|_| mutator_set::random_removal_record())
+            .map(|_| random_removal_record())
             .collect_vec();
         let outputs = (0..num_outputs)
             .map(|_| random_addition_record())

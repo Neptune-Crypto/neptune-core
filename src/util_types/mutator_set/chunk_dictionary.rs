@@ -90,8 +90,8 @@ impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
 
 #[cfg(test)]
 mod chunk_dict_tests {
-    use crate::test_shared::mutator_set::random_chunk_dictionary;
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
+    use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::{Digest, Tip5};

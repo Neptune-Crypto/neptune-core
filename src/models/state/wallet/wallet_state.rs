@@ -1,9 +1,5 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use num_traits::Zero;
 use rusty_leveldb::DB;
 use std::collections::HashMap;
@@ -19,7 +15,6 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use twenty_first::shared_math::digest::Digest;
 
 use super::rusty_wallet_database::RustyWalletDatabase;
@@ -34,6 +29,11 @@ use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use crate::Hash;
 
 #[derive(Clone)]

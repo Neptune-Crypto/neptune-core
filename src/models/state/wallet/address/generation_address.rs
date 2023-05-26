@@ -7,8 +7,6 @@ use anyhow::Result;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use bech32::Variant;
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
 use rand::thread_rng;
 use rand::Rng;
 use serde_derive::Deserialize;
@@ -28,6 +26,8 @@ use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PubScript;
 use crate::models::blockchain::transaction::Transaction;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::mutator_set_trait::commit;
 
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(79);
 

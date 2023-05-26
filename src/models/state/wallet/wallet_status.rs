@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use serde::{Deserialize, Serialize};
 
 use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::Hash;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

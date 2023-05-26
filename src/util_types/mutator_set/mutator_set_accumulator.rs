@@ -109,16 +109,12 @@ impl<H: AlgebraicHasher> BFieldCodec for MutatorSetAccumulator<H> {
 
 #[cfg(test)]
 mod ms_accumulator_tests {
+    use crate::util_types::test_shared::mutator_set::*;
     use itertools::Itertools;
-    use proptest::prelude::Rng;
+    use rand::Rng;
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::{
-        test_shared::mutator_set::{
-            empty_rustyleveldbvec_ams, make_item_and_randomnesses, random_mutator_set_accumulator,
-        },
-        util_types::mutator_set::mutator_set_trait::commit,
-    };
+    use crate::util_types::mutator_set::mutator_set_trait::commit;
 
     use super::*;
 
@@ -348,7 +344,7 @@ mod ms_accumulator_tests {
                     // Verify that the sequential `update_from_remove` return value is correct
                     // The return value from `update_from_remove` shows if the membership proof
                     // was updated or not.
-                    for (i, ((updated, original_mp), item)) in update_by_remove_return_values
+                    for (j, ((updated, original_mp), item)) in update_by_remove_return_values
                         .into_iter()
                         .zip(original_membership_proofs_sequential.iter())
                         .zip(items.iter())
@@ -357,18 +353,18 @@ mod ms_accumulator_tests {
                         if updated {
                             assert!(
                                 !accumulator.verify(item, original_mp),
-                                "i = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
-                                i,
+                                "j = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
+                                j,
                                 original_mp,
-                                membership_proofs_sequential[i]
+                                membership_proofs_sequential[j]
                             );
                         } else {
                             assert!(
                                 accumulator.verify(item, original_mp),
-                                "i = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
-                                i,
+                                "j = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
+                                j,
                                 original_mp,
-                                membership_proofs_sequential[i]
+                                membership_proofs_sequential[j]
                             );
                         }
                     }
@@ -376,12 +372,12 @@ mod ms_accumulator_tests {
                     // Verify that `batch_update_from_remove` return value is correct
                     // The return value indicates which membership proofs
                     let updated_indices: Vec<usize> = batch_update_ret.unwrap();
-                    for (i, (original_mp, item)) in original_membership_proofs_batch
+                    for (j, (original_mp, item)) in original_membership_proofs_batch
                         .iter()
                         .zip(items.iter())
                         .enumerate()
                     {
-                        if updated_indices.contains(&i) {
+                        if updated_indices.contains(&j) {
                             assert!(!accumulator.verify(item, original_mp));
                         } else {
                             assert!(accumulator.verify(item, original_mp));

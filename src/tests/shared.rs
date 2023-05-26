@@ -5,7 +5,6 @@ use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use itertools::Itertools;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
 use num_traits::{One, Zero};
 use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
@@ -27,12 +26,6 @@ use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -69,6 +62,12 @@ use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::models::state::UtxoReceiverData;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::mutator_set_trait::commit;
+use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 

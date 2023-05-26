@@ -222,10 +222,10 @@ mod tests {
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
-    use crate::{
-        test_shared::mutator_set::make_item_and_randomnesses,
-        util_types::mutator_set::{ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE},
+    use crate::util_types::mutator_set::{
+        ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
     };
+    use crate::util_types::test_shared::mutator_set::*;
     use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
     use super::*;

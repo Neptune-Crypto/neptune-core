@@ -39,8 +39,6 @@ impl fmt::Display for MembershipProofError {
 pub enum MembershipProofError {
     AlreadyExistingChunk(u64),
     MissingChunkOnUpdateFromAdd(u64),
-    MissingChunkOnUpdateFromRemove(u64),
-    MissingChunkOnRevertUpdateFromAdd(u64),
 }
 
 // In order to store this structure in the database, it needs to be serializable.
@@ -554,13 +552,11 @@ impl<H: AlgebraicHasher> BFieldCodec for MsMembershipProof<H> {
 mod ms_proof_tests {
 
     use super::*;
-    use crate::test_shared::mutator_set::{
-        empty_rustyleveldbvec_ams, make_item_and_randomnesses, random_mutator_set_membership_proof,
-    };
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::chunk::Chunk;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+    use crate::util_types::test_shared::mutator_set::*;
     use itertools::{Either, Itertools};
     use rand::rngs::StdRng;
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
@@ -1097,9 +1093,12 @@ mod ms_proof_tests {
     #[test]
     fn revert_updates_mixed_test() {
         type H = Tip5;
-        let mut rng = thread_rng();
+        let mut rng_seeder = thread_rng();
         // let seed_integer = rng.next_u32();
-        let error_tuple: (usize, u32) = (10 + rng.next_u32() as usize % 100, rng.next_u32());
+        let error_tuple: (usize, u32) = (
+            10 + rng_seeder.next_u32() as usize % 100,
+            rng_seeder.next_u32(),
+        );
         let n = error_tuple.0;
         let seed_integer = error_tuple.1;
         let margin = n / 5;

@@ -1,12 +1,14 @@
 use anyhow::{bail, Result};
 
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
 use serde::{Deserialize, Serialize};
 
-use crate::models::blockchain::shared::Hash;
+use crate::{
+    models::blockchain::shared::Hash,
+    util_types::mutator_set::{
+        addition_record::AdditionRecord, mutator_set_accumulator::MutatorSetAccumulator,
+        mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
+    },
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MutatorSetUpdate {

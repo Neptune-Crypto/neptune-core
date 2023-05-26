@@ -1,6 +1,5 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
-use mutator_set_tf::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use num_traits::Zero;
 use rusty_leveldb::DB;
 use std::fs;
@@ -10,15 +9,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
+use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::storage_schema::StorageWriter;
-
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
-use twenty_first::amount::u32s::U32s;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::storage_schema::StorageWriter;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
@@ -30,6 +25,10 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
 };
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";

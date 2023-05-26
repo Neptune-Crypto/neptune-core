@@ -1,11 +1,12 @@
+.PHONY: clean help stats bench all install run test build doc check format bench-no-run pretty-log
 
-prog :=mutator-set-tf
+prog :=neptune-core
 
 debug ?=
 
 $(info debug is $(debug))
 # Treat all warnings as errors
-export RUSTFLAGS = -Dwarnings
+# export RUSTFLAGS = -Dwarnings
 
 ifdef debug
   release :=
@@ -25,7 +26,7 @@ build:
 
 doc:
 	cargo doc --no-deps
-	xdg-open "target/doc/twenty_first/index.html"
+	xdg-open "target/doc/neptune-core/index.html"
 
 check:
 	cargo check
@@ -69,6 +70,9 @@ all: lint build test bench-no-run
 help:
 	@echo "usage: make [debug=1]"
 
+restart:
+	@rm -rf ~/.local/share/neptune-integration-test
+
 clean:
 	@echo "      ._.  ██    ██  ███  ██ ██ █████    ████ ██    █████  ███  ██  ██"
 	@echo "    c/-|   ███  ███ ██ ██ ████  ██      ██    ██    ██    ██ ██ ███ ██"
@@ -76,3 +80,10 @@ clean:
 	@echo "   /  /|   ██ ██ ██ ██ ██ ████  ██      ██    ██    ██    ██ ██ ██ ███"
 	@echo " mmm ' '   ██    ██ ██ ██ ██ ██ █████    ████ █████ █████ ██ ██ ██  ██"
 	@rm -rf target
+	cargo clean
+
+stats:
+	git shortlog --numbered --summary --all --email # --committer
+
+pretty-log:
+	git log --pretty=" %C(brightblack)%>(16)%ch  %C(auto,green)%>(11)%cN %C(brightmagenta)%G? %C(blue)%h %C(auto)%d %<|(118,trunc)%s%C(reset)" --date=relative --topo-order -n 52 --reverse

@@ -17,19 +17,19 @@ use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
 use triton_vm::proof::Proof;
+use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::{
     decode_field_length_prepended, decode_vec_length_prepended, encode_vec, BFieldCodec,
 };
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
-use mutator_set_tf::util_types::mutator_set::addition_record::AdditionRecord;
-use mutator_set_tf::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use mutator_set_tf::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use mutator_set_tf::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use mutator_set_tf::util_types::mutator_set::removal_record::RemovalRecord;
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::digest::Digest;
+use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 use self::amount::Amount;
 use self::native_coin::native_coin_program;
@@ -725,13 +725,14 @@ mod witness_tests {
 
 #[cfg(test)]
 mod transaction_tests {
-    use mutator_set_tf::util_types::mutator_set::mutator_set_trait::commit;
     use rand::random;
     use std::time::Duration;
     use tracing_test::traced_test;
 
     use super::*;
-    use crate::tests::shared::make_mock_transaction;
+    use crate::{
+        tests::shared::make_mock_transaction, util_types::mutator_set::mutator_set_trait::commit,
+    };
 
     #[traced_test]
     #[test]
