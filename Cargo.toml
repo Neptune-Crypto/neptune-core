@@ -1,0 +1,77 @@
+[package]
+name = "mutator-set-tf"
+version = "0.8.0"
+authors = ["Triton Software AG"]
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+proptest = "1.0"
+
+[dev-dependencies.criterion]
+version = "0.4"
+features = ["html_reports"]
+
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false
+features = ["precommit-hook", "run-cargo-clippy", "run-cargo-fmt"]
+
+[dependencies]
+anyhow = "1.0"
+bincode = "1.3"
+blake3 = "1.3.3"
+itertools = "0"
+get-size = { version = "^0.1", features = ["derive"] }
+num-traits = "0"
+rand = "0.8"
+rayon = "1"
+rusty-leveldb = "1"
+serde = { version = "1", features = ["derive"] }
+serde-big-array = "0"
+serde_derive = "1"
+serde_json = "1"
+twenty-first = "0.25.1"
+# twenty-first = { path = "../twenty-first/twenty-first" }
+
+[profile.dev]
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = 'unwind'
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = false
+panic = 'unwind'
+incremental = false
+codegen-units = 16
+rpath = false
+
+[profile.test]
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.bench]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = false
+incremental = false
+codegen-units = 16
+rpath = false
