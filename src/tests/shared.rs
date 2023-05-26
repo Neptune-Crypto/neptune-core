@@ -652,7 +652,8 @@ pub fn make_mock_transaction_with_generation_key(
         pubscripts,
         mutator_set_accumulator: tip_msa.clone(),
     };
-    let validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &kernel);
+    let validity_logic =
+        ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &kernel);
 
     Transaction {
         kernel,
@@ -779,7 +780,8 @@ pub fn make_mock_block(
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
     };
-    let validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &tx_kernel);
+    let validity_logic =
+        ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &tx_kernel);
 
     let transaction = Transaction {
         witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),

@@ -264,12 +264,11 @@ impl GlobalState {
         };
 
         // Convert the secret-supported claim to a proof
-        let mut validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &kernel);
-        for lsh in validity_logic.lock_script_halts.iter_mut() {
-            ValidityLogic::prove_lock_script_halts(lsh).expect(
-                "Triton VM proving must succeed. Failed for validity logic:\n {validity_logic:?}",
-            );
-        }
+        let mut validity_logic =
+            ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &kernel);
+        validity_logic
+            .prove()
+            .expect("Proof generation must work when creating a new transaction");
 
         // Remove lock script witness from primitive witness to not leak spending keys
         primitive_witness.lock_script_witnesses = vec![];

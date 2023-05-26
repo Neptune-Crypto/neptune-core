@@ -207,7 +207,8 @@ fn make_coinbase_transaction(
         pubscripts: vec![],
         mutator_set_accumulator,
     };
-    let validity_logic = ValidityLogic::from_primitive_witness(&primitive_witness, &kernel);
+    let validity_logic =
+        ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &kernel);
     (
         Transaction {
             kernel,
