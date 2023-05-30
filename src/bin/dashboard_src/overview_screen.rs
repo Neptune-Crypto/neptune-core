@@ -412,7 +412,7 @@ impl Widget for OverviewScreen {
         ));
         Self::report(&lines, "Blockchain")
             .style(style)
-            .render(vrecter.next(2 + lines.len() as u16), buf);
+            .render(vrecter.next(4 + lines.len() as u16), buf);
 
         // archive
         lines = vec![];
