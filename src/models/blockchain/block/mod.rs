@@ -430,7 +430,7 @@ impl Block {
 
         let new_error = t as i64 - TARGET_BLOCK_INTERVAL as i64;
 
-        let adjustment = (TARGET_BLOCK_INTERVAL as i64 / 100) * new_error;
+        let adjustment = -new_error / 100;
         let absolute_adjustment = abs(adjustment) as u64;
         let adjustment_is_positive = adjustment >= 0;
         let adj_hi = (absolute_adjustment >> 32) as u32;
