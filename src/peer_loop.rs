@@ -92,13 +92,15 @@ impl PeerLoopHandler {
         Ok(())
     }
 
-    /// Function for handling a list of blocks. Used both when a single block
-    /// is received and when a batch of blocks is received. Handles validation
-    /// and sends all blocks to the main thread if they're all valid.
+    /// Handle validation and send all blocks to the main thread if they're all
+    /// valid. Use with a list of blocks or a single block. When the
+    /// `received_blocks` is a list, the parent of the `i+1`th block in the
+    /// list is the `i`th block. The parent of element zero in this list is
+    /// `parent_of_first_block`.
     async fn handle_blocks(
         &self,
         received_blocks: Vec<Block>,
-        parent_block: Block,
+        parent_of_first_block: Block,
     ) -> Result<BlockHeight> {
         debug!(
             "attempting to validate {} {}",
@@ -109,9 +111,19 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
-        let mut previous_block = parent_block;
+        let mut previous_block = &parent_of_first_block;
         for new_block in received_blocks.iter() {
-            if !new_block.archival_is_valid(&previous_block) {
+            if !new_block.has_proof_of_work(previous_block) {
+                warn!(
+                    "Received invalid proof-of-work for block of height {} from peer with IP {}",
+                    new_block.header.height, self.peer_address
+                );
+                self.punish(PeerSanctionReason::InvalidBlock((
+                    new_block.header.height,
+                    new_block.hash,
+                )))?;
+                bail!("Failed to validate block");
+            } else if !new_block.is_valid(previous_block) {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
                     new_block.header.height, self.peer_address
@@ -120,12 +132,12 @@ impl PeerLoopHandler {
                     new_block.header.height,
                     new_block.hash,
                 )))?;
-                bail!("Failed to validated block");
+                bail!("Failed to validate block");
             } else {
                 info!("Block with height {} is valid", new_block.header.height);
             }
 
-            previous_block = new_block.to_owned();
+            previous_block = new_block;
         }
 
         // Send the new blocks to the main thread which handles the state update
@@ -143,7 +155,7 @@ impl PeerLoopHandler {
     }
 
     /// Function for handling the receiving of single new block from a peer
-    async fn handle_new_block<S>(
+    async fn receive_new_block<S>(
         &self,
         received_block: Box<Block>,
         peer: &mut S,
@@ -250,7 +262,7 @@ impl PeerLoopHandler {
                 .join(", ")
         );
 
-        // Parent block is guaranteed to be set here, either it is fetched from the
+        // Parent block is guaranteed to be set here. Because: either it was fetched from the
         // database, or it's the genesis block.
         let new_block_height = self
             .handle_blocks(new_blocks, parent_block.unwrap())
@@ -354,20 +366,26 @@ impl PeerLoopHandler {
                     peer_state_info.highest_shared_block_height = new_block_height;
                 }
 
-                // TODO: Handle the situation where peer_state_info.fork_resolution_blocks is not empty better.
-                let block_is_new = self
+                let incoming_block_is_heavier = self
                     .state
                     .chain
                     .light_state
                     .get_latest_block_header()
                     .await
                     .proof_of_work_family
-                    < block.header.proof_of_work_family
-                    || !peer_state_info.fork_reconciliation_blocks.is_empty();
+                    < block.header.proof_of_work_family;
+                let reconciliation_ongoing = match peer_state_info.fork_reconciliation_blocks.last()
+                {
+                    Some(last_block) => last_block.header.prev_block_digest == block.hash,
+                    None => false,
+                };
 
-                if block_is_new {
+                // Determine whether
+                //  a) the incoming block's POW family is larger than what we have; or
+                //  b) we are populating a fork reconciliation blocks list.
+                if incoming_block_is_heavier || reconciliation_ongoing {
                     debug!("block is new");
-                    self.handle_new_block(block, peer, peer_state_info).await?;
+                    self.receive_new_block(block, peer, peer_state_info).await?;
                 } else {
                     info!(
                         "Got non-canonical block from peer, height: {}, PoW family: {:?}",
@@ -1061,17 +1079,16 @@ mod peer_loop_tests {
     use rand::random;
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
-    use twenty_first::amount::u32s::U32s;
 
     use crate::{
         config_models::{cli_args, network::Network},
         models::{
-            blockchain::block::block_header::TARGET_DIFFICULTY_U32_SIZE, blockchain::shared::Hash,
-            peer::TransactionNotification, state::wallet::WalletSecret,
+            blockchain::shared::Hash, peer::TransactionNotification, state::wallet::WalletSecret,
         },
         tests::shared::{
             add_block, get_dummy_peer_connection_data, get_dummy_socket_address,
-            get_test_genesis_setup, make_mock_block, make_mock_transaction, Action, Mock,
+            get_test_genesis_setup, make_mock_block_with_invalid_pow,
+            make_mock_block_with_valid_pow, make_mock_transaction, Action, Mock,
         },
     };
 
@@ -1174,7 +1191,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1_with_different_genesis, _, _) =
-            make_mock_block(&different_genesis_block, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&different_genesis_block, None, a_recipient_address);
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
             block_1_with_different_genesis.into(),
         )))]);
@@ -1246,13 +1263,8 @@ mod peer_loop_tests {
         // `target_difficulty` requires
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_without_valid_pow, _, _) = make_mock_block(
-            &genesis_block,
-            Some(U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([
-                1_000_000, 0, 0, 0, 0,
-            ])),
-            a_recipient_address,
-        );
+        let (block_without_valid_pow, _, _) =
+            make_mock_block_with_invalid_pow(&genesis_block, None, a_recipient_address);
 
         // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
         // tolerance that is set in the client. For this reason, we include a "Bye" here.
@@ -1338,7 +1350,8 @@ mod peer_loop_tests {
 
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let mock_peer_messages = Mock::new(vec![
@@ -1400,27 +1413,14 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
-        let (block_2_a, _, _) = make_mock_block(
-            &block_1,
-            Some(U32s::new([2_000_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        );
-        let (block_3_a, _, _) = make_mock_block(
-            &block_2_a,
-            Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        ); // <--- canonical
-        let (block_2_b, _, _) = make_mock_block(
-            &block_1,
-            Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        );
-        let (block_3_b, _, _) = make_mock_block(
-            &block_2_b,
-            Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        );
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+        let (block_2_a, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+        let (block_3_a, _, _) =
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address); // <--- canonical
+        let (block_2_b, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+        let (block_3_b, _, _) =
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
 
         add_block(&state, block_1.clone()).await?;
         add_block(&state, block_2_a.clone()).await?;
@@ -1497,27 +1497,14 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
-        let (block_2_a, _, _) = make_mock_block(
-            &block_1,
-            Some(U32s::new([2_000_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        );
-        let (block_3_a, _, _) = make_mock_block(
-            &block_2_a,
-            Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        ); // <--- canonical
-        let (block_2_b, _, _) = make_mock_block(
-            &block_1,
-            Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        );
-        let (block_3_b, _, _) = make_mock_block(
-            &block_2_b,
-            Some(U32s::new([2_000, 0, 0, 0, 0])),
-            a_recipient_address,
-        );
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+        let (block_2_a, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+        let (block_3_a, _, _) =
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address); // <--- canonical
+        let (block_2_b, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+        let (block_3_b, _, _) =
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
 
         add_block(&state, block_1.clone()).await?;
         add_block(&state, block_2_a.clone()).await?;
@@ -1568,7 +1555,8 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
 
-        let (mock_block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
+        let (mock_block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(mock_block_1.into()))),
             Action::Read(PeerMessage::Bye),
@@ -1627,8 +1615,10 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block, None, a_recipient_address);
-        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+        let (block_2, _, _) =
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -1706,10 +1696,14 @@ mod peer_loop_tests {
             .wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, own_recipient_address);
-        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, own_recipient_address);
-        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, own_recipient_address);
-        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, own_recipient_address);
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block.clone(), None, own_recipient_address);
+        let (block_2, _, _) =
+            make_mock_block_with_valid_pow(&block_1.clone(), None, own_recipient_address);
+        let (block_3, _, _) =
+            make_mock_block_with_valid_pow(&block_2.clone(), None, own_recipient_address);
+        let (block_4, _, _) =
+            make_mock_block_with_valid_pow(&block_3.clone(), None, own_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1776,10 +1770,14 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
-        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
-        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
-        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) =
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) =
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) =
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -1853,9 +1851,12 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
-        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
-        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) =
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) =
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -1929,11 +1930,16 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
-        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
-        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
-        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
-        let (block_5, _, _) = make_mock_block(&block_4.clone(), None, a_recipient_address);
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) =
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) =
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) =
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
+        let (block_5, _, _) =
+            make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let mock = Mock::new(vec![
@@ -2029,10 +2035,14 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) = make_mock_block(&genesis_block.clone(), None, a_recipient_address);
-        let (block_2, _, _) = make_mock_block(&block_1.clone(), None, a_recipient_address);
-        let (block_3, _, _) = make_mock_block(&block_2.clone(), None, a_recipient_address);
-        let (block_4, _, _) = make_mock_block(&block_3.clone(), None, a_recipient_address);
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_2, _, _) =
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+        let (block_3, _, _) =
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+        let (block_4, _, _) =
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data(Network::Main, 1);

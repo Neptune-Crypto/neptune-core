@@ -11,6 +11,8 @@ use super::block_height::BlockHeight;
 
 pub const TARGET_DIFFICULTY_U32_SIZE: usize = 5;
 pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
+pub const TARGET_BLOCK_INTERVAL: u64 = 588000; // 9.8 minutes in milliseconds
+pub const MINIMUM_DIFFICULTY: u32 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlockHeader {
@@ -33,8 +35,8 @@ pub struct BlockHeader {
     // use to compare two forks of the same height
     pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
 
-    // This is the target difficulty for the current (*this*) block.
-    pub target_difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
+    // This is the difficulty for the *next* block. Unit: expected # hashes
+    pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
     pub block_body_merkle_root: Digest,
     pub uncles: Vec<Digest>,
 }
@@ -69,7 +71,7 @@ impl BFieldCodec for BlockHeader {
         let max_block_size_encoded = self.max_block_size.encode();
         let proof_of_work_line_encoded = self.proof_of_work_line.encode();
         let proof_of_work_family_encoded = self.proof_of_work_family.encode();
-        let target_difficulty_encoded = self.target_difficulty.encode();
+        let target_difficulty_encoded = self.difficulty.encode();
         let block_body_merkle_root_encoded = self.block_body_merkle_root.encode();
         let uncles_encoded = self.uncles.encode();
         let version_length = BFieldElement::new(version_encoded.len() as u64);
@@ -149,7 +151,7 @@ impl BFieldCodec for BlockHeader {
             max_block_size,
             proof_of_work_line,
             proof_of_work_family,
-            target_difficulty,
+            difficulty: target_difficulty,
             block_body_merkle_root,
             uncles,
         }))
@@ -175,7 +177,7 @@ mod block_header_tests {
             max_block_size: rng.gen(),
             proof_of_work_line: rng.gen(),
             proof_of_work_family: rng.gen(),
-            target_difficulty: rng.gen(),
+            difficulty: rng.gen(),
             block_body_merkle_root: rng.gen(),
             uncles: random_elements((rng.next_u32() % 3) as usize),
         }

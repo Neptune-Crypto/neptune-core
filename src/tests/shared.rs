@@ -5,7 +5,7 @@ use futures::sink;
 use futures::stream;
 use futures::task::{Context, Poll};
 use itertools::Itertools;
-use num_traits::{One, Zero};
+use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
@@ -27,7 +27,6 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
 
@@ -37,7 +36,8 @@ use crate::config_models::network::Network;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_body::BlockBody;
-use crate::models::blockchain::block::block_header::{BlockHeader, TARGET_DIFFICULTY_U32_SIZE};
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
@@ -732,7 +732,8 @@ pub fn make_mock_transaction_with_wallet(
 /// Returns (block, coinbase UTXO, Coinbase output randomness)
 pub fn make_mock_block(
     previous_block: &Block,
-    target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
+    // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
+    block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
 ) -> (Block, Utxo, Digest) {
     let new_block_height: BlockHeight = previous_block.header.height.next();
@@ -755,19 +756,17 @@ pub fn make_mock_block(
     );
     next_mutator_set.add(&coinbase_addition_record);
 
-    let timestamp: BFieldElement = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
-            .as_secs(),
-    );
+    let block_timestamp = match block_timestamp {
+        Some(ts) => ts,
+        None => previous_block.header.timestamp.value() + TARGET_BLOCK_INTERVAL,
+    };
 
     let tx_kernel = TransactionKernel {
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
         pubscript_hashes_and_inputs: vec![],
         fee: Amount::zero(),
-        timestamp,
+        timestamp: BFieldElement::new(block_timestamp),
         coinbase: Some(coinbase_amount),
     };
 
@@ -797,10 +796,11 @@ pub fn make_mock_block(
         stark_proof: vec![],
     };
 
-    let block_target_difficulty = previous_block.header.target_difficulty;
+    let block_target_difficulty = previous_block.header.difficulty;
     let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
     let pow_family = pow_line;
     let zero = BFieldElement::zero();
+    let target_difficulty = Block::difficulty_control(previous_block, block_timestamp);
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
@@ -811,10 +811,7 @@ pub fn make_mock_block(
         max_block_size: 1_000_000,
         proof_of_work_line: pow_family,
         proof_of_work_family: pow_family,
-        target_difficulty: match target_difficulty {
-            Some(td) => td,
-            None => U32s::one(),
-        },
+        difficulty: target_difficulty,
         block_body_merkle_root: Hash::hash(&block_body),
         uncles: vec![],
     };
@@ -824,6 +821,40 @@ pub fn make_mock_block(
         coinbase_utxo,
         coinbase_output_randomness,
     )
+}
+
+pub fn make_mock_block_with_valid_pow(
+    previous_block: &Block,
+    block_timestamp: Option<u64>,
+    coinbase_beneficiary: generation_address::ReceivingAddress,
+) -> (Block, Utxo, Digest) {
+    let (mut block, mut utxo, mut digest) =
+        make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+    while !block.has_proof_of_work(previous_block) {
+        let (block_new, utxo_new, digest_new) =
+            make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+        block = block_new;
+        utxo = utxo_new;
+        digest = digest_new;
+    }
+    (block, utxo, digest)
+}
+
+pub fn make_mock_block_with_invalid_pow(
+    previous_block: &Block,
+    block_timestamp: Option<u64>,
+    coinbase_beneficiary: generation_address::ReceivingAddress,
+) -> (Block, Utxo, Digest) {
+    let (mut block, mut utxo, mut digest) =
+        make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+    while block.has_proof_of_work(previous_block) {
+        let (block_new, utxo_new, digest_new) =
+            make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+        block = block_new;
+        utxo = utxo_new;
+        digest = digest_new;
+    }
+    (block, utxo, digest)
 }
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with

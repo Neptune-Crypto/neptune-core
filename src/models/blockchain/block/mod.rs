@@ -1,8 +1,10 @@
 use itertools::Itertools;
-use num_traits::{One, Zero};
+use num_bigint::BigUint;
+use num_traits::{abs, Zero};
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::cmp::max;
 use tracing::{debug, warn};
+use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -15,11 +17,12 @@ pub mod mutator_set_update;
 pub mod transfer_block;
 
 use self::block_body::BlockBody;
-use self::block_header::BlockHeader;
+use self::block_header::{
+    BlockHeader, MINIMUM_DIFFICULTY, TARGET_BLOCK_INTERVAL, TARGET_DIFFICULTY_U32_SIZE,
+};
 use self::block_height::BlockHeight;
 use self::mutator_set_update::MutatorSetUpdate;
 use self::transfer_block::TransferBlock;
-use super::digest::ordered_digest::to_digest_threshold;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::{amount::Amount, Transaction};
@@ -133,7 +136,7 @@ impl Block {
             max_block_size: 10_000,
             proof_of_work_line: U32s::zero(),
             proof_of_work_family: U32s::zero(),
-            target_difficulty: U32s::one(),
+            difficulty: MINIMUM_DIFFICULTY.into(),
             block_body_merkle_root: Hash::hash(&body),
             uncles: vec![],
         };
@@ -158,6 +161,13 @@ impl Block {
     /// The mutator set data must be valid in all inputs.
     pub fn accumulate_transaction(&mut self, transaction: Transaction) {
         // merge
+        let merged_timestamp = BFieldElement::new(max(
+            self.header.timestamp.value(),
+            max(
+                self.body.transaction.kernel.timestamp.value(),
+                transaction.kernel.timestamp.value(),
+            ),
+        ));
         let new_transaction = self.body.transaction.clone().merge_with(transaction);
 
         // accumulate
@@ -179,26 +189,17 @@ impl Block {
             stark_proof: vec![],
         };
 
-        let block_timestamp = BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Got bad time timestamp in mining process")
-                .as_millis()
-                .try_into()
-                .expect("Must call this function before 584 million years from genesis."),
-        );
-
         let block_header = BlockHeader {
             version: self.header.version,
             height: self.header.height,
             mutator_set_hash: next_mutator_set_accumulator.hash(),
             prev_block_digest: self.header.prev_block_digest,
-            timestamp: block_timestamp,
+            timestamp: merged_timestamp,
             nonce: self.header.nonce,
             max_block_size: self.header.max_block_size,
             proof_of_work_line: self.header.proof_of_work_line,
             proof_of_work_family: self.header.proof_of_work_family,
-            target_difficulty: self.header.target_difficulty,
+            difficulty: self.header.difficulty,
             block_body_merkle_root: Hash::hash(&block_body),
             uncles: vec![],
         };
@@ -211,7 +212,7 @@ impl Block {
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
-    pub(crate) fn is_valid_for_devnet(&self, previous_block: &Block) -> bool {
+    pub(crate) fn is_valid(&self, previous_block: &Block) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
         let block_copy = self.to_owned();
@@ -221,7 +222,9 @@ impl Block {
         // 0. `previous_block` is consistent with current block
         //   a) Block height is previous plus one
         //   b) Block header points to previous block
-        //   c) Next mutator set of previous block matches previous MS of current block
+        //   c) Block timestamp is greater than previous block timestamp
+        //   d) Next mutator set of previous block matches previous MS of current block
+        //   e) Target difficulty was adjusted correctly
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
         //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
@@ -245,11 +248,25 @@ impl Block {
             return false;
         }
 
-        // 0.c) Next mutator set of previous block matches previous MS of current block
+        // 0.c) Block timestamp is greater than that of previuos block
+        if previous_block.header.timestamp.value() >= block_copy.header.timestamp.value() {
+            warn!("Block does not have greater timestamp than that of previous block");
+            return false;
+        }
+
+        // 0.d) Next mutator set of previous block matches previous MS of current block
         if previous_block.body.next_mutator_set_accumulator
             != block_copy.body.previous_mutator_set_accumulator
         {
             warn!("Value for previous mutator set does not match previous block");
+            return false;
+        }
+
+        // 0.e) Target difficulty was updated correctly
+        if block_copy.header.difficulty
+            != Self::difficulty_control(previous_block, block_copy.header.timestamp.value())
+        {
+            warn!("Value for new difficulty is incorrect.");
             return false;
         }
 
@@ -368,23 +385,65 @@ impl Block {
         true
     }
 
-    /// The archival-version of block validation. Archival nodes should run this version.
-    pub fn archival_is_valid(&self, previous_block: &Block) -> bool {
+    /// Determine if the the proof-of-work puzzle was solved correctly. Specifically,
+    /// compare the hash of the current block against the difficulty determined by
+    /// the previous.
+    pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
         // check that hash is below threshold
-        if Into::<Digest>::into(self.hash) > to_digest_threshold(self.header.target_difficulty) {
+        if self.hash > Self::difficulty_to_digest_threshold(previous_block.header.difficulty) {
             warn!("Block digest exceeds target difficulty");
             return false;
         }
 
-        // `devnet_is_valid` contains the rest of the block validation logic. `devnet_is_valid`
-        // is factored out such that we can also test if block templates are valid without having
-        // to build a block with a valid PoW digest.
-        if !self.is_valid_for_devnet(previous_block) {
-            warn!("Block devnet test failed");
-            return false;
+        true
+    }
+
+    /// Converts `difficulty` to type `Digest` so that the hash of a block can be
+    /// tested against the target difficulty using `<`. The unit of `difficulty`
+    /// is expected number of hashes for solving the proof-of-work puzzle.
+    pub fn difficulty_to_digest_threshold(difficulty: U32s<5>) -> Digest {
+        assert!(!difficulty.is_zero(), "Difficulty cannot be less than 1");
+
+        let difficulty_as_bui: BigUint = difficulty.into();
+        let max_threshold_as_bui: BigUint =
+            Digest([BFieldElement::new(BFieldElement::MAX); DIGEST_LENGTH]).into();
+        let threshold_as_bui: BigUint = max_threshold_as_bui / difficulty_as_bui;
+
+        threshold_as_bui.try_into().unwrap()
+    }
+
+    /// Control system for block difficulty. This function computes the new block's
+    /// difficulty from its timestamp and the previous block. It is a PID controller
+    /// (with i=d=0) regulating the block interval by tuning the difficulty.
+    /// We assume that the block timestamp is valid.
+    pub fn difficulty_control(
+        old_block: &Block,
+        new_timestamp: u64,
+    ) -> U32s<TARGET_DIFFICULTY_U32_SIZE> {
+        // no adjustment if the previous block is the genesis block
+        if old_block.header.height.is_genesis() {
+            return old_block.header.difficulty;
         }
 
-        true
+        // otherwise, compute PID control signal
+        let t = new_timestamp - old_block.header.timestamp.value();
+
+        let new_error = t as i64 - TARGET_BLOCK_INTERVAL as i64;
+
+        let adjustment = (TARGET_BLOCK_INTERVAL as i64 / 100) * new_error;
+        let absolute_adjustment = abs(adjustment) as u64;
+        let adjustment_is_positive = adjustment >= 0;
+        let adj_hi = (absolute_adjustment >> 32) as u32;
+        let adj_lo = absolute_adjustment as u32;
+        let adjustment_u32s =
+            U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([adj_lo, adj_hi, 0u32, 0u32, 0u32]);
+        if adjustment_is_positive {
+            old_block.header.difficulty + adjustment_u32s
+        } else if adjustment_u32s > old_block.header.difficulty - MINIMUM_DIFFICULTY.into() {
+            MINIMUM_DIFFICULTY.into()
+        } else {
+            old_block.header.difficulty - adjustment_u32s
+        }
     }
 }
 
@@ -421,7 +480,7 @@ mod block_tests {
 
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address);
         assert!(
-            block_1.is_valid_for_devnet(&genesis_block),
+            block_1.is_valid(&genesis_block),
             "Block 1 must be valid with only coinbase output"
         );
 
@@ -442,7 +501,7 @@ mod block_tests {
 
         block_1.accumulate_transaction(new_tx);
         assert!(
-            block_1.is_valid_for_devnet(&genesis_block),
+            block_1.is_valid(&genesis_block),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
             block_1
                 .body
@@ -467,5 +526,35 @@ mod block_tests {
             block_1.body.transaction.kernel.inputs.len(),
             "New block must have one input: spending of genesis UTXO"
         );
+    }
+
+    #[test]
+    fn difficulty_to_threshold_test() {
+        // Verify that a difficulty of 2 accepts half of the digests
+        let difficulty: u32 = 2;
+        let difficulty_u32s = U32s::<5>::from(difficulty);
+        let threshold_for_difficulty_two: Digest =
+            Block::difficulty_to_digest_threshold(difficulty_u32s);
+
+        for elem in threshold_for_difficulty_two.values() {
+            assert_eq!(BFieldElement::MAX / u64::from(difficulty), elem.value());
+        }
+
+        // Verify that a difficulty of BFieldElement::MAX accepts all digests where the last BFieldElement is zero
+        let some_difficulty = U32s::<5>::new([1, u32::MAX, 0, 0, 0]);
+        let some_threshold_actual: Digest = Block::difficulty_to_digest_threshold(some_difficulty);
+
+        let bfe_max_elem = BFieldElement::new(BFieldElement::MAX);
+        let some_threshold_expected = Digest::new([
+            bfe_max_elem,
+            bfe_max_elem,
+            bfe_max_elem,
+            bfe_max_elem,
+            BFieldElement::zero(),
+        ]);
+
+        assert_eq!(0u64, some_threshold_actual.values()[4].value());
+        assert_eq!(some_threshold_actual, some_threshold_expected);
+        assert_eq!(bfe_max_elem, some_threshold_actual.values()[3]);
     }
 }

@@ -400,7 +400,7 @@ impl Widget for OverviewScreen {
         ));
         lines.push(format!(
             "difficulty: {}",
-            dashifnotset!(data.block_header.as_ref().map(|bh| bh.target_difficulty)),
+            dashifnotset!(data.block_header.as_ref().map(|bh| bh.difficulty)),
         ));
         lines.push(format!(
             "pow line: {}",

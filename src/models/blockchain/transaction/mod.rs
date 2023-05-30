@@ -10,8 +10,9 @@ use itertools::Itertools;
 use num_bigint::{BigInt, BigUint};
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
+use std::cmp::max;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use tracing::{debug, error, warn};
 use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
@@ -410,12 +411,10 @@ impl Transaction {
     /// Merge two transactions. Both input transactions must have a
     /// valid SingleProof witness for this operation to work.
     pub fn merge_with(self, other: Transaction) -> Transaction {
-        let timestamp = BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Timestamping failed")
-                .as_millis() as u64,
-        );
+        let timestamp = BFieldElement::new(max(
+            self.kernel.timestamp.value(),
+            other.kernel.timestamp.value(),
+        ));
 
         let merged_coinbase = match self.kernel.coinbase {
             Some(_) => match other.kernel.coinbase {

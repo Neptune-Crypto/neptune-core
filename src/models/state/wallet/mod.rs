@@ -746,7 +746,7 @@ mod wallet_tests {
         block_1.accumulate_transaction(valid_tx);
 
         // Verify the validity of the merged transaction and block
-        assert!(block_1.is_valid_for_devnet(&genesis_block));
+        assert!(block_1.is_valid(&genesis_block));
 
         // Update wallet state with block_1
         let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
@@ -910,11 +910,8 @@ mod wallet_tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let (block_2_b, _, _) = make_mock_block(
-            &block_1,
-            Some(100.into()),
-            premine_wallet_spending_key.to_address(),
-        );
+        let (block_2_b, _, _) =
+            make_mock_block(&block_1, None, premine_wallet_spending_key.to_address());
         own_wallet_state.update_wallet_state_with_new_block(
             &block_2_b,
             &mut own_wallet_state.wallet_db.lock().await,
@@ -959,11 +956,8 @@ mod wallet_tests {
 
         // Fork back again to the long chain and verify that the membership proofs
         // all work again
-        let (block_19, _, _) = make_mock_block(
-            &block_18,
-            Some(100.into()),
-            premine_wallet_spending_key.to_address(),
-        );
+        let (block_19, _, _) =
+            make_mock_block(&block_18, None, premine_wallet_spending_key.to_address());
         own_wallet_state.update_wallet_state_with_new_block(
             &block_19,
             &mut own_wallet_state.wallet_db.lock().await,
@@ -995,7 +989,11 @@ mod wallet_tests {
         // Fork back to the B-chain with `block_3b` which contains two outputs for `own_wallet`,
         // one coinbase UTXO and one other UTXO
         let (mut block_3_b, cb_utxo, cb_sender_randomness) =
-            make_mock_block(&block_2_b, Some(100.into()), own_address);
+            make_mock_block(&block_2_b, None, own_address);
+        assert!(
+            block_3_b.is_valid(&block_2_b),
+            "Block must be valid before merging txs"
+        );
 
         let receiver_data_six = UtxoReceiverData {
             pubscript: PubScript::default(),
@@ -1012,7 +1010,10 @@ mod wallet_tests {
             .await
             .unwrap();
         block_3_b.accumulate_transaction(tx_from_preminer);
-        assert!(block_3_b.is_valid_for_devnet(&block_2_b));
+        assert!(
+            block_3_b.is_valid(&block_2_b),
+            "Block must be valid after accumulating txs"
+        );
         own_wallet_state
             .expected_utxos
             .write()
@@ -1074,11 +1075,8 @@ mod wallet_tests {
         }
 
         // Then fork back to A-chain
-        let (block_20, _, _) = make_mock_block(
-            &block_19,
-            Some(100.into()),
-            premine_wallet_spending_key.to_address(),
-        );
+        let (block_20, _, _) =
+            make_mock_block(&block_19, None, premine_wallet_spending_key.to_address());
         own_wallet_state.update_wallet_state_with_new_block(
             &block_20,
             &mut own_wallet_state.wallet_db.lock().await,

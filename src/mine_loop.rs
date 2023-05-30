@@ -3,7 +3,6 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
-use crate::models::blockchain::digest::ordered_digest::to_digest_threshold;
 use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -33,10 +32,9 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
-const MOCK_DIFFICULTY: u32 = 50_000;
 
-/// Prepare a Block for Devnet mining
-fn make_devnet_block_template(
+/// Prepare a Block for mining
+fn make_block_template(
     previous_block: &Block,
     transaction: Transaction,
 ) -> (BlockHeader, BlockBody) {
@@ -61,28 +59,31 @@ fn make_devnet_block_template(
     };
 
     let zero = BFieldElement::zero();
-    let difficulty: U32s<5> = U32s::new([MOCK_DIFFICULTY, 0, 0, 0, 0]);
-    let new_pow_line: U32s<5> = previous_block.header.proof_of_work_family + difficulty;
+    let new_pow_line: U32s<5> =
+        previous_block.header.proof_of_work_family + previous_block.header.difficulty;
     let mutator_set_commitment: Digest = next_mutator_set_accumulator.hash();
     let next_block_height = previous_block.header.height.next();
-    let block_timestamp = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
-            .as_millis() as u64,
-    );
+    let mut block_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Got bad time timestamp in mining process")
+        .as_millis() as u64;
+    if block_timestamp < previous_block.header.timestamp.value() {
+        warn!("Received block is timestamped in the future; mining on future-timestamped block.");
+        block_timestamp = previous_block.header.timestamp.value() + 1;
+    }
+    let difficulty: U32s<5> = Block::difficulty_control(previous_block, block_timestamp);
 
     let block_header = BlockHeader {
         version: zero,
         height: next_block_height,
         mutator_set_hash: mutator_set_commitment,
         prev_block_digest: Hash::hash(&previous_block.header),
-        timestamp: block_timestamp,
+        timestamp: BFieldElement::new(block_timestamp),
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
         proof_of_work_line: new_pow_line,
         proof_of_work_family: new_pow_line,
-        target_difficulty: difficulty,
+        difficulty,
         block_body_merkle_root: Hash::hash(&block_body),
         uncles: vec![],
     };
@@ -103,8 +104,8 @@ async fn mine_block(
         block_body.transaction.kernel.outputs.len()
     );
     // Mining takes place here
-    while Into::<Digest>::into(Hash::hash(&block_header))
-        >= to_digest_threshold(block_header.target_difficulty)
+    while Hash::hash(&block_header)
+        >= Block::difficulty_to_digest_threshold(block_header.difficulty)
     {
         // If the sender is cancelled, the parent to this thread most
         // likely received a new block, and this thread hasn't been stopped
@@ -303,7 +304,7 @@ pub async fn mock_regtest_mine(
         } else {
             // Build the block template and spawn the worker thread to mine on it
             let (transaction, coinbase_utxo_info) = create_block_transaction(&latest_block, &state);
-            let (block_header, block_body) = make_devnet_block_template(&latest_block, transaction);
+            let (block_header, block_body) = make_block_template(&latest_block, transaction);
             let miner_task = mine_block(
                 block_header,
                 block_body,
@@ -371,7 +372,8 @@ pub async fn mock_regtest_mine(
                 };
 
                 // Sanity check, remove for more efficient mining.
-                assert!(new_block_info.block.archival_is_valid(&latest_block), "Own mined block must be valid");
+                assert!(new_block_info.block.has_proof_of_work(&latest_block), "Own mined block must be valid");
+                assert!(new_block_info.block.is_valid(&latest_block), "Own mined block must be valid");
 
                 info!("Found new regtest block with block height {}. Hash: {}", new_block_info.block.header.height, new_block_info.block.hash.emojihash());
 
@@ -435,13 +437,13 @@ mod mine_loop_tests {
             "Coinbase transaction with empty mempool must have zero inputs"
         );
         let (block_header_template_empty_mempool, block_body_empty_mempool) =
-            make_devnet_block_template(&genesis_block, transaction_empty_mempool);
+            make_block_template(&genesis_block, transaction_empty_mempool);
         let block_template_empty_mempool = Block::new(
             block_header_template_empty_mempool,
             block_body_empty_mempool,
         );
         assert!(
-            block_template_empty_mempool.is_valid_for_devnet(&genesis_block),
+            block_template_empty_mempool.is_valid(&genesis_block),
             "Block template created by miner with empty mempool must be valid"
         );
 
@@ -487,10 +489,10 @@ mod mine_loop_tests {
 
         // Build and verify block template
         let (block_header_template, block_body) =
-            make_devnet_block_template(&genesis_block, transaction_non_empty_mempool);
+            make_block_template(&genesis_block, transaction_non_empty_mempool);
         let block_template_non_empty_mempool = Block::new(block_header_template, block_body);
         assert!(
-            block_template_non_empty_mempool.is_valid_for_devnet(&genesis_block),
+            block_template_non_empty_mempool.is_valid(&genesis_block),
             "Block template created by miner with non-empty mempool must be valid"
         );
 

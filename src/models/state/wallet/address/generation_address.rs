@@ -1,3 +1,5 @@
+use std::mem;
+
 use aead::Aead;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
@@ -20,7 +22,6 @@ use twenty_first::{
 };
 
 use crate::config_models::network::Network;
-use crate::models::blockchain::digest::BYTES_PER_BFE;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
@@ -100,7 +101,7 @@ pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
 /// computes the inverse of `bytes_to_bfes`.
 pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
     let length = bfes[0].value() as usize;
-    if length > bfes.len() * BYTES_PER_BFE {
+    if length > bfes.len() * mem::size_of::<BFieldElement>() {
         bail!("Cannot decode byte stream shorter than length indicated. BFE slice length: {}, indicated byte stream length: {length}", bfes.len());
     }
 
@@ -565,10 +566,7 @@ mod test_generation_addresses {
         let sender_randomness: Digest = rng.gen();
 
         let ciphertext = receiving_address.encrypt(&utxo, sender_randomness).unwrap();
-        println!(
-            "ciphertext.get_size() = {}",
-            ciphertext.len() * BYTES_PER_BFE
-        );
+        println!("ciphertext.get_size() = {}", ciphertext.len() * 8);
 
         let (utxo_again, sender_randomness_again) = spending_key.decrypt(&ciphertext).unwrap();
 
