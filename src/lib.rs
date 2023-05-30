@@ -29,7 +29,6 @@ use crate::models::state::GlobalState;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
-use config_models::network::Network;
 use database::rusty::RustyLevelDB;
 use futures::future;
 use futures::StreamExt;
@@ -157,9 +156,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let state_clone_for_miner = state.clone();
-    if state.cli.mine && state.cli.network == Network::RegTest {
+    if state.cli.mine {
         let miner_join_handle = tokio::spawn(async move {
-            mine_loop::mock_regtest_mine(
+            mine_loop::mine(
                 main_to_miner_rx,
                 miner_to_main_tx,
                 latest_block,

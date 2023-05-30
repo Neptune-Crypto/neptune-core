@@ -19,6 +19,7 @@ use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -107,6 +108,10 @@ async fn mine_block(
     while Hash::hash(&block_header)
         >= Block::difficulty_to_digest_threshold(block_header.difficulty)
     {
+        if state.cli.throttled_mining {
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+        }
+
         // If the sender is cancelled, the parent to this thread most
         // likely received a new block, and this thread hasn't been stopped
         // yet by the operating system, although the call to abort this
@@ -284,7 +289,7 @@ fn create_block_transaction(
     (merged_transaction, utxo_info_for_coinbase)
 }
 
-pub async fn mock_regtest_mine(
+pub async fn mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block: Block,

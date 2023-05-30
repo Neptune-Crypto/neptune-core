@@ -16,13 +16,13 @@ set -e # Exit on first error.
 
 export RUST_LOG=debug;
 
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 18 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --mine 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/0/ nice -n 18 --  cargo run -- --network regtest --peer-port 29790 --rpc-port 19790 --mine --throttled-mining 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I0:  \1/g'  &
 pid[0]=$!
 sleep 5s;
 RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/1/ nice -n 18 --  cargo run -- --network regtest --peer-port 29791 --rpc-port 19791 --peers 127.0.0.1:29790 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I1:  \1/g'  &
 pid[1]=$!
 sleep 5s;
-RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/2/ nice -n 18 --  cargo run -- --network regtest --peer-port 29792 --rpc-port 19792 --peers 127.0.0.1:29791 --mine --max-number-of-blocks-before-syncing 1000 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I2:  \1/g' &
+RUST_BACKTRACE=1 XDG_DATA_HOME=~/.local/share/neptune-integration-test/2/ nice -n 18 --  cargo run -- --network regtest --peer-port 29792 --rpc-port 19792 --peers 127.0.0.1:29791 --mine --throttled-mining --max-number-of-blocks-before-syncing 1000 2>&1 | tee -a integration_test.log | sed 's/.*neptune_core:\+\(.*\)/I2:  \1/g' &
 pid[2]=$!
 
 # Inspired by https://stackoverflow.com/a/52033580/2574407

@@ -51,6 +51,10 @@ pub struct Args {
     #[clap(long)]
     pub mine: bool,
 
+    /// If mining, restrict CPU time spent in mining thread. Ignored if mine flag not set.
+    #[clap(long)]
+    pub throttled_mining: bool,
+
     /// Prune the mempool when it exceeds this size in RAM.
     ///
     /// Units: B (bytes), K (kilobytes), M (megabytes), G (gigabytes)
