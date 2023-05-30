@@ -918,21 +918,22 @@ impl MainLoopHandler {
 
         // Handle SIGTERM and SIGINT signals on Unix systems
         #[cfg(unix)]
-        let (sigterm, sigint) = {
+        let (sigterm, sigint, sigquit) = {
             use tokio::signal::unix::{signal, SignalKind};
             let sigterm = signal(SignalKind::terminate())?;
             let sigint = signal(SignalKind::interrupt())?;
-            (Some(sigterm), Some(sigint))
+            let sigquit = signal(SignalKind::quit())?;
+            (Some(sigterm), Some(sigint), Some(sigquit))
         };
         #[cfg(not(unix))]
-        let (mut sigterm, mut sigint) = (None, None);
+        let (mut sigterm, mut sigint, mut sigquit, mut sighup) = (None, None, None);
 
-        // Spawn threads to monitor for SIGTERM and SIGINT
+        // Spawn threads to monitor for SIGTERM, SIGINT, and SIGQUIT
         let (tx_term, mut rx_term) = tokio::sync::mpsc::channel(2);
         if let Some(mut sigterm_stream) = sigterm {
             tokio::spawn(async move {
                 if sigterm_stream.recv().await.is_some() {
-                    println!("Received SIGTERM");
+                    info!("Received SIGTERM");
                     tx_term.send(()).await.unwrap();
                 }
             });
@@ -941,8 +942,17 @@ impl MainLoopHandler {
         if let Some(mut sigint_stream) = sigint {
             tokio::spawn(async move {
                 if sigint_stream.recv().await.is_some() {
-                    println!("Received SIGINT");
+                    info!("Received SIGINT");
                     tx_int.send(()).await.unwrap();
+                }
+            });
+        }
+        let (tx_quit, mut rx_quit) = tokio::sync::mpsc::channel(2);
+        if let Some(mut sigquit_stream) = sigquit {
+            tokio::spawn(async move {
+                if sigquit_stream.recv().await.is_some() {
+                    info!("Received SIGQUIT");
+                    tx_quit.send(()).await.unwrap();
                 }
             });
         }
@@ -954,13 +964,17 @@ impl MainLoopHandler {
                     break;
                 }
 
-                // Monitor for SIGTERM and SIGINT
+                // Monitor for SIGTERM, SIGINT, and SIGQUIT. SIGHUP is ignored.
                 Some(_) = rx_term.recv() => {
                     info!("Detected SIGTERM signal.");
                     break;
                 }
                 Some(_) = rx_int.recv() => {
                     info!("Detected SIGINT signal.");
+                    break;
+                }
+                Some(_) = rx_quit.recv() => {
+                    info!("Detected SIGQUIT signal.");
                     break;
                 }
 
