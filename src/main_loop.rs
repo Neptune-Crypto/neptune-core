@@ -20,6 +20,7 @@ use std::thread::sleep;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
+use tokio::task::JoinHandle;
 use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
@@ -71,13 +72,15 @@ impl MainLoopHandler {
 struct MutableMainLoopState {
     sync_state: SyncState,
     potential_peers: PotentialPeersState,
+    thread_handles: Vec<JoinHandle<()>>,
 }
 
 impl MutableMainLoopState {
-    fn default() -> Self {
+    fn new(thread_handles: Vec<JoinHandle<()>>) -> Self {
         Self {
             sync_state: SyncState::default(),
             potential_peers: PotentialPeersState::default(),
+            thread_handles,
         }
     }
 }
@@ -758,7 +761,7 @@ impl MainLoopHandler {
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
         let state_clone = self.global_state.to_owned();
         let peer_thread_to_main_tx_clone = self.peer_thread_to_main_tx.to_owned();
-        tokio::spawn(async move {
+        let outgoing_connection_thread = tokio::spawn(async move {
             call_peer_wrapper(
                 peer_candidate,
                 state_clone,
@@ -769,6 +772,12 @@ impl MainLoopHandler {
             )
             .await;
         });
+        main_loop_state
+            .thread_handles
+            .push(outgoing_connection_thread);
+        main_loop_state
+            .thread_handles
+            .retain(|th| !th.is_finished());
 
         // 3
         self.main_to_peer_broadcast_tx
@@ -876,9 +885,10 @@ impl MainLoopHandler {
         mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
         mut miner_to_main_rx: mpsc::Receiver<MinerToMain>,
         mut rpc_server_to_main_rx: mpsc::Receiver<RPCServerToMain>,
+        thread_handles: Vec<JoinHandle<()>>,
     ) -> Result<()> {
         // Handle incoming connections, messages from peer threads, and messages from the mining thread
-        let mut main_loop_state = MutableMainLoopState::default();
+        let mut main_loop_state = MutableMainLoopState::new(thread_handles);
 
         // Set peer discovery to run every N seconds. The timer must be reset every time it has run.
         let peer_discovery_timer_interval = Duration::from_secs(PEER_DISCOVERY_INTERVAL_IN_SECONDS);
@@ -961,7 +971,7 @@ impl MainLoopHandler {
                     let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
                     let peer_address = stream.peer_addr().unwrap();
                     let own_handshake_data: HandshakeData = state.get_handshakedata().await;
-                    tokio::spawn(async move {
+                    let incoming_peer_thread_handle = tokio::spawn(async move {
                         match answer_peer(
                             stream,
                             state,
@@ -974,7 +984,8 @@ impl MainLoopHandler {
                             Err(err) => error!("Got error: {:?}", err),
                         }
                     });
-
+                    main_loop_state.thread_handles.push(incoming_peer_thread_handle);
+                    main_loop_state.thread_handles.retain(|th| !th.is_finished());
                 }
 
                 // Handle messages from peer threads
@@ -1047,7 +1058,8 @@ impl MainLoopHandler {
             }
         }
 
-        self.graceful_shutdown().await?;
+        self.graceful_shutdown(main_loop_state.thread_handles)
+            .await?;
         info!("Shutdown completed.");
 
         Ok(())
@@ -1195,13 +1207,13 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    async fn graceful_shutdown(&self) -> Result<()> {
+    async fn graceful_shutdown(&self, thread_handles: Vec<JoinHandle<()>>) -> Result<()> {
         info!("Shutdown initiated.");
 
         // Stop mining
         let __result = self.main_to_miner_tx.send(MainToMiner::Shutdown);
 
-        // Send 'bye' message to alle peers.
+        // Send 'bye' message to all peers.
         let _result = self
             .main_to_peer_broadcast_tx
             .send(MainToPeerThread::DisconnectAll());
@@ -1210,10 +1222,16 @@ impl MainLoopHandler {
         // Flush all databases
         self.flush_databases().await?;
 
-        //TODO: wait for child processes to finish - using stored tokio JoinHandles.
+        // wait 0.5 seconds to ensure that child processes have been shut down
+        sleep(Duration::new(0, 500 * 1_000_000));
 
-        // wait 1 seconds to ensure that child processes have been shut down
-        sleep(Duration::new(0, 1000 * 1_000_000));
+        // Child processes should have finished by now. If not, abort them violently.
+        for jh in thread_handles {
+            jh.abort();
+        }
+
+        // wait 0.5 seconds to ensure that child processes have been shut down
+        sleep(Duration::new(0, 500 * 1_000_000));
 
         Ok(())
     }

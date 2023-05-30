@@ -129,6 +129,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let own_handshake_data: HandshakeData = state.get_handshakedata().await;
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
+    let mut thread_join_handles = vec![];
     for peer in state.cli.peers.clone() {
         let peer_state_var = state.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
@@ -136,7 +137,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> =
             peer_thread_to_main_tx.clone();
         let own_handshake_data_clone = own_handshake_data.clone();
-        tokio::spawn(async move {
+        let peer_join_handle = tokio::spawn(async move {
             call_peer_wrapper(
                 peer,
                 peer_state_var.clone(),
@@ -147,6 +148,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             )
             .await;
         });
+        thread_join_handles.push(peer_join_handle);
     }
 
     // Start handling of mining. So far we can only mine on the `RegTest` network.
@@ -156,7 +158,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let state_clone_for_miner = state.clone();
     if state.cli.mine && state.cli.network == Network::RegTest {
-        tokio::spawn(async move {
+        let miner_join_handle = tokio::spawn(async move {
             mine_loop::mock_regtest_mine(
                 main_to_miner_rx,
                 miner_to_main_tx,
@@ -166,6 +168,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             .await
             .expect("Error in mining thread");
         });
+        thread_join_handles.push(miner_join_handle);
     }
 
     // Start RPC server for CLI request and more
@@ -176,7 +179,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     .await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
     let rpc_listener_state: GlobalState = state.clone();
-    tokio::spawn(async move {
+    let rpc_join_handle = tokio::spawn(async move {
         rpc_listener
             // Ignore accept errors.
             .filter_map(|r| future::ready(r.ok()))
@@ -198,6 +201,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             .for_each(|_| async {})
             .await;
     });
+    thread_join_handles.push(rpc_join_handle);
 
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
     let main_loop_handler = MainLoopHandler::new(
@@ -212,6 +216,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             peer_thread_to_main_rx,
             miner_to_main_rx,
             rpc_server_to_main_rx,
+            thread_join_handles,
         )
         .await
 }
