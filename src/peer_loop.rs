@@ -688,7 +688,7 @@ impl PeerLoopHandler {
                     "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.inputs.len(),
                     transaction.kernel.outputs.len(),
-                    transaction.mutator_set_hash
+                    transaction.kernel.mutator_set_hash
                 );
 
                 // If transaction is invalid, punish

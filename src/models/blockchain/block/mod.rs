@@ -91,9 +91,9 @@ impl Block {
                 timestamp,
                 pubscript_hashes_and_inputs: vec![],
                 coinbase: Some(total_premine_amount),
+                mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
             },
             witness: super::transaction::Witness::Faith,
-            mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
         };
 
         for (receiving_address, amount) in premine_distribution {

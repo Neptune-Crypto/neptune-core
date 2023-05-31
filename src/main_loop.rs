@@ -640,7 +640,7 @@ impl MainLoopHandler {
                     "`peer_loop` received following transaction from peer. {} inputs, {} outputs. Synced to mutator set hash: {}",
                     pt2m_transaction.transaction.kernel.inputs.len(),
                     pt2m_transaction.transaction.kernel.outputs.len(),
-                    pt2m_transaction.transaction.mutator_set_hash
+                    pt2m_transaction.transaction.kernel.mutator_set_hash
                 );
 
                 if pt2m_transaction.confirmable_for_block
@@ -1123,7 +1123,7 @@ impl MainLoopHandler {
                     "`main` received following transaction from RPC Server. {} inputs, {} outputs. Synced to mutator set hash: {}",
                     transaction.kernel.inputs.len(),
                     transaction.kernel.outputs.len(),
-                    transaction.mutator_set_hash
+                    transaction.kernel.mutator_set_hash
                 );
 
                 // send notification to peers

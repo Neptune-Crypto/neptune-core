@@ -774,7 +774,7 @@ mod tests {
 
         debug!(
             "tx_by_other_updated has mutator set hash: {}",
-            tx_by_other_updated.mutator_set_hash.emojihash()
+            tx_by_other_updated.kernel.mutator_set_hash.emojihash()
         );
         block_3_with_updated_tx.accumulate_transaction(tx_by_other_updated.clone());
         assert!(

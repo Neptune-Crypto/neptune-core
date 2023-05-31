@@ -201,6 +201,7 @@ fn make_coinbase_transaction(
         fee: Amount::zero(),
         timestamp,
         coinbase: Some(coinbase_amount),
+        mutator_set_hash: mutator_set_accumulator.hash(),
     };
 
     let mutator_set_hash = mutator_set_accumulator.hash();
@@ -220,7 +221,6 @@ fn make_coinbase_transaction(
         Transaction {
             kernel,
             witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
-            mutator_set_hash,
         },
         sender_randomness,
     )

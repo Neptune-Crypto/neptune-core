@@ -195,6 +195,7 @@ impl GlobalState {
             fee,
             timestamp: BFieldElement::new(timestamp.try_into().unwrap()),
             coinbase: None,
+            mutator_set_hash: msa_tip.hash(),
         };
 
         // TODO: The spending key can be different for each UTXO, and therefore must be supplied by `spendable_utxos_and_mps`.
@@ -276,7 +277,6 @@ impl GlobalState {
         Ok(Transaction {
             kernel,
             witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
-            mutator_set_hash,
         })
     }
 

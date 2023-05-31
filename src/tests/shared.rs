@@ -9,6 +9,7 @@ use num_traits::Zero;
 use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
+use rand::random;
 use std::path::Path;
 use std::path::PathBuf;
 use std::{
@@ -618,6 +619,7 @@ pub fn make_mock_transaction_with_generation_key(
         fee,
         timestamp: BFieldElement::new(timestamp),
         coinbase: None,
+        mutator_set_hash: random(),
     };
 
     let input_utxos = input_utxos_mps_keys
@@ -658,7 +660,6 @@ pub fn make_mock_transaction_with_generation_key(
     Transaction {
         kernel,
         witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
-        mutator_set_hash: tip_msa.hash(),
     }
 }
 
@@ -685,9 +686,9 @@ pub fn make_mock_transaction(
             fee: 1.into(),
             timestamp,
             coinbase: None,
+            mutator_set_hash: random(),
         },
         witness: transaction::Witness::Faith,
-        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
     }
 }
 
@@ -717,12 +718,12 @@ pub fn make_mock_transaction_with_wallet(
         fee,
         timestamp,
         coinbase: None,
+        mutator_set_hash: random(),
     };
 
     Transaction {
         kernel,
         witness: transaction::Witness::Faith,
-        mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
     }
 }
 
@@ -768,6 +769,7 @@ pub fn make_mock_block(
         fee: Amount::zero(),
         timestamp: BFieldElement::new(block_timestamp),
         coinbase: Some(coinbase_amount),
+        mutator_set_hash: previous_mutator_set.hash(),
     };
 
     let primitive_witness = PrimitiveWitness {
@@ -784,7 +786,6 @@ pub fn make_mock_block(
 
     let transaction = Transaction {
         witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),
-        mutator_set_hash: previous_mutator_set.hash(),
         kernel: tx_kernel,
     };
 

@@ -40,6 +40,26 @@ impl GetSize for AbsoluteIndexSet {
     }
 }
 
+impl BFieldCodec for AbsoluteIndexSet {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        if sequence.len() < 4 * NUM_TRIALS as usize {
+            bail!("Cannot decode sequence of BFieldElements as AbsoluteIndexSet because sequence is too short.");
+        }
+        let mut absolute_indices = [0u128; NUM_TRIALS as usize];
+        for i in 0..NUM_TRIALS as usize {
+            let subsequence = &sequence[4 * i..4 * (i + 1)];
+            let index = *u128::decode(subsequence)?;
+            absolute_indices[i] = index;
+        }
+
+        Ok(Box::new(AbsoluteIndexSet(absolute_indices)))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.0.iter().flat_map(|bi| bi.encode()).collect()
+    }
+}
+
 impl AbsoluteIndexSet {
     pub fn new(indices: &[u128; NUM_TRIALS as usize]) -> Self {
         Self(*indices)
@@ -687,6 +707,17 @@ mod removal_record_tests {
             let encoded = removal_record.encode();
             let decoded = *RemovalRecord::decode(&encoded).unwrap();
             assert_eq!(removal_record, decoded);
+        }
+    }
+
+    #[test]
+    fn test_absindexset_record_decode() {
+        type H = Tip5;
+        for _ in 0..100 {
+            let removal_record = random_removal_record::<H>();
+            let encoded_absindexset = removal_record.absolute_indices.encode();
+            let decoded_absindexset = *AbsoluteIndexSet::decode(&encoded_absindexset).unwrap();
+            assert_eq!(removal_record.absolute_indices, decoded_absindexset);
         }
     }
 }

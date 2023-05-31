@@ -231,23 +231,18 @@ pub struct Transaction {
     pub kernel: TransactionKernel,
 
     pub witness: Witness,
-
-    pub mutator_set_hash: Digest,
 }
 
 impl BFieldCodec for Transaction {
     fn encode(&self) -> Vec<BFieldElement> {
         let kernel_bfes = self.kernel.encode();
         let witness_bfes = self.witness.encode();
-        let mutator_set_hash_bfes = self.mutator_set_hash.encode();
 
         vec![
             vec![BFieldElement::new(kernel_bfes.len() as u64)],
             kernel_bfes,
             vec![BFieldElement::new(witness_bfes.len() as u64)],
             witness_bfes,
-            vec![BFieldElement::new(mutator_set_hash_bfes.len() as u64)],
-            mutator_set_hash_bfes,
         ]
         .concat()
     }
@@ -255,17 +250,12 @@ impl BFieldCodec for Transaction {
     fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
         let (kernel, sequence) = decode_field_length_prepended(sequence)?;
         let (witness, sequence) = decode_field_length_prepended(&sequence)?;
-        let (mutator_set_hash, sequence) = decode_field_length_prepended(&sequence)?;
 
         if !sequence.is_empty() {
             bail!("Cannot decode sequence of BFieldElements as Transaction: sequence should be empty afterwards!");
         }
 
-        Ok(Box::new(Self {
-            kernel,
-            witness,
-            mutator_set_hash,
-        }))
+        Ok(Box::new(Self { kernel, witness }))
     }
 }
 
@@ -410,7 +400,12 @@ impl Transaction {
 
     /// Merge two transactions. Both input transactions must have a
     /// valid SingleProof witness for this operation to work.
+    /// The mutator sets are assumed to be identical; this is the responsibility of the caller.
     pub fn merge_with(self, other: Transaction) -> Transaction {
+        assert_eq!(
+            self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
+            "Mutator sets must be equal for transaction merger."
+        );
         let timestamp = BFieldElement::new(max(
             self.kernel.timestamp.value(),
             other.kernel.timestamp.value(),
@@ -438,6 +433,7 @@ impl Transaction {
             fee: self.kernel.fee + other.kernel.fee,
             coinbase: merged_coinbase,
             timestamp,
+            mutator_set_hash: self.kernel.mutator_set_hash,
         };
 
         let merged_witness = match (&self.witness, &other.witness) {
@@ -491,7 +487,6 @@ impl Transaction {
         Transaction {
             kernel: merged_kernel,
             witness: merged_witness,
-            mutator_set_hash: self.mutator_set_hash,
         }
     }
 
@@ -563,8 +558,8 @@ impl Transaction {
                     primitive_witness.mutator_set_accumulator.hash().emojihash()
                 );
                 debug!(
-                    "transaction mutator set hash: {}",
-                    self.mutator_set_hash.emojihash()
+                    "kernel mutator set hash: {}",
+                    self.kernel.mutator_set_hash.emojihash()
                 );
                 return false;
             }
@@ -660,12 +655,12 @@ impl Transaction {
 
         // Verify that the mutator set accumulator listed in the
         // primitive witness corresponds to the hash listed in the
-        // transaction.
-        if primitive_witness.mutator_set_accumulator.hash() != self.mutator_set_hash {
+        // transaction's kernel.
+        if primitive_witness.mutator_set_accumulator.hash() != self.kernel.mutator_set_hash {
             warn!("Transaction's mutator set hash does not correspond to the mutator set that the removal records were derived from. Therefore: can't verify that the inputs even exist.");
             debug!(
                 "Transaction mutator set hash: {}",
-                self.mutator_set_hash.emojihash()
+                self.kernel.mutator_set_hash.emojihash()
             );
             debug!(
                 "Witness mutator set hash: {}",

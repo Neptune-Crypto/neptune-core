@@ -35,6 +35,8 @@ pub struct TransactionKernel {
 
     // number of milliseconds since unix epoch
     pub timestamp: BFieldElement,
+
+    pub mutator_set_hash: Digest,
 }
 
 impl BFieldCodec for TransactionKernel {
@@ -45,6 +47,7 @@ impl BFieldCodec for TransactionKernel {
         let fee = self.fee.encode();
         let coinbase = self.coinbase.encode();
         let timestamp = self.timestamp.encode();
+        let mutator_set_hash = self.mutator_set_hash.encode();
 
         [
             vec![BFieldElement::new(inputs.len() as u64)],
@@ -59,6 +62,8 @@ impl BFieldCodec for TransactionKernel {
             coinbase,
             vec![BFieldElement::new(timestamp.len() as u64)],
             timestamp,
+            vec![BFieldElement::new(mutator_set_hash.len() as u64)],
+            mutator_set_hash,
         ]
         .concat()
     }
@@ -70,6 +75,7 @@ impl BFieldCodec for TransactionKernel {
         let (fee, sequence) = decode_field_length_prepended(&sequence)?;
         let (coinbase, sequence) = decode_field_length_prepended(&sequence)?;
         let (timestamp, sequence) = decode_field_length_prepended(&sequence)?;
+        let (mutator_set_hash, sequence) = decode_field_length_prepended(&sequence)?;
 
         if !sequence.is_empty() {
             bail!("Cannot decode sequence of BFieldElements as TransactionKernel: sequence should be empty afterwards.");
@@ -82,6 +88,7 @@ impl BFieldCodec for TransactionKernel {
             fee,
             coinbase,
             timestamp,
+            mutator_set_hash,
         }))
     }
 }
@@ -100,6 +107,8 @@ impl TransactionKernel {
 
         let timestamp_sequence = self.timestamp.encode();
 
+        let mutator_set_hash_sequence = self.mutator_set_hash.encode();
+
         vec![
             input_utxos_sequence,
             output_utxos_sequence,
@@ -107,6 +116,7 @@ impl TransactionKernel {
             fee_sequence,
             coinbase_sequence,
             timestamp_sequence,
+            mutator_set_hash_sequence,
         ]
     }
 
@@ -184,6 +194,7 @@ pub mod transaction_kernel_tests {
         let fee = random_amount();
         let coinbase = random_option(random_amount());
         let timestamp: BFieldElement = random();
+        let mutator_set_hash: Digest = random();
 
         TransactionKernel {
             inputs,
@@ -192,6 +203,7 @@ pub mod transaction_kernel_tests {
             fee,
             coinbase,
             timestamp,
+            mutator_set_hash,
         }
     }
 
