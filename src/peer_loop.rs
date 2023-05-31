@@ -122,7 +122,7 @@ impl PeerLoopHandler {
                     new_block.header.height,
                     new_block.hash,
                 )))?;
-                bail!("Failed to validate block");
+                bail!("Failed to validate block due to insufficient PoW");
             } else if !new_block.is_valid(previous_block) {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
@@ -132,7 +132,7 @@ impl PeerLoopHandler {
                     new_block.header.height,
                     new_block.hash,
                 )))?;
-                bail!("Failed to validate block");
+                bail!("Failed to validate block: invalid block");
             } else {
                 info!("Block with height {} is valid", new_block.header.height);
             }
