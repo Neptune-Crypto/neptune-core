@@ -101,7 +101,7 @@ pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
 /// computes the inverse of `bytes_to_bfes`.
 pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
     let length = bfes[0].value() as usize;
-    if length > bfes.len() * mem::size_of::<BFieldElement>() {
+    if length > mem::size_of_val(bfes) {
         bail!("Cannot decode byte stream shorter than length indicated. BFE slice length: {}, indicated byte stream length: {length}", bfes.len());
     }
 

@@ -37,7 +37,7 @@ impl BFieldCodec for ClaimSupport {
                 1 => {
                     let mut index = 1;
                     let secret_len: usize = match sequence.get(index) {
-                        Some(val) => val.value().try_into()?,
+                        Some(inner_val) => inner_val.value().try_into()?,
                         None => bail!(
                             "ClaimSupport::decode: Invalid sequence length for secret witness secret_len!"
                         ),
@@ -48,7 +48,7 @@ impl BFieldCodec for ClaimSupport {
                     index += secret_len;
 
                     let program_len: usize = match sequence.get(index) {
-                        Some(val) => val.value().try_into()?,
+                        Some(inner_val) => inner_val.value().try_into()?,
                         None => bail!(
                             "ClaimSupport::decode: Invalid sequence length for secret witness program_len!"
                         ),
@@ -143,13 +143,13 @@ pub struct ValidityLogic {
     // program: todo, input: hash of tx kernel (MAST hash), witness: kernel mast auth path, output: encoding of all TX inputs (UTXOs)
     pub kernel_to_inputs: KernelToInputs,
 
-    // program: verify+drop, input: hash of inputs + mutator set hash, witness: inputs + mutator set accumulator, output: removal records
+    // program: verify+drop, input: hash of kernel, witness: inputs + mutator set accumulator, output: []
     pub removal_records_integrity: RemovalRecordsIntegrity,
 
     // program: todo, input: hash of tx kernel (MAST hash), witness: outputs + kernel mast auth path + coins, output: type scripts
     pub kernel_to_typescripts: KernelToTypeScripts,
 
-    // program: type script, input: inputs hash + outputs hash + coinbase + fee, witness: inputs + outputs + any, output: []
+    // program: type script, input: hash of inputs + hash of outputs + coinbase + fee, witness: inputs + outputs + any, output: []
     pub type_script_halts: TypescriptHalts,
 }
 

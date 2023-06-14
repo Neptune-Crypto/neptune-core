@@ -656,7 +656,7 @@ pub fn make_mock_transaction_with_generation_key(
         input_membership_proofs,
         output_utxos,
         pubscripts,
-        mutator_set_accumulator: tip_msa.clone(),
+        mutator_set_accumulator: tip_msa,
     };
     let validity_logic =
         ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &kernel);

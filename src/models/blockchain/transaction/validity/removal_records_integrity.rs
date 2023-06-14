@@ -1,17 +1,18 @@
+use std::collections::HashSet;
+
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use triton_opcodes::program::Program;
-use triton_vm::BFieldElement;
+use triton_vm::{BFieldElement, Digest};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::{shared_math::bfield_codec::BFieldCodec, util_types::mmr::mmr_trait::Mmr};
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::ClaimSupport;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::{
     models::blockchain::shared::Hash,
     util_types::mutator_set::{
@@ -31,8 +32,16 @@ pub struct RemovalRecordsIntegrity {
 pub struct RemovalRecordsIntegrityWitness {
     pub input_utxos: Vec<Utxo>,
     pub membership_proofs: Vec<MsMembershipProof<Hash>>,
-    pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+    pub aocl: MmrAccumulator<Hash>,
+    pub swbfi: MmrAccumulator<Hash>,
+    pub swbfa_hash: Digest,
     pub kernel: TransactionKernel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec)]
+struct RemovalRecordsIntegrityPublicInput {
+    // hash of inputs + mutator set hash
+    pub hash_of_kernel: Digest,
 }
 
 impl RemovalRecordsIntegrity {
@@ -43,17 +52,35 @@ impl RemovalRecordsIntegrity {
         }
     }
 
-    fn verify_raw(_public_input: &[BFieldElement], secret_witness: &[BFieldElement]) {
-        let removal_records_integrity_witness =
-            *RemovalRecordsIntegrityWitness::decode(secret_witness).unwrap();
-        let items = removal_records_integrity_witness
-            .input_utxos
+    fn verify_raw(public_input: &[BFieldElement], secret_input: &[BFieldElement]) {
+        let hash_of_kernel = *Digest::decode(public_input)
+            .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
+
+        // read and process witness data
+        let witness = *RemovalRecordsIntegrityWitness::decode(secret_input).unwrap();
+
+        // assert that the kernel from the witness matches the hash in the public input
+        // now we can trust all data in kernel
+        assert_eq!(hash_of_kernel, witness.kernel.mast_hash());
+
+        // assert that the mutator set's MMRs in the witness match the kernel
+        // now we can trust all data in these MMRs as well
+        let mutator_set_hash = Hash::hash_pair(
+            &Hash::hash_pair(&witness.aocl.bag_peaks(), &witness.swbfi.bag_peaks()),
+            &Hash::hash_pair(&witness.swbfa_hash, &Digest::default()),
+        );
+        assert_eq!(witness.kernel.mutator_set_hash, mutator_set_hash);
+
+        // How do we trust input UTXOs?
+        // Because they generate removal records, and we can match
+        // those against the removal records that are listed in the
+        // kernel.
+        let items = witness.input_utxos.iter().map(Hash::hash).collect_vec();
+
+        // test that removal records listed in kernel match those derived from input utxos
+        let digests_of_derived_index_sets = items
             .iter()
-            .map(Hash::hash)
-            .collect_vec();
-        let mut digests_of_derived_index_sets = items
-            .iter()
-            .zip(removal_records_integrity_witness.membership_proofs.iter())
+            .zip(witness.membership_proofs.iter())
             .map(|(utxo, msmp)| {
                 AbsoluteIndexSet::new(&get_swbf_indices::<Hash>(
                     &Hash::hash(utxo),
@@ -64,20 +91,20 @@ impl RemovalRecordsIntegrity {
                 .encode()
             })
             .map(|x| Hash::hash_varlen(&x))
-            .collect_vec();
-        digests_of_derived_index_sets.sort();
-        let mut digests_of_claimed_index_sets = removal_records_integrity_witness
+            .collect::<HashSet<_>>();
+        let digests_of_claimed_index_sets = witness
             .kernel
             .inputs
             .iter()
             .map(|input| input.absolute_indices.encode())
             .map(|e| Hash::hash_varlen(&e))
-            .collect_vec();
-        digests_of_claimed_index_sets.sort();
+            .collect::<HashSet<_>>();
         assert_eq!(digests_of_derived_index_sets, digests_of_claimed_index_sets);
+
+        // verify that all input utxos (mutator set items) live in the AOCL
         assert!(items
             .iter()
-            .zip(removal_records_integrity_witness.membership_proofs.iter())
+            .zip(witness.membership_proofs.iter())
             .map(|(item, msmp)| {
                 (
                     commit::<Hash>(
@@ -90,26 +117,12 @@ impl RemovalRecordsIntegrity {
             })
             .all(|(cc, mp)| {
                 mp.verify(
-                    &removal_records_integrity_witness
-                        .mutator_set_accumulator
-                        .kernel
-                        .aocl
-                        .get_peaks(),
+                    &witness.aocl.get_peaks(),
                     &cc.canonical_commitment,
-                    removal_records_integrity_witness
-                        .mutator_set_accumulator
-                        .kernel
-                        .aocl
-                        .count_leaves(),
+                    witness.aocl.count_leaves(),
                 )
                 .0
             }));
-        assert_eq!(
-            removal_records_integrity_witness
-                .mutator_set_accumulator
-                .hash(),
-            removal_records_integrity_witness.kernel.mutator_set_hash
-        );
     }
 }
 
@@ -121,8 +134,18 @@ impl TxValidationLogic for RemovalRecordsIntegrity {
         let removal_records_integrity_witness = RemovalRecordsIntegrityWitness {
             input_utxos: primitive_witness.input_utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
-            mutator_set_accumulator: primitive_witness.mutator_set_accumulator.clone(),
             kernel: tx_kernel.to_owned(),
+            aocl: primitive_witness
+                .mutator_set_accumulator
+                .kernel
+                .aocl
+                .clone(),
+            swbfi: primitive_witness
+                .mutator_set_accumulator
+                .kernel
+                .swbf_inactive
+                .clone(),
+            swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.kernel.swbf_active),
         };
         let witness_data = removal_records_integrity_witness.encode();
         let program = Program::default();

@@ -56,12 +56,7 @@ impl TxValidationLogic for LockScriptHalts {
     fn prove(&mut self) -> Result<()> {
         for supported_claim in self.supported_claims.iter_mut() {
             if let ClaimSupport::SecretWitness(secret_witness, program) = &supported_claim.support {
-                let input_bfes: Vec<BFieldElement> = supported_claim
-                    .claim
-                    .input
-                    .iter()
-                    .map(|x| (*x).into())
-                    .collect();
+                let input_bfes: Vec<BFieldElement> = supported_claim.claim.input.to_vec();
                 debug!(
                 "Running lockscript program:\n{program}\n program digest: {}\n Secret input\n{}\n, Public input\n{}\n",
                 supported_claim.claim.program_digest,
@@ -83,8 +78,8 @@ impl TxValidationLogic for LockScriptHalts {
                 let proof = triton_vm::prove(
                     &StarkParameters::default(),
                     &supported_claim.claim,
-                    &program,
-                    &secret_witness,
+                    program,
+                    secret_witness,
                 );
 
                 let proof = match proof {
@@ -134,12 +129,8 @@ impl TxValidationLogic for LockScriptHalts {
                     );
                 }
                 ClaimSupport::SecretWitness(secretw, program) => {
-                    if triton_vm::vm::run(
-                        program,
-                        claim.input.iter().map(|x| (*x).into()).collect(),
-                        secretw.to_owned(),
-                    )
-                    .is_err()
+                    if triton_vm::vm::run(program, claim.input.to_vec(), secretw.to_owned())
+                        .is_err()
                     {
                         warn!("Execution of program failed:\n{}", program);
                         return false;
