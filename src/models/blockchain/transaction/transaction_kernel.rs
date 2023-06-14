@@ -19,7 +19,7 @@ use crate::{
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PubScriptHashAndInput {
     pub pubscript_hash: Digest,
-    pub input: Vec<BFieldElement>,
+    pub pubscript_input: Vec<BFieldElement>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -29,7 +29,7 @@ pub struct TransactionKernel {
     // `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,
 
-    pub pubscript_hashes_and_inputs: Vec<(Digest, Vec<BFieldElement>)>,
+    pub pubscript_hashes_and_inputs: Vec<PubScriptHashAndInput>,
     pub fee: Amount,
     pub coinbase: Option<Amount>,
 
@@ -101,12 +101,15 @@ pub mod transaction_kernel_tests {
         }
     }
 
-    pub fn random_pubscript_tuple() -> (Digest, Vec<BFieldElement>) {
+    pub fn random_pubscript_struct() -> PubScriptHashAndInput {
         let mut rng = thread_rng();
         let digest: Digest = rng.gen();
         let len = 10 + (rng.next_u32() % 50) as usize;
         let input: Vec<BFieldElement> = random_elements(len);
-        (digest, input)
+        PubScriptHashAndInput {
+            pubscript_hash: digest,
+            pubscript_input: input,
+        }
     }
 
     pub fn random_amount() -> Amount {
@@ -135,7 +138,7 @@ pub mod transaction_kernel_tests {
             .map(|_| random_addition_record())
             .collect_vec();
         let pubscripts = (0..num_pubscripts)
-            .map(|_| random_pubscript_tuple())
+            .map(|_| random_pubscript_struct())
             .collect_vec();
         let fee = random_amount();
         let coinbase = random_option(random_amount());
@@ -151,6 +154,22 @@ pub mod transaction_kernel_tests {
             timestamp,
             mutator_set_hash,
         }
+    }
+
+    #[test]
+    pub fn decode_pubscripthash_and_input() {
+        let pubscript = random_pubscript_struct();
+        let encoded = pubscript.encode();
+        let decoded = *PubScriptHashAndInput::decode(&encoded).unwrap();
+        assert_eq!(pubscript, decoded);
+    }
+
+    #[test]
+    pub fn decode_pubscripthashes_and_inputs() {
+        let pubscripts = vec![random_pubscript_struct(), random_pubscript_struct()];
+        let encoded = pubscripts.encode();
+        let decoded = *Vec::<PubScriptHashAndInput>::decode(&encoded).unwrap();
+        assert_eq!(pubscripts, decoded);
     }
 
     #[test]

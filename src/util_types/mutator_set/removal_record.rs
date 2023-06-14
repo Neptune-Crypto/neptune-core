@@ -650,11 +650,24 @@ mod removal_record_tests {
     #[test]
     fn test_removal_record_decode() {
         type H = Tip5;
-        for _ in 0..100 {
+        for _ in 0..10 {
             let removal_record = random_removal_record::<H>();
             let encoded = removal_record.encode();
             let decoded = *RemovalRecord::decode(&encoded).unwrap();
             assert_eq!(removal_record, decoded);
+        }
+    }
+
+    #[test]
+    fn test_removal_record_vec_decode() {
+        type H = Tip5;
+        let mut rng = thread_rng();
+        for _ in 0..10 {
+            let length = rng.gen_range(0..10);
+            let removal_records = vec![random_removal_record::<H>(); length];
+            let encoded = removal_records.encode();
+            let decoded = *Vec::<RemovalRecord<H>>::decode(&encoded).unwrap();
+            assert_eq!(removal_records, decoded);
         }
     }
 

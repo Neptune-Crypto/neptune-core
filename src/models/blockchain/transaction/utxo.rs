@@ -90,9 +90,25 @@ impl StdHash for Utxo {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct LockScript {
     pub program: Program,
+}
+
+impl BFieldCodec for LockScript {
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.program.encode()
+    }
+
+    fn decode(bytes: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        Ok(Box::new(Self {
+            program: *Program::decode(bytes)?,
+        }))
+    }
+
+    fn static_length() -> Option<usize> {
+        None
+    }
 }
 
 impl From<Vec<LabelledInstruction>> for LockScript {
@@ -127,9 +143,25 @@ impl LockScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct TypeScript {
     pub program: Program,
+}
+
+impl BFieldCodec for TypeScript {
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.program.encode()
+    }
+
+    fn decode(bytes: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        Ok(Box::new(Self {
+            program: *Program::decode(bytes)?,
+        }))
+    }
+
+    fn static_length() -> Option<usize> {
+        None
+    }
 }
 
 impl From<Vec<LabelledInstruction>> for TypeScript {

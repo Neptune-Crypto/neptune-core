@@ -165,9 +165,9 @@ impl SpendingKey {
             .kernel
             .pubscript_hashes_and_inputs
             .iter()
-            .filter(|(_psh, psi)| pubscript_input_is_marked(psi))
-            .filter(|(_psh, psi)| {
-                let receiver_id = receiver_identifier_from_pubscript_input(psi);
+            .filter(|psd| pubscript_input_is_marked(&psd.pubscript_input))
+            .filter(|psd| {
+                let receiver_id = receiver_identifier_from_pubscript_input(&psd.pubscript_input);
                 match receiver_id {
                     Ok(recid) => recid == self.receiver_identifier,
                     Err(_) => false,
@@ -175,7 +175,7 @@ impl SpendingKey {
             })
         {
             // decrypt it to obtain the utxo and sender randomness
-            let ciphertext = ciphertext_from_pubscript_input(&matching_script.1);
+            let ciphertext = ciphertext_from_pubscript_input(&matching_script.pubscript_input);
             let decryption_result = match ciphertext {
                 Ok(ctxt) => self.decrypt(&ctxt),
                 _ => {
@@ -463,7 +463,7 @@ mod test_generation_addresses {
         config_models::network::Network,
         models::blockchain::{
             shared::Hash,
-            transaction::{amount::Amount, utxo::Utxo},
+            transaction::{amount::Amount, transaction_kernel::PubScriptHashAndInput, utxo::Utxo},
         },
         tests::shared::make_mock_transaction,
     };
@@ -601,7 +601,10 @@ mod test_generation_addresses {
         mock_tx
             .kernel
             .pubscript_hashes_and_inputs
-            .push((Hash::hash(&pubscript), pubscript_input));
+            .push(PubScriptHashAndInput {
+                pubscript_hash: Hash::hash(&pubscript),
+                pubscript_input,
+            });
 
         let announced_txs = spending_key.scan_for_announced_utxos(&mock_tx);
         assert_eq!(1, announced_txs.len());

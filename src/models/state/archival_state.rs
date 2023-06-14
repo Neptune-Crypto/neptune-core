@@ -875,6 +875,12 @@ mod archival_state_tests {
             let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
 
+            *genesis_receiver_global_state
+                .chain
+                .light_state
+                .latest_block
+                .lock()
+                .await = mock_block_1.clone();
             genesis_receiver_global_state
                 .chain
                 .archival_state

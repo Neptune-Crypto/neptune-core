@@ -42,6 +42,7 @@ use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
+use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::ValidityLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
@@ -603,7 +604,10 @@ pub fn make_mock_transaction_with_generation_key(
 
     let pubscript_hashes_and_inputs = receiver_data
         .iter()
-        .map(|x| (Hash::hash(&x.pubscript), x.pubscript_input.clone()))
+        .map(|x| PubScriptHashAndInput {
+            pubscript_hash: Hash::hash(&x.pubscript),
+            pubscript_input: x.pubscript_input.clone(),
+        })
         .collect_vec();
     let timestamp: u64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)

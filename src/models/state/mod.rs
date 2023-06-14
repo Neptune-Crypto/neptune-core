@@ -18,7 +18,9 @@ use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
-use super::blockchain::transaction::transaction_kernel::TransactionKernel;
+use super::blockchain::transaction::transaction_kernel::{
+    PubScriptHashAndInput, TransactionKernel,
+};
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
 use super::blockchain::transaction::validity::ValidityLogic;
 use super::blockchain::transaction::{amount::Amount, Transaction};
@@ -181,7 +183,10 @@ impl GlobalState {
 
         let pubscript_hashes_and_inputs = receiver_data
             .iter()
-            .map(|x| (Hash::hash(&x.pubscript), x.pubscript_input.clone()))
+            .map(|x| PubScriptHashAndInput {
+                pubscript_hash: Hash::hash(&x.pubscript),
+                pubscript_input: x.pubscript_input.clone(),
+            })
             .collect_vec();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)

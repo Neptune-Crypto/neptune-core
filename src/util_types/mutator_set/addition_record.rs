@@ -3,9 +3,26 @@ use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize)]
 pub struct AdditionRecord {
     pub canonical_commitment: Digest,
+}
+
+// Due to a bug in the derival of `BFieldCodec`, we need to implement this manually.
+impl BFieldCodec for AdditionRecord {
+    fn decode(sequence: &[triton_vm::BFieldElement]) -> anyhow::Result<Box<Self>> {
+        Ok(Box::new(Self {
+            canonical_commitment: *Digest::decode(sequence)?,
+        }))
+    }
+
+    fn encode(&self) -> Vec<triton_vm::BFieldElement> {
+        self.canonical_commitment.encode()
+    }
+
+    fn static_length() -> Option<usize> {
+        Digest::static_length()
+    }
 }
 
 impl AdditionRecord {
@@ -20,6 +37,7 @@ impl AdditionRecord {
 mod addition_record_tests {
     use crate::util_types::mutator_set::mutator_set_trait::commit;
 
+    use rand::random;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -89,5 +107,31 @@ mod addition_record_tests {
             addition_record.canonical_commitment,
             s_back.canonical_commitment
         );
+    }
+
+    #[test]
+    fn bfieldcodec_test() {
+        let addition_record = AdditionRecord {
+            canonical_commitment: random(),
+        };
+
+        let encoded = addition_record.encode();
+        let decoded = *AdditionRecord::decode(&encoded).unwrap();
+        assert_eq!(addition_record, decoded);
+    }
+
+    #[test]
+    fn bfieldcodec_test_on_vecs() {
+        for i in 0..5 {
+            let addition_records = vec![
+                AdditionRecord {
+                    canonical_commitment: random(),
+                };
+                i
+            ];
+            let encoded = addition_records.encode();
+            let decoded = *Vec::<AdditionRecord>::decode(&encoded).unwrap();
+            assert_eq!(addition_records, decoded);
+        }
     }
 }

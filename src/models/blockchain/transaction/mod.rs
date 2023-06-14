@@ -32,15 +32,31 @@ use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
 use self::amount::Amount;
 use self::native_coin::native_coin_program;
-use self::transaction_kernel::TransactionKernel;
+use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
 use self::utxo::{LockScript, Utxo};
 use self::validity::ValidityLogic;
 use super::block::Block;
 use super::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct PubScript {
     pub program: Program,
+}
+
+impl BFieldCodec for PubScript {
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.program.encode()
+    }
+
+    fn decode(bytes: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
+        Ok(Box::new(Self {
+            program: *Program::decode(bytes)?,
+        }))
+    }
+
+    fn static_length() -> Option<usize> {
+        None
+    }
 }
 
 impl Default for PubScript {
@@ -575,7 +591,13 @@ impl Transaction {
         }
 
         // verify pubscripts
-        for ((pubscript_hash, pubscript_input), pubscript) in self
+        for (
+            PubScriptHashAndInput {
+                pubscript_hash,
+                pubscript_input,
+            },
+            pubscript,
+        ) in self
             .kernel
             .pubscript_hashes_and_inputs
             .iter()

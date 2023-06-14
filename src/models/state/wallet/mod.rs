@@ -635,7 +635,8 @@ mod wallet_tests {
         (next_block, _, _) =
             make_mock_block(&next_block.clone(), None, own_spending_key.to_address());
         assert_eq!(Into::<BlockHeight>::into(23u64), next_block.header.height);
-        let msa_tip = next_block.body.next_mutator_set_accumulator.clone();
+        let msa_tip_previous = next_block.body.previous_mutator_set_accumulator.clone();
+
         let receiver_data = vec![UtxoReceiverData {
             utxo: Utxo {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
@@ -654,7 +655,7 @@ mod wallet_tests {
             input_utxos_mps_keys,
             receiver_data,
             Amount::zero(),
-            msa_tip,
+            msa_tip_previous,
         );
         next_block.accumulate_transaction(tx);
 

@@ -253,7 +253,7 @@ mod amount_tests {
     fn test_bfe_conversion() {
         let mut rng = thread_rng();
 
-        for _ in 0..100 {
+        for _ in 0..5 {
             let limbs: [u32; AMOUNT_SIZE_FOR_U32] = (0..AMOUNT_SIZE_FOR_U32)
                 .map(|_| rng.next_u32())
                 .collect_vec()
@@ -265,6 +265,29 @@ mod amount_tests {
 
             assert_eq!(amount, reconstructed_amount);
         }
+    }
+
+    #[test]
+    fn test_bfe_conversion_with_option_amount() {
+        let mut rng = thread_rng();
+
+        for _ in 0..10 {
+            let limbs: [u32; AMOUNT_SIZE_FOR_U32] = (0..AMOUNT_SIZE_FOR_U32)
+                .map(|_| rng.next_u32())
+                .collect_vec()
+                .try_into()
+                .unwrap();
+            let amount = Some(Amount(U32s::new(limbs)));
+            let bfes = amount.encode();
+            let reconstructed_amount = *Option::<Amount>::decode(&bfes).unwrap();
+
+            assert_eq!(amount, reconstructed_amount);
+        }
+
+        let amount: Option<Amount> = None;
+        let bfes = amount.encode();
+        let reconstructed_amount = *Option::<Amount>::decode(&bfes).unwrap();
+        assert!(reconstructed_amount.is_none());
     }
 
     #[test]

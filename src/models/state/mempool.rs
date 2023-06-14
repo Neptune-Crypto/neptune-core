@@ -496,7 +496,7 @@ mod tests {
                 block::block_height::BlockHeight,
                 transaction::{amount::Amount, utxo::Utxo, PubScript, Transaction},
             },
-            shared::SIZE_1MB_IN_BYTES,
+            shared::SIZE_20MB_IN_BYTES,
             state::{
                 wallet::{generate_secret_key, utxo_notification_pool::UtxoNotifier, WalletSecret},
                 UtxoReceiverData,
@@ -567,7 +567,7 @@ mod tests {
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
-        for curr_transaction in mempool.get_transactions_for_block(SIZE_1MB_IN_BYTES) {
+        for curr_transaction in mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES) {
             let curr_fee_density = curr_transaction.fee_density();
             assert!(curr_fee_density <= prev_fee_density);
             prev_fee_density = curr_fee_density;
