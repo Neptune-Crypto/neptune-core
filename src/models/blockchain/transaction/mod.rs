@@ -247,9 +247,10 @@ impl Transaction {
         }
 
         // Sanity check of block validity
+        let block_msa_hash = block.body.next_mutator_set_accumulator.clone().hash();
         assert_eq!(
             msa_state.hash(),
-            block.body.next_mutator_set_accumulator.clone().hash(),
+            block_msa_hash,
             "Internal MSA state must match that from block"
         );
 
@@ -262,6 +263,9 @@ impl Transaction {
         {
             *tx_input = new_rr.to_owned();
         }
+
+        // Update the claimed mutator set hash
+        self.kernel.mutator_set_hash = block_msa_hash;
 
         Ok(())
     }

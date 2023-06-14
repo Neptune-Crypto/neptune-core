@@ -14,6 +14,7 @@
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
+use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
 use bytesize::ByteSize;
 use get_size::GetSize;
@@ -713,8 +714,8 @@ mod tests {
             .await?;
 
         // Add this transaction to the mempool
-        let m = Mempool::new(ByteSize::gb(1));
-        m.insert(&tx_by_preminer);
+        let mempool = Mempool::new(ByteSize::gb(1));
+        mempool.insert(&tx_by_preminer);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
         // included by the miner. This transaction is inserted into the mempool, but since it's
@@ -735,21 +736,21 @@ mod tests {
             .create_transaction(output_utxo_data_by_miner, 1.into())
             .await
             .unwrap();
-        m.insert(&tx_by_other_original);
+        mempool.insert(&tx_by_other_original);
 
         // Create next block which includes preminer's transaction
         let (mut block_2, _, _) = make_mock_block(&block_1, None, premine_receiver_address);
         block_2.accumulate_transaction(tx_by_preminer);
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
-        assert_eq!(2, m.len());
-        m.update_with_block(&block_2, &mut m.internal.write().unwrap());
-        assert_eq!(1, m.len());
+        assert_eq!(2, mempool.len());
+        mempool.update_with_block(&block_2, &mut mempool.internal.write().unwrap());
+        assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction still contains
         // valid mutator set data
         let mut tx_by_other_updated: Transaction =
-            m.get_transactions_for_block(usize::MAX)[0].clone();
+            mempool.get_transactions_for_block(usize::MAX)[0].clone();
 
         let (block_3_with_no_input, _, _) =
             make_mock_block(&block_2, None, premine_receiver_address);
@@ -788,22 +789,25 @@ mod tests {
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
             let (next_block, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
-            m.update_with_block(&next_block, &mut m.internal.write().unwrap());
+            mempool.update_with_block(&next_block, &mut mempool.internal.write().unwrap());
             previous_block = next_block;
         }
 
         let (mut block_14, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
         assert_eq!(Into::<BlockHeight>::into(14), block_14.header.height);
-        tx_by_other_updated = m.get_transactions_for_block(usize::MAX)[0].clone();
+        tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
         block_14.accumulate_transaction(tx_by_other_updated);
         assert!(
             block_14.is_valid(&previous_block),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        m.update_with_block(&block_14, &mut m.internal.write().unwrap());
+        mempool.update_with_block(&block_14, &mut mempool.internal.write().unwrap());
 
-        assert!(m.is_empty(), "Mempool must be empty after 2nd tx was mined");
+        assert!(
+            mempool.is_empty(),
+            "Mempool must be empty after 2nd tx was mined"
+        );
 
         Ok(())
     }
