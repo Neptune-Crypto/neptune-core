@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use itertools::Itertools;
 use rusty_leveldb::{WriteBatch, DB};
 use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, tip5::Digest},
+    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher,
         mmr::archival_mmr::ArchivalMmr,
@@ -126,7 +126,7 @@ type AmsMmrStorage = Arc<Mutex<DbtVec<RustyKey, RustyMSValue, u64, Digest>>>;
 type AmsChunkStorage = Arc<Mutex<DbtVec<RustyKey, RustyMSValue, u64, Chunk>>>;
 pub struct RustyArchivalMutatorSet<H>
 where
-    H: AlgebraicHasher,
+    H: AlgebraicHasher + BFieldCodec,
 {
     pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
     schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
@@ -135,7 +135,7 @@ where
     sync_label: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Digest>>>,
 }
 
-impl<H: AlgebraicHasher> RustyArchivalMutatorSet<H> {
+impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
         let db_pointer = Arc::new(Mutex::new(db));
         let reader = RamsReader {
@@ -177,7 +177,9 @@ impl<H: AlgebraicHasher> RustyArchivalMutatorSet<H> {
     }
 }
 
-impl<H: AlgebraicHasher> StorageWriter<RustyKey, RustyMSValue> for RustyArchivalMutatorSet<H> {
+impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
+    for RustyArchivalMutatorSet<H>
+{
     fn persist(&mut self) {
         let mut write_batch = WriteBatch::new();
 

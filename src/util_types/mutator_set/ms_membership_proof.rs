@@ -1,4 +1,3 @@
-use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -6,8 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::bfield_codec::{decode_field_length_prepended, BFieldCodec};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -42,7 +40,7 @@ pub enum MembershipProofError {
 }
 
 // In order to store this structure in the database, it needs to be serializable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
@@ -50,7 +48,7 @@ pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub target_chunks: ChunkDictionary<H>,
 }
 
-impl<H: AlgebraicHasher> MsMembershipProof<H> {
+impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
     /// Compute the indices that will be added to the SWBF if this item is removed.
     pub fn compute_indices(&self, item: &Digest) -> AbsoluteIndexSet {
         AbsoluteIndexSet::new(&get_swbf_indices::<H>(
@@ -503,48 +501,6 @@ impl<H: AlgebraicHasher> MsMembershipProof<H> {
             );
 
         Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
-    }
-}
-
-impl<H: AlgebraicHasher> BFieldCodec for MsMembershipProof<H> {
-    fn decode(
-        sequence: &[twenty_first::shared_math::b_field_element::BFieldElement],
-    ) -> anyhow::Result<Box<Self>> {
-        let (sender_randomness, sequence) = decode_field_length_prepended(sequence)?;
-        let (receiver_preimage, sequence) = decode_field_length_prepended(&sequence)?;
-        let (auth_path_aocl, sequence) = decode_field_length_prepended(&sequence)?;
-        let (target_chunks, sequence) = decode_field_length_prepended(&sequence)?;
-        if !sequence.is_empty() {
-            bail!("Cannot decode sequence of BFieldElements as MsMembershipProof: sequence at end must be empty!");
-        }
-        Ok(Box::new(MsMembershipProof {
-            sender_randomness,
-            receiver_preimage,
-            auth_path_aocl,
-            target_chunks,
-        }))
-    }
-
-    fn encode(&self) -> Vec<twenty_first::shared_math::b_field_element::BFieldElement> {
-        let sender_randomness_encoded = self.sender_randomness.encode();
-        let sender_randomness_len = BFieldElement::new(sender_randomness_encoded.len() as u64);
-        let receiver_preimage_encoded = self.receiver_preimage.encode();
-        let receiver_preimage_len = BFieldElement::new(receiver_preimage_encoded.len() as u64);
-        let auth_path_aocl_encoded = self.auth_path_aocl.encode();
-        let auth_path_aocl_len = BFieldElement::new(auth_path_aocl_encoded.len() as u64);
-        let target_chunks_encoded = self.target_chunks.encode();
-        let target_chunks_len = BFieldElement::new(target_chunks_encoded.len() as u64);
-        [
-            vec![sender_randomness_len],
-            sender_randomness_encoded,
-            vec![receiver_preimage_len],
-            receiver_preimage_encoded,
-            vec![auth_path_aocl_len],
-            auth_path_aocl_encoded,
-            vec![target_chunks_len],
-            target_chunks_encoded,
-        ]
-        .concat()
     }
 }
 

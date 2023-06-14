@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::storage_vec::StorageVec;
@@ -22,7 +23,7 @@ use super::shared::CHUNK_SIZE;
 
 pub struct ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
 where
-    H: AlgebraicHasher,
+    H: AlgebraicHasher + BFieldCodec,
     MmrStorage: StorageVec<Digest>,
     ChunkStorage: StorageVec<Chunk>,
 {
@@ -32,7 +33,7 @@ where
 
 impl<H, MmrStorage, ChunkStorage> MutatorSet<H> for ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
 where
-    H: AlgebraicHasher,
+    H: AlgebraicHasher + BFieldCodec,
     MmrStorage: StorageVec<Digest>,
     ChunkStorage: StorageVec<Chunk>,
 {
@@ -108,7 +109,7 @@ where
 /// Methods that only work when implementing using archival MMRs as the underlying two MMRs
 impl<H, MmrStorage, ChunkStorage> ArchivalMutatorSet<H, MmrStorage, ChunkStorage>
 where
-    H: AlgebraicHasher,
+    H: AlgebraicHasher + BFieldCodec,
     MmrStorage: StorageVec<Digest>,
     ChunkStorage: StorageVec<Chunk>,
 {
@@ -662,7 +663,7 @@ mod archival_mutator_set_tests {
     #[should_panic(expected = "Decremented integer is already zero.")]
     #[test]
     fn revert_remove_from_active_bloom_filter_panic() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
@@ -680,7 +681,7 @@ mod archival_mutator_set_tests {
     #[should_panic(expected = "Attempted to remove index that was not present in chunk.")]
     #[test]
     fn revert_remove_invalid_panic() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
@@ -705,7 +706,7 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_mutator_set_revert_remove_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
 
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
@@ -750,7 +751,7 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_set_batch_remove_simple_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
 
@@ -797,7 +798,7 @@ mod archival_mutator_set_tests {
 
     #[test]
     fn archival_set_batch_remove_dynamic_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
         let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
             empty_rustyleveldbvec_ams();
 
@@ -869,7 +870,7 @@ mod archival_mutator_set_tests {
     }
 
     fn prepare_seeded_prng_addition<
-        H: AlgebraicHasher,
+        H: AlgebraicHasher + BFieldCodec,
         MmrStorage: StorageVec<Digest>,
         ChunkStorage: StorageVec<Chunk>,
     >(
@@ -888,7 +889,7 @@ mod archival_mutator_set_tests {
     }
 
     fn prepare_random_addition<
-        H: AlgebraicHasher,
+        H: AlgebraicHasher + BFieldCodec,
         MmrStorage: StorageVec<Digest>,
         ChunkStorage: StorageVec<Chunk>,
     >(

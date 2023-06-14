@@ -7,9 +7,7 @@ use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use triton_opcodes::instruction::LabelledInstruction;
 use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::{halt, read_io};
-use twenty_first::shared_math::bfield_codec::{
-    decode_field_length_prepended, decode_vec_length_prepended, encode_vec, BFieldCodec,
-};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 
 use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
@@ -17,48 +15,14 @@ use super::{native_coin, Amount};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
 
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
 }
 
-impl BFieldCodec for Coin {
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if sequence.len() < DIGEST_LENGTH {
-            bail!("Cannot decode coin: could not parse type script hash.");
-        }
-
-        let digest = Digest::decode(&sequence[0..DIGEST_LENGTH])?;
-
-        let state_length = match sequence.get(DIGEST_LENGTH) {
-            Some(bfe) => bfe.value() as usize,
-            None => bail!("Cannot decode coin: state length not present."),
-        };
-
-        let state = *Vec::<BFieldElement>::decode(
-            &sequence[DIGEST_LENGTH + 1..DIGEST_LENGTH + 1 + state_length],
-        )?;
-
-        Ok(Box::new(Self {
-            type_script_hash: *digest,
-            state,
-        }))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        let state_encoded = self.state.encode();
-        vec![
-            self.type_script_hash.encode(),
-            vec![BFieldElement::new(state_encoded.len() as u64)],
-            state_encoded,
-        ]
-        .concat()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
@@ -126,37 +90,7 @@ impl StdHash for Utxo {
     }
 }
 
-impl BFieldCodec for Utxo {
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        let (lock_script_hash, sequence) = decode_field_length_prepended(sequence)?;
-        let (coins, sequence) = decode_vec_length_prepended(&sequence)?;
-
-        if !sequence.is_empty() {
-            bail!("Cannot decode sequence of BFieldElements to UTXO: sequence should be empty afterwards");
-        }
-
-        Ok(Box::new(Self {
-            lock_script_hash,
-            coins,
-        }))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        let lock_script_hash_encoded = self.lock_script_hash.encode();
-        let lock_script_hash_len = BFieldElement::new(lock_script_hash_encoded.len() as u64);
-        let coins_encoded = encode_vec(&self.coins);
-        let coins_len = BFieldElement::new(coins_encoded.len() as u64);
-        [
-            vec![lock_script_hash_len],
-            lock_script_hash_encoded,
-            vec![coins_len],
-            coins_encoded,
-        ]
-        .concat()
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScript {
     pub program: Program,
 }
@@ -177,16 +111,6 @@ impl From<&[LabelledInstruction]> for LockScript {
     }
 }
 
-impl BFieldCodec for LockScript {
-    fn decode(_sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        panic!() // should not get here
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.program.encode()
-    }
-}
-
 impl LockScript {
     pub fn new(program: Program) -> Self {
         Self { program }
@@ -203,19 +127,9 @@ impl LockScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScript {
     pub program: Program,
-}
-
-impl BFieldCodec for TypeScript {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.program.encode()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        Ok(Box::new(TypeScript::new(*Program::decode(sequence)?)))
-    }
 }
 
 impl From<Vec<LabelledInstruction>> for TypeScript {

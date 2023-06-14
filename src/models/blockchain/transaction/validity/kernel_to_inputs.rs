@@ -1,8 +1,7 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use twenty_first::{
-    shared_math::bfield_codec::{encode_vec, BFieldCodec},
-    util_types::algebraic_hasher::AlgebraicHasher,
+    shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
 
 use crate::models::blockchain::shared::Hash;
@@ -30,17 +29,15 @@ impl TxValidationLogic for KernelToInputs {
     ) -> Self {
         let program = triton_opcodes::program::Program::default(); // TODO: implement!
         let program_digest = Hash::hash_varlen(&program.encode());
-        let padded_height = Default::default(); // TODO: Should be removed upstream
         let empty_string = vec![];
         let input = tx_kernel.mast_hash();
-        let output = encode_vec(&primitive_witness.input_utxos);
+        let output = primitive_witness.input_utxos.encode();
         Self {
             supported_claim: SupportedClaim {
                 claim: triton_vm::Claim {
                     program_digest,
-                    input: input.values().map(|x| x.value()).to_vec(),
-                    output: output.iter().map(|x| x.value()).collect(),
-                    padded_height,
+                    input: input.values().to_vec(),
+                    output,
                 },
                 support: ClaimSupport::SecretWitness(empty_string, program),
             },

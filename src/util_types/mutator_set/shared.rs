@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -51,7 +52,7 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 /// This function is factored out because it is shared by `update_from_remove`
 /// and `batch_update_from_remove`.
 #[allow(clippy::type_complexity)]
-pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
+pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher + BFieldCodec>(
     removal_record: &RemovalRecord<H>,
     chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
 ) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, Digest)>) {
@@ -148,7 +149,9 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher>(
 /// This function is factored out because it is shared by
 /// `revert_update_from_remove` and `batch_revert_update_from_remove`.
 #[allow(clippy::type_complexity)]
-pub fn prepare_authenticated_batch_modification_for_removal_record_reversion<H: AlgebraicHasher>(
+pub fn prepare_authenticated_batch_modification_for_removal_record_reversion<
+    H: AlgebraicHasher + BFieldCodec,
+>(
     removal_record: &RemovalRecord<H>,
     chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
 ) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, Digest)>) {

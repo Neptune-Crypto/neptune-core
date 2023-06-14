@@ -1,12 +1,11 @@
-use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
-use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::shared::CHUNK_SIZE;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct Chunk {
     pub relative_indices: Vec<u32>,
 }
@@ -104,24 +103,6 @@ impl Chunk {
         Chunk {
             relative_indices: sl.to_vec(),
         }
-    }
-}
-
-impl BFieldCodec for Chunk {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.relative_indices
-            .iter()
-            .flat_map(|&val| val.encode())
-            .collect()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if !sequence.iter().all(|b| b.value() < u32::MAX as u64) {
-            bail!("Could not decode sequence of BFieldElements as Chunk because some BFieldElements are too large.");
-        }
-        Ok(Box::new(Chunk {
-            relative_indices: sequence.iter().map(|b| b.value() as u32).collect(),
-        }))
     }
 }
 

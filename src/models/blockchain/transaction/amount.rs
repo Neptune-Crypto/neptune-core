@@ -47,7 +47,7 @@ pub enum Sign {
 
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec)]
 pub struct Amount(pub U32s<AMOUNT_SIZE_FOR_U32>);
 
 impl GetSize for Amount {
@@ -186,18 +186,6 @@ impl FromStr for Amount {
         } else {
             bail!("Cannot parse string as amount.");
         }
-    }
-}
-
-impl BFieldCodec for Amount {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.0.encode()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        Ok(Box::new(Self(*U32s::<AMOUNT_SIZE_FOR_U32>::decode(
-            sequence,
-        )?)))
     }
 }
 

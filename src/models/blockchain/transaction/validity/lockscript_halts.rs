@@ -34,7 +34,6 @@ impl TxValidationLogic for LockScriptHalts {
             .map(|(lockscr, spendkey)| (lockscr, Hash::hash_varlen(&lockscr.encode()), spendkey));
         let tx_kernel_mast_hash = tx_kernel.mast_hash();
         let empty_string = vec![];
-        let padded_height = Default::default(); // TODO: Should be removed upstream
 
         Self {
             supported_claims: program_and_program_digests_and_spending_keys
@@ -42,9 +41,8 @@ impl TxValidationLogic for LockScriptHalts {
                 .map(|(lockscript, lockscript_digest, spendkey)| SupportedClaim {
                     claim: triton_vm::Claim {
                         program_digest: lockscript_digest,
-                        input: tx_kernel_mast_hash.values().map(|x| x.value()).to_vec(),
+                        input: tx_kernel_mast_hash.values().to_vec(),
                         output: empty_string.clone(),
-                        padded_height,
                     },
                     support: ClaimSupport::SecretWitness(
                         spendkey.to_owned(),
@@ -82,22 +80,19 @@ impl TxValidationLogic for LockScriptHalts {
 
                 info!("Lockscript run suceeded. Now proving...");
                 let tick = SystemTime::now();
-                let (used_stark_parameters, claim, proof) = triton_vm::prove(
-                    &program.to_string(),
-                    &supported_claim.claim.input,
-                    &secret_witness.iter().map(|b| b.value()).collect_vec(),
+                let proof = triton_vm::prove(
+                    &StarkParameters::default(),
+                    &supported_claim.claim,
+                    &program,
+                    &secret_witness,
                 );
 
-                // Set from proof. Can be removed once `padded_height` is removed from claim
-                // in upstream triton-vm.
-                supported_claim.claim = claim;
-
-                // Sanity check
-                assert_eq!(
-                    StarkParameters::default(),
-                    used_stark_parameters,
-                    "Used STARK parameters must be default"
-                );
+                let proof = match proof {
+                    Ok(proof) => proof,
+                    Err(e) => {
+                        bail!("Proof generation failed: {}", e);
+                    }
+                };
 
                 info!(
                     "Done proving. Elapsed time: {:?}",
@@ -116,9 +111,8 @@ impl TxValidationLogic for LockScriptHalts {
         for elem in self.supported_claims.iter() {
             let claim = triton_vm::Claim {
                 program_digest: elem.claim.program_digest,
-                input: tx_kernel.mast_hash().values().map(|x| x.value()).to_vec(),
+                input: tx_kernel.mast_hash().encode(),
                 output: vec![],
-                padded_height: elem.claim.padded_height,
             };
             match &elem.support {
                 ClaimSupport::Proof(proof) => {
@@ -128,7 +122,9 @@ impl TxValidationLogic for LockScriptHalts {
                     );
                     debug!("claim is:\n {:?}", claim);
                     let tick = SystemTime::now();
-                    if !triton_vm::verify(&triton_vm::StarkParameters::default(), &claim, proof) {
+
+                    // TODO: Don't we need to verify that the claim is also contained in the proof here?
+                    if !triton_vm::verify(&StarkParameters::default(), proof) {
                         warn!("Verification of lockscript failed.");
                         return false;
                     }

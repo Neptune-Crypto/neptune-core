@@ -1,36 +1,34 @@
-use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::ops::Range;
-use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 
-#[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize)]
-pub struct ActiveWindow<H: AlgebraicHasher> {
+#[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
+pub struct ActiveWindow<H: AlgebraicHasher + BFieldCodec> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     pub sbf: Vec<u32>,
     _hasher: PhantomData<H>,
 }
 
-impl<H: AlgebraicHasher> PartialEq for ActiveWindow<H> {
+impl<H: AlgebraicHasher + BFieldCodec> PartialEq for ActiveWindow<H> {
     fn eq(&self, other: &Self) -> bool {
         self.sbf == other.sbf
     }
 }
 
-impl<H: AlgebraicHasher> Default for ActiveWindow<H> {
+impl<H: AlgebraicHasher + BFieldCodec> Default for ActiveWindow<H> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<H: AlgebraicHasher> ActiveWindow<H> {
+impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
     pub fn new() -> Self {
         Self {
             sbf: Vec::new(),
@@ -178,41 +176,6 @@ impl<H: AlgebraicHasher> ActiveWindow<H> {
     }
 }
 
-impl<H: AlgebraicHasher> BFieldCodec for ActiveWindow<H> {
-    fn encode(&self) -> Vec<BFieldElement> {
-        [
-            vec![BFieldElement::new(self.sbf.len() as u64)],
-            self.sbf.iter().flat_map(|i| i.encode()).collect(),
-        ]
-        .concat()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if sequence.is_empty() {
-            bail!("Could not decode empty sequence of BFieldElements as active window.");
-        }
-        let num_indices = sequence[0].value() as usize;
-        if sequence.len() != 1 + num_indices {
-            bail!("Could not decode sequence of BFieldElements as active window because of length prepending mismatch.");
-        }
-        if !sequence
-            .iter()
-            .skip(1)
-            .all(|b| b.value() <= u32::MAX as u64)
-        {
-            bail!("Could not decode sequence of BFieldElements as active window because some are too large.");
-        }
-        Ok(Box::new(Self {
-            sbf: sequence
-                .iter()
-                .skip(1)
-                .map(|b| b.value() as u32)
-                .collect_vec(),
-            _hasher: PhantomData,
-        }))
-    }
-}
-
 #[cfg(test)]
 mod active_window_tests {
 
@@ -220,7 +183,7 @@ mod active_window_tests {
     use rand::{thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
-    impl<H: AlgebraicHasher> ActiveWindow<H> {
+    impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
         fn new_from(sbf: Vec<u32>) -> Self {
             Self {
                 sbf,
@@ -232,7 +195,7 @@ mod active_window_tests {
     #[test]
     fn aw_is_reversible_bloom_filter() {
         let sbf = Vec::<u32>::new();
-        let mut aw = ActiveWindow::<blake3::Hasher>::new_from(sbf);
+        let mut aw = ActiveWindow::<Tip5>::new_from(sbf);
 
         // Insert an index twice, remove it once and the verify that
         // it is still there
@@ -251,7 +214,7 @@ mod active_window_tests {
     #[test]
     fn insert_remove_probe_indices_pbt() {
         let sbf = Vec::<u32>::new();
-        let mut aw = ActiveWindow::<blake3::Hasher>::new_from(sbf);
+        let mut aw = ActiveWindow::<Tip5>::new_from(sbf);
         for i in 0..100 {
             assert!(!aw.contains(i as u32));
         }
@@ -276,7 +239,7 @@ mod active_window_tests {
 
     #[test]
     fn test_slide_window() {
-        let mut aw = ActiveWindow::<blake3::Hasher>::new();
+        let mut aw = ActiveWindow::<Tip5>::new();
 
         let num_insertions = 100;
         let mut rng = thread_rng();
@@ -292,7 +255,7 @@ mod active_window_tests {
 
     #[test]
     fn test_slide_window_back() {
-        type Hasher = blake3::Hasher;
+        type Hasher = Tip5;
 
         let mut active_window = ActiveWindow::<Hasher>::new();
         let num_insertions = 1000;
@@ -312,7 +275,7 @@ mod active_window_tests {
 
     #[test]
     fn test_slide_window_and_back() {
-        type Hasher = blake3::Hasher;
+        type Hasher = Tip5;
 
         let mut active_window = ActiveWindow::<Hasher>::new();
         let num_insertions = 1000;
@@ -335,7 +298,7 @@ mod active_window_tests {
         );
     }
 
-    fn hash_unequal<H: AlgebraicHasher>() {
+    fn hash_unequal_prop<H: AlgebraicHasher + BFieldCodec>() {
         H::hash(&ActiveWindow::<H>::new());
 
         let mut aw_1 = ActiveWindow::<H>::new();
@@ -350,8 +313,7 @@ mod active_window_tests {
         // This is just a test to ensure that the hashing of the active part of the SWBF
         // works in the runtime, for relevant hash functions. It also tests that different
         // indices being inserted results in different digests.
-        hash_unequal::<blake3::Hasher>();
-        hash_unequal::<Tip5>();
+        hash_unequal_prop::<Tip5>();
     }
 
     #[test]

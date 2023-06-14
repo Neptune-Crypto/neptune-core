@@ -1,4 +1,3 @@
-use anyhow::bail;
 use get_size::GetSize;
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
@@ -8,7 +7,6 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
-use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -23,7 +21,7 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, BFieldCodec)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 
 impl GetSize for AbsoluteIndexSet {
@@ -37,26 +35,6 @@ impl GetSize for AbsoluteIndexSet {
 
     fn get_size(&self) -> usize {
         Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
-}
-
-impl BFieldCodec for AbsoluteIndexSet {
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if sequence.len() < 4 * NUM_TRIALS as usize {
-            bail!("Cannot decode sequence of BFieldElements as AbsoluteIndexSet because sequence is too short.");
-        }
-        let mut absolute_indices = [0u128; NUM_TRIALS as usize];
-        for i in 0..NUM_TRIALS as usize {
-            let subsequence = &sequence[4 * i..4 * (i + 1)];
-            let index = *u128::decode(subsequence)?;
-            absolute_indices[i] = index;
-        }
-
-        Ok(Box::new(AbsoluteIndexSet(absolute_indices)))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.0.iter().flat_map(|bi| bi.encode()).collect()
     }
 }
 
@@ -142,13 +120,13 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct RemovalRecord<H: AlgebraicHasher> {
     pub absolute_indices: AbsoluteIndexSet,
     pub target_chunks: ChunkDictionary<H>,
 }
 
-impl<H: AlgebraicHasher> RemovalRecord<H> {
+impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         removal_records: &mut [&mut Self],
         mutator_set: &mut MutatorSetKernel<H, MMR>,
@@ -313,36 +291,6 @@ impl<H: AlgebraicHasher> RemovalRecord<H> {
     /// Returns a hashmap from chunk index to chunk.
     pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u64, Vec<u128>> {
         indices_to_hash_map(&self.absolute_indices.to_array())
-    }
-}
-
-impl<H: AlgebraicHasher> BFieldCodec for RemovalRecord<H> {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.absolute_indices
-            .to_array()
-            .iter()
-            .flat_map(|bi| bi.encode())
-            .chain(self.target_chunks.encode())
-            .collect()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        if sequence.len() < 4 * NUM_TRIALS as usize {
-            bail!("Cannot decode sequence of BFieldElements as RemovalRecord because sequence is too short.");
-        }
-        let mut absolute_indices = [0u128; NUM_TRIALS as usize];
-        for i in 0..NUM_TRIALS as usize {
-            let subsequence = &sequence[4 * i..4 * (i + 1)];
-            let index = *u128::decode(subsequence)?;
-            absolute_indices[i] = index;
-        }
-
-        let target_chunks = *ChunkDictionary::decode(&sequence[4 * NUM_TRIALS as usize..])?;
-
-        Ok(Box::new(RemovalRecord {
-            absolute_indices: AbsoluteIndexSet(absolute_indices),
-            target_chunks,
-        }))
     }
 }
 
@@ -579,7 +527,7 @@ mod removal_record_tests {
     #[test]
     fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = blake3::Hasher;
+        type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
         let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];

@@ -6,6 +6,7 @@ use itertools::Itertools;
 use rand::{random, thread_rng, Rng, RngCore};
 use rusty_leveldb::DB;
 
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::random_elements;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -66,7 +67,7 @@ pub fn random_removal_record<H: AlgebraicHasher>() -> RemovalRecord<H> {
 }
 
 pub fn get_all_indices_with_duplicates<
-    H: AlgebraicHasher,
+    H: AlgebraicHasher + BFieldCodec,
     MmrStorage: StorageVec<Digest>,
     ChunkStorage: StorageVec<Chunk>,
 >(
@@ -98,7 +99,7 @@ pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher>() -> (
+pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher + BFieldCodec>() -> (
     ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
     Arc<Mutex<DB>>,
 ) {
@@ -119,7 +120,7 @@ pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher>() -> (
     (ArchivalMutatorSet { kernel, chunks }, db)
 }
 
-pub fn insert_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
+pub fn insert_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
     mutator_set: &mut MutatorSetKernel<H, M>,
 ) -> (MsMembershipProof<H>, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
@@ -135,7 +136,7 @@ pub fn insert_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
     (membership_proof, new_item)
 }
 
-pub fn remove_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
+pub fn remove_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
     mutator_set: &mut MutatorSetKernel<H, M>,
     item: &Digest,
     mp: &MsMembershipProof<H>,
@@ -145,13 +146,15 @@ pub fn remove_mock_item<H: AlgebraicHasher, M: Mmr<H>>(
 }
 
 /// Generate a random MSA. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_accumulator<H: AlgebraicHasher>() -> MutatorSetAccumulator<H> {
+pub fn random_mutator_set_accumulator<H: AlgebraicHasher + BFieldCodec>() -> MutatorSetAccumulator<H>
+{
     let kernel = random_mutator_set_kernel();
     MutatorSetAccumulator { kernel }
 }
 
 /// Generate a random MSK. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_kernel<H: AlgebraicHasher>() -> MutatorSetKernel<H, MmrAccumulator<H>> {
+pub fn random_mutator_set_kernel<H: AlgebraicHasher + BFieldCodec>(
+) -> MutatorSetKernel<H, MmrAccumulator<H>> {
     let aocl = random_mmra();
     let swbf_inactive = random_mmra();
     let swbf_active = random_swbf_active();
@@ -169,7 +172,7 @@ pub fn random_mmra<H: AlgebraicHasher>() -> MmrAccumulator<H> {
     MmrAccumulator::init(peaks, leaf_count)
 }
 
-pub fn random_swbf_active<H: AlgebraicHasher>() -> ActiveWindow<H> {
+pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec>() -> ActiveWindow<H> {
     let mut rng = thread_rng();
     let num_indices = 10 + (rng.next_u32() % 100) as usize;
 

@@ -4,9 +4,6 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use triton_opcodes::program::Program;
 use triton_vm::BFieldElement;
-use twenty_first::shared_math::bfield_codec::{
-    decode_field_length_prepended, decode_vec_length_prepended, encode_vec,
-};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::{shared_math::bfield_codec::BFieldCodec, util_types::mmr::mmr_trait::Mmr};
 
@@ -31,51 +28,12 @@ pub struct RemovalRecordsIntegrity {
     supported_claim: SupportedClaim,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct RemovalRecordsIntegrityWitness {
     pub input_utxos: Vec<Utxo>,
     pub membership_proofs: Vec<MsMembershipProof<Hash>>,
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
     pub kernel: TransactionKernel,
-}
-
-impl BFieldCodec for RemovalRecordsIntegrityWitness {
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        let (input_utxos, sequence) = decode_vec_length_prepended(sequence)?;
-        let (membership_proofs, sequence) = decode_vec_length_prepended(&sequence)?;
-        let (mutator_set_accumulator, sequence) = decode_field_length_prepended(&sequence)?;
-        let (kernel, sequence) = decode_field_length_prepended(&sequence)?;
-
-        if !sequence.is_empty() {
-            bail!("After decoding sequence of BFieldElements as RemovalRecordsIntegrityWitness, sequence must be empty.");
-        }
-
-        Ok(Box::new(RemovalRecordsIntegrityWitness {
-            input_utxos,
-            membership_proofs,
-            mutator_set_accumulator,
-            kernel,
-        }))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        let input_utxos = encode_vec(&self.input_utxos);
-        let membership_proofs = encode_vec(&self.membership_proofs);
-        let mutator_set_accumulator = self.mutator_set_accumulator.encode();
-        let kernel: Vec<BFieldElement> = self.kernel.encode();
-
-        [
-            vec![BFieldElement::new(input_utxos.len() as u64)],
-            input_utxos,
-            vec![BFieldElement::new(membership_proofs.len() as u64)],
-            membership_proofs,
-            vec![BFieldElement::new(mutator_set_accumulator.len() as u64)],
-            mutator_set_accumulator,
-            vec![BFieldElement::new(kernel.len() as u64)],
-            kernel,
-        ]
-        .concat()
-    }
 }
 
 impl RemovalRecordsIntegrity {
@@ -174,14 +132,8 @@ impl TxValidationLogic for RemovalRecordsIntegrity {
             supported_claim: SupportedClaim {
                 claim: triton_vm::Claim {
                     program_digest: Hash::hash_varlen(&program.encode()),
-                    input: tx_kernel
-                        .mast_hash()
-                        .encode()
-                        .iter()
-                        .map(|x| x.value())
-                        .collect_vec(),
+                    input: tx_kernel.mast_hash().encode(),
                     output: vec![],
-                    padded_height: Default::default(),
                 },
                 support: ClaimSupport::SecretWitness(witness_data, program),
             },

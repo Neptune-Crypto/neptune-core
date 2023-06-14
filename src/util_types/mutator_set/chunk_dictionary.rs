@@ -86,6 +86,10 @@ impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
 
         Ok(Box::new(ChunkDictionary { dictionary }))
     }
+
+    fn static_length() -> Option<usize> {
+        None
+    }
 }
 
 #[cfg(test)]

@@ -14,11 +14,11 @@ use super::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
-pub struct MutatorSetAccumulator<H: AlgebraicHasher> {
+pub struct MutatorSetAccumulator<H: AlgebraicHasher + BFieldCodec> {
     pub kernel: MutatorSetKernel<H, MmrAccumulator<H>>,
 }
 
-impl<H: AlgebraicHasher> MutatorSetAccumulator<H> {
+impl<H: AlgebraicHasher + BFieldCodec> MutatorSetAccumulator<H> {
     pub fn new() -> Self {
         let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
@@ -32,7 +32,7 @@ impl<H: AlgebraicHasher> MutatorSetAccumulator<H> {
     }
 }
 
-impl<H: AlgebraicHasher> Default for MutatorSetAccumulator<H> {
+impl<H: AlgebraicHasher + BFieldCodec> Default for MutatorSetAccumulator<H> {
     fn default() -> Self {
         let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
             aocl: MmrAccumulator::<H>::new(vec![]),
@@ -46,7 +46,7 @@ impl<H: AlgebraicHasher> Default for MutatorSetAccumulator<H> {
     }
 }
 
-impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
+impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H> {
     fn prove(
         &mut self,
         item: &Digest,
@@ -94,7 +94,7 @@ impl<H: AlgebraicHasher> MutatorSet<H> for MutatorSetAccumulator<H> {
     }
 }
 
-impl<H: AlgebraicHasher> BFieldCodec for MutatorSetAccumulator<H> {
+impl<H: AlgebraicHasher + BFieldCodec> BFieldCodec for MutatorSetAccumulator<H> {
     fn decode(
         sequence: &[twenty_first::shared_math::b_field_element::BFieldElement],
     ) -> anyhow::Result<Box<Self>> {
@@ -104,6 +104,10 @@ impl<H: AlgebraicHasher> BFieldCodec for MutatorSetAccumulator<H> {
 
     fn encode(&self) -> Vec<twenty_first::shared_math::b_field_element::BFieldElement> {
         self.kernel.encode()
+    }
+
+    fn static_length() -> Option<usize> {
+        None
     }
 }
 
@@ -121,7 +125,7 @@ mod ms_accumulator_tests {
     #[test]
     fn mutator_set_batch_remove_accumulator_test() {
         // Test the batch-remove function for mutator set accumulator
-        type H = blake3::Hasher;
+        type H = Tip5;
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
         let mut items: Vec<Digest> = vec![];

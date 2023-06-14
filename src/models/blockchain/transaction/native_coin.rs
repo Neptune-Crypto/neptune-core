@@ -1,13 +1,10 @@
 use anyhow::bail;
+use bincode::de;
 use num_traits::Zero;
 use std::collections::VecDeque;
 use triton_opcodes::{program::Program, shortcuts::halt};
 use twenty_first::{
-    shared_math::{
-        b_field_element::BFieldElement,
-        bfield_codec::{decode_vec, BFieldCodec},
-        tip5::Digest,
-    },
+    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher, merkle_tree::CpuParallel,
         merkle_tree_maker::MerkleTreeMaker,
@@ -61,7 +58,8 @@ pub fn native_coin_reference(
     }
 
     // parse secret input
-    let sequences: Vec<Vec<BFieldElement>> = *decode_vec(&read_secret_input)?;
+    let sequences: Vec<Vec<BFieldElement>> =
+        *Vec::<Vec<BFieldElement>>::decode(&read_secret_input)?;
     let input_sequence = &sequences[0];
     let output_sequence = &sequences[1];
     let pubscript_sequence = &sequences[2];
@@ -70,8 +68,8 @@ pub fn native_coin_reference(
     let timestamp_sequence = &sequences[5];
 
     // parse utxos
-    let input_utxos: Vec<Utxo> = *decode_vec(input_sequence)?;
-    let output_utxos: Vec<Utxo> = *decode_vec(output_sequence)?;
+    let input_utxos: Vec<Utxo> = *Vec::<Utxo>::decode(input_sequence)?;
+    let output_utxos: Vec<Utxo> = *Vec::<Utxo>::decode(output_sequence)?;
 
     // parse amounts
     let fee = *Amount::decode(fee_sequence)?;

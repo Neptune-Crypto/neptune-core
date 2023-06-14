@@ -208,6 +208,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
+name = "bfieldcodec_derive"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1595c05da6783253784041972bec6ecd13469fbb716d91e132670e6a6d687c79"
+dependencies = [
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -413,21 +423,9 @@ dependencies = [
  "atty",
  "bitflags",
  "strsim 0.8.0",
- "textwrap 0.11.0",
+ "textwrap",
  "unicode-width",
  "vec_map",
-]
-
-[[package]]
-name = "clap"
-version = "3.2.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ea181bf566f71cb9a5d17a59e1871af638180a18fb0035c92ae62b705207123"
-dependencies = [
- "bitflags",
- "clap_lex 0.2.4",
- "indexmap",
- "textwrap 0.16.0",
 ]
 
 [[package]]
@@ -450,7 +448,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "bitflags",
- "clap_lex 0.5.0",
+ "clap_lex",
  "strsim 0.10.0",
 ]
 
@@ -464,15 +462,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.18",
-]
-
-[[package]]
-name = "clap_lex"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2850f2f5a82cbf437dd5af4d49848fbdfc27c157c3d010345776f952765261c5"
-dependencies = [
- "os_str_bytes",
 ]
 
 [[package]]
@@ -543,19 +532,19 @@ dependencies = [
 
 [[package]]
 name = "criterion"
-version = "0.4.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7c76e09c1aae2bc52b3d2f29e13c6572553b30c4aa1b8a49fd70de6412654cb"
+checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
 dependencies = [
  "anes",
- "atty",
  "cast",
  "ciborium",
- "clap 3.2.25",
+ "clap 4.3.0",
  "criterion-plot",
+ "is-terminal",
  "itertools",
- "lazy_static",
  "num-traits",
+ "once_cell",
  "oorandom",
  "plotters",
  "rayon",
@@ -1565,12 +1554,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "os_str_bytes"
-version = "6.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ceedf44fb00f2d1984b0bc98102627ce622e083e49a5bacdb3e514fa4238e267"
-
-[[package]]
 name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2405,12 +2388,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "textwrap"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "222a222a5bfe1bba4a77b45ec488a741b3cb8872e5e499451fd7d0129c9c7c3d"
-
-[[package]]
 name = "thiserror"
 version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2693,9 +2670,9 @@ dependencies = [
 
 [[package]]
 name = "triton-opcodes"
-version = "0.25.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cdd93c9cb13370cdff1449e793151fac223774803aae2de3ce4dc44cf3ae5f5"
+checksum = "f7127f4b155ed483652a40b3d2a554c5b7db7930d83718cec49a36a8e98b7c81"
 dependencies = [
  "anyhow",
  "get-size",
@@ -2712,9 +2689,9 @@ dependencies = [
 
 [[package]]
 name = "triton-profiler"
-version = "0.25.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "730856a3312f6a627b0882ce9054c1ec71976fb1ac641599e6e51f6e5502b00d"
+checksum = "111c22d387c97789a1c9a1d45d752ff896215b944d26a40b1c3ce88ca9f89f3d"
 dependencies = [
  "colored",
  "criterion",
@@ -2725,9 +2702,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.25.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24383925927d56b2ae0b15bd7a5658bb49f162c8af814db15052e4baff848b17"
+checksum = "d75ef2e61780d6a11255f28ad8e29b0d5aaaf8f6b36d4426ce7ab2af59a31987"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2735,6 +2712,8 @@ dependencies = [
  "itertools",
  "ndarray",
  "num-traits",
+ "proc-macro2",
+ "quote",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "rayon",
@@ -2761,11 +2740,12 @@ dependencies = [
 
 [[package]]
 name = "twenty-first"
-version = "0.25.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4211c0b5cb23ac622e62809d6913e73de5dfaafda4ae31b8a895cb344b2a4d9c"
+checksum = "62b1b50bca50b3c8a82f2a55b774e253334572794a4c6d774718b0b73c9dff80"
 dependencies = [
  "anyhow",
+ "bfieldcodec_derive",
  "bincode",
  "blake3",
  "byteorder",

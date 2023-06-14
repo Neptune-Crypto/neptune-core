@@ -3,13 +3,7 @@ use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use twenty_first::{
-    shared_math::{
-        b_field_element::BFieldElement,
-        bfield_codec::{
-            decode_field_length_prepended, decode_vec_length_prepended, encode_vec, BFieldCodec,
-        },
-        tip5::Digest,
-    },
+    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher, merkle_tree::CpuParallel,
         merkle_tree_maker::MerkleTreeMaker,
@@ -22,7 +16,13 @@ use crate::{
     Hash,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+pub struct PubScriptHashAndInput {
+    pub pubscript_hash: Digest,
+    pub input: Vec<BFieldElement>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TransactionKernel {
     pub inputs: Vec<RemovalRecord<Hash>>,
 
@@ -39,67 +39,13 @@ pub struct TransactionKernel {
     pub mutator_set_hash: Digest,
 }
 
-impl BFieldCodec for TransactionKernel {
-    fn encode(&self) -> Vec<BFieldElement> {
-        let inputs = encode_vec(&self.inputs);
-        let outputs = encode_vec(&self.outputs);
-        let pubscripts = encode_vec(&self.pubscript_hashes_and_inputs);
-        let fee = self.fee.encode();
-        let coinbase = self.coinbase.encode();
-        let timestamp = self.timestamp.encode();
-        let mutator_set_hash = self.mutator_set_hash.encode();
-
-        [
-            vec![BFieldElement::new(inputs.len() as u64)],
-            inputs,
-            vec![BFieldElement::new(outputs.len() as u64)],
-            outputs,
-            vec![BFieldElement::new(pubscripts.len() as u64)],
-            pubscripts,
-            vec![BFieldElement::new(fee.len() as u64)],
-            fee,
-            vec![BFieldElement::new(coinbase.len() as u64)],
-            coinbase,
-            vec![BFieldElement::new(timestamp.len() as u64)],
-            timestamp,
-            vec![BFieldElement::new(mutator_set_hash.len() as u64)],
-            mutator_set_hash,
-        ]
-        .concat()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        let (inputs, sequence) = decode_vec_length_prepended(sequence)?;
-        let (outputs, sequence) = decode_vec_length_prepended(&sequence)?;
-        let (pubscript_hashes_and_inputs, sequence) = decode_vec_length_prepended(&sequence)?;
-        let (fee, sequence) = decode_field_length_prepended(&sequence)?;
-        let (coinbase, sequence) = decode_field_length_prepended(&sequence)?;
-        let (timestamp, sequence) = decode_field_length_prepended(&sequence)?;
-        let (mutator_set_hash, sequence) = decode_field_length_prepended(&sequence)?;
-
-        if !sequence.is_empty() {
-            bail!("Cannot decode sequence of BFieldElements as TransactionKernel: sequence should be empty afterwards.");
-        }
-
-        Ok(Box::new(TransactionKernel {
-            inputs,
-            outputs,
-            pubscript_hashes_and_inputs,
-            fee,
-            coinbase,
-            timestamp,
-            mutator_set_hash,
-        }))
-    }
-}
-
 impl TransactionKernel {
     pub fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
-        let input_utxos_sequence = encode_vec(&self.inputs);
+        let input_utxos_sequence = self.inputs.encode();
 
-        let output_utxos_sequence = encode_vec(&self.outputs);
+        let output_utxos_sequence = self.outputs.encode();
 
-        let pubscript_sequence = encode_vec(&self.pubscript_hashes_and_inputs);
+        let pubscript_sequence = self.pubscript_hashes_and_inputs.encode();
 
         let fee_sequence = self.fee.encode();
 

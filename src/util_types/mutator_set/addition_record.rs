@@ -1,11 +1,9 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
-
-use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec)]
 pub struct AdditionRecord {
     pub canonical_commitment: Digest,
 }
@@ -15,19 +13,6 @@ impl AdditionRecord {
         Self {
             canonical_commitment,
         }
-    }
-}
-
-impl BFieldCodec for AdditionRecord {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.canonical_commitment.encode()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        let canonical_commitment = *Digest::decode(sequence)?;
-        Ok(Box::new(AdditionRecord {
-            canonical_commitment,
-        }))
     }
 }
 

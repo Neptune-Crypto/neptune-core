@@ -7,7 +7,7 @@ use itertools::Itertools;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::bfield_codec::{decode_field_length_prepended, BFieldCodec};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, SpongeHasher};
 use twenty_first::util_types::mmr;
@@ -39,7 +39,7 @@ pub enum MutatorSetKernelError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
-pub struct MutatorSetKernel<H: AlgebraicHasher, MMR: Mmr<H>> {
+pub struct MutatorSetKernel<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
     pub swbf_active: ActiveWindow<H>,
@@ -76,7 +76,7 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
         .unwrap()
 }
 
-impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
+impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
     /// Generates a removal record with which to update the set commitment.
     pub fn drop(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         let indices: AbsoluteIndexSet = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
@@ -468,15 +468,40 @@ impl<H: AlgebraicHasher, M: Mmr<H>> MutatorSetKernel<H, M> {
     }
 }
 
-impl<H: AlgebraicHasher, MMR: Mmr<H> + BFieldCodec> BFieldCodec for MutatorSetKernel<H, MMR> {
+impl<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H> + BFieldCodec> BFieldCodec
+    for MutatorSetKernel<H, MMR>
+{
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        let (aocl, sequence) = decode_field_length_prepended(sequence)?;
-        let (swbf_inactive, sequence) = decode_field_length_prepended(&sequence)?;
-        let (swbf_active, sequence) = decode_field_length_prepended(&sequence)?;
-        if !sequence.is_empty() {
-            bail!("After decoding sequence of BFieldElements as MutatorSetKernel, sequence should be empty.");
+        let mut index = 0;
+        let aocl_len: usize = match sequence.first() {
+            Some(aocl_len) => aocl_len.value().try_into()?,
+            None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
+        };
+        index += 1;
+        let aocl = *MMR::decode(&sequence[index..(index + aocl_len)])?;
+        index += aocl_len;
+
+        let swbf_inactive_len: usize = match sequence.get(index) {
+            Some(swbf_inactive_len) => swbf_inactive_len.value().try_into()?,
+            None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
+        };
+        index += 1;
+        let swbf_inactive = *MMR::decode(&sequence[index..(index + swbf_inactive_len)])?;
+        index += swbf_inactive_len;
+
+        let swbf_active_len: usize = match sequence.get(index) {
+            Some(swbf_active_len) => swbf_active_len.value().try_into()?,
+            None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
+        };
+        index += 1;
+        let swbf_active = *ActiveWindow::decode(&sequence[index..(index + swbf_active_len)])?;
+        index += swbf_active_len;
+
+        if sequence.len() != index {
+            anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel.");
         }
-        Ok(Box::new(MutatorSetKernel {
+
+        Ok(Box::new(Self {
             aocl,
             swbf_inactive,
             swbf_active,
@@ -485,13 +510,13 @@ impl<H: AlgebraicHasher, MMR: Mmr<H> + BFieldCodec> BFieldCodec for MutatorSetKe
 
     fn encode(&self) -> Vec<BFieldElement> {
         let aocl_encoded = self.aocl.encode();
-        let swbf_inactive_encoded = self.swbf_inactive.encode();
-        let swbf_active_encoded = self.swbf_active.encode();
-
         let aocl_len = BFieldElement::new(aocl_encoded.len() as u64);
-        let swbf_inactive_len = BFieldElement::new(swbf_inactive_encoded.len() as u64);
-        let swbf_active_len = BFieldElement::new(swbf_active_encoded.len() as u64);
 
+        let swbf_inactive_encoded = self.swbf_inactive.encode();
+        let swbf_inactive_len = BFieldElement::new(swbf_inactive_encoded.len() as u64);
+
+        let swbf_active_encoded = self.swbf_active.encode();
+        let swbf_active_len = BFieldElement::new(swbf_active_encoded.len() as u64);
         [
             vec![aocl_len],
             aocl_encoded,
@@ -501,6 +526,10 @@ impl<H: AlgebraicHasher, MMR: Mmr<H> + BFieldCodec> BFieldCodec for MutatorSetKe
             swbf_active_encoded,
         ]
         .concat()
+    }
+
+    fn static_length() -> Option<usize> {
+        None
     }
 }
 
@@ -524,7 +553,7 @@ mod accumulation_scheme_tests {
     #[test]
     fn get_batch_index_test() {
         // Verify that the method to get batch index returns sane results
-        type H = blake3::Hasher;
+        type H = Tip5;
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
         assert_eq!(
             0,
@@ -628,7 +657,7 @@ mod accumulation_scheme_tests {
     fn ms_get_indices_test_big() {
         // Test that `get_indices` behaves as expected. I.e. that it returns indices in the correct range,
         // and always returns something of length `NUM_TRIALS`.
-        type H = blake3::Hasher;
+        type H = Tip5;
         for _ in 0..1000 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let ret: [u128; NUM_TRIALS as usize] =
@@ -851,7 +880,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn batch_update_from_addition_and_removal_test() {
-        type H = blake3::Hasher;
+        type H = Tip5;
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
 
         // It's important to test number of additions around the shifting of the window,

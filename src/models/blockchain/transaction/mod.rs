@@ -19,9 +19,7 @@ use triton_opcodes::program::Program;
 use triton_opcodes::shortcuts::halt;
 use triton_vm::proof::Proof;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::bfield_codec::{
-    decode_field_length_prepended, decode_vec_length_prepended, encode_vec, BFieldCodec,
-};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
@@ -40,7 +38,7 @@ use self::validity::ValidityLogic;
 use super::block::Block;
 use super::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PubScript {
     pub program: Program,
 }
@@ -50,18 +48,6 @@ impl Default for PubScript {
         Self {
             program: Program::new(&[halt()]),
         }
-    }
-}
-
-impl BFieldCodec for PubScript {
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
-        Ok(Box::new(PubScript {
-            program: *Program::decode(sequence)?,
-        }))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.program.encode()
     }
 }
 
@@ -83,7 +69,7 @@ impl From<&[LabelledInstruction]> for PubScript {
 
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PrimitiveWitness {
     pub input_utxos: Vec<Utxo>,
     pub input_lock_scripts: Vec<LockScript>,
@@ -94,75 +80,12 @@ pub struct PrimitiveWitness {
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
 }
 
-impl BFieldCodec for PrimitiveWitness {
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
-        let (input_utxos, sequence): (Vec<Utxo>, Vec<BFieldElement>) =
-            decode_vec_length_prepended(sequence)?;
-        let (input_lock_scripts, sequence): (Vec<LockScript>, Vec<BFieldElement>) =
-            decode_vec_length_prepended(&sequence)?;
-        let (lock_script_witnesses, sequence): (Vec<Vec<BFieldElement>>, Vec<BFieldElement>) =
-            decode_vec_length_prepended(&sequence)?;
-        let (input_membership_proofs, sequence): (
-            Vec<MsMembershipProof<Hash>>,
-            Vec<BFieldElement>,
-        ) = decode_vec_length_prepended(&sequence)?;
-        let (output_utxos, sequence): (Vec<Utxo>, Vec<BFieldElement>) =
-            decode_vec_length_prepended(&sequence)?;
-        let (pubscripts, sequence): (Vec<PubScript>, Vec<BFieldElement>) =
-            decode_vec_length_prepended(&sequence)?;
-        let (mutator_set_accumulator, sequence): (MutatorSetAccumulator<Hash>, Vec<BFieldElement>) =
-            decode_field_length_prepended(&sequence)?;
-
-        if !sequence.is_empty() {
-            bail!("Remaining BFEs after decoding PrimitiveWitness")
-        }
-
-        Ok(Box::new(Self {
-            input_utxos,
-            input_lock_scripts,
-            lock_script_witnesses,
-            input_membership_proofs,
-            output_utxos,
-            pubscripts,
-            mutator_set_accumulator,
-        }))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        let input_utxo_bfes = encode_vec(&self.input_utxos);
-        let input_lock_scripts_bfes = encode_vec(&self.input_lock_scripts);
-        let lock_script_witnesses_bfes = encode_vec(&self.lock_script_witnesses);
-        let input_mps_bfes = encode_vec(&self.input_membership_proofs);
-        let output_utxos_bfes = encode_vec(&self.output_utxos);
-        let pubscripts_bfes = encode_vec(&self.pubscripts);
-        let mutator_set_acc_bfes = self.mutator_set_accumulator.encode();
-
-        vec![
-            vec![BFieldElement::new(input_utxo_bfes.len() as u64)],
-            input_utxo_bfes,
-            vec![BFieldElement::new(input_lock_scripts_bfes.len() as u64)],
-            input_lock_scripts_bfes,
-            vec![BFieldElement::new(lock_script_witnesses_bfes.len() as u64)],
-            lock_script_witnesses_bfes,
-            vec![BFieldElement::new(input_mps_bfes.len() as u64)],
-            input_mps_bfes,
-            vec![BFieldElement::new(output_utxos_bfes.len() as u64)],
-            output_utxos_bfes,
-            vec![BFieldElement::new(pubscripts_bfes.len() as u64)],
-            pubscripts_bfes,
-            vec![BFieldElement::new(mutator_set_acc_bfes.len() as u64)],
-            mutator_set_acc_bfes,
-        ]
-        .concat()
-    }
-}
-
 /// Linked proofs are one abstraction level above raw witness. They
 /// hide secrets and can therefore be broadcast securely. Some
 /// information is still leaked though, such as the number of inputs
 /// and outputs, and number of type scripts, but this information
 /// cannot be used to spend someone else's coins.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LinkedProofs {
     lock_script_proofs: Vec<Proof>,
     lock_script_hashes: Vec<Digest>,
@@ -179,7 +102,7 @@ pub struct LinkedProofs {
 /// into one. It hides information that linked proofs expose, but
 /// the downside is that it requires multiple runs of the recursive
 /// prover to produce.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
 pub struct SingleProof(pub Proof);
 
 impl GetSize for SingleProof {
@@ -224,39 +147,17 @@ impl BFieldCodec for Witness {
             _ => vec![],
         }
     }
+
+    fn static_length() -> Option<usize> {
+        None
+    }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
     pub witness: Witness,
-}
-
-impl BFieldCodec for Transaction {
-    fn encode(&self) -> Vec<BFieldElement> {
-        let kernel_bfes = self.kernel.encode();
-        let witness_bfes = self.witness.encode();
-
-        vec![
-            vec![BFieldElement::new(kernel_bfes.len() as u64)],
-            kernel_bfes,
-            vec![BFieldElement::new(witness_bfes.len() as u64)],
-            witness_bfes,
-        ]
-        .concat()
-    }
-
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
-        let (kernel, sequence) = decode_field_length_prepended(sequence)?;
-        let (witness, sequence) = decode_field_length_prepended(&sequence)?;
-
-        if !sequence.is_empty() {
-            bail!("Cannot decode sequence of BFieldElements as Transaction: sequence should be empty afterwards!");
-        }
-
-        Ok(Box::new(Self { kernel, witness }))
-    }
 }
 
 /// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.

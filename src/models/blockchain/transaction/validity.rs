@@ -5,11 +5,12 @@ pub mod lockscript_halts;
 pub mod removal_records_integrity;
 pub mod typescript_halts;
 
-use anyhow::Result;
+use anyhow::{bail, Ok, Result};
 use get_size::GetSize;
+use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
-use triton_vm::proof::Proof;
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use triton_vm::proof::{self, Proof};
+use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 use self::{
     inputs_to_lock_scripts::InputsToLockScripts, kernel_to_inputs::KernelToInputs,
@@ -23,6 +24,83 @@ pub enum ClaimSupport {
     Proof(Proof),
     SecretWitness(Vec<BFieldElement>, triton_opcodes::program::Program),
     DummySupport, // TODO: Remove this when all claims are implemented
+}
+
+impl BFieldCodec for ClaimSupport {
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
+        match sequence.first() {
+            Some(val) => match val.value() {
+                0 => {
+                    let proof = *Proof::decode(&sequence[1..])?;
+                    Ok(Box::new(ClaimSupport::Proof(proof)))
+                }
+                1 => {
+                    let mut index = 1;
+                    let secret_len: usize = match sequence.get(index) {
+                        Some(val) => val.value().try_into()?,
+                        None => bail!(
+                            "ClaimSupport::decode: Invalid sequence length for secret witness secret_len!"
+                        ),
+                    };
+                    index += 1;
+                    let secret =
+                        *Vec::<BFieldElement>::decode(&sequence[index..index + secret_len])?;
+                    index += secret_len;
+
+                    let program_len: usize = match sequence.get(index) {
+                        Some(val) => val.value().try_into()?,
+                        None => bail!(
+                            "ClaimSupport::decode: Invalid sequence length for secret witness program_len!"
+                        ),
+                    };
+                    index += 1;
+
+                    let program = *triton_opcodes::program::Program::decode(
+                        &sequence[index..index + program_len],
+                    )?;
+                    index += program_len;
+
+                    if index != sequence.len() {
+                        bail!("ClaimSupport::decode: Invalid sequence length for secret witness! Too long.");
+                    }
+                    Ok(Box::new(ClaimSupport::SecretWitness(secret, program)))
+                }
+                2 => {
+                    if sequence.len() != 1 {
+                        bail!("ClaimSupport::decode: Invalid sequence length for dummy support!");
+                    }
+                    Ok(Box::new(ClaimSupport::DummySupport))
+                }
+                _ => bail!("ClaimSupport::decode: Invalid claim support type!"),
+            },
+            None => todo!(),
+        }
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        match self {
+            ClaimSupport::Proof(proof) => {
+                vec![vec![BFieldElement::zero()], proof.encode()].concat()
+            }
+            ClaimSupport::SecretWitness(secret, program) => {
+                let secret_encoded = secret.encode();
+                let program_encoded = program.encode();
+                vec![
+                    vec![BFieldElement::one()],
+                    vec![BFieldElement::new(secret_encoded.len() as u64)],
+                    secret_encoded,
+                    vec![BFieldElement::new(program_encoded.len() as u64)],
+                    program_encoded,
+                ]
+                .concat()
+            }
+            ClaimSupport::DummySupport => vec![BFieldElement::new(2)],
+        }
+    }
+
+    fn static_length() -> Option<usize> {
+        None
+    }
 }
 
 /// WitnessableClaim is a helper struct for ValiditySequence. It
@@ -40,7 +118,6 @@ impl SupportedClaim {
             triton_vm::Claim {
                 input: Default::default(),
                 output: Default::default(),
-                padded_height: Default::default(),
                 program_digest: Default::default(),
             }
         }
