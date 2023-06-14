@@ -9,10 +9,7 @@ use std::{
     ops::{Add, Neg, Sub},
     str::FromStr,
 };
-use twenty_first::{
-    amount::u32s::U32s,
-    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-};
+use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
 
 use super::{native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
 

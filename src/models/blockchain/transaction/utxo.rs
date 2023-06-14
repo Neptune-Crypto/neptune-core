@@ -1,5 +1,4 @@
 use crate::models::blockchain::shared::Hash;
-use anyhow::bail;
 use get_size::GetSize;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};

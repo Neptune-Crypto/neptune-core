@@ -204,8 +204,6 @@ fn make_coinbase_transaction(
         mutator_set_hash: mutator_set_accumulator.hash(),
     };
 
-    let mutator_set_hash = mutator_set_accumulator.hash();
-
     let primitive_witness = PrimitiveWitness {
         input_utxos: vec![],
         input_lock_scripts: vec![],

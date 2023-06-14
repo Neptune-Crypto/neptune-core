@@ -1,4 +1,3 @@
-use anyhow::bail;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;

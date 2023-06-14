@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-use std::{error::Error, fmt};
-
-use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::{error::Error, fmt};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};

@@ -1,5 +1,4 @@
 use anyhow::bail;
-use bincode::de;
 use num_traits::Zero;
 use std::collections::VecDeque;
 use triton_opcodes::{program::Program, shortcuts::halt};

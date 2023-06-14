@@ -9,7 +9,7 @@ use anyhow::{bail, Ok, Result};
 use get_size::GetSize;
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
-use triton_vm::proof::{self, Proof};
+use triton_vm::proof::Proof;
 use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 use self::{

@@ -1,4 +1,3 @@
-use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};

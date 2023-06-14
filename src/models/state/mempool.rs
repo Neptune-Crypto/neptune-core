@@ -11,11 +11,6 @@
 //! The `Mempool` type is a thread-safe wrapper around `MempoolInternal`, and
 //! all interaction should go through the wrapper.
 
-use crate::models::blockchain::block::Block;
-use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::{amount::Amount, Transaction};
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
-
 use bytesize::ByteSize;
 use get_size::GetSize;
 use num_traits::Zero;
@@ -29,6 +24,10 @@ use std::{
 };
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+
+use crate::models::blockchain::block::Block;
+use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
 /// transactions.  Different strategies are possible for selecting transactions

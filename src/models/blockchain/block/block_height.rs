@@ -1,4 +1,3 @@
-use anyhow::bail;
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::{

@@ -1,4 +1,3 @@
-use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -44,7 +43,7 @@ impl RemovalRecordsIntegrity {
         }
     }
 
-    fn verify_raw(public_input: &[BFieldElement], secret_witness: &[BFieldElement]) {
+    fn verify_raw(_public_input: &[BFieldElement], secret_witness: &[BFieldElement]) {
         let removal_records_integrity_witness =
             *RemovalRecordsIntegrityWitness::decode(secret_witness).unwrap();
         let items = removal_records_integrity_witness

@@ -4,7 +4,7 @@ pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::{BigInt, BigUint};

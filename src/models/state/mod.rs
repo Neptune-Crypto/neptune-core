@@ -252,7 +252,6 @@ impl GlobalState {
             .await
             .body
             .next_mutator_set_accumulator;
-        let mutator_set_hash = mutator_set_accumulator.hash();
 
         // When reading a digest from secret and standard-in, the digest's
         // zeroth element must be on top of the stack. So the secret-in
