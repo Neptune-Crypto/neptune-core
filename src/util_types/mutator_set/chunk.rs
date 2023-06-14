@@ -197,8 +197,14 @@ mod chunk_tests {
     #[test]
     fn chunk_hashpreimage_test() {
         let zero_chunk = Chunk::empty_chunk();
+
+        // Encoded chunk is prepended with its length.
         let zero_chunk_preimage = zero_chunk.encode();
-        assert!(zero_chunk_preimage.iter().all(|elem| elem.is_zero()));
+        println!("zero chunk preimage: {:?}", zero_chunk_preimage);
+        assert!(zero_chunk_preimage
+            .iter()
+            .skip(1)
+            .all(|elem| elem.is_zero()));
 
         let mut one_chunk = Chunk::empty_chunk();
         one_chunk.insert(32);

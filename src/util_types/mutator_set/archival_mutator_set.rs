@@ -554,20 +554,25 @@ mod archival_mutator_set_tests {
         println!("collission: {saw_collission_at:?}");
 
         // Verify that the MPs with colliding indices are still valid
-        assert!(
-            archival_mutator_set.verify(
-                &items[saw_collission_at.0 .0],
-                &mps[saw_collission_at.0 .0].clone()
-            ),
-            "First colliding MS MP must be valid"
-        );
-        assert!(
-            archival_mutator_set.verify(
-                &items[saw_collission_at.0 .1],
-                &mps[saw_collission_at.0 .1].clone()
-            ),
-            "Second colliding MS MP must be valid"
-        );
+        for ms in [
+            &msa as &dyn MutatorSet<H>,
+            &archival_mutator_set as &dyn MutatorSet<H>,
+        ] {
+            assert!(
+                ms.verify(
+                    &items[saw_collission_at.0 .0],
+                    &mps[saw_collission_at.0 .0].clone()
+                ),
+                "First colliding MS MP must be valid"
+            );
+            assert!(
+                ms.verify(
+                    &items[saw_collission_at.0 .1],
+                    &mps[saw_collission_at.0 .1].clone()
+                ),
+                "Second colliding MS MP must be valid"
+            );
+        }
 
         // Remove 1st colliding element
         assert!(
@@ -587,13 +592,18 @@ mod archival_mutator_set_tests {
         // Update all MPs
         MsMembershipProof::batch_update_from_remove(&mut mps.iter_mut().collect_vec(), &rem0)
             .unwrap();
-        assert!(
-            !archival_mutator_set.verify(
-                &items[saw_collission_at.0 .0],
-                &mps[saw_collission_at.0 .0].clone()
-            ),
-            "First colliding MS MP must be invalid after removal"
-        );
+        for ms in [
+            &msa as &dyn MutatorSet<H>,
+            &archival_mutator_set as &dyn MutatorSet<H>,
+        ] {
+            assert!(
+                !ms.verify(
+                    &items[saw_collission_at.0 .0],
+                    &mps[saw_collission_at.0 .0].clone()
+                ),
+                "First colliding MS MP must be invalid after removal"
+            );
+        }
 
         // Remove 2nd colliding element
         let rem1 =
@@ -608,13 +618,18 @@ mod archival_mutator_set_tests {
         // Update all MPs
         MsMembershipProof::batch_update_from_remove(&mut mps.iter_mut().collect_vec(), &rem1)
             .unwrap();
-        assert!(
-            !archival_mutator_set.verify(
-                &items[saw_collission_at.0 .1],
-                &mps[saw_collission_at.0 .1].clone()
-            ),
-            "Second colliding MS MP must be invalid after removal"
-        );
+        for ms in [
+            &msa as &dyn MutatorSet<H>,
+            &archival_mutator_set as &dyn MutatorSet<H>,
+        ] {
+            assert!(
+                !ms.verify(
+                    &items[saw_collission_at.0 .1],
+                    &mps[saw_collission_at.0 .1].clone()
+                ),
+                "Second colliding MS MP must be invalid after removal"
+            );
+        }
 
         // Verify that AMS and MSA agree now that we know we have an index in the Bloom filter
         // that was set twice
@@ -645,7 +660,7 @@ mod archival_mutator_set_tests {
 
         // Update all MPs
         for (mp, itm) in mps.iter_mut().zip_eq(items.iter()) {
-            mp.revert_update_from_remove(&rem0).unwrap();
+            mp.revert_update_from_remove(&rem1).unwrap();
             assert!(
                 archival_mutator_set.verify(itm, mp),
                 "MS MP must be valid after reversing a removal update"
