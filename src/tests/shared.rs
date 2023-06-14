@@ -619,7 +619,7 @@ pub fn make_mock_transaction_with_generation_key(
         fee,
         timestamp: BFieldElement::new(timestamp),
         coinbase: None,
-        mutator_set_hash: random(),
+        mutator_set_hash: tip_msa.hash(),
     };
 
     let input_utxos = input_utxos_mps_keys
