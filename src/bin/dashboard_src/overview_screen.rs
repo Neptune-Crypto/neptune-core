@@ -202,7 +202,7 @@ impl OverviewScreen {
                                 own_overview_data.is_mining = resp.is_mining;
                             }
 
-                            reset_poller!(dashboard_overview_data, Duration::from_secs(1));
+                            reset_poller!(dashboard_overview_data, Duration::from_secs(3));
                         },
                         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),
                     }
