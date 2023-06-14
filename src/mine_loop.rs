@@ -10,7 +10,7 @@ use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::validity::ValidityLogic;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
-use crate::models::shared::SIZE_1MB_IN_BYTES;
+use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
@@ -233,7 +233,7 @@ fn create_block_transaction(
     latest_block: &Block,
     state: &GlobalState,
 ) -> (Transaction, ExpectedUtxo) {
-    let block_capacity_for_transactions = SIZE_1MB_IN_BYTES;
+    let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     // Get most valuable transactions from mempool
     let transactions_to_include = state
