@@ -77,10 +77,11 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
         let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
         let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
         let active_swbf_bagged = H::hash(&self.kernel.swbf_active);
+        let default = Digest::default();
 
         H::hash_pair(
-            &aocl_mmr_bagged,
-            &H::hash_pair(&inactive_swbf_bagged, &active_swbf_bagged),
+            &H::hash_pair(&aocl_mmr_bagged, &inactive_swbf_bagged),
+            &H::hash_pair(&active_swbf_bagged, &default),
         )
     }
 

@@ -79,14 +79,7 @@ where
     }
 
     fn hash(&self) -> Digest {
-        let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
-        let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = H::hash(&self.kernel.swbf_active);
-
-        H::hash_pair(
-            &aocl_mmr_bagged,
-            &H::hash_pair(&inactive_swbf_bagged, &active_swbf_bagged),
-        )
+        self.accumulator().hash()
     }
 
     /// Apply a list of removal records while keeping a list of mutator-set membership proofs
