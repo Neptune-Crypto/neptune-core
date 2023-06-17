@@ -87,62 +87,41 @@ impl TransactionKernel {
 
 #[cfg(test)]
 pub mod transaction_kernel_tests {
-    use crate::util_types::test_shared::mutator_set::*;
-    use rand::{random, thread_rng, Rng, RngCore};
-    use twenty_first::{amount::u32s::U32s, shared_math::other::random_elements};
+
+    use rand::{rngs::StdRng, thread_rng, Rng, RngCore, SeedableRng};
+    use twenty_first::amount::u32s::U32s;
+
+    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
     use super::*;
-
-    pub fn random_addition_record() -> AdditionRecord {
-        let ar: Digest = random();
-        AdditionRecord {
-            canonical_commitment: ar,
-        }
-    }
-
-    pub fn random_pubscript_struct() -> PubScriptHashAndInput {
-        let mut rng = thread_rng();
-        let digest: Digest = rng.gen();
-        let len = 10 + (rng.next_u32() % 50) as usize;
-        let input: Vec<BFieldElement> = random_elements(len);
-        PubScriptHashAndInput {
-            pubscript_hash: digest,
-            pubscript_input: input,
-        }
-    }
-
-    pub fn random_amount() -> Amount {
-        let number: [u32; 4] = random();
-        Amount(U32s::new(number))
-    }
-
-    pub fn random_option<T>(thing: T) -> Option<T> {
-        if thread_rng().next_u32() % 2 == 0 {
-            None
-        } else {
-            Some(thing)
-        }
-    }
-
     pub fn random_transaction_kernel() -> TransactionKernel {
         let mut rng = thread_rng();
         let num_inputs = 1 + (rng.next_u32() % 5) as usize;
         let num_outputs = 1 + (rng.next_u32() % 6) as usize;
         let num_pubscripts = (rng.next_u32() % 5) as usize;
+        pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts)
+    }
 
+    pub fn pseudorandom_transaction_kernel(
+        seed: [u8; 32],
+        num_inputs: usize,
+        num_outputs: usize,
+        num_pubscripts: usize,
+    ) -> TransactionKernel {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
         let inputs = (0..num_inputs)
-            .map(|_| random_removal_record())
+            .map(|_| pseudorandom_removal_record(rng.gen::<[u8; 32]>()))
             .collect_vec();
         let outputs = (0..num_outputs)
-            .map(|_| random_addition_record())
+            .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
             .collect_vec();
         let pubscripts = (0..num_pubscripts)
-            .map(|_| random_pubscript_struct())
+            .map(|_| pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>()))
             .collect_vec();
-        let fee = random_amount();
-        let coinbase = random_option(random_amount());
-        let timestamp: BFieldElement = random();
-        let mutator_set_hash: Digest = random();
+        let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
+        let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
+        let timestamp: BFieldElement = rng.gen();
+        let mutator_set_hash: Digest = rng.gen();
 
         TransactionKernel {
             inputs,
@@ -152,6 +131,60 @@ pub mod transaction_kernel_tests {
             coinbase,
             timestamp,
             mutator_set_hash,
+        }
+    }
+
+    pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let ar: Digest = rng.gen();
+        AdditionRecord {
+            canonical_commitment: ar,
+        }
+    }
+
+    pub fn random_addition_record() -> AdditionRecord {
+        let mut rng = thread_rng();
+        pseudorandom_addition_record(rng.gen::<[u8; 32]>())
+    }
+
+    pub fn random_pubscript_struct() -> PubScriptHashAndInput {
+        let mut rng = thread_rng();
+        pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>())
+    }
+
+    pub fn pseudorandom_pubscript_struct(seed: [u8; 32]) -> PubScriptHashAndInput {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let digest: Digest = rng.gen();
+        let len = 10 + (rng.next_u32() % 50) as usize;
+        let input: Vec<BFieldElement> = (0..len).map(|_| rng.gen()).collect_vec();
+        PubScriptHashAndInput {
+            pubscript_hash: digest,
+            pubscript_input: input,
+        }
+    }
+
+    pub fn random_amount() -> Amount {
+        let mut rng = thread_rng();
+        pseudorandom_amount(rng.gen::<[u8; 32]>())
+    }
+
+    pub fn pseudorandom_amount(seed: [u8; 32]) -> Amount {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let number: [u32; 4] = rng.gen();
+        Amount(U32s::new(number))
+    }
+
+    pub fn random_option<T>(thing: T) -> Option<T> {
+        let mut rng = thread_rng();
+        pseudorandom_option(rng.gen::<[u8; 32]>(), thing)
+    }
+
+    pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        if rng.next_u32() % 2 == 0 {
+            None
+        } else {
+            Some(thing)
         }
     }
 

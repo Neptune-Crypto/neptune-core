@@ -1389,6 +1389,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "tarpc",
+ "tasm-lib",
  "tokio",
  "tokio-serde",
  "tokio-test",
@@ -1397,7 +1398,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "triton-opcodes",
- "triton-vm",
+ "triton-vm 0.28.0",
  "tui",
  "twenty-first",
  "unicode-width",
@@ -1421,6 +1422,20 @@ checksum = "77a8165726e8236064dbb45459242600304b42a5ea24ee2948e18e023bf7ba84"
 dependencies = [
  "overload",
  "winapi",
+]
+
+[[package]]
+name = "num"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43db66d1170d347f9a065114077f7dccb00c1b9478c89384490a3425279a4606"
+dependencies = [
+ "num-bigint",
+ "num-complex",
+ "num-integer",
+ "num-iter",
+ "num-rational",
+ "num-traits",
 ]
 
 [[package]]
@@ -1451,6 +1466,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "225d3389fb3509a24c93f5c29eb6bde2586b98d9f016636dff58d7c6f7569cd9"
 dependencies = [
  "autocfg",
+ "num-traits",
+]
+
+[[package]]
+name = "num-iter"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d03e6c028c5dc5cac6e2dec0efda81fc887605bb3d884578bb6d6bf7514e252"
+dependencies = [
+ "autocfg",
+ "num-integer",
  "num-traits",
 ]
 
@@ -2379,6 +2405,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tasm-lib"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "num",
+ "num-traits",
+ "rand 0.8.5",
+ "rayon",
+ "serde",
+ "serde_json",
+ "triton-opcodes",
+ "triton-vm 0.29.0",
+ "twenty-first",
+]
+
+[[package]]
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2705,6 +2748,31 @@ name = "triton-vm"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d75ef2e61780d6a11255f28ad8e29b0d5aaaf8f6b36d4426ce7ab2af59a31987"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "get-size",
+ "itertools",
+ "ndarray",
+ "num-traits",
+ "proc-macro2",
+ "quote",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rayon",
+ "serde",
+ "strum",
+ "strum_macros",
+ "triton-opcodes",
+ "triton-profiler",
+ "twenty-first",
+]
+
+[[package]]
+name = "triton-vm"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "feeab38d96fb3f0d0ea4ce31d4fad6a5ab5c4329da1fc8d65a907e81ce876716"
 dependencies = [
  "anyhow",
  "bincode",

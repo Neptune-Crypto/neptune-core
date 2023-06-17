@@ -3,6 +3,7 @@ pub mod kernel_to_inputs;
 pub mod kernel_to_typescripts;
 pub mod lockscript_halts;
 pub mod removal_records_integrity;
+pub mod transaction_kernel_mast_hash;
 pub mod typescript_halts;
 
 use anyhow::{bail, Ok, Result};

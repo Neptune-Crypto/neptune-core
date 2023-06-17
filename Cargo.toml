@@ -52,6 +52,7 @@ tracing-test = "0"
 # triton-opcodes = {path = "../triton-vm/triton-opcodes"}
 triton-vm = "0.28.0"
 triton-opcodes = "0.28.0"
+tasm-lib = { path = "../tasm-lib/" }
 priority-queue = "1"
 get-size = { version = "0", features = ["derive"] }
 num-rational = "0"

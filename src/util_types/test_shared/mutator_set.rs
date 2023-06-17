@@ -3,7 +3,8 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
-use rand::{random, thread_rng, Rng, RngCore};
+use rand::rngs::StdRng;
+use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
 use rusty_leveldb::DB;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -27,8 +28,8 @@ use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE};
 
-pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
-    let mut rng = thread_rng();
+pub fn pseudorandom_chunk_dictionary<H: AlgebraicHasher>(seed: [u8; 32]) -> ChunkDictionary<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
 
     let mut dictionary = HashMap::new();
     for _ in 0..37 {
@@ -49,21 +50,9 @@ pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
     ChunkDictionary::<H>::new(dictionary)
 }
 
-pub fn random_removal_record<H: AlgebraicHasher>() -> RemovalRecord<H> {
+pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
     let mut rng = thread_rng();
-    let absolute_indices = AbsoluteIndexSet::new(
-        &(0..NUM_TRIALS as usize)
-            .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
-            .collect_vec()
-            .try_into()
-            .unwrap(),
-    );
-    let target_chunks = random_chunk_dictionary();
-
-    RemovalRecord {
-        absolute_indices,
-        target_chunks,
-    }
+    pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>())
 }
 
 pub fn get_all_indices_with_duplicates<
@@ -204,6 +193,28 @@ pub fn random_mutator_set_membership_proof<H: AlgebraicHasher>() -> MsMembership
         sender_randomness,
         receiver_preimage,
         auth_path_aocl,
+        target_chunks,
+    }
+}
+
+pub fn random_removal_record<H: AlgebraicHasher>() -> RemovalRecord<H> {
+    let mut rng = thread_rng();
+    pseudorandom_removal_record(rng.gen::<[u8; 32]>())
+}
+
+pub fn pseudorandom_removal_record<H: AlgebraicHasher>(seed: [u8; 32]) -> RemovalRecord<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let absolute_indices = AbsoluteIndexSet::new(
+        &(0..NUM_TRIALS as usize)
+            .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+            .collect_vec()
+            .try_into()
+            .unwrap(),
+    );
+    let target_chunks = pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>());
+
+    RemovalRecord {
+        absolute_indices,
         target_chunks,
     }
 }
