@@ -114,4 +114,37 @@ pub mod transaction_kernel_tests {
         let decoded = *TransactionKernel::decode(&encoded).unwrap();
         assert_eq!(kernel, decoded);
     }
+
+    #[test]
+    pub fn test_decode_transaction_kernel_small() {
+        let mut rng = thread_rng();
+        let absolute_indices = AbsoluteIndexSet::new(
+            &(0..NUM_TRIALS as usize)
+                .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+                .collect_vec()
+                .try_into()
+                .unwrap(),
+        );
+        let removal_record = RemovalRecord {
+            absolute_indices,
+            target_chunks: Default::default(),
+        };
+        let kernel = TransactionKernel {
+            inputs: vec![removal_record],
+            outputs: vec![AdditionRecord {
+                canonical_commitment: random(),
+            }],
+            pubscript_hashes_and_inputs: Default::default(),
+            fee: Amount::one(),
+            coinbase: None,
+            timestamp: Default::default(),
+        };
+        let encoded = kernel.encode();
+        println!(
+            "encoded: {}",
+            encoded.iter().map(|x| x.to_string()).join(", ")
+        );
+        let decoded = *TransactionKernel::decode(&encoded).unwrap();
+        assert_eq!(kernel, decoded);
+    }
 }
