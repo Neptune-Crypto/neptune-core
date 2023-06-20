@@ -1,5 +1,3 @@
-use std::mem;
-
 use aead::Aead;
 use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
@@ -101,7 +99,7 @@ pub fn bytes_to_bfes(bytes: &[u8]) -> Vec<BFieldElement> {
 /// computes the inverse of `bytes_to_bfes`.
 pub fn bfes_to_bytes(bfes: &[BFieldElement]) -> Result<Vec<u8>> {
     let length = bfes[0].value() as usize;
-    if length > mem::size_of_val(bfes) {
+    if length > std::mem::size_of_val(bfes) {
         bail!("Cannot decode byte stream shorter than length indicated. BFE slice length: {}, indicated byte stream length: {length}", bfes.len());
     }
 
