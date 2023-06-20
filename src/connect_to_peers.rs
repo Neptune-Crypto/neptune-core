@@ -15,7 +15,9 @@ use tracing::{debug, error, info, warn};
 use crate::{
     models::{
         channel::{MainToPeerThread, PeerThreadToMain},
-        peer::{ConnectionRefusedReason, ConnectionStatus, HandshakeData, PeerMessage},
+        peer::{
+            ConnectionRefusedReason, ConnectionStatus, HandshakeData, PeerMessage, PeerStanding,
+        },
         state::GlobalState,
     },
     peer_loop::PeerLoopHandler,
@@ -274,6 +276,43 @@ where
     );
     peer_loop_handler
         .run_wrapper(peer, main_to_peer_thread_rx)
+        .await?;
+
+    Ok(())
+}
+
+/// Remove peer from state. This function must be called every time
+/// a peer is disconnected. Whether this happens through a panic
+/// in the peer thread or through a regular disconnect.
+pub async fn close_peer_connected_callback(
+    global_state: &GlobalState,
+    peer_address: SocketAddr,
+    to_main_tx: &mpsc::Sender<PeerThreadToMain>,
+) -> Result<()> {
+    // Store any new peer-standing to database
+    let peer_info_writeback = global_state
+        .net
+        .peer_map
+        .lock()
+        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
+        .remove(&peer_address);
+
+    let new_standing = match peer_info_writeback {
+        Some(new) => new.standing,
+        None => {
+            error!("Could not find peer standing for {peer_address}");
+            PeerStanding::new_on_no_standing_found_in_map()
+        }
+    };
+    debug!("Fetched peer info standing for {}", peer_address);
+    global_state
+        .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
+        .await;
+    debug!("Stored peer info standing for {}", peer_address);
+
+    // This message is used to determine if we are to exit synchronization mode
+    to_main_tx
+        .send(PeerThreadToMain::RemovePeerMaxBlockHeight(peer_address))
         .await?;
 
     Ok(())

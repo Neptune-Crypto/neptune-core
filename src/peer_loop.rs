@@ -1,4 +1,5 @@
 use super::models::blockchain::shared::Hash;
+use crate::connect_to_peers::close_peer_connected_callback;
 use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -1039,32 +1040,7 @@ impl PeerLoopHandler {
         let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
-        // Store any new peer-standing to database
-        let peer_info_writeback = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
-            .remove(&self.peer_address)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Failed to remove {} from peer map. Is peer map mangled?",
-                    self.peer_address
-                )
-            });
-        debug!("Fetched peer info standing for {}", self.peer_address);
-        self.state
-            .write_peer_standing_on_decrease(self.peer_address.ip(), peer_info_writeback.standing)
-            .await;
-        debug!("Stored peer info standing for {}", self.peer_address);
-
-        // This message is used to determine if we are to exit synchronization mode
-        self.to_main_tx
-            .send(PeerThreadToMain::RemovePeerMaxBlockHeight(
-                self.peer_address,
-            ))
-            .await?;
+        close_peer_connected_callback(&self.state, self.peer_address, &self.to_main_tx).await?;
 
         debug!("Ending peer loop for {}", self.peer_address);
 

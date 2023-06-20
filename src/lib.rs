@@ -129,7 +129,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];
-    for peer in state.cli.peers.clone() {
+    for peer_address in state.cli.peers.clone() {
         let peer_state_var = state.clone();
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
@@ -138,7 +138,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         let own_handshake_data_clone = own_handshake_data.clone();
         let peer_join_handle = tokio::spawn(async move {
             call_peer_wrapper(
-                peer,
+                peer_address,
                 peer_state_var.clone(),
                 main_to_peer_broadcast_rx_clone,
                 peer_thread_to_main_tx_clone,

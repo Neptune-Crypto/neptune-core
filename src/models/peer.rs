@@ -25,6 +25,7 @@ const INVALID_MESSAGE_SEVERITY: u16 = 2;
 const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
 const INVALID_TRANSACTION: u16 = 10;
 const UNCONFIRMABLE_TRANSACTION: u16 = 2;
+const NO_STANDING_FOUND_MAYBE_CRASH: u16 = 10;
 
 pub type InstanceId = u128;
 
@@ -57,6 +58,8 @@ pub enum PeerSanctionReason {
     BatchBlocksUnknownRequest,
     InvalidTransaction,
     UnconfirmableTransaction,
+
+    NoStandingFoundMaybeCrash,
 }
 
 impl Display for PeerSanctionReason {
@@ -81,6 +84,9 @@ impl Display for PeerSanctionReason {
             PeerSanctionReason::UnconfirmableTransaction => "unconfirmable transaction",
             PeerSanctionReason::NonMinedTransactionHasCoinbase => {
                 "non-mined transaction has coinbase"
+            }
+            PeerSanctionReason::NoStandingFoundMaybeCrash => {
+                "No standing found in map. Did peer thread crash?"
             }
         };
         write!(f, "{string}")
@@ -131,6 +137,7 @@ impl PeerSanctionReason {
             PeerSanctionReason::InvalidTransaction => INVALID_TRANSACTION,
             PeerSanctionReason::UnconfirmableTransaction => UNCONFIRMABLE_TRANSACTION,
             PeerSanctionReason::NonMinedTransactionHasCoinbase => INVALID_TRANSACTION,
+            PeerSanctionReason::NoStandingFoundMaybeCrash => NO_STANDING_FOUND_MAYBE_CRASH,
         }
     }
 }
@@ -162,6 +169,14 @@ impl PeerStanding {
 
     pub fn is_negative(&self) -> bool {
         self.standing.is_negative()
+    }
+
+    pub fn new_on_no_standing_found_in_map() -> Self {
+        Self {
+            standing: -(NO_STANDING_FOUND_MAYBE_CRASH as i32),
+            latest_sanction: Some(PeerSanctionReason::NoStandingFoundMaybeCrash),
+            timestamp_of_latest_sanction: Some(SystemTime::now()),
+        }
     }
 }
 
