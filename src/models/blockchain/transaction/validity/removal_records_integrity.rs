@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use tasm_lib::snippet::Snippet;
+use tasm_lib::snippet_state::SnippetState;
 use triton_opcodes::program::Program;
 use triton_vm::{BFieldElement, Digest};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -21,6 +23,7 @@ use crate::{
     },
 };
 
+use super::tasm::transaction_kernel_mast_hash::TransactionKernelMastHash;
 use super::{SupportedClaim, TxValidationLogic};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
@@ -163,6 +166,7 @@ impl TxValidationLogic for RemovalRecordsIntegrity {
     }
 
     fn prove(&mut self) -> anyhow::Result<()> {
+        let code = TransactionKernelMastHash.function_code(&mut SnippetState::default());
         todo!()
     }
 

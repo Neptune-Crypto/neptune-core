@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 use num_traits::{One, Zero};
@@ -9,7 +9,7 @@ use tasm_lib::{
         get::UnsafeGet, new::UnsafeNew, set::UnsafeSet, set_length::UnsafeSetLength,
     },
     rust_shadowing_helper_functions,
-    snippet::DataType,
+    snippet::{DataType, Snippet},
     structure::get_field_with_size::GetFieldWithSize,
     ExecutionState,
 };
@@ -28,30 +28,10 @@ use crate::models::blockchain::shared::Hash;
 #[derive(Debug, Clone)]
 pub struct TransactionKernelMastHash;
 
-pub trait NeptuneTasmSnippet {
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String;
-    fn rust_shadowing(
-        &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        _std_in: Vec<triton_vm::BFieldElement>,
-        _secret_in: Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
-    );
-}
-
-impl Display for TransactionKernelMastHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.entrypoint())
-    }
-}
-
-impl TransactionKernelMastHash {
+impl Snippet for TransactionKernelMastHash {
     fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_transaction_kernel_mast_hash".to_string()
     }
-}
-
-impl NeptuneTasmSnippet for TransactionKernelMastHash {
     fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
         let entrypoint = self.entrypoint();
         let new_list = library.import(Box::new(UnsafeNew(DataType::Digest)));
@@ -361,6 +341,100 @@ impl NeptuneTasmSnippet for TransactionKernelMastHash {
         stack.push(root.values()[1]);
         stack.push(root.values()[0]);
     }
+
+    fn inputs(&self) -> Vec<String> {
+        vec!["*transaction_kernel".to_string()]
+    }
+
+    fn input_types(&self) -> Vec<DataType> {
+        vec![DataType::VoidPointer]
+    }
+
+    fn output_types(&self) -> Vec<DataType> {
+        vec![DataType::Digest]
+    }
+
+    fn outputs(&self) -> Vec<String> {
+        ["d4", "d3", "d2", "d1", "d0"]
+            .map(|s| s.to_string())
+            .to_vec()
+    }
+
+    fn stack_diff(&self) -> isize {
+        4
+    }
+
+    fn crash_conditions(&self) -> Vec<String> {
+        vec![]
+    }
+
+    #[allow(unreachable_code)]
+    fn gen_input_states(&self) -> Vec<ExecutionState> {
+        #[cfg(test)]
+        {
+            return vec![input_state_with_kernel_in_memory(
+                BFieldElement::new(rand::Rng::gen_range(&mut rand::thread_rng(), 0..(1 << 20))),
+                &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
+                    &crate::tests::shared::random_transaction_kernel(),
+                ),
+            )];
+        }
+        panic!("`gen_input_states` cannot be called when not in testing environment")
+    }
+
+    #[allow(unreachable_code)]
+    fn common_case_input_state(&self) -> ExecutionState {
+        #[cfg(test)]
+        {
+            let mut seed = [0u8; 32];
+            seed[0] = 0xaa;
+            seed[1] = 0xf1;
+            seed[2] = 0xba;
+            seed[3] = 0xd5;
+            seed[4] = 0xee;
+            seed[5] = 0xd5;
+            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
+            return input_state_with_kernel_in_memory(
+                BFieldElement::new(rand::Rng::gen_range(&mut rng, 0..(1 << 20))),
+                &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
+                    &crate::tests::shared::pseudorandom_transaction_kernel(
+                        rand::Rng::gen::<[u8; 32]>(&mut rng),
+                        2,
+                        2,
+                        0,
+                    ),
+                ),
+            );
+        }
+        panic!("`common_case_input_state` cannot be called when not in testing environment")
+    }
+
+    #[allow(unreachable_code)]
+    fn worst_case_input_state(&self) -> ExecutionState {
+        #[cfg(test)]
+        {
+            let mut seed = [0u8; 32];
+            seed[0] = 0xaa;
+            seed[1] = 0xf2;
+            seed[2] = 0xba;
+            seed[3] = 0xd5;
+            seed[4] = 0xee;
+            seed[5] = 0xd5;
+            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
+            return input_state_with_kernel_in_memory(
+                BFieldElement::new(rand::Rng::gen_range(&mut rng, 0..(1 << 20))),
+                &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
+                    &crate::tests::shared::pseudorandom_transaction_kernel(
+                        rand::Rng::gen::<[u8; 32]>(&mut rng),
+                        4,
+                        4,
+                        2,
+                    ),
+                ),
+            );
+        }
+        panic!("`worst_case_input_state` cannot be called when not in testing environment")
+    }
 }
 
 pub fn input_state_with_kernel_in_memory(
@@ -387,5 +461,29 @@ pub fn input_state_with_kernel_in_memory(
         secret_in: vec![],
         memory,
         words_allocated: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
+
+    use super::TransactionKernelMastHash;
+
+    #[test]
+    fn new_prop_test() {
+        test_rust_equivalence_multiple(&TransactionKernelMastHash, true);
+    }
+}
+
+#[cfg(test)]
+mod benches {
+    use tasm_lib::snippet_bencher::bench_and_write;
+
+    use super::*;
+
+    #[test]
+    fn get_transaction_kernel_field_benchmark() {
+        bench_and_write(TransactionKernelMastHash)
     }
 }

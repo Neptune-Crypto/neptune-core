@@ -1397,7 +1397,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
- "triton-opcodes",
+ "triton-opcodes 0.28.0",
  "triton-vm 0.28.0",
  "tui",
  "twenty-first",
@@ -2416,8 +2416,8 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
- "triton-opcodes",
- "triton-vm 0.29.0",
+ "triton-opcodes 0.29.1",
+ "triton-vm 0.29.1",
  "twenty-first",
 ]
 
@@ -2731,6 +2731,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "triton-opcodes"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54c001596778fe50963b750903c70b3e2c52086d017ac6ca1c594d7556705136"
+dependencies = [
+ "anyhow",
+ "get-size",
+ "itertools",
+ "nom",
+ "num-traits",
+ "rand 0.8.5",
+ "serde",
+ "serde_derive",
+ "strum",
+ "strum_macros",
+ "twenty-first",
+]
+
+[[package]]
 name = "triton-profiler"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2763,16 +2782,14 @@ dependencies = [
  "serde",
  "strum",
  "strum_macros",
- "triton-opcodes",
+ "triton-opcodes 0.28.0",
  "triton-profiler",
  "twenty-first",
 ]
 
 [[package]]
 name = "triton-vm"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feeab38d96fb3f0d0ea4ce31d4fad6a5ab5c4329da1fc8d65a907e81ce876716"
+version = "0.29.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2788,7 +2805,7 @@ dependencies = [
  "serde",
  "strum",
  "strum_macros",
- "triton-opcodes",
+ "triton-opcodes 0.29.1",
  "triton-profiler",
  "twenty-first",
 ]

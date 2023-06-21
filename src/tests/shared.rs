@@ -10,6 +10,11 @@ use pin_project_lite::pin_project;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
 use rand::random;
+use rand::rngs::StdRng;
+use rand::thread_rng;
+use rand::Rng;
+use rand::RngCore;
+use rand::SeedableRng;
 use std::path::Path;
 use std::path::PathBuf;
 use std::{
@@ -24,6 +29,7 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
+use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -70,6 +76,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
@@ -390,6 +397,100 @@ impl<Item> stream::Stream for Mock<Item> {
             // `Bye` in all tests.
             Poll::Ready(Some(Err(MockError::UnexpectedRead)))
         }
+    }
+}
+
+pub fn random_transaction_kernel() -> TransactionKernel {
+    let mut rng = thread_rng();
+    let num_inputs = 1 + (rng.next_u32() % 5) as usize;
+    let num_outputs = 1 + (rng.next_u32() % 6) as usize;
+    let num_pubscripts = (rng.next_u32() % 5) as usize;
+    pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts)
+}
+
+pub fn pseudorandom_transaction_kernel(
+    seed: [u8; 32],
+    num_inputs: usize,
+    num_outputs: usize,
+    num_pubscripts: usize,
+) -> TransactionKernel {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let inputs = (0..num_inputs)
+        .map(|_| pseudorandom_removal_record(rng.gen::<[u8; 32]>()))
+        .collect_vec();
+    let outputs = (0..num_outputs)
+        .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
+        .collect_vec();
+    let pubscripts = (0..num_pubscripts)
+        .map(|_| pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>()))
+        .collect_vec();
+    let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
+    let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
+    let timestamp: BFieldElement = rng.gen();
+    let mutator_set_hash: Digest = rng.gen();
+
+    TransactionKernel {
+        inputs,
+        outputs,
+        pubscript_hashes_and_inputs: pubscripts,
+        fee,
+        coinbase,
+        timestamp,
+        mutator_set_hash,
+    }
+}
+
+pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let ar: Digest = rng.gen();
+    AdditionRecord {
+        canonical_commitment: ar,
+    }
+}
+
+pub fn random_addition_record() -> AdditionRecord {
+    let mut rng = thread_rng();
+    pseudorandom_addition_record(rng.gen::<[u8; 32]>())
+}
+
+pub fn random_pubscript_struct() -> PubScriptHashAndInput {
+    let mut rng = thread_rng();
+    pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>())
+}
+
+pub fn pseudorandom_pubscript_struct(seed: [u8; 32]) -> PubScriptHashAndInput {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let digest: Digest = rng.gen();
+    let len = 10 + (rng.next_u32() % 50) as usize;
+    let input: Vec<BFieldElement> = (0..len).map(|_| rng.gen()).collect_vec();
+    PubScriptHashAndInput {
+        pubscript_hash: digest,
+        pubscript_input: input,
+    }
+}
+
+pub fn random_amount() -> Amount {
+    let mut rng = thread_rng();
+    pseudorandom_amount(rng.gen::<[u8; 32]>())
+}
+
+pub fn pseudorandom_amount(seed: [u8; 32]) -> Amount {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let number: [u32; 4] = rng.gen();
+    Amount(U32s::new(number))
+}
+
+pub fn random_option<T>(thing: T) -> Option<T> {
+    let mut rng = thread_rng();
+    pseudorandom_option(rng.gen::<[u8; 32]>(), thing)
+}
+
+pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    if rng.next_u32() % 2 == 0 {
+        None
+    } else {
+        Some(thing)
     }
 }
 

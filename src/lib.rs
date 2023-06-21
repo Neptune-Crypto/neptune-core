@@ -10,7 +10,7 @@ pub mod rpc_server;
 mod util_types;
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 use crate::config_models::data_directory::DataDirectory;
 use crate::connect_to_peers::call_peer_wrapper;
