@@ -67,21 +67,20 @@ impl TransactionKernel {
 
     pub fn mast_hash(&self) -> Digest {
         // get a sequence of BFieldElements for each field
-        let mut sequences = self.mast_sequences();
+        let sequences = self.mast_sequences();
+
+        let mut mt_leafs = sequences
+            .iter()
+            .map(|seq| Hash::hash_varlen(seq))
+            .collect_vec();
 
         // pad until power of two
-        while sequences.len() & (sequences.len() - 1) != 0 {
-            sequences.push(Digest::default().encode());
+        while mt_leafs.len() & (mt_leafs.len() - 1) != 0 {
+            mt_leafs.push(Digest::default());
         }
 
         // compute Merkle tree and return hash
-        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(
-            &sequences
-                .iter()
-                .map(|seq| Hash::hash_varlen(seq))
-                .collect_vec(),
-        )
-        .get_root()
+        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs).get_root()
     }
 }
 
