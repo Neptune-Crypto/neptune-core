@@ -141,7 +141,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // 2. assert that witness kernel hash == public input
         dup 0 // _ *witness *witness
         push 5 // _ *witness *witness 5 (= field kernel)
-        call {get_field} // _ *witness *kernel
+        call {get_field} // _ *witness *kernel_size_indicator
+
+        push 1 add       // *kernel
         call {transaction_kernel_mast_hash} // _ *witness [witness_kernel_digest]
         {read_input} // _ *witness [witness_kernel_digest] [input_kernel_digest]
         assert_vector
@@ -172,7 +174,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 #[cfg(test)]
 
 mod tests {
-    use rand::{rngs::StdRng, thread_rng, Rng, SeedableRng};
+    use rand::{rngs::StdRng, Rng, SeedableRng};
 
     use super::*;
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
