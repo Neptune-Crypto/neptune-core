@@ -34,8 +34,8 @@ pub fn pseudorandom_chunk_dictionary<H: AlgebraicHasher>(seed: [u8; 32]) -> Chun
     let mut dictionary = HashMap::new();
     for _ in 0..37 {
         let key = rng.next_u64();
-        let authpath: Vec<Digest> = random_elements(rng.next_u32() as usize % 6);
-        let chunk: Vec<u32> = random_elements(rng.next_u32() as usize % 17);
+        let authpath: Vec<Digest> = (0..rng.gen_range(0..6)).map(|_| rng.gen()).collect_vec();
+        let chunk: Vec<u32> = (0..rng.gen_range(0..17)).map(|_| rng.gen()).collect_vec();
 
         dictionary.insert(
             key,
@@ -188,7 +188,8 @@ pub fn pseudorandom_mmr_membership_proof<H: AlgebraicHasher>(
 ) -> MmrMembershipProof<H> {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let leaf_index: u64 = rng.gen();
-    let authentication_path: Vec<Digest> = random_elements((rng.next_u32() % 15) as usize);
+    let authentication_path: Vec<Digest> =
+        (0..rng.gen_range(0..15)).map(|_| rng.gen()).collect_vec();
     MmrMembershipProof {
         leaf_index,
         authentication_path,
