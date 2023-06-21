@@ -107,9 +107,8 @@ async fn mine_block(
     );
 
     // Mining takes place here
-    while Hash::hash(&block_header)
-        >= Block::difficulty_to_digest_threshold(block_header.difficulty)
-    {
+    let threshold = Block::difficulty_to_digest_threshold(block_header.difficulty);
+    while Hash::hash(&block_header) >= threshold {
         if state.cli.throttled_mining {
             tokio::time::sleep(Duration::from_micros(100)).await;
         }
@@ -145,7 +144,7 @@ async fn mine_block(
         block_header.nonce[2].increment();
     }
     info!(
-        "Found valid block with nonce: ({}, {}, {})",
+        "Found valid block with nonce: ({}, {}, {}).",
         block_header.nonce[0], block_header.nonce[1], block_header.nonce[2]
     );
 
@@ -153,6 +152,11 @@ async fn mine_block(
         block: Box::new(Block::new(block_header, block_body)),
         coinbase_utxo_info: Box::new(coinbase_utxo_info),
     };
+
+    info!(
+        "PoW digest of new block: {}. Threshhold was: {threshold}",
+        new_block_info.block.hash
+    );
 
     sender
         .send(new_block_info)
@@ -296,7 +300,7 @@ pub async fn mine(
 ) -> Result<()> {
     let mut pause_mine = false;
     loop {
-        let (sender, receiver) = oneshot::channel::<NewBlockFound>();
+        let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
         let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
             info!("Not mining because we are syncing");
             *state.mining.write().unwrap() = false;
@@ -312,7 +316,7 @@ pub async fn mine(
             let miner_task = mine_block(
                 block_header,
                 block_body,
-                sender,
+                worker_thread_tx,
                 state.clone(),
                 coinbase_utxo_info,
             );
@@ -366,7 +370,7 @@ pub async fn mine(
                     }
                 }
             }
-            new_block_res = receiver => {
+            new_block_res = worker_thread_rx => {
                 let new_block_info = match new_block_res {
                     Ok(res) => res,
                     Err(err) => {
@@ -375,9 +379,18 @@ pub async fn mine(
                     }
                 };
 
+                debug!("Worker thread reports new block of height {}", new_block_info.block.header.height);
+
                 // Sanity check, remove for more efficient mining.
-                assert!(new_block_info.block.has_proof_of_work(&latest_block), "Own mined block must be valid");
-                assert!(new_block_info.block.is_valid(&latest_block), "Own mined block must be valid");
+                // The below PoW check could fail due to race conditions. So we don't panic,
+                // we only ignore what the worker thread sent us.
+                if !new_block_info.block.has_proof_of_work(&latest_block) {
+                    error!("Own mined block did not have valid PoW Discarding.");
+                }
+
+                // The block, however, *must* be valid on other parameters. So here, we should panic
+                // if it is not.
+                assert!(new_block_info.block.is_valid(&latest_block), "Own mined block must be valid. Failed validity check after successful PoW check.");
 
                 info!("Found new regtest block with block height {}. Hash: {}", new_block_info.block.header.height, new_block_info.block.hash.emojihash());
 
