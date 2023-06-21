@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-
 use itertools::Itertools;
-use num_traits::{One, Zero};
+use num_traits::One;
 use tasm_lib::{
-    get_init_tvm_stack,
     hashing::hash_varlen::HashVarlen,
     list::unsafe_u32::{
         get::UnsafeGet, new::UnsafeNew, set::UnsafeSet, set_length::UnsafeSetLength,
@@ -368,18 +365,20 @@ impl Snippet for TransactionKernelMastHash {
         vec![]
     }
 
-    #[allow(unreachable_code)]
     fn gen_input_states(&self) -> Vec<ExecutionState> {
         #[cfg(test)]
         {
-            return vec![input_state_with_kernel_in_memory(
+            vec![input_state_with_kernel_in_memory(
                 BFieldElement::new(rand::Rng::gen_range(&mut rand::thread_rng(), 0..(1 << 20))),
                 &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
                     &crate::tests::shared::random_transaction_kernel(),
                 ),
-            )];
+            )]
         }
-        panic!("`gen_input_states` cannot be called when not in testing environment")
+        #[cfg(not(test))]
+        {
+            panic!("`gen_input_states` cannot be called when not in testing environment")
+        }
     }
 
     #[allow(unreachable_code)]
@@ -437,23 +436,25 @@ impl Snippet for TransactionKernelMastHash {
     }
 }
 
-pub fn input_state_with_kernel_in_memory(
+#[cfg(test)]
+fn input_state_with_kernel_in_memory(
     address: BFieldElement,
     transaction_kernel_encoded: &[BFieldElement],
 ) -> ExecutionState {
     // populate memory
-    let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+    let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
+        std::collections::HashMap::new();
     for (i, t) in transaction_kernel_encoded.iter().enumerate() {
         memory.insert(address + BFieldElement::new(i as u64), *t);
     }
 
     // set dynamic allocator
     memory.insert(
-        BFieldElement::zero(),
+        <BFieldElement as num_traits::Zero>::zero(),
         BFieldElement::new(transaction_kernel_encoded.len() as u64) + address,
     );
 
-    let mut stack = get_init_tvm_stack();
+    let mut stack = tasm_lib::get_init_tvm_stack();
     stack.push(address);
     ExecutionState {
         stack,
@@ -466,9 +467,38 @@ pub fn input_state_with_kernel_in_memory(
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use tasm_lib::test_helpers::{
+        test_rust_equivalence_given_execution_state, test_rust_equivalence_multiple,
+    };
+    use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-    use super::TransactionKernelMastHash;
+    use crate::tests::shared::pseudorandom_transaction_kernel;
+
+    use super::*;
+
+    #[test]
+    fn verify_agreement_with_tx_kernel_mast_hash() {
+        let mut seed = [99u8; 32];
+        seed[17] = 0x17;
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let tx_kernel = pseudorandom_transaction_kernel(rng.gen(), 2, 2, 1);
+        let mut output_with_known_digest = test_rust_equivalence_given_execution_state(
+            &TransactionKernelMastHash,
+            input_state_with_kernel_in_memory(BFieldElement::one(), &tx_kernel.encode()),
+        );
+
+        // read the digest from the very short TX kernel
+        let d0 = output_with_known_digest.final_stack.pop().unwrap();
+        let d1 = output_with_known_digest.final_stack.pop().unwrap();
+        let d2 = output_with_known_digest.final_stack.pop().unwrap();
+        let d3 = output_with_known_digest.final_stack.pop().unwrap();
+        let d4 = output_with_known_digest.final_stack.pop().unwrap();
+        let mast_hash_from_vm = Digest::new([d0, d1, d2, d3, d4]);
+
+        // Verify agreement with mast_hash method on tx kernel
+        assert_eq!(tx_kernel.mast_hash(), mast_hash_from_vm);
+    }
 
     #[test]
     fn new_prop_test() {
