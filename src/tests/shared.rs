@@ -50,6 +50,7 @@ use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::ValidityLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::Witness;
@@ -76,6 +77,8 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
+use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
@@ -397,6 +400,36 @@ impl<Item> stream::Stream for Mock<Item> {
             // `Bye` in all tests.
             Poll::Ready(Some(Err(MockError::UnexpectedRead)))
         }
+    }
+}
+
+pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    Utxo {
+        lock_script_hash: rng.gen(),
+        coins: Amount::from(rng.next_u32()).to_native_coins(),
+    }
+}
+
+pub fn pseudorandom_removal_record_integrity_witness(
+    seed: [u8; 32],
+) -> RemovalRecordsIntegrityWitness {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let num_inputs = 2;
+    let num_outputs = 2;
+    let num_pubscripts = 1;
+
+    RemovalRecordsIntegrityWitness {
+        input_utxos: (0..num_inputs)
+            .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
+            .collect_vec(),
+        membership_proofs: (0..num_inputs)
+            .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
+            .collect_vec(),
+        aocl: pseudorandom_mmra(rng.gen::<[u8; 32]>()),
+        swbfi: pseudorandom_mmra(rng.gen::<[u8; 32]>()),
+        swbfa_hash: rng.gen(),
+        kernel: pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts),
     }
 }
 

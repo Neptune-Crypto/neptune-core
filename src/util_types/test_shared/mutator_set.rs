@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
 use rand::rngs::StdRng;
-use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
+use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusty_leveldb::DB;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -154,10 +154,16 @@ pub fn random_mutator_set_kernel<H: AlgebraicHasher + BFieldCodec>(
     }
 }
 
-/// Generate a random MMRA. For serialization testing. Might not be a consistent or valid object.
+/// Generate a random MMRA. For testing. Might not be a consistent or valid object.
 pub fn random_mmra<H: AlgebraicHasher>() -> MmrAccumulator<H> {
-    let leaf_count = thread_rng().next_u32() as u64;
-    let peaks: Vec<Digest> = random_elements((thread_rng().next_u32() % 10) as usize);
+    pseudorandom_mmra(thread_rng().gen())
+}
+
+pub fn pseudorandom_mmra<H: AlgebraicHasher>(seed: [u8; 32]) -> MmrAccumulator<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let leaf_count = rng.next_u32() as u64;
+    let num_peaks = rng.next_u32() % 10;
+    let peaks: Vec<Digest> = (0..num_peaks).map(|_| rng.gen()).collect_vec();
     MmrAccumulator::init(peaks, leaf_count)
 }
 
@@ -174,8 +180,15 @@ pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec>() -> ActiveWindow<H>
 }
 
 pub fn random_mmr_membership_proof<H: AlgebraicHasher>() -> MmrMembershipProof<H> {
-    let leaf_index: u64 = random();
-    let authentication_path: Vec<Digest> = random_elements((thread_rng().next_u32() % 15) as usize);
+    pseudorandom_mmr_membership_proof(thread_rng().gen())
+}
+
+pub fn pseudorandom_mmr_membership_proof<H: AlgebraicHasher>(
+    seed: [u8; 32],
+) -> MmrMembershipProof<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let leaf_index: u64 = rng.gen();
+    let authentication_path: Vec<Digest> = random_elements((rng.next_u32() % 15) as usize);
     MmrMembershipProof {
         leaf_index,
         authentication_path,
@@ -185,10 +198,17 @@ pub fn random_mmr_membership_proof<H: AlgebraicHasher>() -> MmrMembershipProof<H
 
 /// Generate a random MsMembershipProof. For serialization testing. Might not be a consistent or valid object.
 pub fn random_mutator_set_membership_proof<H: AlgebraicHasher>() -> MsMembershipProof<H> {
-    let sender_randomness: Digest = random();
-    let receiver_preimage: Digest = random();
-    let auth_path_aocl: MmrMembershipProof<H> = random_mmr_membership_proof::<H>();
-    let target_chunks: ChunkDictionary<H> = random_chunk_dictionary();
+    pseudorandom_mutator_set_membership_proof(thread_rng().gen())
+}
+
+pub fn pseudorandom_mutator_set_membership_proof<H: AlgebraicHasher>(
+    seed: [u8; 32],
+) -> MsMembershipProof<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let sender_randomness: Digest = rng.gen();
+    let receiver_preimage: Digest = rng.gen();
+    let auth_path_aocl: MmrMembershipProof<H> = pseudorandom_mmr_membership_proof::<H>(rng.gen());
+    let target_chunks: ChunkDictionary<H> = pseudorandom_chunk_dictionary(rng.gen());
     MsMembershipProof {
         sender_randomness,
         receiver_preimage,

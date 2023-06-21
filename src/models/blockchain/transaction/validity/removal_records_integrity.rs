@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ use twenty_first::{shared_math::bfield_codec::BFieldCodec, util_types::mmr::mmr_
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::validity::ClaimSupport;
+use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::{
     models::blockchain::shared::Hash,
@@ -31,7 +33,7 @@ pub struct RemovalRecordsIntegrity {
     supported_claim: SupportedClaim,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, FieldCount)]
 pub struct RemovalRecordsIntegrityWitness {
     pub input_utxos: Vec<Utxo>,
     pub membership_proofs: Vec<MsMembershipProof<Hash>>,
@@ -39,6 +41,27 @@ pub struct RemovalRecordsIntegrityWitness {
     pub swbfi: MmrAccumulator<Hash>,
     pub swbfa_hash: Digest,
     pub kernel: TransactionKernel,
+}
+
+impl RemovalRecordsIntegrityWitness {
+    pub fn new(primitive_witness: &PrimitiveWitness, tx_kernel: &TransactionKernel) -> Self {
+        Self {
+            input_utxos: primitive_witness.input_utxos.clone(),
+            membership_proofs: primitive_witness.input_membership_proofs.clone(),
+            kernel: tx_kernel.to_owned(),
+            aocl: primitive_witness
+                .mutator_set_accumulator
+                .kernel
+                .aocl
+                .clone(),
+            swbfi: primitive_witness
+                .mutator_set_accumulator
+                .kernel
+                .swbf_inactive
+                .clone(),
+            swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.kernel.swbf_active),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec)]
@@ -134,22 +157,8 @@ impl TxValidationLogic for RemovalRecordsIntegrity {
         primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
         tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) -> Self {
-        let removal_records_integrity_witness = RemovalRecordsIntegrityWitness {
-            input_utxos: primitive_witness.input_utxos.clone(),
-            membership_proofs: primitive_witness.input_membership_proofs.clone(),
-            kernel: tx_kernel.to_owned(),
-            aocl: primitive_witness
-                .mutator_set_accumulator
-                .kernel
-                .aocl
-                .clone(),
-            swbfi: primitive_witness
-                .mutator_set_accumulator
-                .kernel
-                .swbf_inactive
-                .clone(),
-            swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.kernel.swbf_active),
-        };
+        let removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::new(primitive_witness, tx_kernel);
         let witness_data = removal_records_integrity_witness.encode();
         let program = Program::default();
 
