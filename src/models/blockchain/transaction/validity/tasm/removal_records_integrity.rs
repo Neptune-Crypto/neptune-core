@@ -3,8 +3,9 @@ use std::collections::{HashSet, VecDeque};
 use field_count::FieldCount;
 use itertools::Itertools;
 use tasm_lib::{
-    io::load_struct_from_input::LoadStructFromInput, snippet::InputSource,
-    snippet_state::SnippetState, structure::get_field::GetField, DIGEST_LENGTH,
+    io::load_struct_from_input::LoadStructFromInput, mmr::bag_peaks::BagPeaks,
+    snippet::InputSource, snippet_state::SnippetState, structure::get_field::GetField,
+    DIGEST_LENGTH,
 };
 use triton_opcodes::program::{self, Program};
 use triton_vm::BFieldElement;
@@ -58,7 +59,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // now we can trust all data in kernel
         assert_eq!(hash_of_kernel, witness.kernel.mast_hash());
 
-        // assert that the mutator set's MMRs in the witness match the kernel
+        // 3. assert that the mutator set's MMRs in the witness match the kernel
         // now we can trust all data in these MMRs as well
         let mutator_set_hash = Hash::hash_pair(
             &Hash::hash_pair(&witness.aocl.bag_peaks(), &witness.swbfi.bag_peaks()),
@@ -130,6 +131,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let load_struct_from_input = library.import(Box::new(LoadStructFromInput {
             input_source: InputSource::SecretIn,
         }));
+        let bag_peaks = library.import(Box::new(BagPeaks));
         let read_input = "read_io\n".repeat(DIGEST_LENGTH);
 
         let code = format!(
@@ -143,12 +145,82 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         push 5 // _ *witness *witness 5 (= field kernel)
         call {get_field} // _ *witness *kernel_size_indicator
 
-        push 1 add       // *kernel
-        call {transaction_kernel_mast_hash} // _ *witness [witness_kernel_digest]
-        {read_input} // _ *witness [witness_kernel_digest] [input_kernel_digest]
+        push 1 add       // _ *witness *kernel
+        dup 0 // _ *witness *kernel *kernel
+        call {transaction_kernel_mast_hash} // _ *witness *kernel [witness_kernel_digest]
+        {read_input} // _ *witness *kernel [witness_kernel_digest] [input_kernel_digest]
         assert_vector
-        pop pop pop pop pop // _ *witness [kernel_digest]
+        pop pop pop pop pop // _ *witness *kernel [kernel_digest]
+        pop pop pop pop pop // _ *witness *kernel
 
+        // 3. assert that witness mutator set MMRs match those in kernel
+
+        push 0 push 0 push 0 push 0 push 0 // _ *witness *kernel 0 0 0 0 0
+        dup 6 // _ *witness *kernel 0^5 *witness
+        push 4 // _ *witness *kernel 0^5 *witness 4 (= field swbfa_hash)
+        call {get_field} // _ *witness *kernel 0^5 *witness_swbfa_li
+        push 1 add // _ *witness *kernel 0^5 *witness_swbfa_hash
+        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 *wsh+1
+        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 h1 *wsh+2
+        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 h1 h2 *wsh+3
+        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 h1 h2 h3 *wsh+4
+        read_mem swap 1 pop // _ *witness *kernel 0^5 h0 h1 h2 h3 h4
+
+        swap 4 // _ *witness *kernel 0^5 h4 h1 h2 h3 h0
+        dup 1 //  _ *witness *kernel 0^5 h4 h1 h2 h3 h0 h3
+        swap 4 // _ *witness *kernel 0^5 h4 h3 h2 h3 h0 h1
+        swap 2 // _ *witness *kernel 0^5 h4 h3 h2 h1 h0 h3
+        pop    // _ *witness *kernel 0^5 h4 h3 h2 h1 h0
+
+        hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [garbage]
+        pop pop pop pop pop // _ *witness *kernel [H(H(swbfaw)||0^5)]
+
+        dup 6 // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness
+        push 3 // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness 3 (= field swbfi)
+        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_li
+        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi
+        push 1 // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi 1 (= field peaks)
+        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_peaks_li
+        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_peaks
+        call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash]
+        
+        dup 11 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness
+        push 2 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness 2 (= field aocl)
+        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_size_indicator
+        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl
+        push 1 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl 1 (= field peaks)
+        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks_li
+        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
+        call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] [witness_aocl_hash]
+
+        hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)] [garbage]
+        pop pop pop pop pop // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)]
+
+        hash // _ *witness *kernel [H(H(aocl||swbfi))||H(H(swbfaw)||0^5)] [garbage]
+        pop pop pop pop pop // _ *witness *kernel [Hw]
+        
+        dup 5 // _ *witness *kernel [Hw] *kernel
+        push 6 // _ *witness *kernel [Hw] *kernel 6 (= field mutator_set_hash)
+        call {get_field} // _ *witness *kernel [Hw] *kernel_msh_li
+        push 1 add // _ *witness *kernel [Hw] *kernel_msh
+        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 *kernel_msh+1
+        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 Hk1 *kernel_msh+2
+        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 Hk1 Hk2 *kernel_msh+3
+        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 Hk1 Hk2 Hk3 *kernel_msh+4
+        read_mem swap 1 pop // _ *witness *kernel [Hw] Hk0 Hk1 Hk2 Hk3 Hk4
+
+        swap 4 // _ *witness *kernel [Hw] Hk4 Hk1 Hk2 Hk3 Hk0
+        dup 1 //  _ *witness *kernel [Hw] Hk4 Hk1 Hk2 Hk3 Hk0 Hk3
+        swap 4 // _ *witness *kernel [Hw] Hk4 Hk3 Hk2 Hk3 Hk0 Hk1
+        swap 2 // _ *witness *kernel [Hw] Hk4 Hk3 Hk2 Hk1 Hk0 Hk3
+        pop    // _ *witness *kernel [Hw] Hk4 Hk3 Hk2 Hk1 Hk0
+        // _ *witness *kernel [Hw] [Hk]
+
+        assert_vector
+        pop pop pop pop pop
+        pop pop pop pop pop
+        // _ *witness *kernel
+        
         halt
         "
         );
@@ -187,6 +259,7 @@ mod tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let removal_record_integrity_witness =
             pseudorandom_removal_record_integrity_witness(rng.gen());
+
         let program = RemovalRecordsIntegrity.program();
         let stdin: Vec<BFieldElement> = removal_record_integrity_witness
             .kernel

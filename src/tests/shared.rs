@@ -33,6 +33,7 @@ use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::other::random_elements_array;
@@ -419,6 +420,16 @@ pub fn pseudorandom_removal_record_integrity_witness(
     let num_outputs = 2;
     let num_pubscripts = 1;
 
+    let aocl = pseudorandom_mmra(rng.gen::<[u8; 32]>());
+    let swbfi = pseudorandom_mmra(rng.gen::<[u8; 32]>());
+    let swbfa_hash: Digest = rng.gen();
+    let mut kernel =
+        pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts);
+    kernel.mutator_set_hash = Hash::hash_pair(
+        &Hash::hash_pair(&aocl.bag_peaks(), &swbfi.bag_peaks()),
+        &Hash::hash_pair(&swbfa_hash, &Digest::default()),
+    );
+
     RemovalRecordsIntegrityWitness {
         input_utxos: (0..num_inputs)
             .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
@@ -426,10 +437,10 @@ pub fn pseudorandom_removal_record_integrity_witness(
         membership_proofs: (0..num_inputs)
             .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
             .collect_vec(),
-        aocl: pseudorandom_mmra(rng.gen::<[u8; 32]>()),
-        swbfi: pseudorandom_mmra(rng.gen::<[u8; 32]>()),
-        swbfa_hash: rng.gen(),
-        kernel: pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts),
+        aocl,
+        swbfi,
+        swbfa_hash,
+        kernel,
     }
 }
 

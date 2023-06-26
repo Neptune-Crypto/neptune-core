@@ -8,7 +8,6 @@ use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusty_leveldb::DB;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::other::random_elements;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
@@ -179,7 +178,7 @@ pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec>() -> ActiveWindow<H>
     aw
 }
 
-pub fn random_mmr_membership_proof<H: AlgebraicHasher>() -> MmrMembershipProof<H> {
+pub fn _random_mmr_membership_proof<H: AlgebraicHasher>() -> MmrMembershipProof<H> {
     pseudorandom_mmr_membership_proof(thread_rng().gen())
 }
 
