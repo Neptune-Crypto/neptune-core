@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn new_prop_test() {
-        test_rust_equivalence_multiple(&TransactionKernelMastHash, true);
+        test_rust_equivalence_multiple(&TransactionKernelMastHash, false);
     }
 }
 

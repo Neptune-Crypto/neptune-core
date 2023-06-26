@@ -3,9 +3,9 @@ use std::collections::{HashSet, VecDeque};
 use field_count::FieldCount;
 use itertools::Itertools;
 use tasm_lib::{
-    io::load_struct_from_input::LoadStructFromInput, mmr::bag_peaks::BagPeaks,
-    snippet::InputSource, snippet_state::SnippetState, structure::get_field::GetField,
-    DIGEST_LENGTH,
+    io::load_struct_from_input::LoadStructFromInput, list::higher_order::inner_function::RawCode,
+    mmr::bag_peaks::BagPeaks, snippet::InputSource, snippet_state::SnippetState,
+    structure::get_field::GetField, DIGEST_LENGTH,
 };
 use triton_opcodes::program::{self, Program};
 use triton_vm::BFieldElement;
@@ -67,6 +67,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         );
         assert_eq!(witness.kernel.mutator_set_hash, mutator_set_hash);
 
+        // 4. derive index sets from inputs and match them against those listed in the kernel
         // How do we trust input UTXOs?
         // Because they generate removal records, and we can match
         // those against the removal records that are listed in the
@@ -220,6 +221,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         pop pop pop pop pop
         pop pop pop pop pop
         // _ *witness *kernel
+
+        // 4. derive index sets and match them against kernel
+
         
         halt
         "
