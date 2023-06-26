@@ -3,9 +3,13 @@ use std::collections::{HashSet, VecDeque};
 use field_count::FieldCount;
 use itertools::Itertools;
 use tasm_lib::{
-    io::load_struct_from_input::LoadStructFromInput, list::higher_order::inner_function::RawCode,
-    mmr::bag_peaks::BagPeaks, snippet::InputSource, snippet_state::SnippetState,
-    structure::get_field::GetField, DIGEST_LENGTH,
+    io::load_struct_from_input::LoadStructFromInput,
+    list::higher_order::inner_function::RawCode,
+    mmr::bag_peaks::BagPeaks,
+    snippet::{DataType, InputSource},
+    snippet_state::SnippetState,
+    structure::get_field::GetField,
+    DIGEST_LENGTH,
 };
 use triton_opcodes::program::{self, Program};
 use triton_vm::BFieldElement;
@@ -27,6 +31,7 @@ use crate::{
         removal_record::AbsoluteIndexSet,
     },
 };
+use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 
 pub struct RemovalRecordsIntegrity;
 
@@ -134,6 +139,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         }));
         let bag_peaks = library.import(Box::new(BagPeaks));
         let read_input = "read_io\n".repeat(DIGEST_LENGTH);
+        let read_digest = library.import(Box::new(PushRamToStack {
+            output_type: DataType::Digest,
+        }));
 
         let code = format!(
             "
@@ -161,17 +169,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         push 4 // _ *witness *kernel 0^5 *witness 4 (= field swbfa_hash)
         call {get_field} // _ *witness *kernel 0^5 *witness_swbfa_li
         push 1 add // _ *witness *kernel 0^5 *witness_swbfa_hash
-        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 *wsh+1
-        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 h1 *wsh+2
-        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 h1 h2 *wsh+3
-        read_mem swap 1 push 1 add // _ *witness *kernel 0^5 h0 h1 h2 h3 *wsh+4
-        read_mem swap 1 pop // _ *witness *kernel 0^5 h0 h1 h2 h3 h4
-
-        swap 4 // _ *witness *kernel 0^5 h4 h1 h2 h3 h0
-        dup 1 //  _ *witness *kernel 0^5 h4 h1 h2 h3 h0 h3
-        swap 4 // _ *witness *kernel 0^5 h4 h3 h2 h3 h0 h1
-        swap 2 // _ *witness *kernel 0^5 h4 h3 h2 h1 h0 h3
-        pop    // _ *witness *kernel 0^5 h4 h3 h2 h1 h0
+        call {read_digest}
 
         hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [garbage]
         pop pop pop pop pop // _ *witness *kernel [H(H(swbfaw)||0^5)]
@@ -204,17 +202,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         push 6 // _ *witness *kernel [Hw] *kernel 6 (= field mutator_set_hash)
         call {get_field} // _ *witness *kernel [Hw] *kernel_msh_li
         push 1 add // _ *witness *kernel [Hw] *kernel_msh
-        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 *kernel_msh+1
-        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 Hk1 *kernel_msh+2
-        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 Hk1 Hk2 *kernel_msh+3
-        read_mem swap 1 push 1 add // _ *witness *kernel [Hw] Hk0 Hk1 Hk2 Hk3 *kernel_msh+4
-        read_mem swap 1 pop // _ *witness *kernel [Hw] Hk0 Hk1 Hk2 Hk3 Hk4
-
-        swap 4 // _ *witness *kernel [Hw] Hk4 Hk1 Hk2 Hk3 Hk0
-        dup 1 //  _ *witness *kernel [Hw] Hk4 Hk1 Hk2 Hk3 Hk0 Hk3
-        swap 4 // _ *witness *kernel [Hw] Hk4 Hk3 Hk2 Hk3 Hk0 Hk1
-        swap 2 // _ *witness *kernel [Hw] Hk4 Hk3 Hk2 Hk1 Hk0 Hk3
-        pop    // _ *witness *kernel [Hw] Hk4 Hk3 Hk2 Hk1 Hk0
+        call {read_digest}
         // _ *witness *kernel [Hw] [Hk]
 
         assert_vector
