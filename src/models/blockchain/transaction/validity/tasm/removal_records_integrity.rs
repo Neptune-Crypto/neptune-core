@@ -7,6 +7,7 @@ use tasm_lib::{
     list::{
         contiguous_list::get_pointer_list::GetPointerList,
         higher_order::{inner_function::InnerFunction, map::Map, zip::Zip},
+        multiset_equality::MultisetEquality,
         ListType,
     },
     mmr::bag_peaks::BagPeaks,
@@ -37,8 +38,10 @@ use crate::{
 };
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 
-use super::compute_indices::ComputeIndices;
-use super::hash_utxo::HashUtxo;
+use super::{
+    compute_indices::ComputeIndices, hash_removal_record_indices::HashRemovalRecordIndices,
+};
+use super::{hash_index_set::HashIndexSet, hash_utxo::HashUtxo};
 
 pub struct RemovalRecordsIntegrity;
 
@@ -165,6 +168,15 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             list_type: ListType::Unsafe,
             f: InnerFunction::Snippet(Box::new(ComputeIndices)),
         }));
+        let map_hash_index_set = library.import(Box::new(Map {
+            list_type: ListType::Unsafe,
+            f: InnerFunction::Snippet(Box::new(HashIndexSet)),
+        }));
+        let map_hash_removal_record_indices = library.import(Box::new(Map {
+            list_type: ListType::Unsafe,
+            f: InnerFunction::Snippet(Box::new(HashRemovalRecordIndices)),
+        }));
+        let multiset_equality = library.import(Box::new(MultisetEquality(ListType::Unsafe)));
 
         let code = format!(
             "
@@ -245,8 +257,16 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {get_pointer_list} // _ *witness *kernel *[item] *[*mp]
         call {zip_digest_with_void_pointer} // _ *witness *kernel *[(item,*mp)]
         call {map_compute_indices} // _ *witness *kernel *[*index_set]
+        call {map_hash_index_set} // _ *witness *kernel *[index_set_hash]
 
-        push 0 halt
+        dup 1 // _ *witness *kernel *[index_set_hash] *kernel
+        push 0 // _ *witness *kernel *[index_set_hash] *kernel 0 (= field inputs)
+        call {get_field} // _ *witness *kernel *[index_set_hash] *kernel_inputs_si
+        push 1 add // _ *witness *kernel *[index_set_hash] *kernel_inputs
+        call {get_pointer_list} // _ *witness *kernel *[index_set_hash] *[input]
+        call {map_hash_removal_record_indices} // _ *witness *kernel *[witness_index_set_hash] *[kernel_index_set_hash]
+        call {multiset_equality} // _ *witness *kernel witness_inputs==kernel_inputs
+        assert // _ *witness *kernel
         
         halt
         "

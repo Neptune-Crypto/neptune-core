@@ -14,7 +14,6 @@ pub struct HashIndexSet;
 impl HashIndexSet {
     #[cfg(test)]
     fn pseudorandom_init_state(seed: [u8; 32], length: usize) -> tasm_lib::ExecutionState {
-        use itertools::Itertools;
         use rand::RngCore;
 
         let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
