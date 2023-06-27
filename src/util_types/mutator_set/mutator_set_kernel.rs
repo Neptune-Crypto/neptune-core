@@ -1,6 +1,6 @@
 use get_size::GetSize;
 use itertools::Itertools;
-use num_traits::Zero;
+use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{error::Error, fmt};
@@ -53,17 +53,25 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
     let batch_index: u128 = aocl_leaf_index as u128 / BATCH_SIZE as u128;
     let batch_offset: u128 = batch_index * CHUNK_SIZE as u128;
     let leaf_index_bfes = aocl_leaf_index.encode();
-    let leaf_index_bfes_len = leaf_index_bfes.len();
     let input = [
         item.encode(),
         sender_randomness.encode(),
         receiver_preimage.encode(),
         leaf_index_bfes,
-        // Pad with zeros until length is a multiple of RATE; according to spec
-        vec![BFieldElement::zero(); DIGEST_LENGTH - leaf_index_bfes_len],
+        // Pad according to spec
+        vec![
+            BFieldElement::one(),
+            BFieldElement::zero(),
+            BFieldElement::zero(),
+        ],
     ]
     .concat();
-    assert_eq!(input.len() % DIGEST_LENGTH, 0);
+    assert_eq!(
+        input.len() % DIGEST_LENGTH,
+        0,
+        "Input to sponge must be a multiple digest length"
+    );
+
     let mut sponge = <H as SpongeHasher>::init();
     H::absorb_repeatedly(&mut sponge, input.iter());
     H::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
