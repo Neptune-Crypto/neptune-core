@@ -4,7 +4,11 @@ use field_count::FieldCount;
 use itertools::Itertools;
 use tasm_lib::{
     io::load_struct_from_input::LoadStructFromInput,
-    list::higher_order::inner_function::RawCode,
+    list::{
+        contiguous_list::get_pointer_list::GetPointerList,
+        higher_order::{inner_function::InnerFunction, map::Map, zip::Zip},
+        ListType,
+    },
     mmr::bag_peaks::BagPeaks,
     snippet::{DataType, InputSource},
     snippet_state::SnippetState,
@@ -32,6 +36,9 @@ use crate::{
     },
 };
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
+
+use super::compute_indices::ComputeIndices;
+use super::hash_utxo::HashUtxo;
 
 pub struct RemovalRecordsIntegrity;
 
@@ -142,6 +149,22 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let read_digest = library.import(Box::new(PushRamToStack {
             output_type: DataType::Digest,
         }));
+        let map_hash_utxo = library.import(Box::new(Map {
+            list_type: ListType::Unsafe,
+            f: InnerFunction::Snippet(Box::new(HashUtxo)),
+        }));
+        let get_pointer_list = library.import(Box::new(GetPointerList {
+            output_list_type: ListType::Unsafe,
+        }));
+        let zip_digest_with_void_pointer = library.import(Box::new(Zip {
+            list_type: ListType::Unsafe,
+            left_type: DataType::Digest,
+            right_type: DataType::VoidPointer,
+        }));
+        let map_compute_indices = library.import(Box::new(Map {
+            list_type: ListType::Unsafe,
+            f: InnerFunction::Snippet(Box::new(ComputeIndices)),
+        }));
 
         let code = format!(
             "
@@ -211,7 +234,19 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // _ *witness *kernel
 
         // 4. derive index sets and match them against kernel
+        dup 1 // _ *witness *kernel *witness
+        push 0 call {get_field} // _ *witness *kernel *utxos_si
+        push 1 add // _ *witness *kernel *utxos
+        call {get_pointer_list} // _ *witness *kernel *[*utxo]
+        call {map_hash_utxo} // _ *witness *kernel *[item]
+        dup 2 // _ *witness *kernel *[item] *witness
+        push 1 call {get_field} // _ *witness *kernel *[item] *mps_si
+        push 1 add // _ *witness *kernel *[items] *mps
+        call {get_pointer_list} // _ *witness *kernel *[item] *[*mp]
+        call {zip_digest_with_void_pointer} // _ *witness *kernel *[(item,*mp)]
+        call {map_compute_indices} // _ *witness *kernel *[*index_set]
 
+        push 0 halt
         
         halt
         "
