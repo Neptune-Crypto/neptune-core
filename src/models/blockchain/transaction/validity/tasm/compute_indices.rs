@@ -370,7 +370,7 @@ mod benches {
     use super::*;
 
     #[test]
-    fn commit_benchmark() {
+    fn compute_index_set_benchmark() {
         bench_and_write(ComputeIndices)
     }
 }
