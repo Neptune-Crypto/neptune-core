@@ -89,11 +89,20 @@ impl Snippet for HashRemovalRecordIndices {
         // AFTER: _ [digest]
         {entrypoint}:
             push 0 // _ *removal_record 0 (= field absolute_index_set)
+
             call {get_field} // _ *ais_si
-            read_mem // _ *ais_si size
+
+            push 181 // _ *ais_si size
             // size is 181
-            // push -1 add // _ *ais_si size-1
-            swap 1 push 1 add swap 1 // _ *ais size-1
+            // Why not read it? Because BFieldCodec does not encode consistently.
+
+            swap 1 push 1 add swap 1 // _ *ais size
+
+            swap 1 read_mem push 181 eq add swap 1 
+            // Wait, what? Work around BFieldCodec's inconsistency.
+
+            // swap 1 read_mem push 0 assert
+
             call {hash_varlen}
             return"
         )
@@ -203,6 +212,7 @@ mod tests {
         },
         rust_shadowing_helper_functions,
         test_helpers::test_rust_equivalence_multiple,
+        VmHasher,
     };
     use triton_vm::{BFieldElement, Digest};
     use twenty_first::shared_math::tip5::DIGEST_LENGTH;
@@ -233,22 +243,13 @@ mod tests {
         // compute digests
         let rust_digests = removal_records
             .iter()
-            .map(|rr| Hash::hash_varlen(&rr.absolute_indices.encode()[1..]))
+            .map(|rr| Hash::hash_varlen(&rr.absolute_indices.encode()[0..]))
             .collect_vec();
-        println!(
-            "length of encoding of one absolute index set: {}",
-            removal_records[0].absolute_indices.encode().len()
-        );
-        println!(
-            "rr.absolute_indices.encode()[1..]: {}",
-            removal_records[0].absolute_indices.encode()[1..]
-                .iter()
-                .join(",")
-        );
 
         // populate memory
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let removal_records_encoded = removal_records.encode();
+        Vec::<RemovalRecord<VmHasher>>::decode(&removal_records_encoded).unwrap();
         for (i, v) in removal_records_encoded.iter().enumerate() {
             memory.insert(address + BFieldElement::new(i as u64), *v);
         }
@@ -270,7 +271,7 @@ mod tests {
         let get_pointer_list = GetPointerList {
             output_list_type: ListType::Unsafe,
         };
-        let vm_output = get_pointer_list.link_and_run_tasm_for_test(
+        let _vm_output = get_pointer_list.link_and_run_tasm_for_test(
             &mut stack,
             vec![],
             vec![],
@@ -325,7 +326,6 @@ mod tests {
             list_type: ListType::Unsafe,
             f: InnerFunction::Snippet(Box::new(HashRemovalRecordIndices)),
         };
-        println!("stack before 2nd run: {}", stack.iter().join(","));
         let _vm_output_state = map_hash_removal_record_indices.link_and_run_tasm_for_test(
             &mut stack,
             vec![],
@@ -333,9 +333,6 @@ mod tests {
             &mut memory,
             new_dyn_malloc_value,
         );
-        println!("stack after 2nd run: {}", stack.iter().join(","));
-        let new_dyn_malloc_value2 = memory[&BFieldElement::zero()].value() as usize;
-        println!("new dyn malloc value: {}", new_dyn_malloc_value2);
         // STACK: 0^16 *[digest]
 
         // inspect memory
