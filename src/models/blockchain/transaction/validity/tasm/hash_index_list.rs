@@ -9,9 +9,9 @@ use twenty_first::{
 
 use crate::models::blockchain::shared::Hash;
 
-pub struct HashIndexSet;
+pub struct HashIndexList;
 
-impl HashIndexSet {
+impl HashIndexList {
     #[cfg(test)]
     fn pseudorandom_init_state(seed: [u8; 32], length: usize) -> tasm_lib::ExecutionState {
         use rand::RngCore;
@@ -49,9 +49,9 @@ impl HashIndexSet {
     }
 }
 
-impl Snippet for HashIndexSet {
+impl Snippet for HashIndexList {
     fn entrypoint(&self) -> String {
-        "tasm_neptune_transaction_hash_index_set".to_string()
+        "tasm_neptune_transaction_hash_index_list".to_string()
     }
 
     fn inputs(&self) -> Vec<String> {
@@ -90,8 +90,12 @@ impl Snippet for HashIndexSet {
         // AFTER: _ [digest]
         {entrypoint}:
             read_mem // _ *index_set length
-            push 4 mul // _ *index_set length*4
-            push 1 add // _ *index_set length*4+1
+            push 4 mul // _ *index_set size
+
+            swap 1 
+            push 1
+            add
+            swap 1
 
             call {hash_varlen}
             return"
@@ -161,10 +165,10 @@ impl Snippet for HashIndexSet {
         }
 
         // decode index set
-        let index_set: Vec<u128> = *Vec::<u128>::decode(&index_set_encoded).unwrap();
+        let _index_set: Vec<u128> = *Vec::<u128>::decode(&index_set_encoded).unwrap();
 
         // hash index set
-        let digest = Hash::hash(&index_set);
+        let digest = Hash::hash_varlen(&index_set_encoded[1..]);
 
         // populate stack
         stack.push(digest.values()[4]);
@@ -183,7 +187,7 @@ mod tests {
 
     #[test]
     fn new_prop_test() {
-        test_rust_equivalence_multiple(&HashIndexSet, false);
+        test_rust_equivalence_multiple(&HashIndexList, false);
     }
 }
 
@@ -195,6 +199,6 @@ mod benches {
 
     #[test]
     fn hash_index_set_benchmark() {
-        bench_and_write(HashIndexSet)
+        bench_and_write(HashIndexList)
     }
 }

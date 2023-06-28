@@ -40,9 +40,9 @@ use crate::{
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 
 use super::{
-    compute_indices::ComputeIndices, hash_removal_record_indices::HashRemovalRecordIndices,
+    compute_indices::ComputeIndices, hash_index_list::HashIndexList,
+    hash_removal_record_indices::HashRemovalRecordIndices, hash_utxo::HashUtxo,
 };
-use super::{hash_index_set::HashIndexSet, hash_utxo::HashUtxo};
 
 pub struct RemovalRecordsIntegrity;
 
@@ -91,7 +91,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let items = witness.input_utxos.iter().map(Hash::hash).collect_vec();
 
         // test that removal records listed in kernel match those derived from input utxos
-        let digests_of_derived_index_sets = items
+        let digests_of_derived_index_lists = items
             .iter()
             .zip(witness.membership_proofs.iter())
             .map(|(utxo, msmp)| {
@@ -105,14 +105,17 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             })
             .map(|x| Hash::hash_varlen(&x))
             .collect::<HashSet<_>>();
-        let digests_of_claimed_index_sets = witness
+        let digests_of_claimed_index_lists = witness
             .kernel
             .inputs
             .iter()
             .map(|input| input.absolute_indices.encode())
             .map(|e| Hash::hash_varlen(&e))
             .collect::<HashSet<_>>();
-        assert_eq!(digests_of_derived_index_sets, digests_of_claimed_index_sets);
+        assert_eq!(
+            digests_of_derived_index_lists,
+            digests_of_claimed_index_lists
+        );
 
         // verify that all input utxos (mutator set items) live in the AOCL
         assert!(items
@@ -169,9 +172,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             list_type: ListType::Unsafe,
             f: InnerFunction::Snippet(Box::new(ComputeIndices)),
         }));
-        let map_hash_index_set = library.import(Box::new(Map {
+        let map_hash_index_list = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashIndexSet)),
+            f: InnerFunction::Snippet(Box::new(HashIndexList)),
         }));
         let map_hash_removal_record_indices = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
@@ -180,6 +183,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let multiset_equality = library.import(Box::new(MultisetEquality(ListType::Unsafe)));
 
         let get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
+        let compute_indices = library.import(Box::new(ComputeIndices));
 
         let code = format!(
             "
@@ -259,20 +263,16 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         push 1 add // _ *witness *kernel *[items] *mps
         call {get_pointer_list} // _ *witness *kernel *[item] *[*mp]
         call {zip_digest_with_void_pointer} // _ *witness *kernel *[(item,*mp)]
-        call {map_compute_indices} // _ *witness *kernel *[*index_set]
-        call {map_hash_index_set} // _ *witness *kernel *[index_set_hash]
+        call {map_compute_indices} // _ *witness *kernel *[*[index]]
 
-        dup 1 // _ *witness *kernel *[index_set_hash] *kernel
-        push 0 // _ *witness *kernel *[index_set_hash] *kernel 0 (= field inputs)
-        call {get_field} // _ *witness *kernel *[index_set_hash] *kernel_inputs_si
-        push 1 add // _ *witness *kernel *[index_set_hash] *kernel_inputs
-        call {get_pointer_list} // _ *witness *kernel *[index_set_hash] *[*tx_input]
-        call {map_hash_removal_record_indices} // _ *witness *kernel *[witness_index_set_hash] *[kernel_index_set_hash]
+        call {map_hash_index_list} // _ *witness *kernel *[index_list_hash]
 
-        // print kernel index set hash
-        push 1 add
-        call {read_digest}
-        push 0 eq
+        dup 1 // _ *witness *kernel *[index_list_hash] *kernel
+        push 0 // _ *witness *kernel *[index_list_hash] *kernel 0 (= field inputs)
+        call {get_field} // _ *witness *kernel *[index_list_hash] *kernel_inputs_si
+        push 1 add // _ *witness *kernel *[index_list_hash] *kernel_inputs
+        call {get_pointer_list} // _ *witness *kernel *[index_list_hash] *[*tx_input]
+        call {map_hash_removal_record_indices} // _ *witness *kernel *[witness_index_list_hash] *[kernel_index_list_hash]
 
         call {multiset_equality} // _ *witness *kernel witness_inputs==kernel_inputs
         assert // _ *witness *kernel
@@ -326,7 +326,7 @@ mod tests {
             .to_vec();
         let secret_in: Vec<BFieldElement> = removal_record_integrity_witness.encode();
 
-        let witness_index_sets = removal_record_integrity_witness
+        let witness_index_lists = removal_record_integrity_witness
             .input_utxos
             .iter()
             .zip_eq(removal_record_integrity_witness.membership_proofs.iter())
@@ -341,42 +341,51 @@ mod tests {
             .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(&item, &sr, &rp, li))
             .map(|ais| AbsoluteIndexSet::new(&ais))
             .collect_vec();
-        let mut witness_index_sets_hashes = witness_index_sets.iter().map(Hash::hash).collect_vec();
-        witness_index_sets_hashes.sort();
+        let very_first_index = witness_index_lists[0].to_array()[0];
+        println!(
+            "very first index: {} {} {} {}",
+            very_first_index >> 96,
+            (very_first_index >> 64) & u32::MAX as u128,
+            (very_first_index >> 32) & u32::MAX as u128,
+            very_first_index & u32::MAX as u128
+        );
+        let mut witness_index_lists_hashes =
+            witness_index_lists.iter().map(Hash::hash).collect_vec();
+        witness_index_lists_hashes.sort();
 
         println!(
             "witness index set hashes: ({})",
-            witness_index_sets_hashes
+            witness_index_lists_hashes
                 .iter()
                 .map(|wis| wis.emojihash())
                 .join(", ")
         );
         println!(
-            "first elements: {} {}",
-            witness_index_sets_hashes[0].values()[0],
-            witness_index_sets_hashes[1].values()[0]
+            "as numbers: ({})-({})",
+            witness_index_lists_hashes[0].values().iter().join(", "),
+            witness_index_lists_hashes[1].values().iter().join(", ")
         );
 
-        let kernel_index_sets = removal_record_integrity_witness
+        let kernel_index_lists = removal_record_integrity_witness
             .kernel
             .inputs
             .iter()
             .map(|rr| rr.absolute_indices.clone())
             .collect_vec();
-        let mut kernel_index_sets_hashes = kernel_index_sets.iter().map(Hash::hash).collect_vec();
-        kernel_index_sets_hashes.sort();
+        let mut kernel_index_lists_hashes = kernel_index_lists.iter().map(Hash::hash).collect_vec();
+        kernel_index_lists_hashes.sort();
 
         println!(
             "kernel index set hashes: ({})",
-            kernel_index_sets_hashes
+            kernel_index_lists_hashes
                 .iter()
                 .map(|wis| wis.emojihash())
                 .join(", ")
         );
         println!(
-            "first elements: {} {}",
-            kernel_index_sets_hashes[0].values()[0],
-            kernel_index_sets_hashes[1].values()[0]
+            "as numbers: ({})-({})",
+            kernel_index_lists_hashes[0].values().iter().join(", "),
+            kernel_index_lists_hashes[1].values().iter().join(", ")
         );
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());

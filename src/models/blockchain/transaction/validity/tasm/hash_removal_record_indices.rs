@@ -92,16 +92,18 @@ impl Snippet for HashRemovalRecordIndices {
 
             call {get_field} // _ *ais_si
 
-            push 181 // _ *ais_si size
-            // size is 181
+            push 180 // _ *ais_si size
+            // size is 180
             // Why not read it? Because BFieldCodec does not encode consistently.
 
             swap 1 push 1 add swap 1 // _ *ais size
 
-            swap 1 read_mem push 181 eq add swap 1 
+            swap 1 read_mem push 181 eq add
+            push 1 add
+            swap 1 
             // Wait, what? Work around BFieldCodec's inconsistency.
 
-            // swap 1 read_mem push 0 assert
+            // _ *first 180
 
             call {hash_varlen}
             return"
@@ -185,7 +187,7 @@ impl Snippet for HashRemovalRecordIndices {
         let removal_record = *RemovalRecord::<Hash>::decode(&encoding).unwrap();
 
         // hash absolute index set
-        let digest = Hash::hash_varlen(&removal_record.absolute_indices.encode()[0..]);
+        let digest = Hash::hash_varlen(&removal_record.absolute_indices.encode()[1..]);
 
         // write hash to stack
         stack.push(digest.values()[4]);
@@ -243,7 +245,7 @@ mod tests {
         // compute digests
         let rust_digests = removal_records
             .iter()
-            .map(|rr| Hash::hash_varlen(&rr.absolute_indices.encode()[0..]))
+            .map(|rr| Hash::hash_varlen(&rr.absolute_indices.encode()[1..]))
             .collect_vec();
 
         // populate memory

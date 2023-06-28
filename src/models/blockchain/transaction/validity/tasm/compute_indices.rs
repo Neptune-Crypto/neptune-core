@@ -22,12 +22,6 @@ impl ComputeIndices {
             >(rand::Rng::gen(&mut rng));
         msmp.auth_path_aocl.leaf_index = rand::Rng::gen(&mut rng);
 
-        println!(
-            "leaf index lo: {}",
-            msmp.auth_path_aocl.leaf_index & u32::MAX as u64
-        );
-        println!("leaf index hi: {}", msmp.auth_path_aocl.leaf_index >> 32);
-
         let msmp_encoded = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&msmp);
 
         let item: Digest = rand::Rng::gen(&mut rng);
