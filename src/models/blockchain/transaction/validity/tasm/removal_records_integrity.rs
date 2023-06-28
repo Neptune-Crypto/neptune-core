@@ -182,8 +182,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         }));
         let multiset_equality = library.import(Box::new(MultisetEquality(ListType::Unsafe)));
 
-        let get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
-        let compute_indices = library.import(Box::new(ComputeIndices));
+        let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
+        let _compute_indices = library.import(Box::new(ComputeIndices));
 
         let code = format!(
             "
