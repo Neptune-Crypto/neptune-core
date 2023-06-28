@@ -75,9 +75,12 @@ use crate::models::state::UtxoReceiverData;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::test_shared::mutator_set::pseudorandom_chunk_dictionary;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
@@ -420,6 +423,12 @@ pub fn pseudorandom_removal_record_integrity_witness(
     let num_outputs = 2;
     let num_pubscripts = 1;
 
+    let input_utxos = (0..num_inputs)
+        .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
+        .collect_vec();
+    let membership_proofs = (0..num_inputs)
+        .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
+        .collect_vec();
     let aocl = pseudorandom_mmra(rng.gen::<[u8; 32]>());
     let swbfi = pseudorandom_mmra(rng.gen::<[u8; 32]>());
     let swbfa_hash: Digest = rng.gen();
@@ -429,14 +438,34 @@ pub fn pseudorandom_removal_record_integrity_witness(
         &Hash::hash_pair(&aocl.bag_peaks(), &swbfi.bag_peaks()),
         &Hash::hash_pair(&swbfa_hash, &Digest::default()),
     );
+    kernel.inputs = input_utxos
+        .iter()
+        .zip(membership_proofs.iter())
+        .map(|(utxo, msmp)| {
+            (
+                Hash::hash(utxo),
+                msmp.sender_randomness,
+                msmp.receiver_preimage,
+                msmp.auth_path_aocl.leaf_index,
+            )
+        })
+        .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(&item, &sr, &rp, li))
+        .map(|ais| RemovalRecord {
+            absolute_indices: AbsoluteIndexSet::new(&ais),
+            target_chunks: pseudorandom_chunk_dictionary(rng.gen()),
+        })
+        .collect_vec();
+
+    let mut kernel_index_set_hashes = kernel
+        .inputs
+        .iter()
+        .map(|rr| Hash::hash(&rr.absolute_indices))
+        .collect_vec();
+    kernel_index_set_hashes.sort();
 
     RemovalRecordsIntegrityWitness {
-        input_utxos: (0..num_inputs)
-            .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
-            .collect_vec(),
-        membership_proofs: (0..num_inputs)
-            .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
-            .collect_vec(),
+        input_utxos,
+        membership_proofs,
         aocl,
         swbfi,
         swbfa_hash,

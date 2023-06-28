@@ -68,10 +68,10 @@ impl Snippet for ComputeIndices {
     fn inputs(&self) -> Vec<String> {
         vec![
             "i4".to_string(),
-            "i4".to_string(),
-            "i4".to_string(),
-            "i4".to_string(),
-            "i4".to_string(),
+            "i3".to_string(),
+            "i2".to_string(),
+            "i1".to_string(),
+            "i0".to_string(),
             "*mp".to_string(),
         ]
     }
