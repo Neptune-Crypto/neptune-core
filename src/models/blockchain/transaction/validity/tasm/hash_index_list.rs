@@ -88,6 +88,15 @@ impl Snippet for HashIndexList {
         // BEFORE: _ *index_list
         // AFTER: _ [digest]
         {entrypoint}:
+
+            read_mem // _ *index_list length
+            swap 1 push 1 add // _ length *index_list+1
+            read_mem // _ length *index_list+1 maybe_len
+            push 4 mul push 1 add // _ length *index_list+1 maybe_length*4+1
+            swap 1 push -1 add swap 2 // _ *index_list maybe_length*4+1 length
+            eq // _ *index_list maybe_length*4+1==length
+            add // _ *index_list(+1)? // maybe skip size-prepending (possibly 181)
+
             read_mem // _ *index_list length
             push 4 mul // _ *index_list size
 
