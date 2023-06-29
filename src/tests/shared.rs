@@ -454,6 +454,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
             absolute_indices: AbsoluteIndexSet::new(&ais),
             target_chunks: pseudorandom_chunk_dictionary(rng.gen()),
         })
+        .rev()
         .collect_vec();
 
     let mut kernel_index_set_hashes = kernel
