@@ -19,13 +19,13 @@ impl HashRemovalRecordIndices {
     fn pseudorandom_init_state(seed: [u8; 32]) -> ExecutionState {
         use std::collections::HashMap;
 
-        use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+        use rand::{Rng, RngCore};
         use tasm_lib::get_init_tvm_stack;
         use triton_vm::BFieldElement;
 
         use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
         let removal_record = pseudorandom_removal_record::<Hash>(rng.gen());
         let address: BFieldElement = BFieldElement::new(rng.next_u64() % (1u64 << 20));
 
@@ -92,18 +92,9 @@ impl Snippet for HashRemovalRecordIndices {
 
             call {get_field} // _ *ais_si
 
-            push 180 // _ *ais_si size
-            // size is 180
-            // Why not read it? Because BFieldCodec does not encode consistently.
-
-            swap 1 push 1 add swap 1 // _ *ais size
-
-            swap 1 read_mem push 181 eq add
             push 1 add
-            swap 1 
-            // Wait, what? Work around BFieldCodec's inconsistency.
 
-            // _ *first 180
+            read_mem swap 1 push 1 add swap 1
 
             call {hash_varlen}
             return"
@@ -117,7 +108,10 @@ impl Snippet for HashRemovalRecordIndices {
     fn gen_input_states(&self) -> Vec<ExecutionState> {
         #[cfg(test)]
         {
-            let mut rng = rand::thread_rng();
+            let mut seed = [0u8; 32];
+            seed[0] = 0x26;
+            seed[1] = 0x53;
+            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
             vec![
                 Self::pseudorandom_init_state(rand::Rng::gen(&mut rng)),
                 Self::pseudorandom_init_state(rand::Rng::gen(&mut rng)),
@@ -224,7 +218,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_prop_test() {
+    fn test_hash_removal_record_indices() {
         test_rust_equivalence_multiple(&HashRemovalRecordIndices, false);
     }
 
@@ -301,12 +295,18 @@ mod tests {
         // read removal records from memory through list of pointers
         let mut read_removal_records = vec![];
         for pointer in pointers_list {
-            let size = memory.get(&pointer).unwrap().value() as usize;
+            // Since this pointer list points into a contiguous list, every
+            // element is size-prepended, but the pointer points past the size.
+            // So move one back to read the size works.
+            let size = memory
+                .get(&(pointer - BFieldElement::new(1)))
+                .unwrap()
+                .value() as usize;
             let mut removal_record_encoding = vec![];
             for i in 0..size {
                 removal_record_encoding.push(
                     *memory
-                        .get(&(pointer + BFieldElement::new(1 + i as u64)))
+                        .get(&(pointer + BFieldElement::new(i as u64)))
                         .unwrap(),
                 );
             }

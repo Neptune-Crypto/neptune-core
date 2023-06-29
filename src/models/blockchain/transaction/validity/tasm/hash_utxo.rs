@@ -11,9 +11,8 @@ use twenty_first::{
 
 use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
 
-/// HashUtxo takes a VoidPointer to a length-prepended UTXO in
-/// memory, hashes it using hash_varlen, and leaves the digest on top
-/// of the stack.
+/// HashUtxo takes a VoidPointer to a UTXO living in a contiguous
+/// list, and hashes it.
 pub struct HashUtxo;
 
 impl HashUtxo {
@@ -32,12 +31,12 @@ impl HashUtxo {
             > = std::collections::HashMap::new();
             let encoded_utxo = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&utxo);
             memory.insert(
-                address,
+                address - BFieldElement::new(1),
                 triton_vm::BFieldElement::new(encoded_utxo.len() as u64),
             );
             for (i, v) in encoded_utxo.iter().enumerate() {
                 memory.insert(
-                    address + triton_vm::BFieldElement::new(1u64 + i as u64),
+                    address + triton_vm::BFieldElement::new(i as u64),
                     v.to_owned(),
                 );
             }
@@ -91,13 +90,15 @@ impl Snippet for HashUtxo {
 
         format!(
             "
-        // BEFORE: _ *utxo_si
+        // BEFORE: _ *utxo
         // AFTER: _ [utxo_digest]
         {entrypoint}:
+            push -1 add // _ *utxo_si // because it lives in a contiguous list
             read_mem // _ *utxo_si utxo_size
             swap 1 // _ utxo_size *utxo_si
             push 1 add // _ utxo_size *utxo
             swap 1 // _ *utxo utxo_size
+
             call {hash_varlen}
             return
             "
@@ -143,12 +144,15 @@ impl Snippet for HashUtxo {
         let address = stack.pop().unwrap();
 
         // read utxo
-        let size = memory.get(&address).unwrap().value() as usize;
+        let size = memory
+            .get(&(address - BFieldElement::new(1)))
+            .unwrap()
+            .value() as usize;
         let mut utxo_encoded = vec![];
         for i in 0..size {
             utxo_encoded.push(
                 memory
-                    .get(&(address + BFieldElement::new(1u64 + i as u64)))
+                    .get(&(address + BFieldElement::new(i as u64)))
                     .unwrap()
                     .to_owned(),
             );

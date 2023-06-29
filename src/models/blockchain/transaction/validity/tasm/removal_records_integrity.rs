@@ -267,15 +267,6 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {zip_digest_with_void_pointer} // _ *witness *kernel *[(*mp, item)]
         call {map_compute_indices} // _ *witness *kernel *[*[index]]
 
-    // push 1 add // _ *witness *kernel *[*index]]+1
-    // read_mem // _ *witness *kernel *[*index]]+1 *[absolute_indices]
-    // read_mem swap 1 push 1 add
-    // read_mem swap 1 push 1 add
-    // read_mem swap 1 push 1 add
-    // read_mem swap 1 push 1 add
-    // read_mem swap 1 push 1 add
-    // push 77 assert
-
         call {map_hash_index_list} // _ *witness *kernel *[index_list_hash]
 
         dup 1 // _ *witness *kernel *[index_list_hash] *kernel
@@ -360,8 +351,18 @@ mod tests {
             (very_first_index >> 32) & u32::MAX as u128,
             very_first_index & u32::MAX as u128
         );
-        let mut witness_index_lists_hashes =
-            witness_index_lists.iter().map(Hash::hash).collect_vec();
+        let very_second_index = witness_index_lists[1].to_array()[0];
+        println!(
+            "very second index: {} {} {} {}",
+            very_second_index >> 96,
+            (very_second_index >> 64) & u32::MAX as u128,
+            (very_second_index >> 32) & u32::MAX as u128,
+            very_second_index & u32::MAX as u128
+        );
+        let mut witness_index_lists_hashes = witness_index_lists
+            .iter()
+            .map(|l| Hash::hash_varlen(&l.encode()[1..]))
+            .collect_vec();
         witness_index_lists_hashes.sort();
 
         println!(
@@ -383,7 +384,10 @@ mod tests {
             .iter()
             .map(|rr| rr.absolute_indices.clone())
             .collect_vec();
-        let mut kernel_index_lists_hashes = kernel_index_lists.iter().map(Hash::hash).collect_vec();
+        let mut kernel_index_lists_hashes = kernel_index_lists
+            .iter()
+            .map(|l| Hash::hash_varlen(&l.encode()[1..]))
+            .collect_vec();
         kernel_index_lists_hashes.sort();
 
         println!(
