@@ -258,12 +258,21 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         push 1 add // _ *witness *kernel *utxos
         call {get_pointer_list} // _ *witness *kernel *[*utxo]
         call {map_hash_utxo} // _ *witness *kernel *[item]
+
         dup 2 // _ *witness *kernel *[item] *witness
         push 1 call {get_field} // _ *witness *kernel *[item] *mps_si
         push 1 add // _ *witness *kernel *[items] *mps
         call {get_pointer_list} // _ *witness *kernel *[item] *[*mp]
         call {zip_digest_with_void_pointer} // _ *witness *kernel *[(item,*mp)]
         call {map_compute_indices} // _ *witness *kernel *[*[index]]
+    push 1 add // _ *witness *kernel *[*index]]+1
+    read_mem // _ *witness *kernel *[*index]]+1 *[absolute_indices]
+    read_mem swap 1 push 1 add
+    read_mem swap 1 push 1 add
+    read_mem swap 1 push 1 add
+    read_mem swap 1 push 1 add
+    read_mem swap 1 push 1 add
+    push 77 assert
 
         call {map_hash_index_list} // _ *witness *kernel *[index_list_hash]
 

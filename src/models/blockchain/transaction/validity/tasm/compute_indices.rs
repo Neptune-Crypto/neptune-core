@@ -1,6 +1,7 @@
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::get_swbf_indices::GetSwbfIndices,
+    rust_shadowing_helper_functions,
     snippet::{DataType, Snippet},
     structure::get_field::GetField,
 };
@@ -105,6 +106,7 @@ impl Snippet for ComputeIndices {
         // BEFORE: _ i4 i3 i2 i1 i0 *mp
         // AFTER: _ *indices
         {entrypoint}:
+
 
             // get fields
             dup 0 // _ [item] *mp *mp
@@ -342,18 +344,186 @@ impl Snippet for ComputeIndices {
             num_trials: NUM_TRIALS as usize,
         };
         get_swbf_indices.rust_shadowing(stack, std_in, secret_in, memory);
+
+        // print absolute indices for debugging purposes
+        let absolute_index_list_address: BFieldElement = *stack.last().unwrap();
+        for i in 0..45 {
+            println!(
+                "absolute index {i}: {}",
+                rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
+                    absolute_index_list_address,
+                    i,
+                    memory,
+                    4
+                )
+                .iter()
+                .map(|b| b.value() as u128)
+                .enumerate()
+                .map(|(j, v)| v << (32 * j))
+                .sum::<u128>()
+            );
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
+    use std::collections::HashMap;
+
+    use itertools::Itertools;
+    use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+    use tasm_lib::{
+        get_init_tvm_stack,
+        list::{
+            higher_order::{inner_function::InnerFunction, map::Map},
+            ListType,
+        },
+        test_helpers::test_rust_equivalence_multiple,
+    };
+    use twenty_first::shared_math::bfield_codec::BFieldCodec;
+
+    use crate::models::blockchain::shared::Hash;
+    use crate::util_types::{
+        mutator_set::mutator_set_kernel::get_swbf_indices,
+        test_shared::mutator_set::pseudorandom_mutator_set_membership_proof,
+    };
 
     use super::*;
 
     #[test]
-    fn new_prop_test() {
+    fn test_compute_indices() {
         test_rust_equivalence_multiple(&ComputeIndices, false);
+    }
+
+    #[test]
+    fn test_map_compute_indices() {
+        let mut seed = [0u8; 32];
+        seed[0] = 0xa7;
+        seed[1] = 0xdf;
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+        let num_items = 5;
+
+        // sample membership proofs
+        let membership_proofs = (0..num_items)
+            .map(|_| pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen()))
+            .collect_vec();
+
+        // sample items
+        let items: Vec<Digest> = (0..num_items).map(|_| rng.gen()).collect_vec();
+
+        // put membership proofs into memory
+        let mut address = BFieldElement::new(rng.next_u64() % (1 << 20));
+        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+        let mut membership_proof_addresses = vec![];
+        for mp in membership_proofs.iter() {
+            membership_proof_addresses.push(address);
+            for v in mp.encode().iter() {
+                memory.insert(address, *v);
+                address.increment()
+            }
+        }
+
+        // zip items with membership proof addresses and store that list to memory
+        let main_list_address = address;
+        memory.insert(address, BFieldElement::new(num_items as u64));
+        address.increment();
+        for (item, ptr) in items.iter().zip(membership_proof_addresses.iter()) {
+            // Opposite order because stack. (Data is stored in the right order in memory.)
+            memory.insert(address, *ptr);
+            address.increment();
+            memory.insert(address, item.values()[0]);
+            address.increment();
+            memory.insert(address, item.values()[1]);
+            address.increment();
+            memory.insert(address, item.values()[2]);
+            address.increment();
+            memory.insert(address, item.values()[3]);
+            address.increment();
+            memory.insert(address, item.values()[4]);
+            address.increment();
+        }
+
+        // populate stack
+        let mut stack = get_init_tvm_stack();
+        stack.push(main_list_address);
+
+        // run map snippet
+        let mallocked = address.value() as usize;
+        let map_compute_indices = Map {
+            list_type: ListType::Unsafe,
+            f: InnerFunction::Snippet(Box::new(ComputeIndices)),
+        };
+        let _vm_output_state = map_compute_indices.link_and_run_tasm_for_test(
+            &mut stack,
+            vec![],
+            vec![],
+            &mut memory,
+            mallocked,
+        );
+
+        // inspect memory
+        let output_list_address = stack.pop().unwrap();
+        let output_list_length = memory.get(&output_list_address).unwrap().value() as usize;
+        assert_eq!(output_list_length, num_items);
+        let mut index_set_pointers = vec![];
+        for i in 0..output_list_length {
+            index_set_pointers.push(
+                rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
+                    output_list_address,
+                    i,
+                    &memory,
+                    1,
+                )[0],
+            );
+        }
+        let mut tasm_index_sets = vec![];
+        for ptr in index_set_pointers.iter() {
+            let mut index_set = vec![];
+            for i in 0..NUM_TRIALS as usize {
+                index_set.push(
+                    rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
+                        *ptr, i, &memory, 4,
+                    )
+                    .iter()
+                    .enumerate()
+                    .map(|(j, v)| (v.value() as u128) << (32 * j))
+                    .sum::<u128>(),
+                );
+            }
+            tasm_index_sets.push(index_set);
+        }
+
+        // test against rust shadow
+        let rust_index_sets = items
+            .into_iter()
+            .zip(membership_proofs.into_iter())
+            .map(|(item, mp)| {
+                get_swbf_indices::<Hash>(
+                    &item,
+                    &mp.sender_randomness,
+                    &mp.receiver_preimage,
+                    mp.auth_path_aocl.leaf_index,
+                )
+                .to_vec()
+            })
+            .collect_vec();
+
+        assert_eq!(
+            rust_index_sets,
+            tasm_index_sets,
+            "\nrust: {}\ntasm: {}",
+            rust_index_sets[0]
+                .iter()
+                .take(2)
+                .chain(rust_index_sets[1].iter().take(2))
+                .join(","),
+            tasm_index_sets[0]
+                .iter()
+                .take(2)
+                .chain(tasm_index_sets[1].iter().take(2))
+                .join(",")
+        )
     }
 }
 
