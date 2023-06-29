@@ -107,7 +107,6 @@ impl Snippet for ComputeIndices {
         // AFTER: _ *indices
         {entrypoint}:
 
-
             // get fields
             dup 0 // _ [item] *mp *mp
             push 0 // _ [item] *mp *mp 0 (= field sender_randomness)
@@ -176,7 +175,6 @@ impl Snippet for ComputeIndices {
             swap 5  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 sr0 i4 i3 i2 i1 i0
                     // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 sr0 i4 i3 i2 i1 i0
 
-            // get indices
             call {get_swbf_indices}
 
             return
@@ -412,13 +410,27 @@ mod tests {
         // sample items
         let items: Vec<Digest> = (0..num_items).map(|_| rng.gen()).collect_vec();
 
+        // TODO: Remove this
+        let mps_encoded = membership_proofs.encode();
+        println!(
+            "****** mps_encoded ******\n\n\n\n: {}",
+            mps_encoded.iter().take(200).join(",")
+        );
+        println!(
+            "****** mps[0] encoded ******\n\n\n\n: {}",
+            membership_proofs[0].encode().iter().take(200).join(",")
+        );
+
         // put membership proofs into memory
         let mut address = BFieldElement::new(rng.next_u64() % (1 << 20));
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let mut membership_proof_addresses = vec![];
         for mp in membership_proofs.iter() {
             membership_proof_addresses.push(address);
-            for v in mp.encode().iter() {
+            for (i, v) in mp.encode().iter().enumerate() {
+                if i == 0 {
+                    println!("encoding of membership proof, element 0: {}", v);
+                }
                 memory.insert(address, *v);
                 address.increment()
             }
