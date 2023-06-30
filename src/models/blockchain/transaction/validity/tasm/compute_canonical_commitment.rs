@@ -1,5 +1,5 @@
 use crate::models::blockchain::shared::Hash;
-use itertools::Itertools;
+use num_traits::{One, Zero};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
@@ -32,11 +32,16 @@ impl ComputeCanonicalCommitment {
             // generate random ms membership proof object
             let membership_proof = pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen());
 
-            // populate memory
+            // populate memory, with the size of the encoding prepended
             let address = BFieldElement::new(rng.next_u64() % (1 << 20));
             let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
-            for (i, v) in membership_proof.encode().iter().enumerate() {
-                memory.insert(address + BFieldElement::new(i as u64), *v);
+            let mp_encoding = membership_proof.encode();
+            memory.insert(address, BFieldElement::new(mp_encoding.len() as u64));
+            for (i, v) in mp_encoding.iter().enumerate() {
+                memory.insert(
+                    address + BFieldElement::one() + BFieldElement::new(i as u64),
+                    *v,
+                );
             }
 
             // populate stack
@@ -47,7 +52,7 @@ impl ComputeCanonicalCommitment {
             stack.push(digest.values()[2]);
             stack.push(digest.values()[1]);
             stack.push(digest.values()[0]);
-            stack.push(address);
+            stack.push(address + BFieldElement::new(1));
 
             ExecutionState {
                 stack,
@@ -113,26 +118,29 @@ impl Snippet for ComputeCanonicalCommitment {
         // BEFORE: _  i4 i3 i2 i1 i0 *mp
         // AFTER: _  c4 c3 c2 c1 c0
         {entrypoint}:
+            dup 0 push 0 call {get_field} // _ i4 i3 i2 i1 i0 *mp *sr_si
+            swap 1 push 1 call {get_field} // _ i4 i3 i2 i1 i0 *sr_si *rp_si
 
-            dup 0 push 0 call {get_field} // _ i4 i3 i2 i1 i0 *mp *sr
-            swap 1 push 1 call {get_field} // _ i4 i3 i2 i1 i0 *sr *rp
-
-            call {read_digest} // _ i4 i3 i2 i1 i0 *sr rp4 rp3 rp2 rp1 rp0
+            push 1 add  // _ i4 i3 i2 i1 i0 *sr_si *rp
             push 0 push 0 push 0 push 0 push 0
+            swap 5                  // _ i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 *rp
+
+            call {read_digest} // _ i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 [receiver_preimage]
             hash
             pop pop pop pop pop
-            // _ i4 i3 i2 i1 i0 *sr rd4 rd3 rd2 rd1 rd0
+            // _ i4 i3 i2 i1 i0 *sr_si rd4 rd3 rd2 rd1 rd0
 
-            swap 6  // _ i4 i3 i2 i1 rd0 *sr rd4 rd3 rd2 rd1 i0
-            swap 1  // _ i4 i3 i2 i1 rd0 *sr rd4 rd3 rd2 i0 rd1
-            swap 7  // _ i4 i3 i2 rd1 rd0 *sr rd4 rd3 rd2 i0 i1
-            swap 2  // _ i4 i3 i2 rd1 rd0 *sr rd4 rd3 i1 i0 rd2
-            swap 8  // _ i4 i3 rd2 rd1 rd0 *sr rd4 rd3 i1 i0 i2
-            swap 3  // _ i4 i3 rd2 rd1 rd0 *sr rd4 i2 i1 i0 rd3
-            swap 9  // _ i4 rd3 rd2 rd1 rd0 *sr rd4 i2 i1 i0 i3
-            swap 4  // _ i4 rd3 rd2 rd1 rd0 *sr i3 i2 i1 i0 rd4
-            swap 10 // _ rd4 rd3 rd2 rd1 rd0 *sr i3 i2 i1 i0 i4
-            swap 5  // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr
+            swap 6                  // _ i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 rd1 i0
+            swap 1                  // _ i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 i0 rd1
+            swap 7                  // _ i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 rd2 i0 i1
+            swap 2                  // _ i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 i1 i0 rd2
+            swap 8                  // _ i4 i3 rd2 rd1 rd0 *sr_si rd4 rd3 i1 i0 i2
+            swap 3                  // _ i4 i3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 rd3
+            swap 9                  // _ i4 rd3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 i3
+            swap 4                  // _ i4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 rd4
+            swap 10                 // _ rd4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 i4
+            swap 5                  // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr_si
+            push 1 add              // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr
 
             call {read_digest} // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 sr4 sr3 sr2 sr1 sr0
 
@@ -197,7 +205,7 @@ impl Snippet for ComputeCanonicalCommitment {
         memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
     ) {
         // read arguments
-        let address = stack.pop().unwrap();
+        let address = stack.pop().unwrap() - BFieldElement::new(1);
         let d0 = stack.pop().unwrap();
         let d1 = stack.pop().unwrap();
         let d2 = stack.pop().unwrap();
@@ -206,23 +214,30 @@ impl Snippet for ComputeCanonicalCommitment {
         let item = Digest::new([d0, d1, d2, d3, d4]);
 
         // read membership proof object from memory
-        let size = memory.get(&address).unwrap().value() as usize;
-        println!("size of encoding: {size}");
+        let encoding_size = memory.get(&address).unwrap().value() as usize;
+        println!("size of encoding: {encoding_size}");
+        println!("address = {}", address);
         let mut encoding = vec![];
-        for i in 0..=size {
-            encoding.push(
-                *memory
-                    .get(&(address + BFieldElement::new(i as u64)))
-                    .unwrap(),
-            );
+        for i in 0..encoding_size {
+            let read_word = memory
+                .get(&(address + BFieldElement::new(i as u64) + BFieldElement::one()))
+                .map(|x| *x)
+                .unwrap_or_else(|| BFieldElement::zero());
+            encoding.push(read_word);
         }
 
         // decode object
-        println!("encoding: {}", encoding.iter().join(","));
         let membership_proof = *MsMembershipProof::<Hash>::decode(&encoding).unwrap();
 
         // compute commitment
+        println!("receiver_preimage: {}", membership_proof.receiver_preimage);
         let receiver_digest = membership_proof.receiver_preimage.hash::<Hash>();
+        println!("receiver_digest: {}", receiver_digest);
+        println!(
+            "\nsender_randomness:\n {}",
+            membership_proof.sender_randomness
+        );
+        println!("\nitem:\n{}", item);
         let c = commit::<Hash>(&item, &membership_proof.sender_randomness, &receiver_digest);
 
         // push onto stack
