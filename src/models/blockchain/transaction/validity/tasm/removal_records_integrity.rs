@@ -289,15 +289,18 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // 5. verify that all item commitments live in the aocl
         // get aocl leaf count
         dup 1 // _ *[(*mp, item)] *witness *kernel *witness
-        push 2 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl
+        push 2 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl_si
+        push 1 add              // _ *[(*mp, item)] *witness *kernel *aocl
         dup 0                   // _ *[(*mp, item)] *witness *kernel *aocl *aocl
-        push 0 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count
+        push 0 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count_si
         push 2 add // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count+2
         read_mem swap 1 push -1 add // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi *leaf_count+1
         read_mem swap 1 pop // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo
 
         dup 2                   // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *aocl
-        push 1 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
+        push 1 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks_si
+        push 1 add              // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
+
 
         swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(*mp, item)]
         swap 2 // _ *peaks *witness *kernel *aocl *[(*mp, item)] leaf_count_lo leaf_count_hi
@@ -350,6 +353,16 @@ mod tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let removal_record_integrity_witness =
             pseudorandom_removal_record_integrity_witness(rng.gen());
+        let aocl_leaf_count = removal_record_integrity_witness.aocl.count_leaves();
+        println!("aocl leaf count: {aocl_leaf_count}",);
+        let aocl_leaf_count_hi = (aocl_leaf_count >> 32) as u32;
+        let aocl_leaf_count_lo = (aocl_leaf_count & u32::MAX as u64) as u32;
+        println!("aocl_leaf_count_hi: {aocl_leaf_count_hi}",);
+        println!("aocl_leaf_count_lo: {aocl_leaf_count_lo}",);
+        println!(
+            "number of peaks in AOCL: {}",
+            removal_record_integrity_witness.aocl.get_peaks().len()
+        );
 
         let program = RemovalRecordsIntegrity.program();
         let stdin: Vec<BFieldElement> = removal_record_integrity_witness
