@@ -84,7 +84,10 @@ impl Snippet for ComputeCanonicalCommitment {
     }
 
     fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Digest, DataType::VoidPointer]
+        vec![DataType::Pair(
+            Box::new(DataType::Digest),
+            Box::new(DataType::VoidPointer),
+        )]
     }
 
     fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {

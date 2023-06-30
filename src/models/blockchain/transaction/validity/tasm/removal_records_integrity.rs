@@ -40,8 +40,9 @@ use crate::{
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 
 use super::{
-    compute_indices::ComputeIndices, hash_index_list::HashIndexList,
-    hash_removal_record_indices::HashRemovalRecordIndices, hash_utxo::HashUtxo,
+    compute_canonical_commitment::ComputeCanonicalCommitment, compute_indices::ComputeIndices,
+    hash_index_list::HashIndexList, hash_removal_record_indices::HashRemovalRecordIndices,
+    hash_utxo::HashUtxo,
 };
 
 pub struct RemovalRecordsIntegrity;
@@ -182,6 +183,11 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         }));
         let multiset_equality = library.import(Box::new(MultisetEquality(ListType::Unsafe)));
 
+        let map_compute_canonical_commitment = library.import(Box::new(Map {
+            list_type: ListType::Unsafe,
+            f: InnerFunction::Snippet(Box::new(ComputeCanonicalCommitment)),
+        }));
+
         let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
         let _compute_indices = library.import(Box::new(ComputeIndices));
 
@@ -312,7 +318,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         pop    // _ *peaks leaf_count_hi leaf_count_lo *witness *[(*mp, item)] *kernel
         swap 1 // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[(*mp, item)]
 
-        swap 1 swap 2 swap 3 swap 4 swap 5 // _ *witness *kernel leaf_count_hi leaf_count_lo *[(*mp, item)]
+        call {map_compute_canonical_commitment}
+               // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[cc]
         
         halt
         "
@@ -446,6 +453,28 @@ mod tests {
             "as numbers: ({})-({})",
             kernel_index_lists_hashes[0].values().iter().join(", "),
             kernel_index_lists_hashes[1].values().iter().join(", ")
+        );
+
+        let canonical_commitments = removal_record_integrity_witness
+            .input_utxos
+            .iter()
+            .map(Hash::hash)
+            .zip(removal_record_integrity_witness.membership_proofs.iter())
+            .map(|(item, mp)| {
+                commit::<Hash>(
+                    &item,
+                    &mp.sender_randomness,
+                    &mp.receiver_preimage.hash::<Hash>(),
+                )
+            })
+            .collect_vec();
+        println!(
+            "first canonical commitment: ({})",
+            canonical_commitments[0]
+                .canonical_commitment
+                .values()
+                .iter()
+                .join(", ")
         );
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
