@@ -91,11 +91,15 @@ impl Snippet for ComputeCanonicalCommitment {
     }
 
     fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Digest]
+        vec![DataType::Pair(
+            Box::new(DataType::VoidPointer),
+            Box::new(DataType::Digest),
+        )]
     }
 
     fn outputs(&self) -> Vec<String> {
         vec![
+            "*mp".to_string(),
             "c4".to_string(),
             "c3".to_string(),
             "c2".to_string(),
@@ -105,7 +109,7 @@ impl Snippet for ComputeCanonicalCommitment {
     }
 
     fn stack_diff(&self) -> isize {
-        -1
+        0
     }
 
     fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
@@ -119,45 +123,50 @@ impl Snippet for ComputeCanonicalCommitment {
         format!(
             "
         // BEFORE: _  i4 i3 i2 i1 i0 *mp
-        // AFTER: _  c4 c3 c2 c1 c0
+        // AFTER: _  *mp c4 c3 c2 c1 c0
         {entrypoint}:
-            dup 0 push 0 call {get_field} // _ i4 i3 i2 i1 i0 *mp *sr_si
-            swap 1 push 1 call {get_field} // _ i4 i3 i2 i1 i0 *sr_si *rp_si
+            swap 5 swap 4 swap 3 swap 2 swap 1 dup 5
+            // _  *mp i4 i3 i2 i1 i0 *mp
 
-            push 1 add  // _ i4 i3 i2 i1 i0 *sr_si *rp
+            dup 0 push 0 call {get_field} // _ *mpi4 i3 i2 i1 i0 *mp *sr_si
+            swap 1 push 1 call {get_field} // _ *mpi4 i3 i2 i1 i0 *sr_si *rp_si
+
+            push 1 add  // _ *mpi4 i3 i2 i1 i0 *sr_si *rp
             push 0 push 0 push 0 push 0 push 0
-            swap 5                  // _ i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 *rp
+            swap 5                  // _ *mp i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 *rp
 
-            call {read_digest} // _ i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 [receiver_preimage]
+            call {read_digest} // _ *mp i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 [receiver_preimage]
             hash
             pop pop pop pop pop
-            // _ i4 i3 i2 i1 i0 *sr_si rd4 rd3 rd2 rd1 rd0
+            // _ *mp i4 i3 i2 i1 i0 *sr_si rd4 rd3 rd2 rd1 rd0
 
-            swap 6                  // _ i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 rd1 i0
-            swap 1                  // _ i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 i0 rd1
-            swap 7                  // _ i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 rd2 i0 i1
-            swap 2                  // _ i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 i1 i0 rd2
-            swap 8                  // _ i4 i3 rd2 rd1 rd0 *sr_si rd4 rd3 i1 i0 i2
-            swap 3                  // _ i4 i3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 rd3
-            swap 9                  // _ i4 rd3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 i3
-            swap 4                  // _ i4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 rd4
-            swap 10                 // _ rd4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 i4
-            swap 5                  // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr_si
-            push 1 add              // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr
+            swap 6                  // _ *mp i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 rd1 i0
+            swap 1                  // _ *mp i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 i0 rd1
+            swap 7                  // _ *mp i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 rd2 i0 i1
+            swap 2                  // _ *mp i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 i1 i0 rd2
+            swap 8                  // _ *mp i4 i3 rd2 rd1 rd0 *sr_si rd4 rd3 i1 i0 i2
+            swap 3                  // _ *mp i4 i3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 rd3
+            swap 9                  // _ *mp i4 rd3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 i3
+            swap 4                  // _ *mp i4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 rd4
+            swap 10                 // _ *mp rd4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 i4
+            swap 5                  // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr_si
+            push 1 add              // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr
 
-            call {read_digest} // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 sr4 sr3 sr2 sr1 sr0
+            call {read_digest} // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 sr4 sr3 sr2 sr1 sr0
 
-            push 1  // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 sr4 sr3 sr2 sr1 sr0 1
-            swap 5  // _ rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 1 sr3 sr2 sr1 sr0 sr4
-            swap 10 // _ rd4 rd3 rd2 rd1 rd0 sr4 i3 i2 i1 i0 1 sr3 sr2 sr1 sr0 i4
-            swap 5  // _ rd4 rd3 rd2 rd1 rd0 sr4 i3 i2 i1 i0 i4 sr3 sr2 sr1 sr0 1
-            swap 4 swap 9 swap 4 // _ rd4 rd3 rd2 rd1 rd0 sr4 sr3 i2 i1 i0 i4 i3 sr2 sr1 sr0 1
-            swap 3 swap 8 swap 3 // _ rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 i1 i0 i4 i3 i2 sr1 sr0 1
-            swap 2 swap 7 swap 2 // _ rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 sr1 i0 i4 i3 i2 i1 sr0 1
-            swap 1 swap 6 swap 1 // _ rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 sr1 sr0 i4 i3 i2 i1 i0 1
+            push 1  // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 sr4 sr3 sr2 sr1 sr0 1
+            swap 5  // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 1 sr3 sr2 sr1 sr0 sr4
+            swap 10 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 i3 i2 i1 i0 1 sr3 sr2 sr1 sr0 i4
+            swap 5  // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 i3 i2 i1 i0 i4 sr3 sr2 sr1 sr0 1
+            swap 4 swap 9 swap 4 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 sr3 i2 i1 i0 i4 i3 sr2 sr1 sr0 1
+            swap 3 swap 8 swap 3 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 i1 i0 i4 i3 i2 sr1 sr0 1
+            swap 2 swap 7 swap 2 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 sr1 i0 i4 i3 i2 i1 sr0 1
+            swap 1 swap 6 swap 1 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 sr1 sr0 i4 i3 i2 i1 i0 1
             pop
 
             call {commit}
+
+            // _ *mp c4 c3 c2 c1 c0
 
             return
             "
@@ -208,7 +217,8 @@ impl Snippet for ComputeCanonicalCommitment {
         memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
     ) {
         // read arguments
-        let address = stack.pop().unwrap() - BFieldElement::new(1);
+        let size_address = stack.pop().unwrap() - BFieldElement::new(1);
+        let mp_pointer = size_address + BFieldElement::one();
         let d0 = stack.pop().unwrap();
         let d1 = stack.pop().unwrap();
         let d2 = stack.pop().unwrap();
@@ -217,13 +227,13 @@ impl Snippet for ComputeCanonicalCommitment {
         let item = Digest::new([d0, d1, d2, d3, d4]);
 
         // read membership proof object from memory
-        let encoding_size = memory.get(&address).unwrap().value() as usize;
+        let encoding_size = memory.get(&size_address).unwrap().value() as usize;
         println!("size of encoding: {encoding_size}");
-        println!("address = {}", address);
+        println!("address = {}", size_address);
         let mut encoding = vec![];
         for i in 0..encoding_size {
             let read_word = memory
-                .get(&(address + BFieldElement::new(i as u64) + BFieldElement::one()))
+                .get(&(size_address + BFieldElement::new(i as u64) + BFieldElement::one()))
                 .map(|x| *x)
                 .unwrap_or_else(|| BFieldElement::zero());
             encoding.push(read_word);
@@ -244,6 +254,7 @@ impl Snippet for ComputeCanonicalCommitment {
         let c = commit::<Hash>(&item, &membership_proof.sender_randomness, &receiver_digest);
 
         // push onto stack
+        stack.push(mp_pointer);
         stack.push(c.canonical_commitment.values()[4]);
         stack.push(c.canonical_commitment.values()[3]);
         stack.push(c.canonical_commitment.values()[2]);
