@@ -118,7 +118,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             digests_of_claimed_index_lists
         );
 
-        // verify that all input utxos (mutator set items) live in the AOCL
+        // 5. verify that all input utxos (mutator set items) live in the AOCL
         assert!(items
             .iter()
             .zip(witness.membership_proofs.iter())
@@ -311,15 +311,14 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(*mp, item)]
         swap 2 // _ *peaks *witness *kernel *aocl *[(*mp, item)] leaf_count_lo leaf_count_hi
         swap 5 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo *witness
-        swap 1 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] *witness leaf_count_lo
-        swap 4 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)] *witness *kernel
-        swap 1 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)] *kernel *witness
-        swap 3 // _ *peaks leaf_count_hi leaf_count_lo *witness *[(*mp, item)] *kernel *aocl
-        pop    // _ *peaks leaf_count_hi leaf_count_lo *witness *[(*mp, item)] *kernel
-        swap 1 // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[(*mp, item)]
+        pop    // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo
+        swap 3 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)] *kernel
+        pop    // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)]
+        swap 1 // _ *peaks leaf_count_hi leaf_count_lo *[(*mp, item)] *aocl
+        pop    // _ *peaks leaf_count_hi leaf_count_lo *[(*mp, item)]
 
         call {map_compute_canonical_commitment}
-               // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[(cc, *mp)]
+               // _ *peaks leaf_count_hi leaf_count_lo *[(cc, *mp)]
 
         // Verify that all CCs live in the AOCL
 

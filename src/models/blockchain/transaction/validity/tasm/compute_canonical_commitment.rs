@@ -234,8 +234,8 @@ impl Snippet for ComputeCanonicalCommitment {
         for i in 0..encoding_size {
             let read_word = memory
                 .get(&(size_address + BFieldElement::new(i as u64) + BFieldElement::one()))
-                .map(|x| *x)
-                .unwrap_or_else(|| BFieldElement::zero());
+                .copied()
+                .unwrap_or_else(BFieldElement::zero);
             encoding.push(read_word);
         }
 
