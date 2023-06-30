@@ -261,23 +261,55 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         dup 2 // _ *witness *kernel *[item] *witness
         push 1 call {get_field} // _ *witness *kernel *[item] *mps_si
-        push 1 add // _ *witness *kernel *[items] *mps
-        call {get_pointer_list} // _ *witness *kernel *[item] *[*mp]
-        swap 1 // _ *witness *kernel *[*mp] *[item[]]
+        push 1 add //_ *witness *kernel *[items] *mps
+        call {get_pointer_list} //_ *witness *kernel *[item] *[*mp]
+        swap 1 //_ *witness *kernel *[*mp] *[item]
         call {zip_digest_with_void_pointer} // _ *witness *kernel *[(*mp, item)]
-        call {map_compute_indices} // _ *witness *kernel *[*[index]]
 
-        call {map_hash_index_list} // _ *witness *kernel *[index_list_hash]
+        // store for later use
+        dup 0  // _ *witness *kernel *[(*mp, item)] *[(*mp, item)]
+        swap 3 // _  *[(*mp, item)] *kernel *[(*mp, item)] *witness
+        swap 2 // _  *[(*mp, item)] *witness *[(*mp, item)] *kernel
+        swap 1 // _  *[(*mp, item)] *witness *kernel *[(*mp, item)]
 
-        dup 1 // _ *witness *kernel *[index_list_hash] *kernel
-        push 0 // _ *witness *kernel *[index_list_hash] *kernel 0 (= field inputs)
-        call {get_field} // _ *witness *kernel *[index_list_hash] *kernel_inputs_si
-        push 1 add // _ *witness *kernel *[index_list_hash] *kernel_inputs
-        call {get_pointer_list} // _ *witness *kernel *[index_list_hash] *[*tx_input]
-        call {map_hash_removal_record_indices} // _ *witness *kernel *[witness_index_list_hash] *[kernel_index_list_hash]
+        call {map_compute_indices} // _  *[(*mp, item)] *witness *kernel *[*[index]]
 
-        call {multiset_equality} // _ *witness *kernel witness_inputs==kernel_inputs
-        assert // _ *witness *kernel
+        call {map_hash_index_list} // _  *[(*mp, item)] *witness *kernel *[index_list_hash]
+
+        dup 1 // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel
+        push 0 // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel 0 (= field inputs)
+        call {get_field} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel_inputs_si
+        push 1 add // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel_inputs
+        call {get_pointer_list} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *[*tx_input]
+        call {map_hash_removal_record_indices} // _  *[(*mp, item)] *witness *kernel *[witness_index_list_hash] *[kernel_index_list_hash]
+
+        call {multiset_equality} // _  *[(*mp, item)] *witness *kernel witness_inputs==kernel_inputs
+        assert // _  *[(*mp, item)] *witness *kernel
+
+        // 5. verify that all item commitments live in the aocl
+        // get aocl leaf count
+        dup 1 // _ *[(*mp, item)] *witness *kernel *witness
+        push 2 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl
+        dup 0                   // _ *[(*mp, item)] *witness *kernel *aocl *aocl
+        push 0 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count
+        push 2 add // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count+2
+        read_mem swap 1 push -1 add // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi *leaf_count+1
+        read_mem swap 1 pop // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo
+
+        dup 2                   // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *aocl
+        push 1 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
+
+        swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(*mp, item)]
+        swap 2 // _ *peaks *witness *kernel *aocl *[(*mp, item)] leaf_count_lo leaf_count_hi
+        swap 5 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo *witness
+        swap 1 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] *witness leaf_count_lo
+        swap 4 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)] *witness *kernel
+        swap 1 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)] *kernel *witness
+        swap 3 // _ *peaks leaf_count_hi leaf_count_lo *witness *[(*mp, item)] *kernel *aocl
+        pop    // _ *peaks leaf_count_hi leaf_count_lo *witness *[(*mp, item)] *kernel
+        swap 1 // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[(*mp, item)]
+
+        swap 1 swap 2 swap 3 swap 4 swap 5 // _ *witness *kernel leaf_count_hi leaf_count_lo *[(*mp, item)]
         
         halt
         "
