@@ -319,8 +319,11 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         swap 1 // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[(*mp, item)]
 
         call {map_compute_canonical_commitment}
-               // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[cc]
-        
+               // _ *peaks leaf_count_hi leaf_count_lo *witness *kernel *[(cc, *mp)]
+
+        // Verify that all CCs live in the AOCL
+
+
         halt
         "
         );
@@ -470,11 +473,11 @@ mod tests {
             .collect_vec();
         println!(
             "first canonical commitment: ({})",
-            canonical_commitments[0]
-                .canonical_commitment
-                .values()
-                .iter()
-                .join(", ")
+            canonical_commitments[0].canonical_commitment
+        );
+        println!(
+            "second canonical commitment: ({})",
+            canonical_commitments[1].canonical_commitment
         );
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
