@@ -6,7 +6,7 @@ use tasm_lib::{
     io::load_struct_from_input::LoadStructFromInput,
     list::{
         contiguous_list::get_pointer_list::GetPointerList,
-        higher_order::{inner_function::InnerFunction, map::Map, zip::Zip},
+        higher_order::{all::All, inner_function::InnerFunction, map::Map, zip::Zip},
         multiset_equality::MultisetEquality,
         unsafe_u32::get::UnsafeGet,
         ListType,
@@ -42,7 +42,7 @@ use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 use super::{
     compute_canonical_commitment::ComputeCanonicalCommitment, compute_indices::ComputeIndices,
     hash_index_list::HashIndexList, hash_removal_record_indices::HashRemovalRecordIndices,
-    hash_utxo::HashUtxo,
+    hash_utxo::HashUtxo, verify_aocl_membership::VerifyAoclMembership,
 };
 
 pub struct RemovalRecordsIntegrity;
@@ -187,6 +187,10 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             list_type: ListType::Unsafe,
             f: InnerFunction::Snippet(Box::new(ComputeCanonicalCommitment)),
         }));
+        let all_verify_aocl_membership = library.import(Box::new(All {
+            list_type: ListType::Unsafe,
+            f: InnerFunction::Snippet(Box::new(VerifyAoclMembership)),
+        }));
 
         let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
         let _compute_indices = library.import(Box::new(ComputeIndices));
@@ -292,7 +296,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {multiset_equality} // _  *[(*mp, item)] *witness *kernel witness_inputs==kernel_inputs
         assert // _  *[(*mp, item)] *witness *kernel
 
-        // 5. verify that all item commitments live in the aocl
+        // 5. verify that all items' commitments live in the aocl
         // get aocl leaf count
         dup 1 // _ *[(*mp, item)] *witness *kernel *witness
         push 2 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl_si
@@ -319,9 +323,13 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         call {map_compute_canonical_commitment}
                // _ *peaks leaf_count_hi leaf_count_lo *[(cc, *mp)]
+        
+        push 0 assert
 
-        // Verify that all CCs live in the AOCL
+        call {all_verify_aocl_membership}
+               // _ *peaks leaf_count_hi leaf_count_lo all_live_in_aocl
 
+        // assert 
 
         halt
         "
@@ -480,7 +488,7 @@ mod tests {
         );
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
-        let run_res = triton_vm::vm::debug_terminal_state(&program, stdin, secret_in);
+        let run_res = triton_vm::vm::debug_terminal_state(&program, stdin, secret_in, None, None);
         match run_res {
             Ok(_) => (),
             Err((state, msg)) => panic!("Failed: {msg}\n last state was: {state}"),
