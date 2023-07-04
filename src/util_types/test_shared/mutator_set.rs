@@ -8,12 +8,14 @@ use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusty_leveldb::DB;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::other::log_2_ceil;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use twenty_first::util_types::storage_vec::{RustyLevelDbVec, StorageVec};
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
@@ -166,6 +168,39 @@ pub fn pseudorandom_mmra<H: AlgebraicHasher>(seed: [u8; 32]) -> MmrAccumulator<H
     MmrAccumulator::init(peaks, leaf_count)
 }
 
+pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
+    seed: [u8; 32],
+    leaf: Digest,
+) -> (MmrAccumulator<H>, MmrMembershipProof<H>) {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let leaf_count = rng.next_u64();
+    let num_peaks = leaf_count.count_ones();
+    let leaf_index = rng.next_u64() % leaf_count;
+    let (inner_index, peak_index) = leaf_index_to_mt_index_and_peak_index(leaf_index, leaf_count);
+    let tree_height = log_2_ceil(inner_index as u128 + 1u128) - 1;
+    let authentication_path: Vec<Digest> = (0..tree_height).map(|_| rng.gen()).collect_vec();
+    let mut root = leaf;
+    let mut shift = 0;
+    while (inner_index >> shift) > 1 {
+        if (inner_index >> shift) & 1 == 1 {
+            root = H::hash_pair(&authentication_path[shift], &root);
+        } else {
+            root = H::hash_pair(&root, &authentication_path[shift]);
+        }
+        shift += 1;
+    }
+    let peaks: Vec<Digest> = (0..num_peaks)
+        .map(|i| if i == peak_index { root } else { rng.gen() })
+        .collect_vec();
+    let membership_proof = MmrMembershipProof::<H> {
+        leaf_index,
+        authentication_path,
+        _hasher: PhantomData,
+    };
+    let mmr_accumulator = MmrAccumulator::<H>::init(peaks, leaf_count);
+    (mmr_accumulator, membership_proof)
+}
+
 pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec>() -> ActiveWindow<H> {
     let mut rng = thread_rng();
     let num_indices = 10 + (rng.next_u32() % 100) as usize;
@@ -255,5 +290,14 @@ mod shared_tests_test {
         let _ = get_all_indices_with_duplicates(&mut ams);
         let _ = make_item_and_randomnesses();
         let _ = insert_mock_item(&mut ams.kernel);
+    }
+
+    #[test]
+    fn test_pseudorandom_mmra_with_mp() {
+        type H = Tip5;
+        let mut rng = thread_rng();
+        let leaf: Digest = rng.gen();
+        let (mmra, mp) = pseudorandom_mmra_with_mp::<H>(rng.gen(), leaf);
+        assert!(mp.verify(&mmra.get_peaks(), &leaf, mmra.count_leaves()).0);
     }
 }

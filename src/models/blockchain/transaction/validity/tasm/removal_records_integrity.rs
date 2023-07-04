@@ -487,6 +487,22 @@ mod tests {
             canonical_commitments[1].canonical_commitment
         );
 
+        println!(
+            "canonical commitments live in aocl? {}",
+            removal_record_integrity_witness
+                .membership_proofs
+                .iter()
+                .zip(canonical_commitments.iter())
+                .all(|(mp, cc)| mp
+                    .auth_path_aocl
+                    .verify(
+                        &removal_record_integrity_witness.aocl.get_peaks(),
+                        &cc.canonical_commitment,
+                        removal_record_integrity_witness.aocl.count_leaves()
+                    )
+                    .0)
+        );
+
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
         let run_res = triton_vm::vm::debug_terminal_state(&program, stdin, secret_in, None, None);
         match run_res {
