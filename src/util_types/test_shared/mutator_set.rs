@@ -544,12 +544,7 @@ mod shared_tests_test {
         let seed: [u8; 32] = thread_rng().gen();
         let mut outer_rng: StdRng = SeedableRng::from_seed(seed);
         for num_leafs in 0..20 {
-            // for num_leafs in [2] {
             let inner_seed: [u8; 32] = outer_rng.gen();
-            // let inner_seed: [u8; 32] = [
-            // 77, 62, 206, 77, 215, 43, 103, 126, 203, 225, 83, 50, 93, 25, 221, 120, 184, 77,
-            // 127, 56, 201, 27, 47, 228, 130, 185, 69, 123, 136, 125, 117, 218,
-            // ];
             let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
 
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
