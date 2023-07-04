@@ -324,12 +324,10 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {map_compute_canonical_commitment}
                // _ *peaks leaf_count_hi leaf_count_lo *[(cc, *mp)]
         
-        push 0 assert
-
         call {all_verify_aocl_membership}
                // _ *peaks leaf_count_hi leaf_count_lo all_live_in_aocl
 
-        // assert 
+        assert 
 
         halt
         "
