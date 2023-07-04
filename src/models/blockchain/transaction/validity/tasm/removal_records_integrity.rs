@@ -355,6 +355,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use triton_vm::Claim;
     use twenty_first::util_types::emojihash_trait::Emojihash;
 
     use super::*;
@@ -502,10 +503,27 @@ mod tests {
         );
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
-        let run_res = triton_vm::vm::debug_terminal_state(&program, stdin, secret_in, None, None);
+        let run_res = triton_vm::vm::debug_terminal_state(
+            &program,
+            stdin.clone(),
+            secret_in.clone(),
+            None,
+            None,
+        );
         match run_res {
             Ok(_) => (),
             Err((state, msg)) => panic!("Failed: {msg}\n last state was: {state}"),
         };
+
+        let claim: Claim = Claim {
+            program_digest: Hash::hash_varlen(&program.encode()),
+            input: stdin,
+            output: vec![],
+        };
+
+        if std::env::var("DYING_TO_PROVE").is_ok() {
+            let proof = triton_vm::prove(&Default::default(), &claim, &program, &secret_in);
+            assert!(proof.is_ok());
+        }
     }
 }
