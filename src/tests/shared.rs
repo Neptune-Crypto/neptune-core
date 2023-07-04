@@ -82,6 +82,7 @@ use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::test_shared::mutator_set::pseudorandom_chunk_dictionary;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
+use crate::util_types::test_shared::mutator_set::pseudorandom_mmra_with_mps;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 use crate::Hash;
@@ -426,10 +427,28 @@ pub fn pseudorandom_removal_record_integrity_witness(
     let input_utxos = (0..num_inputs)
         .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
         .collect_vec();
-    let membership_proofs = (0..num_inputs)
+    let mut membership_proofs = (0..num_inputs)
         .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen::<[u8; 32]>()))
         .collect_vec();
-    let aocl = pseudorandom_mmra(rng.gen::<[u8; 32]>());
+    let addition_records = input_utxos
+        .iter()
+        .zip(membership_proofs.iter())
+        .map(|(utxo, msmp)| {
+            commit::<Hash>(
+                &Hash::hash(utxo),
+                &msmp.sender_randomness,
+                &msmp.receiver_preimage.hash::<Hash>(),
+            )
+        })
+        .collect_vec();
+    let canonical_commitments = addition_records
+        .iter()
+        .map(|ar| ar.canonical_commitment)
+        .collect_vec();
+    let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments);
+    for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
+        ms_mp.auth_path_aocl = mmr_mp.clone();
+    }
     let swbfi = pseudorandom_mmra(rng.gen::<[u8; 32]>());
     let swbfa_hash: Digest = rng.gen();
     let mut kernel =
