@@ -8,7 +8,7 @@ use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusty_leveldb::DB;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::other::log_2_ceil;
+use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
@@ -178,17 +178,22 @@ pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
     let leaf_index = rng.next_u64() % leaf_count;
     let (inner_index, peak_index) = leaf_index_to_mt_index_and_peak_index(leaf_index, leaf_count);
     let tree_height = log_2_ceil(inner_index as u128 + 1u128) - 1;
-    let authentication_path: Vec<Digest> = (0..tree_height).map(|_| rng.gen()).collect_vec();
-    let mut root = leaf;
-    let mut shift = 0;
-    while (inner_index >> shift) > 1 {
-        if (inner_index >> shift) & 1 == 1 {
-            root = H::hash_pair(&authentication_path[shift], &root);
-        } else {
-            root = H::hash_pair(&root, &authentication_path[shift]);
-        }
-        shift += 1;
-    }
+
+    let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
+        rng.gen(),
+        tree_height as usize,
+        &[(leaf, inner_index)],
+    );
+    let authentication_path = authentication_paths[0].clone();
+
+    assert_eq!(authentication_path.len(), tree_height as usize);
+    assert!(
+        merkle_verify_tester_helper::<H>(root, inner_index, &authentication_path, leaf),
+        "root: ({root})\nindex: {inner_index}\nauth path len: {}\nauth path: ({})",
+        authentication_path.len(),
+        authentication_path.iter().join("), (")
+    );
+
     let peaks: Vec<Digest> = (0..num_peaks)
         .map(|i| if i == peak_index { root } else { rng.gen() })
         .collect_vec();
@@ -201,7 +206,131 @@ pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
     (mmr_accumulator, membership_proof)
 }
 
-pub fn pseudorandom_root_with_authentication_paths<H: AlgebraicHasher>(
+pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
+    seed: [u8; 32],
+    leafs: &[Digest],
+) -> (MmrAccumulator<H>, Vec<MmrMembershipProof<H>>) {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+    // sample size of MMR
+    let mut leaf_count = rng.next_u64();
+    while leaf_count < leafs.len() as u64 {
+        leaf_count = rng.next_u64();
+    }
+    let num_peaks = leaf_count.count_ones();
+
+    // sample mmr leaf indices and calculate matching derived indices
+    let leaf_indices = leafs
+        .iter()
+        .enumerate()
+        .map(|(original_index, _leaf)| (original_index, rng.next_u64() % leaf_count))
+        .map(|(original_index, mmr_index)| {
+            let (mt_index, peak_index) =
+                leaf_index_to_mt_index_and_peak_index(mmr_index, leaf_count);
+            (original_index, mmr_index, mt_index, peak_index)
+        })
+        .collect_vec();
+    let leafs_and_indices = leafs
+        .iter()
+        .copied()
+        .zip(leaf_indices.into_iter())
+        .collect_vec();
+
+    // iterate over all trees
+    let mut peaks = vec![];
+    let dummy_mp = MmrMembershipProof::new(0u64, vec![]);
+    let mut mps: Vec<MmrMembershipProof<H>> =
+        (0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec();
+    for tree in 0..num_peaks {
+        // select all leafs and merkle tree indices for this tree
+        let leafs_and_mt_indices = leafs_and_indices
+            .iter()
+            .copied()
+            .filter(
+                |(_leaf, (_original_index, _mmr_index, _mt_index, peak_index))| *peak_index == tree,
+            )
+            .map(
+                |(leaf, (original_index, _mmr_index, mt_index, _peak_index))| {
+                    (leaf, mt_index, original_index)
+                },
+            )
+            .collect_vec();
+        if leafs_and_mt_indices.is_empty() {
+            peaks.push(rng.gen());
+            continue;
+        }
+
+        // generate root and authentication paths
+        let tree_height =
+            log_2_floor(*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128)
+                as usize;
+        let (root, authentication_paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
+            rng.gen(),
+            tree_height,
+            &leafs_and_mt_indices
+                .iter()
+                .map(|(l, i, _o)| (*l, *i))
+                .collect_vec(),
+        );
+
+        // sanity check
+        for ((leaf, mt_index, _original_index), auth_path) in
+            leafs_and_mt_indices.iter().zip(authentication_paths.iter())
+        {
+            assert!(merkle_verify_tester_helper::<H>(
+                root, *mt_index, auth_path, *leaf
+            ));
+        }
+
+        // update peaks list
+        peaks.push(root);
+
+        // generate membership proof objects
+        let membership_proofs = leafs_and_indices
+            .iter()
+            .copied()
+            .filter(
+                |(_leaf, (_original_index, _mmr_index, _mt_index, peak_index))| *peak_index == tree,
+            )
+            .zip(authentication_paths.into_iter())
+            .map(
+                |(
+                    (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
+                    authentication_path,
+                )| { MmrMembershipProof::<H>::new(mmr_index, authentication_path) },
+            )
+            .collect_vec();
+
+        // sanity check: test if membership proofs agree with peaks list (up until now)
+        let dummy_remainder: Vec<Digest> = (peaks.len()..num_peaks as usize)
+            .map(|_| rng.gen())
+            .collect_vec();
+        let dummy_peaks = [peaks.clone(), dummy_remainder].concat();
+        for ((leaf, _mt_index, _original_index), mp) in
+            leafs_and_mt_indices.iter().zip(membership_proofs.iter())
+        {
+            assert!(mp.verify(&dummy_peaks, leaf, leaf_count).0);
+        }
+
+        // collect membership proofs in vector, with indices matching those of the supplied leafs
+        for ((_leaf, _mt_index, original_index), mp) in
+            leafs_and_mt_indices.iter().zip(membership_proofs.iter())
+        {
+            mps[*original_index] = mp.clone();
+        }
+    }
+
+    let mmra = MmrAccumulator::<H>::init(peaks, leaf_count);
+
+    // sanity check
+    for (leaf, mp) in leafs.iter().zip(mps.iter()) {
+        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+    }
+
+    (mmra, mps)
+}
+
+pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
     seed: [u8; 32],
     tree_height: usize,
     leafs_and_indices: &[(Digest, u64)],
@@ -234,7 +363,7 @@ pub fn pseudorandom_root_with_authentication_paths<H: AlgebraicHasher>(
             if nodes.get(&wi_even).is_none() {
                 nodes.insert(wi_even, rng.gen::<Digest>());
             }
-            let hash = H::hash_pair(nodes.get(&wi_odd).unwrap(), nodes.get(&wi_even).unwrap());
+            let hash = H::hash_pair(nodes.get(&wi_even).unwrap(), nodes.get(&wi_odd).unwrap());
             nodes.insert(wi >> 1, hash);
         }
         depth -= 1;
@@ -329,6 +458,23 @@ pub fn pseudorandom_removal_record<H: AlgebraicHasher>(seed: [u8; 32]) -> Remova
     }
 }
 
+fn merkle_verify_tester_helper<H: AlgebraicHasher>(
+    root: Digest,
+    index: u64,
+    path: &[Digest],
+    leaf: Digest,
+) -> bool {
+    let mut acc = leaf;
+    for (shift, p) in path.iter().enumerate() {
+        if (index >> shift) & 1 == 1 {
+            acc = H::hash_pair(p, &acc);
+        } else {
+            acc = H::hash_pair(&acc, p);
+        }
+    }
+    acc == root
+}
+
 #[cfg(test)]
 mod shared_tests_test {
 
@@ -349,7 +495,7 @@ mod shared_tests_test {
     }
 
     #[test]
-    fn test_pseudorandom_mmra_with_mp() {
+    fn test_pseudorandom_mmra_with_single_mp() {
         type H = Tip5;
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
@@ -357,30 +503,10 @@ mod shared_tests_test {
         assert!(mp.verify(&mmra.get_peaks(), &leaf, mmra.count_leaves()).0);
     }
 
-    fn merkle_verify<H: AlgebraicHasher>(
-        root: Digest,
-        index: u64,
-        path: &[Digest],
-        leaf: Digest,
-    ) -> bool {
-        let mut acc = leaf;
-        for (shift, p) in path.iter().enumerate() {
-            if (index >> shift) & 1 == 0 {
-                acc = H::hash_pair(p, &acc);
-            } else {
-                acc = H::hash_pair(&acc, p);
-            }
-        }
-        acc == root
-    }
-
     #[test]
     fn test_pseudorandom_root_with_authentication_paths() {
         type H = Tip5;
-        let seed: [u8; 32] = [
-            125, 252, 72, 117, 12, 52, 92, 59, 254, 146, 242, 231, 10, 248, 117, 54, 226, 25, 44,
-            214, 250, 226, 211, 48, 177, 110, 81, 113, 88, 168, 131, 164,
-        ];
+        let seed: [u8; 32] = thread_rng().gen();
         let mut outer_rng: StdRng = SeedableRng::from_seed(seed);
         for num_leafs in 0..20 {
             let inner_seed: [u8; 32] = outer_rng.gen();
@@ -398,13 +524,41 @@ mod shared_tests_test {
             }
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
             let leafs_and_indices = leafs.into_iter().zip(indices.into_iter()).collect_vec();
-            let (root, paths) = pseudorandom_root_with_authentication_paths::<H>(
+            let (root, paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
                 inner_rng.gen(),
                 tree_height,
                 &leafs_and_indices,
             );
             for ((leaf, index), path) in leafs_and_indices.into_iter().zip(paths.into_iter()) {
-                assert!(merkle_verify::<H>(root, index, &path, leaf));
+                assert!(
+                    merkle_verify_tester_helper::<H>(root, index, &path, leaf),
+                    "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_pseudorandom_mmra_with_mps() {
+        type H = Tip5;
+        let seed: [u8; 32] = thread_rng().gen();
+        let mut outer_rng: StdRng = SeedableRng::from_seed(seed);
+        for num_leafs in 0..20 {
+            // for num_leafs in [2] {
+            let inner_seed: [u8; 32] = outer_rng.gen();
+            // let inner_seed: [u8; 32] = [
+            // 77, 62, 206, 77, 215, 43, 103, 126, 203, 225, 83, 50, 93, 25, 221, 120, 184, 77,
+            // 127, 56, 201, 27, 47, 228, 130, 185, 69, 123, 136, 125, 117, 218,
+            // ];
+            let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
+
+            let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
+            let (mmra, mps) = pseudorandom_mmra_with_mps::<H>(inner_rng.gen(), &leafs);
+            for (leaf, mp) in leafs.iter().zip(mps.iter()) {
+                assert!(
+                    mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0,
+                    "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
+                );
             }
         }
     }
