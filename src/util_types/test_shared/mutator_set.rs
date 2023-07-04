@@ -201,6 +201,61 @@ pub fn pseudorandom_mmra_with_mp<H: AlgebraicHasher>(
     (mmr_accumulator, membership_proof)
 }
 
+pub fn pseudorandom_root_with_authentication_paths<H: AlgebraicHasher>(
+    seed: [u8; 32],
+    tree_height: usize,
+    leafs_and_indices: &[(Digest, u64)],
+) -> (Digest, Vec<Vec<Digest>>) {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let mut nodes: HashMap<u64, Digest> = HashMap::new();
+
+    // populate nodes dictionary with leafs
+    for (leaf, index) in leafs_and_indices.iter() {
+        nodes.insert(*index, *leaf);
+    }
+
+    // walk up tree layer by layer
+    // when we need nodes not already present, sample at random
+    let mut depth = tree_height + 1;
+    while depth > 0 {
+        let mut working_indices = nodes
+            .keys()
+            .copied()
+            .filter(|i| (*i as u128) < (1u128 << (depth)) && (*i as u128) >= (1u128 << (depth - 1)))
+            .collect_vec();
+        working_indices.sort();
+        working_indices.dedup();
+        for wi in working_indices {
+            let wi_odd = wi | 1;
+            if nodes.get(&wi_odd).is_none() {
+                nodes.insert(wi_odd, rng.gen::<Digest>());
+            }
+            let wi_even = wi_odd ^ 1;
+            if nodes.get(&wi_even).is_none() {
+                nodes.insert(wi_even, rng.gen::<Digest>());
+            }
+            let hash = H::hash_pair(nodes.get(&wi_odd).unwrap(), nodes.get(&wi_even).unwrap());
+            nodes.insert(wi >> 1, hash);
+        }
+        depth -= 1;
+    }
+
+    // read out root
+    let root = *nodes.get(&1).unwrap_or(&rng.gen());
+
+    // read out paths
+    let paths = leafs_and_indices
+        .iter()
+        .map(|(_d, i)| {
+            (0..tree_height)
+                .map(|j| *nodes.get(&((*i >> j) ^ 1)).unwrap())
+                .collect_vec()
+        })
+        .collect_vec();
+
+    (root, paths)
+}
+
 pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec>() -> ActiveWindow<H> {
     let mut rng = thread_rng();
     let num_indices = 10 + (rng.next_u32() % 100) as usize;
@@ -276,6 +331,7 @@ pub fn pseudorandom_removal_record<H: AlgebraicHasher>(seed: [u8; 32]) -> Remova
 
 #[cfg(test)]
 mod shared_tests_test {
+
     use twenty_first::shared_math::tip5::Tip5;
 
     use super::*;
@@ -299,5 +355,57 @@ mod shared_tests_test {
         let leaf: Digest = rng.gen();
         let (mmra, mp) = pseudorandom_mmra_with_mp::<H>(rng.gen(), leaf);
         assert!(mp.verify(&mmra.get_peaks(), &leaf, mmra.count_leaves()).0);
+    }
+
+    fn merkle_verify<H: AlgebraicHasher>(
+        root: Digest,
+        index: u64,
+        path: &[Digest],
+        leaf: Digest,
+    ) -> bool {
+        let mut acc = leaf;
+        for (shift, p) in path.iter().enumerate() {
+            if (index >> shift) & 1 == 0 {
+                acc = H::hash_pair(p, &acc);
+            } else {
+                acc = H::hash_pair(&acc, p);
+            }
+        }
+        acc == root
+    }
+
+    #[test]
+    fn test_pseudorandom_root_with_authentication_paths() {
+        type H = Tip5;
+        let seed: [u8; 32] = [
+            125, 252, 72, 117, 12, 52, 92, 59, 254, 146, 242, 231, 10, 248, 117, 54, 226, 25, 44,
+            214, 250, 226, 211, 48, 177, 110, 81, 113, 88, 168, 131, 164,
+        ];
+        let mut outer_rng: StdRng = SeedableRng::from_seed(seed);
+        for num_leafs in 0..20 {
+            let inner_seed: [u8; 32] = outer_rng.gen();
+            let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
+            let mut tree_height = 0;
+            while num_leafs > (1u64 << tree_height) {
+                tree_height = inner_rng.next_u32() as usize % 64;
+            }
+            let mut indices = vec![];
+            while indices.len() != num_leafs as usize {
+                let index = (inner_rng.next_u64() % (1u64 << tree_height)) + (1u64 << tree_height);
+                if !indices.contains(&index) {
+                    indices.push(index);
+                }
+            }
+            let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
+            let leafs_and_indices = leafs.into_iter().zip(indices.into_iter()).collect_vec();
+            let (root, paths) = pseudorandom_root_with_authentication_paths::<H>(
+                inner_rng.gen(),
+                tree_height,
+                &leafs_and_indices,
+            );
+            for ((leaf, index), path) in leafs_and_indices.into_iter().zip(paths.into_iter()) {
+                assert!(merkle_verify::<H>(root, index, &path, leaf));
+            }
+        }
     }
 }
