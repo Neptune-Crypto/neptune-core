@@ -17,10 +17,6 @@ aes-gcm = "0"
 bech32 = "0"
 blake3 = "1"
 field_count = "0.1.1"
-twenty-first = "0.28.0"
-# twenty-first = { path = "../twenty-first/twenty-first" }
-# mutator-set-tf = { git = "ssh://git@neptune.builders:2222/core-team/mutator-set-tf.git" }
-# mutator-set-tf = { path = "../mutator-set-tf" }
 anyhow = "1"
 bincode = "1"
 bytes = "1"
@@ -49,11 +45,14 @@ tracing-subscriber = { version = "0", features = [
     "fmt",
 ] }
 tracing-test = "0"
-triton-vm = {path = "../triton-vm/triton-vm"}
+# triton-vm = {path = "../triton-vm/triton-vm"}
 # triton-opcodes = {path = "../triton-vm/triton-opcodes"}
-# triton-vm = "0.28.0"
-triton-opcodes = "0.29.1"
+triton-vm = "0.31.1"
+triton-opcodes = "0.31.0"
+twenty-first = "0.30.0"
+# twenty-first = { path = "../twenty-first/twenty-first" }
 tasm-lib = { path = "../tasm-lib/" }
+# tasm-lib = "0.1.0"
 priority-queue = "1"
 get-size = { version = "0", features = ["derive"] }
 num-rational = "0"

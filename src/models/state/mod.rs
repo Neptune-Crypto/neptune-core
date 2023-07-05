@@ -22,7 +22,7 @@ use super::blockchain::transaction::transaction_kernel::{
     PubScriptHashAndInput, TransactionKernel,
 };
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
-use super::blockchain::transaction::validity::ValidityLogic;
+use super::blockchain::transaction::validity::{TransactionValidityLogic, ValidationLogic};
 use super::blockchain::transaction::{amount::Amount, Transaction};
 use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
@@ -268,19 +268,27 @@ impl GlobalState {
             mutator_set_accumulator,
         };
 
-        // Convert the secret-supported claim to a proof
-        let mut validity_logic =
-            ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &kernel);
-        validity_logic
-            .prove()
-            .expect("Proof generation must work when creating a new transaction");
+        // Convert the secret-supported claim to a proof, several proofs, or
+        // at the very least hide sensitive data.
+        let mut transaction_validity_logic =
+            TransactionValidityLogic::new_from_witness(&primitive_witness, &kernel);
+
+        if self.cli.privacy {
+            transaction_validity_logic
+                .prove()
+                .expect("Proof generation must work when creating a new transaction");
+        } else {
+            transaction_validity_logic.lock_scripts_halt.prove().expect(
+                "Proof generation must work when unlocking owned UTXOs for a new transaction.",
+            );
+        }
 
         // Remove lock script witness from primitive witness to not leak spending keys
         primitive_witness.lock_script_witnesses = vec![];
 
         Ok(Transaction {
             kernel,
-            witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
+            witness: Witness::ValidityLogic((transaction_validity_logic, primitive_witness)),
         })
     }
 

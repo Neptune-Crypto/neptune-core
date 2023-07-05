@@ -1,7 +1,9 @@
 use std::collections::{HashSet, VecDeque};
 
 use field_count::FieldCount;
+use get_size::GetSize;
 use itertools::Itertools;
+use serde_derive::{Deserialize, Serialize};
 use tasm_lib::{
     io::load_struct_from_input::LoadStructFromInput,
     list::{
@@ -17,24 +19,34 @@ use tasm_lib::{
     structure::get_field::GetField,
     DIGEST_LENGTH,
 };
+use tracing::{debug, warn};
 use triton_opcodes::program::{self, Program};
-use triton_vm::BFieldElement;
+use triton_vm::{BFieldElement, StarkParameters};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_trait::Mmr},
+    util_types::{
+        algebraic_hasher::AlgebraicHasher,
+        mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+    },
 };
 
 use crate::{
     models::blockchain::{
         shared::Hash,
-        transaction::validity::{
-            removal_records_integrity::RemovalRecordsIntegrityWitness,
-            tasm::transaction_kernel_mast_hash::TransactionKernelMastHash,
+        transaction::{
+            transaction_kernel::TransactionKernel,
+            utxo::Utxo,
+            validity::{
+                compiled_program::CompiledProgram,
+                tasm::transaction_kernel_mast_hash::TransactionKernelMastHash, ClaimSupport,
+                SupportedClaim, ValidationLogic,
+            },
+            PrimitiveWitness,
         },
     },
     util_types::mutator_set::{
-        mutator_set_kernel::get_swbf_indices, mutator_set_trait::commit,
-        removal_record::AbsoluteIndexSet,
+        ms_membership_proof::MsMembershipProof, mutator_set_kernel::get_swbf_indices,
+        mutator_set_trait::commit, removal_record::AbsoluteIndexSet,
     },
 };
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
@@ -45,27 +57,159 @@ use super::{
     hash_utxo::HashUtxo, verify_aocl_membership::VerifyAoclMembership,
 };
 
-pub struct RemovalRecordsIntegrity;
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, FieldCount)]
+pub struct RemovalRecordsIntegrityWitness {
+    pub input_utxos: Vec<Utxo>,
+    pub membership_proofs: Vec<MsMembershipProof<Hash>>,
+    pub aocl: MmrAccumulator<Hash>,
+    pub swbfi: MmrAccumulator<Hash>,
+    pub swbfa_hash: Digest,
+    pub kernel: TransactionKernel,
+}
 
-pub trait CompiledProgram {
-    fn rust_shadow(
-        &self,
-        public_input: VecDeque<BFieldElement>,
-        secret_input: VecDeque<BFieldElement>,
-    ) -> Vec<BFieldElement>;
-    fn program(&self) -> Program;
-    fn crash_conditions(&self) -> Vec<String>;
+impl RemovalRecordsIntegrityWitness {
+    pub fn new(primitive_witness: &PrimitiveWitness, tx_kernel: &TransactionKernel) -> Self {
+        Self {
+            input_utxos: primitive_witness.input_utxos.clone(),
+            membership_proofs: primitive_witness.input_membership_proofs.clone(),
+            kernel: tx_kernel.to_owned(),
+            aocl: primitive_witness
+                .mutator_set_accumulator
+                .kernel
+                .aocl
+                .clone(),
+            swbfi: primitive_witness
+                .mutator_set_accumulator
+                .kernel
+                .swbf_inactive
+                .clone(),
+            swbfa_hash: Hash::hash(&primitive_witness.mutator_set_accumulator.kernel.swbf_active),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount)]
+pub struct RemovalRecordsIntegrity {
+    pub supported_claim: SupportedClaim,
+}
+
+impl ValidationLogic for RemovalRecordsIntegrity {
+    fn new_from_witness(
+        primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
+        tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+    ) -> Self {
+        let removal_records_integrity_witness =
+            RemovalRecordsIntegrityWitness::new(primitive_witness, tx_kernel);
+        let witness_data = removal_records_integrity_witness.encode();
+
+        Self {
+            supported_claim: SupportedClaim {
+                claim: triton_vm::Claim {
+                    program_digest: Hash::hash_varlen(&Self::program().encode()),
+                    input: tx_kernel.mast_hash().encode(),
+                    output: vec![],
+                },
+                support: ClaimSupport::SecretWitness(witness_data, None),
+            },
+        }
+    }
+
+    fn prove(&mut self) -> anyhow::Result<()> {
+        debug!(
+            "rri program digest: ({})",
+            Hash::hash_varlen(&Self::program().encode())
+        );
+        debug!(
+            "rri program digest: ({})",
+            Hash::hash_varlen(&Self::program().encode())
+        );
+        match &self.supported_claim.support {
+            ClaimSupport::Proof(_) => {
+                // nothing to do; proof already exists
+                Ok(())
+            }
+            ClaimSupport::SecretWitness(witness, _program) => {
+                debug!(
+                    "program digest: ({})\nclaimed digest: ({})",
+                    Hash::hash_varlen(&Self::program().encode()),
+                    self.supported_claim.claim.program_digest
+                );
+                let proof = triton_vm::prove(
+                    &StarkParameters::default(),
+                    &self.supported_claim.claim,
+                    &Self::program(),
+                    witness,
+                )
+                .expect("Proving integrity of removal records must succeed.");
+                self.supported_claim.support = ClaimSupport::Proof(proof);
+                Ok(())
+            }
+            ClaimSupport::DummySupport => {
+                // nothing to do
+                warn!(
+                    "Trying to prove removal record integrity for claim supported by dummy support"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    fn verify(&self) -> bool {
+        match &self.supported_claim.support {
+            ClaimSupport::Proof(proof) => triton_vm::verify(
+                &StarkParameters::default(),
+                &self.supported_claim.claim,
+                proof,
+            ),
+            ClaimSupport::SecretWitness(witness, _no_program) => {
+                // let rust_output = Self::rust_shadow(
+                //     self.supported_claim.claim.input.clone().into(),
+                //     witness.clone().into(),
+                // );
+                let vm_result = triton_vm::vm::run(
+                    &Self::program(),
+                    self.supported_claim.claim.input.clone(),
+                    witness.to_vec(),
+                );
+                match vm_result {
+                    Ok(observed_output) => {
+                        let found_expected_output =
+                            observed_output == self.supported_claim.claim.output;
+                        if !found_expected_output {
+                            warn!("Observed output does not match claimed output for RRI");
+                            debug!("Got output: {found_expected_output}");
+                        }
+
+                        found_expected_output
+                    }
+                    Err(err) => {
+                        warn!("VM execution for removal records integrity did not halt gracefully");
+                        debug!("Last state was: {err}");
+                        false
+                    }
+                }
+            }
+            ClaimSupport::DummySupport => {
+                warn!("removal record integrity support must be supplied");
+                false
+            }
+        }
+    }
 }
 
 impl CompiledProgram for RemovalRecordsIntegrity {
     fn rust_shadow(
-        &self,
         public_input: VecDeque<BFieldElement>,
         secret_input: VecDeque<BFieldElement>,
     ) -> Vec<BFieldElement> {
-        let hash_of_kernel =
-            *Digest::decode(&public_input.into_iter().take(DIGEST_LENGTH).collect_vec())
-                .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
+        let hash_of_kernel = *Digest::decode(
+            &public_input
+                .into_iter()
+                .take(DIGEST_LENGTH)
+                .rev()
+                .collect_vec(),
+        )
+        .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
 
         // 1. read and process witness data
         let witness =
@@ -74,7 +218,13 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         // 2. assert that the kernel from the witness matches the hash in the public input
         // now we can trust all data in kernel
-        assert_eq!(hash_of_kernel, witness.kernel.mast_hash());
+        assert_eq!(
+            hash_of_kernel,
+            witness.kernel.mast_hash(),
+            "hash of kernel ({})\nwitness kernel ({})",
+            hash_of_kernel,
+            witness.kernel.mast_hash()
+        );
 
         // 3. assert that the mutator set's MMRs in the witness match the kernel
         // now we can trust all data in these MMRs as well
@@ -95,9 +245,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let digests_of_derived_index_lists = items
             .iter()
             .zip(witness.membership_proofs.iter())
-            .map(|(utxo, msmp)| {
+            .map(|(item, msmp)| {
                 AbsoluteIndexSet::new(&get_swbf_indices::<Hash>(
-                    &Hash::hash(utxo),
+                    item,
                     &msmp.sender_randomness,
                     &msmp.receiver_preimage,
                     msmp.auth_path_aocl.leaf_index,
@@ -111,7 +261,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             .inputs
             .iter()
             .map(|input| input.absolute_indices.encode())
-            .map(|e| Hash::hash_varlen(&e))
+            .map(|x| Hash::hash_varlen(&x))
             .collect::<HashSet<_>>();
         assert_eq!(
             digests_of_derived_index_lists,
@@ -144,7 +294,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         vec![]
     }
 
-    fn program(&self) -> Program {
+    fn program() -> Program {
         let mut library = SnippetState::default();
         let num_fields_on_witness = RemovalRecordsIntegrityWitness::field_count();
         let get_field = library.import(Box::new(GetField));
@@ -340,7 +490,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         program::Program::from_code(&src).unwrap()
     }
 
-    fn crash_conditions(&self) -> Vec<String> {
+    fn crash_conditions() -> Vec<String> {
         vec![
             "the kernel from the witness does not match the hash in the public input".to_string(),
             "the mutator set's MMRs in the witness do not match the kernel".to_string(),
@@ -380,7 +530,7 @@ mod tests {
             removal_record_integrity_witness.aocl.get_peaks().len()
         );
 
-        let program = RemovalRecordsIntegrity.program();
+        let program = RemovalRecordsIntegrity::program();
         let stdin: Vec<BFieldElement> = removal_record_integrity_witness
             .kernel
             .mast_hash()
@@ -528,8 +678,37 @@ mod tests {
 
             assert!(triton_vm::verify(
                 &StarkParameters::default(),
+                &claim,
                 &maybe_proof.unwrap()
             ));
         }
+    }
+
+    #[test]
+    fn program_is_deterministic() {
+        let program = RemovalRecordsIntegrity::program();
+        let other_program = RemovalRecordsIntegrity::program();
+        assert_eq!(program, other_program);
+    }
+
+    #[test]
+    fn tasm_matches_rust() {
+        let mut seed = [0u8; 32];
+        seed[0] = 0xa0;
+        seed[1] = 0xf1;
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let witness = pseudorandom_removal_record_integrity_witness(rng.gen());
+
+        let kernel_hash = witness.kernel.mast_hash().reversed().values();
+        let tasm_output = triton_vm::vm::run(
+            &RemovalRecordsIntegrity::program(),
+            kernel_hash.to_vec(),
+            witness.encode(),
+        )
+        .unwrap();
+        let rust_output =
+            RemovalRecordsIntegrity::rust_shadow(kernel_hash.into(), witness.encode().into());
+
+        assert_eq!(rust_output, tasm_output);
     }
 }

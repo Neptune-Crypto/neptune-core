@@ -1,29 +1,38 @@
-pub mod inputs_to_lock_scripts;
-pub mod kernel_to_inputs;
+pub mod compiled_program;
+pub mod kernel_to_lock_scripts;
 pub mod kernel_to_typescripts;
-pub mod lockscript_halts;
-pub mod removal_records_integrity;
+pub mod lockscripts_halt;
 pub mod tasm;
-pub mod typescript_halts;
+pub mod typescripts_halt;
 
+use crate::models::blockchain::shared::Hash;
 use anyhow::{bail, Ok, Result};
 use get_size::GetSize;
+use itertools::Itertools;
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
-use triton_vm::proof::Proof;
-use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
+use tracing::{debug, info};
+use triton_opcodes::program::Program;
+use triton_vm::{proof::Proof, Claim};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::{
+    shared_math::b_field_element::BFieldElement, util_types::algebraic_hasher::AlgebraicHasher,
+};
 
 use self::{
-    inputs_to_lock_scripts::InputsToLockScripts, kernel_to_inputs::KernelToInputs,
-    kernel_to_typescripts::KernelToTypeScripts, lockscript_halts::LockScriptHalts,
-    removal_records_integrity::RemovalRecordsIntegrity, typescript_halts::TypescriptHalts,
+    compiled_program::CompiledProgram,
+    kernel_to_lock_scripts::KernelToLockScripts,
+    kernel_to_typescripts::KernelToTypeScripts,
+    lockscripts_halt::LockScriptsHalt,
+    tasm::removal_records_integrity::{RemovalRecordsIntegrity, RemovalRecordsIntegrityWitness},
+    typescripts_halt::TypeScriptsHalt,
 };
 use super::{transaction_kernel::TransactionKernel, PrimitiveWitness};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub enum ClaimSupport {
     Proof(Proof),
-    SecretWitness(Vec<BFieldElement>, triton_opcodes::program::Program),
+    SecretWitness(Vec<BFieldElement>, Option<Program>),
     DummySupport, // TODO: Remove this when all claims are implemented
 }
 
@@ -56,7 +65,7 @@ impl BFieldCodec for ClaimSupport {
                     };
                     index += 1;
 
-                    let program = *triton_opcodes::program::Program::decode(
+                    let maybe_program = *Option::<triton_opcodes::program::Program>::decode(
                         &sequence[index..index + program_len],
                     )?;
                     index += program_len;
@@ -64,7 +73,7 @@ impl BFieldCodec for ClaimSupport {
                     if index != sequence.len() {
                         bail!("ClaimSupport::decode: Invalid sequence length for secret witness! Too long.");
                     }
-                    Ok(Box::new(ClaimSupport::SecretWitness(secret, program)))
+                    Ok(Box::new(ClaimSupport::SecretWitness(secret, maybe_program)))
                 }
                 2 => {
                     if sequence.len() != 1 {
@@ -83,9 +92,9 @@ impl BFieldCodec for ClaimSupport {
             ClaimSupport::Proof(proof) => {
                 vec![vec![BFieldElement::zero()], proof.encode()].concat()
             }
-            ClaimSupport::SecretWitness(secret, program) => {
+            ClaimSupport::SecretWitness(secret, maybe_program) => {
                 let secret_encoded = secret.encode();
-                let program_encoded = program.encode();
+                let program_encoded = maybe_program.encode();
                 vec![
                     vec![BFieldElement::one()],
                     vec![BFieldElement::new(secret_encoded.len() as u64)],
@@ -104,7 +113,7 @@ impl BFieldCodec for ClaimSupport {
     }
 }
 
-/// WitnessableClaim is a helper struct for ValiditySequence. It
+/// SupportedClaim is a helper struct for ValiditySequence. It
 /// encodes a Claim with an optional witness.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct SupportedClaim {
@@ -114,17 +123,15 @@ pub struct SupportedClaim {
 
 impl SupportedClaim {
     // TODO: REMOVE when all validity logic is implemented
-    pub fn dummy_supported_claim() -> SupportedClaim {
-        fn dummy_claim() -> triton_vm::Claim {
-            triton_vm::Claim {
-                input: Default::default(),
-                output: Default::default(),
-                program_digest: Default::default(),
-            }
-        }
+    pub fn dummy() -> SupportedClaim {
+        let dummy_claim = triton_vm::Claim {
+            input: Default::default(),
+            output: Default::default(),
+            program_digest: Default::default(),
+        };
 
         Self {
-            claim: dummy_claim(),
+            claim: dummy_claim,
             support: ClaimSupport::DummySupport,
         }
     }
@@ -134,68 +141,112 @@ impl SupportedClaim {
 /// claims with optional witnesses. If all claims a true, then the
 /// transaction is valid.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
-pub struct ValidityLogic {
-    // program: lock_script, input: hash of tx kernel (MAST hash), witness: secret spending key, output: []
-    pub lock_script_halts: LockScriptHalts,
+pub struct TransactionValidityLogic {
+    // programs: [lock_script], input: hash of tx kernel (MAST hash), witness: secret spending key, output: []
+    pub lock_scripts_halt: LockScriptsHalt,
 
-    // program: todo, input: encoding of all TX inputs (UTXOs), witness: input utxos, utxo mast auth path, output: lock scripts
-    pub inputs_to_lock_scripts: InputsToLockScripts,
+    // program: todo, input: hash of tx kernel (MAST hash), witness: input utxos, utxo mast auth path, output: hashes of lock scripts
+    pub kernel_to_lock_scripts: KernelToLockScripts,
 
-    // program: todo, input: hash of tx kernel (MAST hash), witness: kernel mast auth path, output: encoding of all TX inputs (UTXOs)
-    pub kernel_to_inputs: KernelToInputs,
-
-    // program: verify+drop, input: hash of kernel, witness: inputs + mutator set accumulator, output: []
+    // program: recompute swbf indices, input: hash of kernel, witness: inputs + mutator set accumulator, output: []
     pub removal_records_integrity: RemovalRecordsIntegrity,
 
     // program: todo, input: hash of tx kernel (MAST hash), witness: outputs + kernel mast auth path + coins, output: type scripts
     pub kernel_to_typescripts: KernelToTypeScripts,
 
     // program: type script, input: hash of inputs + hash of outputs + coinbase + fee, witness: inputs + outputs + any, output: []
-    pub type_script_halts: TypescriptHalts,
+    pub type_scripts_halt: TypeScriptsHalt,
 }
 
-pub trait TxValidationLogic {
-    fn unproven_from_primitive_witness(
+pub trait ValidationLogic {
+    fn new_from_witness(
         primitive_witness: &PrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> Self;
     fn prove(&mut self) -> Result<()>;
-    fn verify(&self, tx_kernel: &TransactionKernel) -> bool;
+    fn verify(&self) -> bool;
 }
 
-// Logic for generating ValidityLogic
-impl ValidityLogic {
-    // TODO: Consider implementing the `TxValidationLogic` trait here
-    /// Generate validity logic for a transaction containing secret data as stand-in for proofs
-    pub fn unproven_from_primitive_witness(
+impl ValidationLogic for TransactionValidityLogic {
+    fn new_from_witness(
         primitive_witness: &PrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> Self {
-        let lock_script_halts =
-            LockScriptHalts::unproven_from_primitive_witness(primitive_witness, tx_kernel);
-
-        // TODO: Generate all other fields correctly
+        let kernel_hash = tx_kernel.mast_hash().reversed().values().to_vec();
+        let lock_scripts_halt = LockScriptsHalt {
+            supported_claims: primitive_witness
+                .input_utxos
+                .iter()
+                .zip(primitive_witness.input_lock_scripts.iter())
+                .zip(primitive_witness.lock_script_witnesses.iter())
+                .map(
+                    |((_utxo, lock_script), lock_script_witness)| SupportedClaim {
+                        claim: Claim {
+                            program_digest: lock_script.hash(),
+                            input: kernel_hash.clone(),
+                            output: vec![],
+                        },
+                        support: ClaimSupport::SecretWitness(
+                            lock_script_witness.clone(),
+                            Some(lock_script.program.clone()),
+                        ),
+                    },
+                )
+                .collect_vec(),
+        };
+        let kernel_to_lock_scripts = KernelToLockScripts {
+            supported_claim: SupportedClaim::dummy(),
+        };
+        debug!(
+            "Removal Records Integrity program digest: ({})",
+            Hash::hash_varlen(&RemovalRecordsIntegrity::program().encode())
+        );
+        let removal_records_integrity = RemovalRecordsIntegrity {
+            supported_claim: SupportedClaim {
+                claim: Claim {
+                    program_digest: RemovalRecordsIntegrity::program().hash::<Hash>(),
+                    input: kernel_hash,
+                    output: vec![],
+                },
+                support: ClaimSupport::SecretWitness(
+                    RemovalRecordsIntegrityWitness::new(primitive_witness, tx_kernel).encode(),
+                    None,
+                ),
+            },
+        };
+        let kernel_to_typescripts = KernelToTypeScripts {
+            supported_claim: SupportedClaim::dummy(),
+        };
+        let type_scripts_halt = TypeScriptsHalt {
+            supported_claims: vec![SupportedClaim::dummy()],
+        };
         Self {
-            lock_script_halts,
-            inputs_to_lock_scripts: InputsToLockScripts::dummy(),
-            kernel_to_inputs: KernelToInputs::dummy(),
-            removal_records_integrity: RemovalRecordsIntegrity::dummy(),
-            kernel_to_typescripts: KernelToTypeScripts::dummy(),
-            type_script_halts: TypescriptHalts::dummy(),
+            lock_scripts_halt,
+            kernel_to_lock_scripts,
+            removal_records_integrity,
+            kernel_to_typescripts,
+            type_scripts_halt,
         }
     }
 
-    pub fn verify(&self, tx_kernel: &TransactionKernel) -> bool {
-        self.lock_script_halts.verify(tx_kernel) // && ...
+    fn prove(&mut self) -> Result<()> {
+        self.lock_scripts_halt.prove()?;
 
-        // TODO: Add all other checks here
+        self.removal_records_integrity.prove()?;
+
+        // not supported yet:
+        // self.kernel_to_lock_scripts.prove()?;
+        // self.kernel_to_typescripts.prove()?;
+        // self.type_scripts_halt.prove()?;
+        Ok(())
     }
 
-    pub fn prove(&mut self) -> Result<()> {
-        self.lock_script_halts.prove()?;
-
-        // TODO: Prove all other fields here
-
-        Ok(())
+    fn verify(&self) -> bool {
+        info!("validity logic for 'kernel_to_lock_scripts', 'kernel_to_type_scripts', 'type_scripts_halt' not implemented yet.");
+        self.lock_scripts_halt.verify()
+            // && self.kernel_to_lock_scripts.verify()
+            && self.removal_records_integrity.verify()
+        // && self.kernel_to_typescripts.verify()
+        // && self.type_scripts_halt.verify()
     }
 }

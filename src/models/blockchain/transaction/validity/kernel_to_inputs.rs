@@ -23,7 +23,7 @@ impl KernelToInputs {
 }
 
 impl TxValidationLogic for KernelToInputs {
-    fn unproven_from_primitive_witness(
+    fn new_from_witness(
         primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
         tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) -> Self {

@@ -20,7 +20,6 @@ use triton_opcodes::shortcuts::halt;
 use triton_vm::proof::Proof;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -34,7 +33,7 @@ use self::amount::Amount;
 use self::native_coin::native_coin_program;
 use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
 use self::utxo::{LockScript, Utxo};
-use self::validity::ValidityLogic;
+use self::validity::{TransactionValidityLogic, ValidationLogic};
 use super::block::Block;
 use super::shared::Hash;
 
@@ -96,23 +95,6 @@ pub struct PrimitiveWitness {
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
 }
 
-/// Linked proofs are one abstraction level above raw witness. They
-/// hide secrets and can therefore be broadcast securely. Some
-/// information is still leaked though, such as the number of inputs
-/// and outputs, and number of type scripts, but this information
-/// cannot be used to spend someone else's coins.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct LinkedProofs {
-    lock_script_proofs: Vec<Proof>,
-    lock_script_hashes: Vec<Digest>,
-    index_proofs: Vec<Proof>,
-    type_script_proofs: Vec<Proof>,
-    type_script_hashes: Vec<Digest>,
-    lock_script_extraction_proof: Proof,
-    type_script_extraction_proof: Proof,
-    pubscript_proofs: Vec<Proof>,
-}
-
 /// Single proofs are the final abstaction layer for transaction
 /// witnesses. It represents the merger of a set of linked proofs
 /// into one. It hides information that linked proofs expose, but
@@ -140,9 +122,8 @@ impl GetSize for SingleProof {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub enum Witness {
     Primitive(PrimitiveWitness),
-    LinkedProofs(LinkedProofs),
     SingleProof(SingleProof),
-    ValidityLogic((ValidityLogic, PrimitiveWitness)),
+    ValidityLogic((TransactionValidityLogic, PrimitiveWitness)),
     Faith,
 }
 
@@ -294,24 +275,13 @@ impl Transaction {
     ///
     /// This method tests the transaction's internal consistency in
     /// isolation, without the context of the canonical chain.
-    ///
-    /// When a transaction occurs in a mined block, `coinbase_amount` is
-    /// derived from that block. When a transaction is received from a peer,
-    /// and is not yet mined, the coinbase amount is None.
     pub fn is_valid(&self) -> bool {
         match &self.witness {
-            Witness::ValidityLogic((validity_logic, primitive_witness)) => {
-                let valid_primitive_witness = self.validate_primitive_witness(primitive_witness);
-
-                // TODO: Implement check of validity logic, *without* using primitive witness
-                let valid_validity_logic = validity_logic.verify(&self.kernel);
-
-                valid_primitive_witness && valid_validity_logic
-            }
+            Witness::ValidityLogic((validity_logic, _)) => validity_logic.verify(),
             Witness::Primitive(primitive_witness) => {
+                warn!("Verifying transaction by raw witness; unlock key might be exposed!");
                 self.validate_primitive_witness(primitive_witness)
             }
-            Witness::LinkedProofs(_) => true,
             Witness::SingleProof(_) => true,
             // TODO: All validation of `Faith` should panic as only the genesis block
             // should have a Faith witness once all validation logic is implemented.

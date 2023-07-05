@@ -51,8 +51,9 @@ use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
-use crate::models::blockchain::transaction::validity::ValidityLogic;
+use crate::models::blockchain::transaction::validity::tasm::removal_records_integrity::RemovalRecordsIntegrityWitness;
+use crate::models::blockchain::transaction::validity::TransactionValidityLogic;
+use crate::models::blockchain::transaction::validity::ValidationLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::Witness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
@@ -446,6 +447,16 @@ pub fn pseudorandom_removal_record_integrity_witness(
         .map(|ar| ar.canonical_commitment)
         .collect_vec();
     let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments);
+    assert_eq!(num_inputs, mmr_mps.len());
+    assert_eq!(num_inputs, canonical_commitments.len());
+
+    for (mp, cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
+        assert!(
+            mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
+            "Returned MPs must be valid for returned AOCL"
+        );
+    }
+
     for (ms_mp, mmr_mp) in membership_proofs.iter_mut().zip(mmr_mps.iter()) {
         ms_mp.auth_path_aocl = mmr_mp.clone();
     }
@@ -852,8 +863,7 @@ pub fn make_mock_transaction_with_generation_key(
         pubscripts,
         mutator_set_accumulator: tip_msa,
     };
-    let validity_logic =
-        ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &kernel);
+    let validity_logic = TransactionValidityLogic::new_from_witness(&primitive_witness, &kernel);
 
     Transaction {
         kernel,
@@ -979,8 +989,7 @@ pub fn make_mock_block(
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
     };
-    let validity_logic =
-        ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &tx_kernel);
+    let validity_logic = TransactionValidityLogic::new_from_witness(&primitive_witness, &tx_kernel);
 
     let transaction = Transaction {
         witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),

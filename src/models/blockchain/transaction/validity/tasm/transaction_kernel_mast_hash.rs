@@ -13,10 +13,7 @@ use tasm_lib::{
 use triton_vm::BFieldElement;
 use twenty_first::{
     shared_math::{tip5::Digest, tip5::DIGEST_LENGTH},
-    util_types::{
-        algebraic_hasher::AlgebraicHasher, merkle_tree::CpuParallel,
-        merkle_tree_maker::MerkleTreeMaker,
-    },
+    util_types::algebraic_hasher::AlgebraicHasher,
 };
 
 use crate::models::blockchain::shared::Hash;
@@ -306,8 +303,11 @@ impl Snippet for TransactionKernelMastHash {
             mutator_set_hash_hash,
             zero,
         ];
-        let tree = <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&leafs);
-        let root = tree.get_root();
+        let mut nodes = [[zero; 8], leafs].concat();
+        for i in (1..=7).rev() {
+            nodes[i] = Hash::hash_pair(&nodes[2 * i], &nodes[2 * i + 1]);
+        }
+        let root = nodes[1].to_owned();
 
         // populate memory with merkle tree
         let list_address = rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(
@@ -320,7 +320,7 @@ impl Snippet for TransactionKernelMastHash {
             16,
             memory,
         );
-        for (i, node) in tree.nodes.into_iter().enumerate().skip(1) {
+        for (i, node) in nodes.into_iter().enumerate().skip(1) {
             for j in 0..DIGEST_LENGTH {
                 memory.insert(
                     list_address

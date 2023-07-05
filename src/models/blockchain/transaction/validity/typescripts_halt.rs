@@ -1,24 +1,24 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
-use super::{SupportedClaim, TxValidationLogic};
+use super::{SupportedClaim, ValidationLogic};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
-pub struct InputsToLockScripts {
-    supported_claim: SupportedClaim,
+pub struct TypeScriptsHalt {
+    pub supported_claims: Vec<SupportedClaim>,
 }
 
-impl InputsToLockScripts {
+impl TypeScriptsHalt {
     // TODO: Remove after implementing this struct
     pub fn dummy() -> Self {
         Self {
-            supported_claim: SupportedClaim::dummy_supported_claim(),
+            supported_claims: vec![SupportedClaim::dummy()],
         }
     }
 }
 
-impl TxValidationLogic for InputsToLockScripts {
-    fn unproven_from_primitive_witness(
+impl ValidationLogic for TypeScriptsHalt {
+    fn new_from_witness(
         _primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
         _tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) -> Self {
@@ -29,10 +29,7 @@ impl TxValidationLogic for InputsToLockScripts {
         todo!()
     }
 
-    fn verify(
-        &self,
-        _tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
-    ) -> bool {
+    fn verify(&self) -> bool {
         todo!()
     }
 }

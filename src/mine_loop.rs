@@ -7,7 +7,8 @@ use crate::models::blockchain::shared::*;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
-use crate::models::blockchain::transaction::validity::ValidityLogic;
+use crate::models::blockchain::transaction::validity::TransactionValidityLogic;
+use crate::models::blockchain::transaction::validity::ValidationLogic;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -213,8 +214,7 @@ fn make_coinbase_transaction(
         pubscripts: vec![],
         mutator_set_accumulator,
     };
-    let validity_logic =
-        ValidityLogic::unproven_from_primitive_witness(&primitive_witness, &kernel);
+    let validity_logic = TransactionValidityLogic::new_from_witness(&primitive_witness, &kernel);
     (
         Transaction {
             kernel,

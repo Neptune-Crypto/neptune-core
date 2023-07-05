@@ -1,5 +1,6 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
@@ -10,13 +11,13 @@ pub struct AdditionRecord {
 
 // Due to a bug in the derival of `BFieldCodec`, we need to implement this manually.
 impl BFieldCodec for AdditionRecord {
-    fn decode(sequence: &[triton_vm::BFieldElement]) -> anyhow::Result<Box<Self>> {
+    fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
         Ok(Box::new(Self {
             canonical_commitment: *Digest::decode(sequence)?,
         }))
     }
 
-    fn encode(&self) -> Vec<triton_vm::BFieldElement> {
+    fn encode(&self) -> Vec<BFieldElement> {
         self.canonical_commitment.encode()
     }
 

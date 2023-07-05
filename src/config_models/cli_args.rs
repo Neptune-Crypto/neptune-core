@@ -111,6 +111,18 @@ pub struct Args {
     /// Max number of membership proofs stored per owned UTXO
     #[structopt(long, default_value = "3")]
     pub number_of_mps_per_utxo: usize,
+
+    /// Whether to enable privacy when initiating transactions. If this flag
+    /// is set to false, when the client initiates a transaction it will
+    /// supply the raw witness for the mutator set removal record integrity
+    /// proof rather than produce the proof directly, saving work and memory.
+    /// The drawback is that observers can link the transaction inputs to
+    /// their originating transaction outputs. This flag is set to true by
+    /// default. This flag has no bearing on the lock scripts; proving their
+    /// graceful halt is mandatory and therefore no-one else can spend your
+    /// coins.
+    #[clap(long, default_value = "false")]
+    pub privacy: bool,
 }
 
 impl Args {

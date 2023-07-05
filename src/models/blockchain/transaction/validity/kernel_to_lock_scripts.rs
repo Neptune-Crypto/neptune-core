@@ -1,14 +1,15 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use triton_opcodes::program::Program;
 
 use super::{compiled_program::CompiledProgram, SupportedClaim, ValidationLogic};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
-pub struct KernelToTypeScripts {
+pub struct KernelToLockScripts {
     pub supported_claim: SupportedClaim,
 }
 
-impl KernelToTypeScripts {
+impl KernelToLockScripts {
     // TODO: Remove after implementing this struct
     pub fn dummy() -> Self {
         Self {
@@ -17,7 +18,7 @@ impl KernelToTypeScripts {
     }
 }
 
-impl ValidationLogic for KernelToTypeScripts {
+impl ValidationLogic for KernelToLockScripts {
     fn new_from_witness(
         _primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
         _tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
@@ -34,7 +35,7 @@ impl ValidationLogic for KernelToTypeScripts {
     }
 }
 
-impl CompiledProgram for KernelToTypeScripts {
+impl CompiledProgram for KernelToLockScripts {
     fn rust_shadow(
         _public_input: std::collections::VecDeque<triton_vm::BFieldElement>,
         _secret_input: std::collections::VecDeque<triton_vm::BFieldElement>,
@@ -43,7 +44,7 @@ impl CompiledProgram for KernelToTypeScripts {
     }
 
     fn program() -> triton_opcodes::program::Program {
-        todo!()
+        Program::default()
     }
 
     fn crash_conditions() -> Vec<String> {

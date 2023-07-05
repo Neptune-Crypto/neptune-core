@@ -138,7 +138,7 @@ impl LockScript {
     }
 
     pub fn hash(&self) -> Digest {
-        Hash::hash_varlen(&self.program.encode())
+        self.program.hash::<Hash>()
     }
 }
 
