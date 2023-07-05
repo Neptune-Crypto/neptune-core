@@ -355,7 +355,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use triton_vm::Claim;
+    use triton_vm::{Claim, StarkParameters};
     use twenty_first::util_types::emojihash_trait::Emojihash;
 
     use super::*;
@@ -522,8 +522,14 @@ mod tests {
         };
 
         if std::env::var("DYING_TO_PROVE").is_ok() {
-            let proof = triton_vm::prove(&Default::default(), &claim, &program, &secret_in);
-            assert!(proof.is_ok());
+            let maybe_proof =
+                triton_vm::prove(&StarkParameters::default(), &claim, &program, &secret_in);
+            assert!(maybe_proof.is_ok());
+
+            assert!(triton_vm::verify(
+                &StarkParameters::default(),
+                &maybe_proof.unwrap()
+            ));
         }
     }
 }
