@@ -71,3 +71,5 @@ This repository contains unit tests, but multi-threaded programs are notoriously
 
 ## Notes
 The `Makefile` recipes set the flag `RUSTFLAGS=-Dwarnings` and this sometimes makes the recompilation **much** slower than without this flag, as `cargo` for some reason rebuilds the entire crate when this flag is set and a minor change is made in a test. So it is much faster to run the tests using cargo and then use the `make all` command before e.g. committing to ensure that the test build does not produce any warnings.
+
+If the RPC server is spamming your log too much, set the logging-level environment to `RUST_LOG='info,tarpc=warn'`.
