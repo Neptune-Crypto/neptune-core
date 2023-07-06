@@ -158,8 +158,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Start handling of mining. So far we can only mine on the `RegTest` network.
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
-    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
-        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let state_clone_for_miner = state.clone();
     if state.cli.mine {
         let miner_join_handle = tokio::spawn(async move {
@@ -176,6 +174,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     }
 
     // Start RPC server for CLI request and more
+    let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
+        mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
         format!("127.0.0.1:{}", state.cli.rpc_port),
         Json::default,
