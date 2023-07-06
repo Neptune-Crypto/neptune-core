@@ -299,6 +299,12 @@ pub async fn mine(
     mut latest_block: Block,
     state: GlobalState,
 ) -> Result<()> {
+    // Wait before starting mining thread to ensure that peers have sent us information about
+    // their latest blocks. This should prevent the client from finding blocks that will later
+    // be orphaned.
+    const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 10;
+    tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+
     let mut pause_mine = false;
     loop {
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
