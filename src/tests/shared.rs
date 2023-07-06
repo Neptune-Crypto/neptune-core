@@ -154,7 +154,7 @@ pub fn get_dummy_latest_block(
 }
 
 /// Return a handshake object with a randomly set instance ID
-pub fn get_dummy_handshake_data(network: Network, id: u8) -> HandshakeData {
+pub fn get_dummy_handshake_data_for_genesis(network: Network, id: u8) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
         tip_header: get_dummy_latest_block(None).2.lock().unwrap().to_owned(),
@@ -173,8 +173,11 @@ pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
-pub fn get_dummy_peer_connection_data(network: Network, id: u8) -> (HandshakeData, SocketAddr) {
-    let handshake = get_dummy_handshake_data(network, id);
+pub fn get_dummy_peer_connection_data_genesis(
+    network: Network,
+    id: u8,
+) -> (HandshakeData, SocketAddr) {
+    let handshake = get_dummy_handshake_data_for_genesis(network, id);
     let socket_address = get_dummy_socket_address(id);
 
     (handshake, socket_address)
@@ -247,7 +250,7 @@ pub async fn get_test_genesis_setup(
         to_main_tx,
         _to_main_rx1,
         state,
-        get_dummy_handshake_data(network, 0),
+        get_dummy_handshake_data_for_genesis(network, 0),
     ))
 }
 

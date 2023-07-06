@@ -561,6 +561,22 @@ impl PeerLoopHandler {
 
                 Ok(false)
             }
+            PeerMessage::BlockNotificationRequest => {
+                debug!("Got BlockNotificationRequest");
+
+                let block_header = self
+                    .state
+                    .chain
+                    .light_state
+                    .latest_block
+                    .lock()
+                    .await
+                    .to_owned();
+                peer.send(PeerMessage::BlockNotification(block_header.into()))
+                    .await?;
+
+                Ok(false)
+            }
             PeerMessage::BlockNotification(block_notification) => {
                 debug!(
                     "Got BlockNotification of height {}",
@@ -969,7 +985,7 @@ impl PeerLoopHandler {
     /// to check the standing again.
     pub async fn run_wrapper<S>(
         &self,
-        peer: S,
+        mut peer: S,
         from_main_rx: broadcast::Receiver<MainToPeerThread>,
     ) -> Result<()>
     where
@@ -1037,6 +1053,20 @@ impl PeerLoopHandler {
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
+
+        // If peer indicates more canonical block, request a block notification to catch up ASAP
+        if self.peer_handshake_data.tip_header.proof_of_work_family
+            > self
+                .state
+                .chain
+                .light_state
+                .get_latest_block_header()
+                .await
+                .proof_of_work_family
+        {
+            peer.send(PeerMessage::BlockNotificationRequest).await?;
+        }
+
         let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
@@ -1062,7 +1092,7 @@ mod peer_loop_tests {
             blockchain::shared::Hash, peer::TransactionNotification, state::wallet::WalletSecret,
         },
         tests::shared::{
-            add_block, get_dummy_peer_connection_data, get_dummy_socket_address,
+            add_block, get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
             get_test_genesis_setup, make_mock_block_with_invalid_pow,
             make_mock_block_with_valid_pow, make_mock_transaction, Action, Mock,
         },
@@ -1115,7 +1145,7 @@ mod peer_loop_tests {
         let (peer_address1, instance_id1) =
             (peer_infos[1].connected_address, peer_infos[1].instance_id);
 
-        let (hsd2, sa2) = get_dummy_peer_connection_data(Network::Main, 2);
+        let (hsd2, sa2) = get_dummy_peer_connection_data_genesis(Network::Main, 2);
         let expected_response = vec![
             (peer_address0, instance_id0),
             (peer_address1, instance_id1),
@@ -1659,7 +1689,7 @@ mod peer_loop_tests {
             ..Default::default()
         };
 
-        let (hsd1, peer_address1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Main, 1);
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -2021,7 +2051,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
-        let (hsd_1, sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(Network::Main, 1);
         let expected_peer_list_resp = vec![
             (
                 peer_infos[0].address_for_incoming_connections.unwrap(),
@@ -2110,7 +2140,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Main, 1);
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state.clone(),
@@ -2152,7 +2182,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let (hsd_1, _sa_1) = get_dummy_peer_connection_data(Network::Main, 1);
+        let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Main, 1);
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state.clone(),

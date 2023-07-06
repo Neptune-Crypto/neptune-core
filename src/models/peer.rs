@@ -219,6 +219,16 @@ impl From<Block> for PeerBlockNotification {
     }
 }
 
+impl From<&BlockHeader> for PeerBlockNotification {
+    fn from(value: &BlockHeader) -> Self {
+        PeerBlockNotification {
+            hash: Hash::hash(value),
+            height: value.height,
+            proof_of_work_family: value.proof_of_work_family,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ConnectionRefusedReason {
     AlreadyConnected,
@@ -256,6 +266,7 @@ impl From<Transaction> for TransactionNotification {
 pub enum PeerMessage {
     Handshake(Box<(Vec<u8>, HandshakeData)>),
     Block(Box<TransferBlock>),
+    BlockNotificationRequest,
     BlockNotification(PeerBlockNotification),
     BlockRequestByHeight(BlockHeight),
     BlockRequestByHash(Digest),
@@ -283,6 +294,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake(_) => "handshake".to_string(),
             PeerMessage::Block(_) => "block".to_string(),
+            PeerMessage::BlockNotificationRequest => "block notification request".to_string(),
             PeerMessage::BlockNotification(_) => "block notification".to_string(),
             PeerMessage::BlockRequestByHeight(_) => "block req by height".to_string(),
             PeerMessage::BlockRequestByHash(_) => "block req by hash".to_string(),
@@ -302,6 +314,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake(_) => false,
             PeerMessage::Block(_) => false,
+            PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,
@@ -322,6 +335,7 @@ impl PeerMessage {
         match self {
             PeerMessage::Handshake(_) => false,
             PeerMessage::Block(_) => true,
+            PeerMessage::BlockNotificationRequest => false,
             PeerMessage::BlockNotification(_) => false,
             PeerMessage::BlockRequestByHeight(_) => false,
             PeerMessage::BlockRequestByHash(_) => false,

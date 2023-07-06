@@ -125,7 +125,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         mempool,
         mining: Arc::new(std::sync::RwLock::new(false)),
     };
-    let own_handshake_data: HandshakeData = state.get_handshakedata().await;
+    let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];

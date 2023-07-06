@@ -313,7 +313,7 @@ impl GlobalState {
         peer_databases.peer_standings.get(ip)
     }
 
-    pub async fn get_handshakedata(&self) -> HandshakeData {
+    pub async fn get_own_handshakedata(&self) -> HandshakeData {
         let listen_addr_socket = SocketAddr::new(self.cli.listen_addr, self.cli.peer_port);
         let latest_block_header = self.chain.light_state.get_latest_block_header().await;
 
