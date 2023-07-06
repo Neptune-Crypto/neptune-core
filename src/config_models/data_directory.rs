@@ -86,7 +86,7 @@ impl DataDirectory {
     ///////////////////////////////////////////////////////////////////////////
     ///
     /// The wallet file path
-    pub fn wallet_director_path(&self) -> PathBuf {
+    pub fn wallet_directory_path(&self) -> PathBuf {
         self.data_dir.join(Path::new(WALLET_DIRECTORY))
     }
 

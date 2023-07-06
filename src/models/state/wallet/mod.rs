@@ -10,6 +10,7 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::info;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::shared_math::other::random_elements_array;
@@ -42,10 +43,16 @@ pub fn generate_secret_key() -> Digest {
 pub struct WalletSecret {
     name: String,
 
-    // For now we use `Digest` as secret key as it's consistent with STARK
-    // proofs that we're transitioning to after DevNet.
     pub secret_seed: Digest,
     version: u8,
+}
+
+/// Struct for containing file paths for secrets. To be communicated to user upon
+/// wallet creation or wallet opening.
+pub struct WalletSecretFileLocations {
+    pub wallet_secret_path: PathBuf,
+    pub incoming_randomness_file: PathBuf,
+    pub outgoing_randomness_file: PathBuf,
 }
 
 impl WalletSecret {
@@ -85,13 +92,24 @@ impl WalletSecret {
 
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
     /// and save it to `wallet_file`.
-    /// Also create files for incoming and outgoing randomness which are appended to
+    /// Also create files for incoming and outgoing randomness which should be appended to
     /// on each incoming and outgoing transaction.
-    pub fn read_from_file_or_create(wallet_directory_path: &Path) -> Result<Self> {
+    /// Returns an instance of self and the path in which the wallet secret was stored.
+    pub fn read_from_file_or_create(
+        wallet_directory_path: &Path,
+    ) -> Result<(Self, WalletSecretFileLocations)> {
         let wallet_secret_path = Self::wallet_secret_path(wallet_directory_path);
         let wallet = if wallet_secret_path.exists() {
+            info!(
+                "***** Reading wallet from {} *****\n\n\n",
+                wallet_secret_path.display()
+            );
             Self::read_from_file(&wallet_secret_path)?
         } else {
+            info!(
+                "***** Creating new wallet in {} *****\n\n\n",
+                wallet_secret_path.display()
+            );
             let new_secret: Digest = generate_secret_key();
             let new_wallet: WalletSecret = WalletSecret::new(new_secret);
             new_wallet.create_wallet_secret_file(&wallet_secret_path)?;
@@ -132,7 +150,13 @@ impl WalletSecret {
             );
         }
 
-        Ok(wallet)
+        let wallet_secret_file_locations = WalletSecretFileLocations {
+            wallet_secret_path,
+            incoming_randomness_file,
+            outgoing_randomness_file,
+        };
+
+        Ok((wallet, wallet_secret_file_locations))
     }
 
     pub fn nth_generation_spending_key(&self, counter: u16) -> generation_address::SpendingKey {
