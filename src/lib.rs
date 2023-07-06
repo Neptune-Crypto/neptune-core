@@ -47,6 +47,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
 use tracing::debug;
+use tracing::info;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
@@ -126,6 +127,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         mining: Arc::new(std::sync::RwLock::new(false)),
     };
     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
+    info!(
+        "Most known canonical block has height {}",
+        own_handshake_data.tip_header.height
+    );
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];

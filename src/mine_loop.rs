@@ -102,8 +102,9 @@ async fn mine_block(
     coinbase_utxo_info: ExpectedUtxo,
 ) {
     info!(
-        "Mining on block with {} outputs",
-        block_body.transaction.kernel.outputs.len()
+        "Mining on block with {} outputs. Attempting to find block with height {}",
+        block_body.transaction.kernel.outputs.len(),
+        block_header.height
     );
 
     // Mining takes place here
