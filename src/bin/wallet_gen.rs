@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
         WalletSecret::read_from_file_or_create(&wallet_dir).unwrap();
 
     println!(
-        "Wallet stored in: {}\n Make sure you also see this path if you run the neptune-core client",
+        "Wallet stored in: {}\nMake sure you also see this path if you run the neptune-core client",
         secret_file_paths.wallet_secret_path.display()
     );
     let spending_key = wallet_secret.nth_generation_spending_key(0);
