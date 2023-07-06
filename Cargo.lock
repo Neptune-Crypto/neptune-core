@@ -1309,7 +1309,6 @@ dependencies = [
  "anyhow",
  "bech32",
  "bincode",
- "blake3",
  "bytes",
  "bytesize",
  "cargo-husky",
@@ -2237,6 +2236,8 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "975759df2297e94a3bb9d830dc7532459f791b0bd9260adaf96d123a63240f82"
 dependencies = [
  "anyhow",
  "itertools 0.11.0",
