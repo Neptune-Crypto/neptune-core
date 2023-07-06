@@ -6,18 +6,15 @@ pub mod tasm;
 pub mod typescripts_halt;
 
 use crate::models::blockchain::shared::Hash;
-use anyhow::{bail, Ok, Result};
+use anyhow::{Ok, Result};
 use get_size::GetSize;
 use itertools::Itertools;
-use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 use triton_opcodes::program::Program;
 use triton_vm::{proof::Proof, Claim};
+use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::{
-    shared_math::b_field_element::BFieldElement, util_types::algebraic_hasher::AlgebraicHasher,
-};
 
 use self::{
     compiled_program::CompiledProgram,
@@ -34,83 +31,6 @@ pub enum ClaimSupport {
     Proof(Proof),
     SecretWitness(Vec<BFieldElement>, Option<Program>),
     DummySupport, // TODO: Remove this when all claims are implemented
-}
-
-impl BFieldCodec for ClaimSupport {
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
-        match sequence.first() {
-            Some(val) => match val.value() {
-                0 => {
-                    let proof = *Proof::decode(&sequence[1..])?;
-                    Ok(Box::new(ClaimSupport::Proof(proof)))
-                }
-                1 => {
-                    let mut index = 1;
-                    let secret_len: usize = match sequence.get(index) {
-                        Some(inner_val) => inner_val.value().try_into()?,
-                        None => bail!(
-                            "ClaimSupport::decode: Invalid sequence length for secret witness secret_len!"
-                        ),
-                    };
-                    index += 1;
-                    let secret =
-                        *Vec::<BFieldElement>::decode(&sequence[index..index + secret_len])?;
-                    index += secret_len;
-
-                    let program_len: usize = match sequence.get(index) {
-                        Some(inner_val) => inner_val.value().try_into()?,
-                        None => bail!(
-                            "ClaimSupport::decode: Invalid sequence length for secret witness program_len!"
-                        ),
-                    };
-                    index += 1;
-
-                    let maybe_program = *Option::<triton_opcodes::program::Program>::decode(
-                        &sequence[index..index + program_len],
-                    )?;
-                    index += program_len;
-
-                    if index != sequence.len() {
-                        bail!("ClaimSupport::decode: Invalid sequence length for secret witness! Too long.");
-                    }
-                    Ok(Box::new(ClaimSupport::SecretWitness(secret, maybe_program)))
-                }
-                2 => {
-                    if sequence.len() != 1 {
-                        bail!("ClaimSupport::decode: Invalid sequence length for dummy support!");
-                    }
-                    Ok(Box::new(ClaimSupport::DummySupport))
-                }
-                _ => bail!("ClaimSupport::decode: Invalid claim support type!"),
-            },
-            None => todo!(),
-        }
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        match self {
-            ClaimSupport::Proof(proof) => {
-                vec![vec![BFieldElement::zero()], proof.encode()].concat()
-            }
-            ClaimSupport::SecretWitness(secret, maybe_program) => {
-                let secret_encoded = secret.encode();
-                let program_encoded = maybe_program.encode();
-                vec![
-                    vec![BFieldElement::one()],
-                    vec![BFieldElement::new(secret_encoded.len() as u64)],
-                    secret_encoded,
-                    vec![BFieldElement::new(program_encoded.len() as u64)],
-                    program_encoded,
-                ]
-                .concat()
-            }
-            ClaimSupport::DummySupport => vec![BFieldElement::new(2)],
-        }
-    }
-
-    fn static_length() -> Option<usize> {
-        None
-    }
 }
 
 /// SupportedClaim is a helper struct for ValiditySequence. It
@@ -199,7 +119,7 @@ impl ValidationLogic for TransactionValidityLogic {
         };
         debug!(
             "Removal Records Integrity program digest: ({})",
-            Hash::hash_varlen(&RemovalRecordsIntegrity::program().encode())
+            RemovalRecordsIntegrity::program().hash::<Hash>()
         );
         let removal_records_integrity = RemovalRecordsIntegrity {
             supported_claim: SupportedClaim {

@@ -469,9 +469,7 @@ impl Transaction {
 
         // verify type scripts
         for type_script_hash in type_scripts {
-            let type_script = if type_script_hash
-                != Hash::hash_varlen(&native_coin_program().encode())
-            {
+            let type_script = if type_script_hash != native_coin_program().hash::<Hash>() {
                 warn!("Observed non-native type script: {} Non-native type scripts are not supported yet.", type_script_hash.emojihash());
                 continue;
             } else {

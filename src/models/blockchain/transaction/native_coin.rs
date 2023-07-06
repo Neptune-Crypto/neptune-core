@@ -19,11 +19,11 @@ use crate::models::blockchain::{
 };
 
 pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
-    BFieldElement::new(12960675664441692999),
-    BFieldElement::new(1713263139658829986),
-    BFieldElement::new(4953090415653761319),
-    BFieldElement::new(10232794718978818029),
-    BFieldElement::new(15162962915077700302),
+    BFieldElement::new(4843866011885844809),
+    BFieldElement::new(16618866032559590857),
+    BFieldElement::new(18247689143239181392),
+    BFieldElement::new(7637465675240023996),
+    BFieldElement::new(9104890367162237026),
 ]);
 
 pub fn native_coin_program() -> Program {
@@ -141,7 +141,10 @@ mod tests_native_coin {
 
     #[test]
     fn hash_is_really_hash() {
-        let calculated_digest = Hash::hash_varlen(&native_coin_program().encode());
-        assert_eq!(calculated_digest, NATIVE_COIN_TYPESCRIPT_DIGEST);
+        let calculated_digest = native_coin_program().hash::<Hash>();
+        assert_eq!(
+            calculated_digest, NATIVE_COIN_TYPESCRIPT_DIGEST,
+            "\ncalculated: ({calculated_digest})\nhardcoded: ({NATIVE_COIN_TYPESCRIPT_DIGEST})"
+        );
     }
 }

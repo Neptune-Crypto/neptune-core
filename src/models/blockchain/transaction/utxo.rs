@@ -89,25 +89,9 @@ impl StdHash for Utxo {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScript {
     pub program: Program,
-}
-
-impl BFieldCodec for LockScript {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.program.encode()
-    }
-
-    fn decode(bytes: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        Ok(Box::new(Self {
-            program: *Program::decode(bytes)?,
-        }))
-    }
-
-    fn static_length() -> Option<usize> {
-        None
-    }
 }
 
 impl From<Vec<LabelledInstruction>> for LockScript {
@@ -142,25 +126,9 @@ impl LockScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScript {
     pub program: Program,
-}
-
-impl BFieldCodec for TypeScript {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.program.encode()
-    }
-
-    fn decode(bytes: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        Ok(Box::new(Self {
-            program: *Program::decode(bytes)?,
-        }))
-    }
-
-    fn static_length() -> Option<usize> {
-        None
-    }
 }
 
 impl From<Vec<LabelledInstruction>> for TypeScript {
@@ -185,7 +153,7 @@ impl TypeScript {
     }
 
     pub fn hash(&self) -> Digest {
-        Hash::hash_varlen(&self.program.encode())
+        self.program.hash::<Hash>()
     }
 
     pub fn native_coin() -> Self {
@@ -336,7 +304,7 @@ mod utxo_tests {
             let type_script = TypeScript::native_coin();
             let state: Vec<BFieldElement> = random_elements(rng.gen_range(0..10));
             coins.push(Coin {
-                type_script_hash: Hash::hash(&type_script),
+                type_script_hash: type_script.hash(),
                 state,
             });
         }
