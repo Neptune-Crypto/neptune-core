@@ -87,7 +87,12 @@ impl TransactionKernel {
 #[cfg(test)]
 pub mod transaction_kernel_tests {
 
-    use crate::tests::shared::{random_pubscript_struct, random_transaction_kernel};
+    use rand::{random, thread_rng, Rng, RngCore};
+
+    use crate::{
+        tests::shared::{random_pubscript_struct, random_transaction_kernel},
+        util_types::mutator_set::{removal_record::AbsoluteIndexSet, shared::NUM_TRIALS},
+    };
 
     use super::*;
 
@@ -138,6 +143,7 @@ pub mod transaction_kernel_tests {
             fee: Amount::one(),
             coinbase: None,
             timestamp: Default::default(),
+            mutator_set_hash: rng.gen::<Digest>(),
         };
         let encoded = kernel.encode();
         println!(
