@@ -45,7 +45,7 @@ pub fn native_coin_reference(
     //  - hash_varlen(fee_sequence)
     //  - hash_varlen(coinbase_sequence)
     //  - hash_varlen(timestamp_sequence)
-    //  - Digest::default()
+    //  - mutator set hash
     //  - Digest::default().
     // The sequences are provided through secret_in.
 
@@ -65,6 +65,7 @@ pub fn native_coin_reference(
     let fee_sequence = &sequences[3];
     let coinbase_sequence = &sequences[4];
     let timestamp_sequence = &sequences[5];
+    let mutator_set_hash = *Digest::decode(&sequences[6]).unwrap_or(Box::<Digest>::default());
 
     // parse utxos
     let input_utxos: Vec<Utxo> = *Vec::<Utxo>::decode(input_sequence)?;
@@ -117,7 +118,7 @@ pub fn native_coin_reference(
         Hash::hash_varlen(fee_sequence),
         Hash::hash_varlen(coinbase_sequence),
         Hash::hash_varlen(timestamp_sequence),
-        Digest::default(),
+        mutator_set_hash,
         Digest::default(),
     ];
     let root = <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&leafs).get_root();
