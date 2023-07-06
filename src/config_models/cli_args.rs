@@ -117,10 +117,10 @@ pub struct Args {
     /// supply the raw witness for the mutator set removal record integrity
     /// proof rather than produce the proof directly, saving work and memory.
     /// The drawback is that observers can link the transaction inputs to
-    /// their originating transaction outputs. This flag is set to true by
+    /// their originating transaction outputs. This flag is set to false by
     /// default. This flag has no bearing on the lock scripts; proving their
     /// graceful halt is mandatory and therefore no-one else can spend your
-    /// coins.
+    /// coins. The default option is likely to change in the future.
     #[clap(long, default_value = "false")]
     pub privacy: bool,
 }
