@@ -94,7 +94,7 @@ pub async fn answer_peer<S>(
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
-    info!("Established incoming TCP connection");
+    info!("Established incoming TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
@@ -213,7 +213,7 @@ async fn call_peer<S>(
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
-    info!("Established outgoing TCP connection");
+    info!("Established outgoing TCP connection with {peer_address}");
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
