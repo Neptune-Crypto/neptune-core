@@ -92,7 +92,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let latest_block: Block = archival_state.get_latest_block().await;
 
     // Bind socket to port on this machine, to handle incoming connections from peers
-    let listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
+    let incoming_peer_listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
         .await
         .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
 
@@ -209,7 +209,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
     let main_loop_handler = MainLoopHandler::new(
-        listener,
+        incoming_peer_listener,
         state,
         main_to_peer_broadcast_tx,
         peer_thread_to_main_tx,

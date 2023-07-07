@@ -44,7 +44,7 @@ const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
 
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
-    tcp_listener: TcpListener,
+    incoming_peer_listener: TcpListener,
     global_state: GlobalState,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
@@ -53,14 +53,14 @@ pub struct MainLoopHandler {
 
 impl MainLoopHandler {
     pub fn new(
-        tcp_listener: TcpListener,
+        incoming_peer_listener: TcpListener,
         state: GlobalState,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
         peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
         main_to_miner_tx: watch::Sender<MainToMiner>,
     ) -> Self {
         Self {
-            tcp_listener,
+            incoming_peer_listener,
             global_state: state,
             main_to_miner_tx,
             main_to_peer_broadcast_tx,
@@ -1035,7 +1035,7 @@ impl MainLoopHandler {
                 }
 
                 // Handle incoming connections from peer
-                Ok((stream, _)) = self.tcp_listener.accept() => {
+                Ok((stream, _)) = self.incoming_peer_listener.accept() => {
                     let state = self.global_state.clone();
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
