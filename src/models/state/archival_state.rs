@@ -2704,4 +2704,13 @@ mod archival_state_tests {
 
         Ok(())
     }
+
+    use crate::config_models::{cli_args, data_directory::DataDirectory};
+
+    #[test]
+    fn can_initialize_mutator_set_database() {
+        let args: cli_args::Args = cli_args::Args::default();
+        let data_dir = DataDirectory::get(args.data_dir.clone(), args.network).unwrap();
+        let _rams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
+    }
 }
