@@ -85,11 +85,18 @@ impl ArchivalState {
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
 
         let options = rusty_leveldb::Options::default();
-        let db = match DB::open(ms_db_dir_path, options) {
+        let db = match DB::open(ms_db_dir_path.clone(), options) {
             Ok(db) => db,
             Err(e) => {
-                tracing::error!("Could not open mutator set database: {e}");
-                panic!("Could not open database; do not know how to proceed. Panicking.");
+                tracing::error!(
+                    "Could not open mutator set database at {}: {e}",
+                    ms_db_dir_path.display()
+                );
+                panic!(
+                    "Could not open database; do not know how to proceed. Panicking.\n\
+                    If you suspect the database may be corrupted, consider renaming the directory {} or removing it altogether.",
+                    ms_db_dir_path.display()
+                );
             }
         };
 
@@ -2707,10 +2714,12 @@ mod archival_state_tests {
 
     use crate::config_models::{cli_args, data_directory::DataDirectory};
 
+    #[traced_test]
     #[test]
     fn can_initialize_mutator_set_database() {
         let args: cli_args::Args = cli_args::Args::default();
         let data_dir = DataDirectory::get(args.data_dir.clone(), args.network).unwrap();
+        println!("data dir: {}", data_dir);
         let _rams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
     }
 }
