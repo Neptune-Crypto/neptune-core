@@ -69,8 +69,7 @@ async fn get_connection_status(
 
     // Disallow connection to already connected peer
     if pm.values().any(|peer| {
-        peer.instance_id == other_handshake.instance_id
-            || other_handshake.listen_address == peer.address_for_incoming_connections
+        peer.instance_id == other_handshake.instance_id || *peer_address == peer.connected_address
     }) {
         return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
     }
