@@ -26,17 +26,19 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
 
 This software comes with a dashboard that communicates with the daemon. The dashboard is a console-based user interface to generate addresses, receive and send money, and monitor the behavior of the client. The daemon must be running before the dashboard is started. To start the dashboard, run: `neptune-dashboard`. (If you set daemon's RPC port to a custom value specify that value with the flag `--port [port]`.)
 
-## RPC
+## Command-Line Interface
 
-In addition to a dashboard, the software comes with a CLI client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available RPC commands, execute 
+In addition to a dashboard, the software comes with a CLI client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available commands, execute 
 ```
-rpc_cli --help
+neptune-cli --help
 ```
 
 To get e.g. the block height of a running daemon, execute
 ```
-rpc_cli --server-addr 127.0.0.1:<rpc_port> block-height
+neptune-cli --server-addr block-height
 ```
+
+If you set up `neptune-core` on a different address or port from the default (127.0.0.1:9799), then the flag `--server-addr [ip_address:port]` is your friend.
 
 ## Setup for Development (Ubuntu)
 
