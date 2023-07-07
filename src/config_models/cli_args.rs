@@ -153,6 +153,6 @@ mod cli_args_tests {
         assert_eq!(8, default_args.max_peers);
         assert_eq!(9798, default_args.peer_port);
         assert_eq!(9799, default_args.rpc_port);
-        assert_eq!(Ipv4Addr::new(127, 0, 0, 1), default_args.listen_addr);
+        assert_eq!(Ipv4Addr::new(0, 0, 0, 0), default_args.listen_addr);
     }
 }
