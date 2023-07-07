@@ -12,6 +12,7 @@ use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
 use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::GlobalState;
 use anyhow::Result;
+use itertools::Itertools;
 use rand::prelude::{IteratorRandom, SliceRandom};
 use rand::thread_rng;
 use std::collections::HashMap;
@@ -686,6 +687,7 @@ impl MainLoopHandler {
             Err(_) => return Ok(()),
         };
 
+        // Check if we are connected to too many peers
         if connected_peers.len() > self.global_state.cli.max_peers as usize {
             // This would indicate a race-condition on the peer map field in the state which
             // we unfortunately cannot exclude. So we just disconnect from a peer that the user
@@ -717,6 +719,47 @@ impl MainLoopHandler {
             };
 
             return Ok(());
+        }
+
+        // Check if we lost connection to any of the peers specified in the peers CLI list.
+        // If we did, attempt to reconnect.
+        let connected_peer_addresses = connected_peers
+            .iter()
+            .map(|x| x.connected_address)
+            .collect_vec();
+        let peers_with_lost_connection = self
+            .global_state
+            .cli
+            .peers
+            .iter()
+            .filter(|peer| !connected_peer_addresses.contains(peer))
+            .cloned()
+            .collect_vec();
+        for peer_with_lost_connection in peers_with_lost_connection {
+            info!(
+                "Attempting to reconnect to peer with lost connection: {peer_with_lost_connection}"
+            );
+            let own_handshake_data: HandshakeData = self.global_state.get_own_handshakedata().await;
+            let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
+            let state_clone = self.global_state.to_owned();
+            let peer_thread_to_main_tx_clone = self.peer_thread_to_main_tx.to_owned();
+            let outgoing_connection_thread = tokio::spawn(async move {
+                call_peer_wrapper(
+                    peer_with_lost_connection,
+                    state_clone,
+                    main_to_peer_broadcast_rx,
+                    peer_thread_to_main_tx_clone,
+                    own_handshake_data,
+                    1, // All CLI-specified peers have distance 1 by definition
+                )
+                .await;
+            });
+            main_loop_state
+                .thread_handles
+                .push(outgoing_connection_thread);
+            main_loop_state
+                .thread_handles
+                .retain(|th| !th.is_finished());
         }
 
         // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
