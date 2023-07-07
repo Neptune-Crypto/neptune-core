@@ -678,7 +678,7 @@ impl MainLoopHandler {
 
     /// Function to perform peer discovery: Finds potential peers from connected peers and attempts
     /// to establish connections with one of those potential peers.
-    async fn peer_discovery_handler(
+    async fn peer_discovery_and_reconnector(
         &self,
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<()> {
@@ -1073,7 +1073,7 @@ impl MainLoopHandler {
                     // Check number of peers we are connected to and connect to more peers
                     // if needed.
                     debug!("Running peer discovery job");
-                    self.peer_discovery_handler(&mut main_loop_state).await?;
+                    self.peer_discovery_and_reconnector(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in N seconds
                     peer_discovery_timer.as_mut().reset(tokio::time::Instant::now() + peer_discovery_timer_interval);
