@@ -95,7 +95,7 @@ pub async fn answer_peer<S>(
 where
     S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
 {
-    info!("Established connection");
+    info!("Established incoming TCP connection");
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
@@ -137,7 +137,7 @@ where
             peer.send(PeerMessage::ConnectionStatus(connection_status))
                 .await?;
             if let ConnectionStatus::Refused(refused_reason) = connection_status {
-                warn!("Connection refused: {:?}", refused_reason);
+                warn!("Incoming connection refused: {:?}", refused_reason);
                 bail!("Refusing incoming connection. Reason: {:?}", refused_reason);
             }
 
@@ -214,7 +214,7 @@ async fn call_peer<S>(
 where
     S: AsyncRead + AsyncWrite + Debug + Unpin,
 {
-    info!("Established connection");
+    info!("Established outgoing TCP connection");
 
     // Build the communication/serialization/frame handler
     let length_delimited = Framed::new(stream, get_codec_rules());
@@ -257,13 +257,13 @@ where
 
     match peer.try_next().await? {
         Some(PeerMessage::ConnectionStatus(ConnectionStatus::Accepted)) => {
-            info!("Connection accepted by {peer_address}");
+            info!("Outgoing connection accepted by {peer_address}");
         }
         Some(PeerMessage::ConnectionStatus(ConnectionStatus::Refused(reason))) => {
-            bail!("Connection attempt refused. Reason: {:?}", reason);
+            bail!("Outgoing connection attempt refused. Reason: {:?}", reason);
         }
         _ => {
-            bail!("Got invalid connection status response");
+            bail!("Got invalid connection status response on outgoing connection");
         }
     }
 
