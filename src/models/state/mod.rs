@@ -563,7 +563,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn premine_recipient_can_spend_genesis_block_output() {
         let other_wallet = WalletSecret::new(wallet::generate_secret_key());
-        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let global_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let twenty_amount: Amount = 20.into();
         let twenty_coins = twenty_amount.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
@@ -648,7 +648,7 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
-        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let global_state = get_mock_global_state(Network::Alpha, 2, None).await;
 
         let other_receiver_wallet_secret = WalletSecret::new(random());
         let other_receiver_address = other_receiver_wallet_secret
@@ -727,7 +727,7 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
-        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let global_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let own_spending_key = global_state
             .wallet_state
             .wallet_secret
@@ -866,7 +866,7 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
-        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let global_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let wallet_secret = global_state.wallet_state.wallet_secret.clone();
         let own_spending_key = wallet_secret.nth_generation_spending_key(0);
         let own_receiving_address = own_spending_key.to_address();

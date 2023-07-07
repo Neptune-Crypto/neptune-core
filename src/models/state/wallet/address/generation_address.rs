@@ -228,9 +228,9 @@ impl SpendingKey {
         // Sanity check that spending key's receiver address can be encoded to
         // bech32m without loss of information.
         let receiving_address = spending_key.to_address();
-        let encoded_address = receiving_address.to_bech32m(Network::Main).unwrap();
+        let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
         let decoded_address =
-            ReceivingAddress::from_bech32m(encoded_address, Network::Main).unwrap();
+            ReceivingAddress::from_bech32m(encoded_address, Network::Alpha).unwrap();
         assert_eq!(
             receiving_address, decoded_address,
             "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
@@ -397,7 +397,7 @@ impl ReceivingAddress {
     fn get_hrp(network: Network) -> String {
         let mut hrp = "nga".to_string();
         let network_byte: char = match network {
-            Network::Main => 'm',
+            Network::Alpha => 'm',
             Network::Testnet => 't',
             Network::RegTest => 'r',
         };

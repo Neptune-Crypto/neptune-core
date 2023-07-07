@@ -747,7 +747,7 @@ mod archival_state_tests {
     async fn initialize_archival_state_test() -> Result<()> {
         // Ensure that the archival state can be initialized without overflowing the stack
         tokio::spawn(async move {
-            let network = Network::Main;
+            let network = Network::Alpha;
 
             let archival_state0 = make_test_archival_state(network).await;
             let archival_state1 = make_test_archival_state(network).await;
@@ -789,7 +789,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn archival_state_init_test() -> Result<()> {
         // Verify that archival mutator set is populated with outputs from genesis block
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
 
         assert_eq!(
             Block::genesis_block().body.transaction.kernel.outputs.len() as u64,
@@ -821,7 +821,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn archival_state_restore_test() -> Result<()> {
         // Verify that a restored archival mutator set is populated with the right `sync_label`
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &archival_state.genesis_block,
@@ -865,7 +865,7 @@ mod archival_state_tests {
     async fn update_mutator_set_db_write_test() -> Result<()> {
         // Verify that `update_mutator_set` writes the active window back to disk.
 
-        let network = Network::Main;
+        let network = Network::Alpha;
         let archival_state = make_test_archival_state(network).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
         let wallet = genesis_wallet_state.wallet_secret;
@@ -947,7 +947,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn update_mutator_set_rollback_ms_block_sync_test() -> Result<()> {
-        let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Main).await;
+        let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Alpha).await;
         let mut block_db_lock = archival_state.block_index_db.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let own_wallet = WalletSecret::new(random());
@@ -994,7 +994,7 @@ mod archival_state_tests {
         // Make a rollback of one block that contains multiple inputs and outputs.
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks.
-        let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Main).await;
+        let (archival_state, _peer_db_lock) = make_unit_test_archival_state(Network::Alpha).await;
         let genesis_wallet_state = get_mock_wallet_state(None).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = genesis_wallet.nth_generation_spending_key(0).to_address();
@@ -1361,15 +1361,16 @@ mod archival_state_tests {
             .wallet_secret
             .nth_generation_spending_key(0);
         let genesis_state =
-            get_mock_global_state(Network::Main, 3, Some(genesis_wallet_state.wallet_secret)).await;
+            get_mock_global_state(Network::Alpha, 3, Some(genesis_wallet_state.wallet_secret))
+                .await;
 
         let wallet_secret_alice = WalletSecret::new(random());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
-        let alice_state = get_mock_global_state(Network::Main, 3, Some(wallet_secret_alice)).await;
+        let alice_state = get_mock_global_state(Network::Alpha, 3, Some(wallet_secret_alice)).await;
 
         let wallet_secret_bob = WalletSecret::new(random());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
-        let bob_state = get_mock_global_state(Network::Main, 3, Some(wallet_secret_bob)).await;
+        let bob_state = get_mock_global_state(Network::Alpha, 3, Some(wallet_secret_bob)).await;
 
         let genesis_block = Block::genesis_block();
 
@@ -1773,7 +1774,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn get_latest_block_test() -> Result<()> {
-        let archival_state: ArchivalState = make_test_archival_state(Network::Main).await;
+        let archival_state: ArchivalState = make_test_archival_state(Network::Alpha).await;
 
         let mut db_lock_0 = archival_state.block_index_db.lock().await;
         let ret = archival_state.get_latest_block_from_disk(&mut db_lock_0)?;
@@ -1827,7 +1828,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn get_block_test() -> Result<()> {
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
 
         let genesis = *archival_state.genesis_block.clone();
         let own_wallet = WalletSecret::new(random());
@@ -1890,7 +1891,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn find_path_simple_test() -> Result<()> {
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
 
         // Test that `find_path` returns the correct result
@@ -2038,7 +2039,7 @@ mod archival_state_tests {
             assert_eq!(forwards_expected, forwards, "\n\nforwards digests must match expected value. Got:\n {forwards:?}\n\n, Expected from helper function:\n{forwards_expected:?}\n");
         }
 
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
 
         let genesis = *archival_state.genesis_block.clone();
         assert!(
@@ -2379,7 +2380,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn digest_of_ancestors_panic_test() {
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
 
         let genesis = archival_state.genesis_block.clone();
         archival_state
@@ -2390,7 +2391,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn digest_of_ancestors_test() {
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
         let own_wallet = WalletSecret::new(random());
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
@@ -2489,7 +2490,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn write_block_db_test() -> Result<()> {
-        let archival_state = make_test_archival_state(Network::Main).await;
+        let archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
         let own_wallet = WalletSecret::new(random());
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();

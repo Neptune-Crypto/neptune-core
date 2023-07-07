@@ -633,13 +633,13 @@ mod tests {
     async fn remove_transactions_with_block_test() -> Result<()> {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let premine_receiver_global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let premine_receiver_global_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
         let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_global_state =
-            get_mock_global_state(Network::Main, 2, Some(other_wallet_secret.clone())).await;
+            get_mock_global_state(Network::Alpha, 2, Some(other_wallet_secret.clone())).await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
         let other_receiver_address = other_receiver_spending_key.to_address();
 
@@ -815,7 +815,7 @@ mod tests {
     #[tokio::test]
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
-        let preminer_state = get_mock_global_state(Network::Main, 2, None).await;
+        let preminer_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
         let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_address = premine_spending_key.to_address();

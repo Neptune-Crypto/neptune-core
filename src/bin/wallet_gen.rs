@@ -5,7 +5,7 @@ use neptune_core::models::state::wallet::WalletSecret;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let network = Network::Main;
+    let network = Network::Alpha;
 
     // The root path is where both the wallet and all databases are stored
     let data_dir = DataDirectory::get(None, network)?;

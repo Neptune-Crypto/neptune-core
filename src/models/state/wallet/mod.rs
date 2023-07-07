@@ -722,7 +722,7 @@ mod wallet_tests {
         let genesis_block = Block::genesis_block();
         let premine_wallet = get_mock_wallet_state(None).await.wallet_secret;
         let premine_receiver_global_state =
-            get_mock_global_state(Network::Main, 2, Some(premine_wallet)).await;
+            get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
         let preminers_original_balance = premine_receiver_global_state
             .wallet_state
             .get_balance()
@@ -1161,7 +1161,7 @@ mod wallet_tests {
         let address = spending_key.to_address();
         println!(
             "_authority_wallet address: {}",
-            address.to_bech32m(Network::Main).unwrap()
+            address.to_bech32m(Network::Alpha).unwrap()
         );
         println!("_authority_wallet spending_lock: {}", address.spending_lock);
     }

@@ -344,7 +344,7 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_outgoing_connection_succeed() -> Result<()> {
-        let network = Network::Main;
+        let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
         let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
         let mock = Builder::new()
@@ -363,7 +363,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_test_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Alpha, 0).await?;
         call_peer(
             mock,
             state.clone(),
@@ -387,7 +387,7 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_get_connection_status() -> Result<()> {
-        let network = Network::Main;
+        let network = Network::Alpha;
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, mut state, _hsd) =
             get_test_genesis_setup(network, 1).await?;
 
@@ -479,7 +479,7 @@ mod connect_tests {
         // the connection. If this sequence is not followed, the `mock`
         // object will panic, and the `await` operator will evaluate
         // to Error.
-        let network = Network::Main;
+        let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
         let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
         let mock = Builder::new()
@@ -520,7 +520,7 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
-        let network = Network::Main;
+        let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
         let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
         let mock = Builder::new()
@@ -551,7 +551,7 @@ mod connect_tests {
     #[tokio::test]
     async fn test_incoming_connection_fail_bad_network() -> Result<()> {
         let other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(Network::Main, 0);
+        let own_handshake = get_dummy_handshake_data_for_genesis(Network::Alpha, 0);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -564,7 +564,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_test_genesis_setup(Network::Main, 0).await?;
+            get_test_genesis_setup(Network::Alpha, 0).await?;
 
         let answer = answer_peer(
             mock,
@@ -585,7 +585,7 @@ mod connect_tests {
     async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
         // In this scenario a node attempts to make an ingoing connection but this
         // node is banned, so this should not succeed.
-        let network = Network::Main;
+        let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
         let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
         let mock = Builder::new()
@@ -600,7 +600,7 @@ mod connect_tests {
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state, _hsd) =
-            get_test_genesis_setup(Network::Main, 2).await?;
+            get_test_genesis_setup(Network::Alpha, 2).await?;
 
         // set max_peers to 2 to ensure failure on next connection attempt
         state.cli.max_peers = 2;
@@ -625,7 +625,7 @@ mod connect_tests {
     async fn disallow_ingoing_connections_from_banned_peers_test() -> Result<()> {
         // In this scenario a peer has been banned, and is attempting to make an ingoing
         // connection. This should not be possible.
-        let network = Network::Main;
+        let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network, 3);
         let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
         let mock = Builder::new()
@@ -644,8 +644,11 @@ mod connect_tests {
 
         let peer_count_before_incoming_connection_request = 3;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
-            get_test_genesis_setup(Network::Main, peer_count_before_incoming_connection_request)
-                .await?;
+            get_test_genesis_setup(
+                Network::Alpha,
+                peer_count_before_incoming_connection_request,
+            )
+            .await?;
         let bad_standing: PeerStanding = PeerStanding {
             standing: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((

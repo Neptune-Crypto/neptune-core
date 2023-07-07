@@ -535,7 +535,7 @@ mod rpc_server_tests {
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         let state = get_mock_global_state(
-            Network::Main,
+            Network::Alpha,
             2,
             Some(WalletSecret::new(generate_secret_key())),
         )
@@ -558,7 +558,7 @@ mod rpc_server_tests {
     async fn clear_ip_standing_test() -> Result<()> {
         // Create initial conditions
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_test_genesis_setup(Network::Main, 2).await?;
+            get_test_genesis_setup(Network::Alpha, 2).await?;
         let peer_address_0 = state
             .net
             .peer_map
@@ -654,7 +654,7 @@ mod rpc_server_tests {
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_test_genesis_setup(Network::Main, 2).await?;
+            get_test_genesis_setup(Network::Alpha, 2).await?;
         let peer_address_0 = state
             .net
             .peer_map

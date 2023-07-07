@@ -104,8 +104,8 @@ pub struct Args {
     #[structopt(long)]
     pub peers: Vec<SocketAddr>,
 
-    /// Specify network, `main`, `testnet`, or `regtest`
-    #[structopt(long, short, default_value = "main")]
+    /// Specify network, `alpha`, `testnet`, or `regtest`
+    #[structopt(long, short, default_value = "alpha")]
     pub network: Network,
 
     /// Max number of membership proofs stored per owned UTXO

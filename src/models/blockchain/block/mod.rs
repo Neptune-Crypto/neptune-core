@@ -466,7 +466,7 @@ mod block_tests {
     async fn merge_transaction_test() {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let global_state = get_mock_global_state(Network::Main, 2, None).await;
+        let global_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let spending_key = global_state
             .wallet_state
             .wallet_secret
