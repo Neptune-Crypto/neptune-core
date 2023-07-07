@@ -45,11 +45,13 @@ enum Command {
 #[clap(name = "neptune-core-rpc", about = "An RPC client")]
 struct Config {
     /// Sets the server address to connect to.
-    #[clap(long)]
+    #[clap(long, default_value = "127.0.0.1:9799")]
     server_addr: SocketAddr,
+
     #[clap(subcommand)]
     command: Command,
-    #[structopt(long, short, default_value = "main")]
+
+    #[structopt(long, short, default_value = "alpha")]
     pub network: Network,
 }
 
