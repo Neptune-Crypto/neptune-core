@@ -30,12 +30,12 @@ This software comes with a dashboard that communicates with the daemon. The dash
 
 In addition to a dashboard, the software comes with a CLI client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available RPC commands, execute 
 ```
-rpc_cli -- --help
+rpc_cli --help
 ```
 
 To get e.g. the block height of a running daemon, execute
 ```
-rpc_cli -- --server-addr 127.0.0.1:<rpc_port> block-height
+rpc_cli --server-addr 127.0.0.1:<rpc_port> block-height
 ```
 
 ## Setup for Development (Ubuntu)
