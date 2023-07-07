@@ -736,9 +736,22 @@ impl MainLoopHandler {
             .cloned()
             .collect_vec();
         for peer_with_lost_connection in peers_with_lost_connection {
-            info!(
-                "Attempting to reconnect to peer with lost connection: {peer_with_lost_connection}"
-            );
+            // Disallow reconnection if peer is in bad standing
+            let standing = self
+                .global_state
+                .get_peer_standing_from_database(peer_with_lost_connection.ip())
+                .await;
+
+            if standing.is_some()
+                && standing.unwrap().standing < -(self.global_state.cli.peer_tolerance as i32)
+            {
+                info!("Not reconnecting to peer with lost connection because it was banned: {peer_with_lost_connection}");
+            } else {
+                info!(
+                    "Attempting to reconnect to peer with lost connection: {peer_with_lost_connection}"
+                );
+            }
+
             let own_handshake_data: HandshakeData = self.global_state.get_own_handshakedata().await;
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
             let state_clone = self.global_state.to_owned();
