@@ -20,6 +20,10 @@ use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
+use rand::rngs::StdRng;
+use rand::thread_rng;
+use rand::Rng;
+use rand::SeedableRng;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
@@ -100,15 +104,22 @@ async fn mine_block(
     sender: oneshot::Sender<NewBlockFound>,
     state: GlobalState,
     coinbase_utxo_info: ExpectedUtxo,
+    difficulty: U32s<5>,
 ) {
     info!(
         "Mining on block with {} outputs. Attempting to find block with height {}",
         block_body.transaction.kernel.outputs.len(),
         block_header.height
     );
+    let threshold = Block::difficulty_to_digest_threshold(difficulty);
+
+    // The RNG used to sample nonces must be thread-safe, which `thread_rng()` is not.
+    // Solution: use `thread_rng()` to generate a seed, and generate a thread-safe RNG
+    // seeded with that seed. The `thread_rng()` object is dropped immediately.
+    let mut rng: StdRng = SeedableRng::from_seed(thread_rng().gen());
+    let mut counter = 0;
 
     // Mining takes place here
-    let threshold = Block::difficulty_to_digest_threshold(block_header.difficulty);
     while Hash::hash(&block_header) >= threshold {
         if state.cli.throttled_mining {
             tokio::time::sleep(Duration::from_micros(100)).await;
@@ -126,23 +137,14 @@ async fn mine_block(
             return;
         }
 
-        // Don't mine if we are syncing
-        if block_header.nonce[2].value() % 100 == 0 && state.net.syncing.read().unwrap().to_owned()
-        {
+        // Don't mine if we are syncing (but don't check too often)
+        if counter % 100 == 0 && state.net.syncing.read().unwrap().to_owned() {
             return;
+        } else {
+            counter += 1;
         }
 
-        if block_header.nonce[2].value() == BFieldElement::MAX {
-            block_header.nonce[2] = BFieldElement::zero();
-            if block_header.nonce[1].value() == BFieldElement::MAX {
-                block_header.nonce[1] = BFieldElement::zero();
-                block_header.nonce[0].increment();
-                continue;
-            }
-            block_header.nonce[1].increment();
-            continue;
-        }
-        block_header.nonce[2].increment();
+        block_header.nonce = rng.gen();
     }
     info!(
         "Found valid block with nonce: ({}, {}, {}).",
@@ -155,7 +157,7 @@ async fn mine_block(
     };
 
     info!(
-        "PoW digest of new block: {}. Threshhold was: {threshold}",
+        "PoW digest of new block: {}. Threshold was: {threshold}",
         new_block_info.block.hash
     );
 
@@ -326,6 +328,7 @@ pub async fn mine(
                 worker_thread_tx,
                 state.clone(),
                 coinbase_utxo_info,
+                latest_block.header.difficulty,
             );
             *state.mining.write().unwrap() = true;
             Some(tokio::spawn(miner_task))

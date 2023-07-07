@@ -119,6 +119,12 @@ impl PeerLoopHandler {
                     "Received invalid proof-of-work for block of height {} from peer with IP {}",
                     new_block.header.height, self.peer_address
                 );
+                warn!("Difficulty is {}.", previous_block.header.difficulty);
+                warn!(
+                    "Proof of work should be {} (or more) but was [{}].",
+                    Block::difficulty_to_digest_threshold(previous_block.header.difficulty),
+                    new_block.hash.values().iter().join(", ")
+                );
                 self.punish(PeerSanctionReason::InvalidBlock((
                     new_block.header.height,
                     new_block.hash,
