@@ -1,4 +1,4 @@
-use crate::connect_to_peers::{answer_peer, call_peer_wrapper};
+use crate::connect_to_peers::{answer_peer_wrapper, call_peer_wrapper};
 use crate::database::rusty::RustyLevelDB;
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -1042,7 +1042,7 @@ impl MainLoopHandler {
                     let peer_address = stream.peer_addr().unwrap();
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
                     let incoming_peer_thread_handle = tokio::spawn(async move {
-                        match answer_peer(
+                        match answer_peer_wrapper(
                             stream,
                             state,
                             peer_address,
