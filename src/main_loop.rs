@@ -1136,6 +1136,13 @@ impl MainLoopHandler {
     }
 
     async fn resync_membership_proofs(&self) -> Result<()> {
+        // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
+        // have to sync many times, instead of just *one* time once we have caught up.
+        if *self.global_state.net.syncing.read().unwrap() {
+            debug!("Not syncing MS membership proofs because we are syncing");
+            return Ok(());
+        }
+
         // is it necessary?
         let current_tip_digest = self
             .global_state
