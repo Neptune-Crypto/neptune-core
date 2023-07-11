@@ -1,0 +1,9 @@
+[
+  {
+    "name": "removal_records_integrity",
+    "clock_cycle_count": 131322,
+    "hash_table_height": 5472,
+    "u32_table_height": 16378,
+    "case": "CommonCase"
+  }
+]

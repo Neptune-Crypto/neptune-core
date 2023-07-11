@@ -712,3 +712,50 @@ mod tests {
         assert_eq!(rust_output, tasm_output);
     }
 }
+
+#[cfg(test)]
+mod bench {
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use tasm_lib::snippet_bencher::{write_benchmarks, BenchmarkCase, BenchmarkResult};
+    use triton_vm::BFieldElement;
+    use twenty_first::shared_math::bfield_codec::BFieldCodec;
+
+    use crate::{
+        models::blockchain::transaction::validity::compiled_program::CompiledProgram,
+        tests::shared::pseudorandom_removal_record_integrity_witness,
+    };
+
+    use super::RemovalRecordsIntegrity;
+
+    #[test]
+    fn benchmark() {
+        let mut seed = [0u8; 32];
+        seed[0] = 0xa7;
+        seed[1] = 0xf7;
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let removal_record_integrity_witness =
+            pseudorandom_removal_record_integrity_witness(rng.gen());
+
+        let program = RemovalRecordsIntegrity::program();
+        let stdin: Vec<BFieldElement> = removal_record_integrity_witness
+            .kernel
+            .mast_hash()
+            .reversed()
+            .values()
+            .to_vec();
+        let secret_in: Vec<BFieldElement> = removal_record_integrity_witness.encode();
+
+        let benchmark = match triton_vm::vm::simulate(&program, stdin, secret_in) {
+            Ok((aet, _output)) => BenchmarkResult {
+                case: BenchmarkCase::CommonCase,
+                name: "removal_records_integrity".to_string(),
+                clock_cycle_count: aet.processor_table_length(),
+                hash_table_height: aet.hash_table_length(),
+                u32_table_height: aet.u32_table_length(),
+            },
+            Err(_) => panic!(),
+        };
+
+        write_benchmarks(vec![benchmark]);
+    }
+}
