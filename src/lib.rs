@@ -71,8 +71,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     DataDirectory::create_dir_if_not_exists(&wallet_dir)?;
     let (wallet_secret, _) =
         WalletSecret::read_from_file_or_create(&data_dir.wallet_directory_path())?;
+    info!("Now getting wallet state. This may take a while if the database needs pruning.");
     let wallet_state =
         WalletState::new_from_wallet_secret(Some(&data_dir), wallet_secret, &cli_args).await;
+    info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync
     let block_index_db = ArchivalState::initialize_block_index_database(&data_dir)?;
