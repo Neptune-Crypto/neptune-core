@@ -91,6 +91,16 @@ impl StorageWriter<RustyKey, RustyValue> for RustyWalletDatabase {
             .expect("RustyWallet: StorageWriter -- could not get lock on database for writing.")
             .write(write_batch, true)
             .expect("Could not persist to database.");
+
+        // Calling `flush` here *seems* to reduce the used disk space, although I cannot quite
+        // explain why. See https://github.com/Neptune-Crypto/neptune-core/issues/14 for a
+        // discussion. Either way, calling `flush` explicitly here shouldn't incur a huge
+        // overhead, so the downside is limited.
+        self.db
+            .lock()
+            .expect("Must be able to acquire DB lock in persist")
+            .flush()
+            .expect("Flushing must succeed in persist");
     }
 
     fn restore_or_new(&mut self) {
