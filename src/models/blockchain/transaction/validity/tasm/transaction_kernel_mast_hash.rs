@@ -1,5 +1,7 @@
+use crate::models::blockchain::shared::Hash;
 use itertools::Itertools;
 use num_traits::One;
+use tasm_lib::library::Library;
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
     list::unsafe_u32::{
@@ -16,8 +18,6 @@ use twenty_first::{
     util_types::algebraic_hasher::AlgebraicHasher,
 };
 
-use crate::models::blockchain::shared::Hash;
-
 /// Computes the mast hash of a transaction kernel object
 #[derive(Debug, Clone)]
 pub struct TransactionKernelMastHash;
@@ -26,7 +26,7 @@ impl Snippet for TransactionKernelMastHash {
     fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_transaction_kernel_mast_hash".to_string()
     }
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let entrypoint = self.entrypoint();
         let new_list = library.import(Box::new(UnsafeNew(DataType::Digest)));
         let get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));

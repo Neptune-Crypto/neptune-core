@@ -11,6 +11,7 @@ use twenty_first::{
 use crate::{
     models::blockchain::shared::Hash, util_types::mutator_set::removal_record::RemovalRecord,
 };
+use tasm_lib::library::Library;
 
 pub struct HashRemovalRecordIndices;
 
@@ -78,7 +79,7 @@ impl Snippet for HashRemovalRecordIndices {
         4
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let get_field = library.import(Box::new(GetField));
         let hash_varlen = library.import(Box::new(HashVarlen));
         let entrypoint = self.entrypoint();

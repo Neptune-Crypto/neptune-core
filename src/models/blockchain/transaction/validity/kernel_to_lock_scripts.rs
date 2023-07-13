@@ -1,8 +1,8 @@
+use super::{SupportedClaim, ValidationLogic};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
-use triton_opcodes::program::Program;
-
-use super::{compiled_program::CompiledProgram, SupportedClaim, ValidationLogic};
+use tasm_lib::compiled_program::CompiledProgram;
+use tasm_lib::library::Library;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct KernelToLockScripts {
@@ -37,17 +37,17 @@ impl ValidationLogic for KernelToLockScripts {
 
 impl CompiledProgram for KernelToLockScripts {
     fn rust_shadow(
-        _public_input: std::collections::VecDeque<triton_vm::BFieldElement>,
-        _secret_input: std::collections::VecDeque<triton_vm::BFieldElement>,
-    ) -> Vec<triton_vm::BFieldElement> {
+        _public_input: &mut std::collections::VecDeque<triton_vm::BFieldElement>,
+        _secret_input: &mut std::collections::VecDeque<triton_vm::BFieldElement>,
+    ) -> anyhow::Result<Vec<triton_vm::BFieldElement>> {
         todo!()
     }
 
-    fn program() -> triton_opcodes::program::Program {
-        Program::default()
+    fn crash_conditions() -> Vec<String> {
+        todo!()
     }
 
-    fn crash_conditions() -> Vec<String> {
+    fn code() -> (Vec<triton_vm::instruction::LabelledInstruction>, Library) {
         todo!()
     }
 }

@@ -4,6 +4,7 @@ use crate::{
 };
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::library::Library;
 use tasm_lib::{
     list::ListType,
     mmr::verify_from_memory::MmrVerifyFromMemory,
@@ -120,7 +121,7 @@ impl Snippet for VerifyAoclMembership {
         -5
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let verify_mmr_membership = library.import(Box::new(MmrVerifyFromMemory {
             list_type: ListType::Unsafe,
         }));

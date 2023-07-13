@@ -67,7 +67,7 @@ impl ValidationLogic for LockScriptsHalt {
 
                     // sanity check
                     assert_eq!(supported_claim.claim.program_digest, program.hash::<Hash>());
-                    if triton_vm::vm::run(program, input_bfes, secret_witness.to_owned()).is_err() {
+                    if program.run(input_bfes, secret_witness.to_owned()).is_err() {
                         bail!("Lockscript execution failed for program:\n{program}")
                     }
 
@@ -128,7 +128,8 @@ impl ValidationLogic for LockScriptsHalt {
                 }
                 ClaimSupport::SecretWitness(secretw, maybe_program) => {
                     if let Some(program) = maybe_program {
-                        if triton_vm::vm::run(program, claim.input.to_vec(), secretw.to_owned())
+                        if program
+                            .run(claim.input.to_vec(), secretw.to_owned())
                             .is_err()
                         {
                             warn!("Execution of program failed:\n{}", program);

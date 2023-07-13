@@ -1,3 +1,4 @@
+use tasm_lib::library::Library;
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::get_swbf_indices::GetSwbfIndices,
@@ -90,7 +91,7 @@ impl Snippet for ComputeIndices {
         -5
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let get_field = library.import(Box::new(GetField));
         let entrypoint = self.entrypoint();
         let read_digest = library.import(Box::new(PushRamToStack {

@@ -4,6 +4,8 @@ use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
+use tasm_lib::compiled_program::CompiledProgram;
+use tasm_lib::library::Library;
 use tasm_lib::{
     io::load_struct_from_input::LoadStructFromInput,
     list::{
@@ -15,13 +17,12 @@ use tasm_lib::{
     },
     mmr::bag_peaks::BagPeaks,
     snippet::{DataType, InputSource},
-    snippet_state::SnippetState,
     structure::get_field::GetField,
     DIGEST_LENGTH,
 };
 use tracing::{debug, warn};
-use triton_opcodes::program::{self, Program};
-use triton_vm::{BFieldElement, StarkParameters};
+use triton_vm::triton_asm;
+use triton_vm::{instruction::LabelledInstruction, BFieldElement, StarkParameters};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
@@ -37,7 +38,6 @@ use crate::{
             transaction_kernel::TransactionKernel,
             utxo::Utxo,
             validity::{
-                compiled_program::CompiledProgram,
                 tasm::transaction_kernel_mast_hash::TransactionKernelMastHash, ClaimSupport,
                 SupportedClaim, ValidationLogic,
             },
@@ -87,7 +87,6 @@ impl RemovalRecordsIntegrityWitness {
         }
     }
 }
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount)]
 pub struct RemovalRecordsIntegrity {
     pub supported_claim: SupportedClaim,
@@ -166,11 +165,8 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                 //     self.supported_claim.claim.input.clone().into(),
                 //     witness.clone().into(),
                 // );
-                let vm_result = triton_vm::vm::run(
-                    &Self::program(),
-                    self.supported_claim.claim.input.clone(),
-                    witness.to_vec(),
-                );
+                let vm_result =
+                    Self::program().run(self.supported_claim.claim.input.clone(), witness.to_vec());
                 match vm_result {
                     Ok(observed_output) => {
                         let found_expected_output =
@@ -199,12 +195,13 @@ impl ValidationLogic for RemovalRecordsIntegrity {
 
 impl CompiledProgram for RemovalRecordsIntegrity {
     fn rust_shadow(
-        public_input: VecDeque<BFieldElement>,
-        secret_input: VecDeque<BFieldElement>,
-    ) -> Vec<BFieldElement> {
+        public_input: &mut VecDeque<BFieldElement>,
+        secret_input: &mut VecDeque<BFieldElement>,
+    ) -> anyhow::Result<Vec<BFieldElement>> {
         let hash_of_kernel = *Digest::decode(
             &public_input
-                .into_iter()
+                .iter()
+                .copied()
                 .take(DIGEST_LENGTH)
                 .rev()
                 .collect_vec(),
@@ -213,7 +210,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         // 1. read and process witness data
         let witness =
-            *RemovalRecordsIntegrityWitness::decode(&secret_input.into_iter().collect_vec())
+            *RemovalRecordsIntegrityWitness::decode(&secret_input.iter().copied().collect_vec())
                 .unwrap();
 
         // 2. assert that the kernel from the witness matches the hash in the public input
@@ -291,11 +288,11 @@ impl CompiledProgram for RemovalRecordsIntegrity {
                 .0
             }));
 
-        vec![]
+        Ok(vec![])
     }
 
-    fn program() -> Program {
-        let mut library = SnippetState::default();
+    fn code() -> (Vec<LabelledInstruction>, Library) {
+        let mut library = Library::new();
         let num_fields_on_witness = RemovalRecordsIntegrityWitness::field_count();
         let get_field = library.import(Box::new(GetField));
         let transaction_kernel_mast_hash = library.import(Box::new(TransactionKernelMastHash));
@@ -345,8 +342,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
         let _compute_indices = library.import(Box::new(ComputeIndices));
 
-        let code = format!(
-            "
+        let code = triton_asm!(
+
         // 1. read RemovalRecordsIntegrityWitness from secio
         push {num_fields_on_witness}
         call {load_struct_from_input} // _ *witness
@@ -384,7 +381,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_peaks_li
         push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_peaks
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash]
-        
+
         dup 11 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness
         push 2 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness 2 (= field aocl)
         call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_size_indicator
@@ -399,7 +396,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         hash // _ *witness *kernel [H(H(aocl||swbfi))||H(H(swbfaw)||0^5)] [garbage]
         pop pop pop pop pop // _ *witness *kernel [Hw]
-        
+
         dup 5 // _ *witness *kernel [Hw] *kernel
         push 6 // _ *witness *kernel [Hw] *kernel 6 (= field mutator_set_hash)
         call {get_field} // _ *witness *kernel [Hw] *kernel_msh_li
@@ -473,21 +470,16 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         call {map_compute_canonical_commitment}
                // _ *peaks leaf_count_hi leaf_count_lo *[(cc, *mp)]
-        
+
         call {all_verify_aocl_membership}
                // _ *peaks leaf_count_hi leaf_count_lo all_live_in_aocl
 
-        assert 
+        assert
 
         halt
-        "
         );
 
-        let mut src = code;
-        let imports = library.all_imports();
-        src.push_str(&imports);
-
-        program::Program::from_code(&src).unwrap()
+        (code, library)
     }
 
     fn crash_conditions() -> Vec<String> {
@@ -505,6 +497,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use tasm_lib::compiled_program::test_rust_shadow;
     use triton_vm::{Claim, StarkParameters};
     use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -653,13 +646,7 @@ mod tests {
         );
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
-        let run_res = triton_vm::vm::debug_terminal_state(
-            &program,
-            stdin.clone(),
-            secret_in.clone(),
-            None,
-            None,
-        );
+        let run_res = program.debug_terminal_state(stdin.clone(), secret_in.clone(), None, None);
         match run_res {
             Ok(_) => (),
             Err((state, msg)) => panic!("Failed: {msg}\n last state was: {state}"),
@@ -698,34 +685,25 @@ mod tests {
         seed[1] = 0xf1;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let witness = pseudorandom_removal_record_integrity_witness(rng.gen());
-
         let kernel_hash = witness.kernel.mast_hash().reversed().values();
-        let tasm_output = triton_vm::vm::run(
-            &RemovalRecordsIntegrity::program(),
-            kernel_hash.to_vec(),
-            witness.encode(),
-        )
-        .unwrap();
-        let rust_output =
-            RemovalRecordsIntegrity::rust_shadow(kernel_hash.into(), witness.encode().into());
+        let mut public_input: VecDeque<BFieldElement> = kernel_hash.to_vec().into();
+        let mut witness: VecDeque<BFieldElement> = witness.encode().into();
 
-        assert_eq!(rust_output, tasm_output);
+        test_rust_shadow::<RemovalRecordsIntegrity>(&mut public_input, &mut witness);
     }
 }
 
 #[cfg(test)]
 mod bench {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::snippet_bencher::{write_benchmarks, BenchmarkCase, BenchmarkResult};
+    use tasm_lib::snippet_bencher::BenchmarkCase;
     use triton_vm::BFieldElement;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-    use crate::{
-        models::blockchain::transaction::validity::compiled_program::CompiledProgram,
-        tests::shared::pseudorandom_removal_record_integrity_witness,
-    };
+    use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
 
     use super::RemovalRecordsIntegrity;
+    use tasm_lib::compiled_program::bench_program;
 
     #[test]
     fn benchmark() {
@@ -736,7 +714,6 @@ mod bench {
         let removal_record_integrity_witness =
             pseudorandom_removal_record_integrity_witness(rng.gen());
 
-        let program = RemovalRecordsIntegrity::program();
         let stdin: Vec<BFieldElement> = removal_record_integrity_witness
             .kernel
             .mast_hash()
@@ -745,17 +722,11 @@ mod bench {
             .to_vec();
         let secret_in: Vec<BFieldElement> = removal_record_integrity_witness.encode();
 
-        let benchmark = match triton_vm::vm::simulate(&program, stdin, secret_in) {
-            Ok((aet, _output)) => BenchmarkResult {
-                case: BenchmarkCase::CommonCase,
-                name: "removal_records_integrity".to_string(),
-                clock_cycle_count: aet.processor_table_length(),
-                hash_table_height: aet.hash_table_length(),
-                u32_table_height: aet.u32_table_length(),
-            },
-            Err(_) => panic!(),
-        };
-
-        write_benchmarks(vec![benchmark]);
+        bench_program::<RemovalRecordsIntegrity>(
+            "tasm_neptune_transaction_removal_records_integrity".to_string(),
+            BenchmarkCase::CommonCase,
+            &mut stdin.into(),
+            &mut secret_in.into(),
+        );
     }
 }

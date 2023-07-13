@@ -11,7 +11,8 @@ use rand::thread_rng;
 use rand::Rng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use triton_opcodes::shortcuts::*;
+use triton_vm::triton_asm;
+use triton_vm::triton_instr;
 use twenty_first::shared_math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::{
@@ -347,7 +348,7 @@ impl ReceivingAddress {
         let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
         ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
 
-        let pubscript = vec![vec![read_io(); ciphertext.len()], vec![halt()]].concat();
+        let pubscript = vec![triton_asm![read_io; ciphertext.len()], triton_asm!(halt)].concat();
 
         Ok((pubscript.into(), ciphertext))
     }
@@ -379,17 +380,17 @@ impl ReceivingAddress {
         // .concat();
 
         let mut instructions = vec![
-            vec![divine(); DIGEST_LENGTH],
-            vec![hash()],
-            vec![pop(); DIGEST_LENGTH],
+            vec![triton_instr!(divine); DIGEST_LENGTH],
+            triton_asm!(hash),
+            vec![triton_instr!(pop); DIGEST_LENGTH],
         ]
         .concat();
         for elem in self.spending_lock.values().iter().rev() {
-            instructions.push(push(elem.value()));
+            instructions.push(triton_instr!(push elem.value()));
         }
-        instructions.push(assert_vector());
-        instructions.append(&mut vec![read_io(); DIGEST_LENGTH]);
-        instructions.push(halt());
+        instructions.push(triton_instr!(assert_vector));
+        instructions.append(&mut triton_asm![read_io; DIGEST_LENGTH]);
+        instructions.push(triton_instr!(halt));
 
         instructions.into()
     }

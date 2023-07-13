@@ -1,6 +1,7 @@
 use crate::models::blockchain::shared::Hash;
 use num_traits::{One, Zero};
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::library::Library;
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::commit::Commit,
@@ -112,7 +113,7 @@ impl Snippet for ComputeCanonicalCommitment {
         0
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let get_field = library.import(Box::new(GetField));
         let commit = library.import(Box::new(Commit));
         let read_digest = library.import(Box::new(PushRamToStack {

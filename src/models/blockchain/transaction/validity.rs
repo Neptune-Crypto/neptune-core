@@ -1,4 +1,3 @@
-pub mod compiled_program;
 pub mod kernel_to_lock_scripts;
 pub mod kernel_to_typescripts;
 pub mod lockscripts_halt;
@@ -10,14 +9,14 @@ use anyhow::{Ok, Result};
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use tasm_lib::compiled_program::CompiledProgram;
 use tracing::{debug, info};
-use triton_opcodes::program::Program;
+use triton_vm::program::Program;
 use triton_vm::{proof::Proof, Claim};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use self::{
-    compiled_program::CompiledProgram,
     kernel_to_lock_scripts::KernelToLockScripts,
     kernel_to_typescripts::KernelToTypeScripts,
     lockscripts_halt::LockScriptsHalt,

@@ -1,7 +1,9 @@
+use super::{SupportedClaim, ValidationLogic};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
-
-use super::{compiled_program::CompiledProgram, SupportedClaim, ValidationLogic};
+use tasm_lib::compiled_program::CompiledProgram;
+use tasm_lib::library::Library;
+use triton_vm::instruction::LabelledInstruction;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct KernelToTypeScripts {
@@ -36,13 +38,13 @@ impl ValidationLogic for KernelToTypeScripts {
 
 impl CompiledProgram for KernelToTypeScripts {
     fn rust_shadow(
-        _public_input: std::collections::VecDeque<triton_vm::BFieldElement>,
-        _secret_input: std::collections::VecDeque<triton_vm::BFieldElement>,
-    ) -> Vec<triton_vm::BFieldElement> {
+        _public_input: &mut std::collections::VecDeque<triton_vm::BFieldElement>,
+        _secret_input: &mut std::collections::VecDeque<triton_vm::BFieldElement>,
+    ) -> anyhow::Result<Vec<triton_vm::BFieldElement>> {
         todo!()
     }
 
-    fn program() -> triton_opcodes::program::Program {
+    fn code() -> (Vec<LabelledInstruction>, Library) {
         todo!()
     }
 
