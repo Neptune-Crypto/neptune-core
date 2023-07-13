@@ -44,10 +44,12 @@ tracing-subscriber = { version = "0", features = [
     "fmt",
 ] }
 tracing-test = "0"
-triton-vm = "0.31.1"
-triton-opcodes = "0.31.0"
+# triton-vm = "0.31.1"
+triton-vm = {path = "../triton-vm/triton-vm/"}
+# triton-opcodes = "0.31.0"
 twenty-first = "0.30.0"
-tasm-lib = "0.1.0"
+# tasm-lib = "0.1.0"
+tasm-lib = {path = "../tasm-lib/"}
 priority-queue = "1"
 get-size = { version = "0", features = ["derive"] }
 num-rational = "0"
