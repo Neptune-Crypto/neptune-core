@@ -1,4 +1,6 @@
 tasm_neptune_transaction_removal_records_integrity:
+
+# call graph
  tasm_io_load_struct_from_input_secin: 74699
    tasm_io_load_from_input_secin: 658
      tasm_memory_dyn_malloc: 25
@@ -1495,4 +1497,111 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_eq: 8
          tasm_list_unsafe_u32_get_element_digest: 25
          tasm_hashing_eq_digest: 15
+ total: 131322
+
+# aggregated
+ tasm_io_load_struct_from_input_secin: 74699
+   tasm_io_load_from_input_secin: 74642
+     tasm_memory_dyn_malloc: 500
+     tasm_io_load_from_input_secin_loop: 74390
+   tasm_io_load_struct_from_input_secin_loop: 74034
+ tasm_structure_get_field: 794
+   tasm_structure_get_field_loop: 701
+ tasm_neptune_transaction_transaction_kernel_mast_hash: 21527
+   tasm_list_unsafe_u32_new_digest: 132
+   tasm_list_unsafe_u32_set_length_digest: 2
+   tasm_structure_get_field_with_size: 364
+     tasm_structure_get_field_with_size_loop: 308
+   tasm_hashing_hash_varlen: 27594
+     tasm_hashing_hash_varlen_loop: 25217
+       tasm_hashing_hash_varlen_if_branch: 44
+     tasm_hashing_hash_varlen_pad_varnum_zeros: 1274
+     tasm_hashing_hash_varlen_read_remaining_elements: 517
+   tasm_list_unsafe_u32_set_element_digest: 525
+     tasm_hashing_hash_varlen_if_first_time_absob_init: 16
+   tasm_list_unsafe_u32_get_element_digest: 4625
+ tasm_memory_push_ram_to_stack_digest: 220
+ tasm_mmr_bag_peaks: 1846
+   tasm_list_unsafe_u32_length_long_digest: 20
+   tasm_mmr_bag_peaks_length_is_not_zero: 1818
+     tasm_mmr_bag_peaks_length_is_not_one: 1802
+       tasm_mmr_bag_peaks_loop: 1644
+ tasm_list_contiguous_list_get_pointer_list_unsafe: 486
+   tasm_list_contiguous_list_get_length: 165
+     tasm_list_contiguous_list_get_length_loop: 129
+   tasm_list_unsafe_u32_new_void_pointer: 124
+   tasm_list_unsafe_u32_set_length_void_pointer: 12
+   tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 171
+     tasm_list_unsafe_u32_set_element_void_pointer: 56
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo: 822
+   tasm_list_unsafe_u32_length_long_void_pointer: 16
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo_loop: 771
+     tasm_list_unsafe_u32_get_element_void_pointer: 42
+     tasm_neptune_transaction_hash_utxo: 674
+ tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest: 406
+   tasm_list_unsafe_u32_new_pair_Lvoid_pointer_and_digestR: 66
+   tasm_list_unsafe_u32_set_length_pair_Lvoid_pointer_and_digestR: 2
+   tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest_loop: 345
+     tasm_memory_memcpy: 268
+       tasm_memory_memcpy_loop: 248
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10450
+   tasm_list_unsafe_u32_length_long_pair_Ldigest_and_void_pointerR: 8
+   tasm_list_unsafe_u32_set_length_pair_Ldigest_and_void_pointerR: 4
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10401
+     tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 116
+     tasm_neptune_transaction_compute_indices: 10296
+       tasm_neptune_mutator_get_swbf_indices_1048576_45: 9952
+         tasm_arithmetic_u128_shift_right_static_3: 48
+         tasm_arithmetic_u128_shift_left_static_12: 44
+         tasm_hashing_sample_indices_to_unsafe_list: 3718
+           tasm_list_unsafe_u32_new_u32: 62
+           tasm_list_unsafe_u32_set_length_u32: 8
+           tasm_hashing_sample_indices_to_unsafe_list_loop: 3560
+             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 1440
+         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 6062
+           tasm_list_unsafe_u32_length_long_u32: 8
+           tasm_list_unsafe_u32_new_u128: 66
+           tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128_loop: 5950
+             tasm_list_unsafe_u32_get_element_u32: 630
+             u32_to_u128_add_another_u128: 2160
+             tasm_list_unsafe_u32_set_element_u128: 1890
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list: 3294
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list_loop: 3243
+     tasm_neptune_transaction_hash_index_list: 3146
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3314
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3263
+     tasm_neptune_transaction_hash_removal_record_indices: 3166
+ tasm_list_unsafe_u32_multiset_equality: 780
+   tasm_list_unsafe_u32_multiset_equality_continue: 757
+     tasm_list_unsafe_u32_multiset_equality_running_product: 226
+       tasm_list_unsafe_u32_multiset_equality_running_product_loop: 198
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 490
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 439
+     tasm_neptune_transaction_compute_commitment: 290
+       tasm_neptune_mutator_set_commit: 26
+     tasm_list_unsafe_u32_set_element_pair_Lvoid_pointer_and_digestR: 58
+ tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12567
+   tasm_list_unsafe_u32_length_long_pair_Lvoid_pointer_and_digestR: 4
+   tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12555
+     tasm_list_unsafe_u32_get_element_pair_Lvoid_pointer_and_digestR: 58
+     tasm_neptune_transaction_verify_aocl_membership: 12462
+       tasm_mmr_verify_from_memory_unsafe: 12232
+         tasm_mmr_leaf_index_to_mt_index_and_peak_index: 256
+           tasm_arithmetic_u64_lt: 12
+           tasm_arithmetic_u64_xor: 10
+           tasm_arithmetic_u64_log_2_floor: 30
+             tasm_arithmetic_u64_log_2_floor_then: 16
+           tasm_arithmetic_u64_pow2: 8
+           tasm_arithmetic_u64_decr: 38
+             tasm_arithmetic_u64_decr_carry: 22
+           tasm_arithmetic_u64_and: 20
+           tasm_arithmetic_u64_add: 28
+           tasm_arithmetic_u64_popcount: 20
+         tasm_mmr_verify_from_memory_unsafe_while: 11832
+           tasm_arithmetic_u64_eq: 1024
+           tasm_arithmetic_u32_is_odd: 1008
+             tasm_pseudo_lsb: 504
+           tasm_arithmetic_u64_div2: 1764
+           tasm_hashing_swap_digest: 784
+         tasm_hashing_eq_digest: 30
  total: 131322
