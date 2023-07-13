@@ -37,8 +37,8 @@ impl ValidationLogic for KernelToLockScripts {
 
 impl CompiledProgram for KernelToLockScripts {
     fn rust_shadow(
-        _public_input: &mut std::collections::VecDeque<triton_vm::BFieldElement>,
-        _secret_input: &mut std::collections::VecDeque<triton_vm::BFieldElement>,
+        _public_input: &[triton_vm::BFieldElement],
+        _secret_input: &[triton_vm::BFieldElement],
     ) -> anyhow::Result<Vec<triton_vm::BFieldElement>> {
         todo!()
     }

@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use field_count::FieldCount;
 use get_size::GetSize;
@@ -195,8 +195,8 @@ impl ValidationLogic for RemovalRecordsIntegrity {
 
 impl CompiledProgram for RemovalRecordsIntegrity {
     fn rust_shadow(
-        public_input: &mut VecDeque<BFieldElement>,
-        secret_input: &mut VecDeque<BFieldElement>,
+        public_input: &[BFieldElement],
+        secret_input: &[BFieldElement],
     ) -> anyhow::Result<Vec<BFieldElement>> {
         let hash_of_kernel = *Digest::decode(
             &public_input
@@ -686,10 +686,10 @@ mod tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let witness = pseudorandom_removal_record_integrity_witness(rng.gen());
         let kernel_hash = witness.kernel.mast_hash().reversed().values();
-        let mut public_input: VecDeque<BFieldElement> = kernel_hash.to_vec().into();
-        let mut witness: VecDeque<BFieldElement> = witness.encode().into();
+        let public_input = kernel_hash.to_vec();
+        let witness = witness.encode();
 
-        test_rust_shadow::<RemovalRecordsIntegrity>(&mut public_input, &mut witness);
+        test_rust_shadow::<RemovalRecordsIntegrity>(&public_input, &witness);
     }
 }
 
@@ -725,8 +725,8 @@ mod bench {
         bench_program::<RemovalRecordsIntegrity>(
             "tasm_neptune_transaction_removal_records_integrity".to_string(),
             BenchmarkCase::CommonCase,
-            &mut stdin.into(),
-            &mut secret_in.into(),
+            &stdin,
+            &secret_in,
         );
     }
 }
