@@ -14,7 +14,7 @@ use crate::models::blockchain::{
     transaction::{transaction_kernel::TransactionKernel, PrimitiveWitness},
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, Default, BFieldCodec)]
 pub struct LockScriptsHalt {
     pub supported_claims: Vec<SupportedClaim>,
 }

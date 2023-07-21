@@ -25,7 +25,7 @@ use self::{
 };
 use super::{transaction_kernel::TransactionKernel, PrimitiveWitness};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum ClaimSupport {
     Proof(Proof),
     SecretWitness(Vec<BFieldElement>, Option<Program>),
@@ -34,7 +34,7 @@ pub enum ClaimSupport {
 
 /// SupportedClaim is a helper struct for ValiditySequence. It
 /// encodes a Claim with an optional witness.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct SupportedClaim {
     pub claim: triton_vm::Claim,
     pub support: ClaimSupport,
@@ -59,7 +59,7 @@ impl SupportedClaim {
 /// ValidityConditions is a helper struct. It contains a sequence of
 /// claims with optional witnesses. If all claims a true, then the
 /// transaction is valid.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TransactionValidityLogic {
     // programs: [lock_script], input: hash of tx kernel (MAST hash), witness: secret spending key, output: []
     pub lock_scripts_halt: LockScriptsHalt,

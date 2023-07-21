@@ -37,25 +37,9 @@ use self::validity::{TransactionValidityLogic, ValidationLogic};
 use super::block::Block;
 use super::shared::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PubScript {
     pub program: Program,
-}
-
-impl BFieldCodec for PubScript {
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.program.encode()
-    }
-
-    fn decode(bytes: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
-        Ok(Box::new(Self {
-            program: *Program::decode(bytes)?,
-        }))
-    }
-
-    fn static_length() -> Option<usize> {
-        None
-    }
 }
 
 impl Default for PubScript {
@@ -139,10 +123,17 @@ impl BFieldCodec for Witness {
     }
 
     fn encode(&self) -> Vec<BFieldElement> {
-        match self {
+        let inner_encoding = match self {
             Witness::Primitive(pw) => pw.encode(),
-            _ => vec![],
-        }
+            Witness::SingleProof(sp) => sp.encode(),
+            Witness::ValidityLogic(vl) => vl.encode(),
+            Witness::Faith => vec![],
+        };
+        [
+            vec![BFieldElement::new(self.get_index() as u64)],
+            inner_encoding,
+        ]
+        .concat()
     }
 
     fn static_length() -> Option<usize> {
