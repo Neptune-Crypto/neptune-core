@@ -118,7 +118,7 @@ pub trait RPC {
     async fn restart_miner();
 
     // mark MUTXOs as abandoned
-    async fn prune_abandoned_monitored_utxos();
+    async fn prune_abandoned_monitored_utxos() -> usize;
 }
 
 #[derive(Clone)]
@@ -153,7 +153,7 @@ impl RPC for NeptuneRPCServer {
     type GetDashboardOverviewDataFut = Ready<DashBoardOverviewDataFromClient>;
     type PauseMinerFut = Ready<()>;
     type RestartMinerFut = Ready<()>;
-    type PruneAbandonedMonitoredUtxosFut = Ready<()>;
+    type PruneAbandonedMonitoredUtxosFut = Ready<usize>;
 
     fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
         let network = self.state.cli.network;
@@ -539,13 +539,13 @@ impl RPC for NeptuneRPCServer {
         match prune_count_res {
             Ok(prune_count) => {
                 info!("Marked {prune_count} monitored UTXOs as abandoned");
+                future::ready(prune_count)
             }
             Err(err) => {
                 error!("Pruning monitored UTXOs failed with error: {err}");
+                future::ready(0)
             }
-        };
-
-        future::ready(())
+        }
     }
 }
 
