@@ -24,6 +24,10 @@ pub struct MonitoredUtxo {
 
     // hash of the block, if any, in which this UTXO was confirmed
     pub confirmed_in_block: Option<(Digest, Duration, BlockHeight)>,
+
+    /// Indicator used to mark the UTXO as belonging to an abandoned fork
+    /// Indicates what was the block tip when UTXO was marked as abandoned
+    pub abandoned_at: Option<(Digest, Duration, BlockHeight)>,
 }
 
 impl MonitoredUtxo {
@@ -34,6 +38,7 @@ impl MonitoredUtxo {
             number_of_mps_per_utxo: max_number_of_mps_stored,
             spent_in_block: None,
             confirmed_in_block: None,
+            abandoned_at: None,
         }
     }
 

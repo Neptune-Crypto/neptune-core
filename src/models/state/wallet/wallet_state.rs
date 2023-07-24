@@ -23,11 +23,14 @@ use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::WalletSecret;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
+use crate::models::blockchain::block::block_header::BlockHeader;
+use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
+use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -207,6 +210,75 @@ impl WalletState {
                 false
             } else { true })
             .collect_vec()
+    }
+
+    /// Delete from the database all monitored UTXOs from abandoned chains with a depth deeper than
+    /// `block_depth_threshhold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
+    /// abandoned chains of unknown depth.
+    /// Returns the number of monitored UTXOs removed from the database.
+    pub async fn prune_abandoned_monitored_utxos_with_lock<'a>(
+        &self,
+        block_depth_threshhold: usize,
+        wallet_db_lock: &mut tokio::sync::MutexGuard<'a, RustyWalletDatabase>,
+        current_tip: &BlockHeader,
+        archival_state: &ArchivalState,
+    ) -> Result<usize> {
+        const MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING: usize = 10;
+        if block_depth_threshhold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
+            bail!(
+                "
+                Cannot prune monitored UTXOs with a depth threshold less than
+                {MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING}. Got threshold {block_depth_threshhold}"
+            )
+        }
+
+        let current_tip_info: (Digest, Duration, BlockHeight) = (
+            Hash::hash(current_tip),
+            Duration::from_millis(current_tip.timestamp.value()),
+            current_tip.height,
+        );
+        let mutxo_count = wallet_db_lock.monitored_utxos.len();
+        let mut removed_count = 0;
+        for i in 0..mutxo_count {
+            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+
+            // Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
+            // once the spending block is buried sufficiently deep
+            if monitored_utxo.spent_in_block.is_some() {
+                continue;
+            }
+
+            // If synced to current tip, there is nothing more to do with this MUTXO
+            if monitored_utxo.is_synced_to(&current_tip_info.0) {
+                continue;
+            }
+
+            // MUTXO is neither spent nor synced. Mark as abandoned if it was confirmed in block that is now
+            // abandoned, and if that block is older than threshold.
+            let mark_as_abandoned = match monitored_utxo.confirmed_in_block {
+                Some((
+                    _block_digest_confirmed,
+                    _block_timestamp_confirmed,
+                    block_height_confirmed,
+                )) => {
+                    let depth = current_tip.height - block_height_confirmed + 1;
+                    depth >= block_depth_threshhold as i128
+                        && monitored_utxo
+                            .was_abandoned(&current_tip_info.0, archival_state)
+                            .await
+                }
+                None => false,
+            };
+
+            if mark_as_abandoned {
+                monitored_utxo.abandoned_at = Some(current_tip_info);
+                wallet_db_lock.monitored_utxos.set(i, monitored_utxo);
+                removed_count += 1;
+            }
+        }
+
+        // Loop over all MUTXOs, checking which are not synced
+        Ok(removed_count)
     }
 
     /// Update wallet state with new block. Assumes the given block
@@ -714,5 +786,341 @@ impl WalletState {
             }
         }
         history
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use num_traits::One;
+
+    use crate::{
+        config_models::network::Network,
+        models::state::wallet::generate_secret_key,
+        tests::shared::{get_mock_global_state, make_mock_block},
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn wallet_state_prune_abandoned_mutxos() {
+        // Get genesis block. Verify wallet is empty
+        // Add two blocks to state containing no UTXOs for own wallet
+        // Add a UTXO (e.g. coinbase) in block 3a (height = 3)
+        // Verify that this UTXO was recognized
+        // Fork chain with new block of height 3: 3b
+        // Run the pruner
+        // Verify that MUTXO is *not* marked as abandoned
+        // Add 8 blocks
+        // Verify that MUTXO is *not* marked as abandoned
+        // Add 1 block
+        // Verify that MUTXO is *not* marked as abandoned
+        // Prune
+        // Verify that MUTXO *is* marked as abandoned
+
+        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
+        let own_global_state =
+            get_mock_global_state(Network::Testnet, 0, Some(own_wallet_secret)).await;
+        let genesis_block = Block::genesis_block();
+        let monitored_utxos_count_init = own_global_state
+            .wallet_state
+            .wallet_db
+            .lock()
+            .await
+            .monitored_utxos
+            .len();
+        assert!(
+            monitored_utxos_count_init.is_zero(),
+            "Monitored UTXO list must be empty at init"
+        );
+
+        // Add two blocks with no UTXOs for us
+        let other_recipient_address = WalletSecret::new(generate_secret_key())
+            .nth_generation_spending_key(0)
+            .to_address();
+        let mut latest_block = genesis_block;
+        for _ in 1..=2 {
+            let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
+                make_mock_block(&latest_block, None, other_recipient_address);
+            own_global_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &new_block,
+                    &mut own_global_state.wallet_state.wallet_db.lock().await,
+                )
+                .unwrap();
+            own_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .write_block(
+                    Box::new(new_block.clone()),
+                    &mut own_global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .block_index_db
+                        .lock()
+                        .await,
+                    Some(latest_block.header.proof_of_work_family),
+                )
+                .unwrap();
+            latest_block = new_block;
+        }
+        assert!(
+            own_global_state
+                .wallet_state
+                .wallet_db
+                .lock()
+                .await
+                .monitored_utxos
+                .len()
+                .is_zero(),
+            "Monitored UTXO list must be empty at height 2"
+        );
+
+        // Add block 3a with a coinbase UTXO for us
+        let own_recipient_address = own_spending_key.to_address();
+        let (block_3a, block_3a_coinbase_utxo, block_3a_coinbase_sender_randomness) =
+            make_mock_block(&latest_block, None, own_recipient_address);
+        own_global_state
+            .wallet_state
+            .expected_utxos
+            .write()
+            .unwrap()
+            .add_expected_utxo(
+                block_3a_coinbase_utxo.clone(),
+                block_3a_coinbase_sender_randomness,
+                own_spending_key.privacy_preimage,
+                UtxoNotifier::OwnMiner,
+            )
+            .unwrap();
+        own_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_3a,
+                &mut own_global_state.wallet_state.wallet_db.lock().await,
+            )
+            .unwrap();
+        own_global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .write_block(
+                Box::new(block_3a.clone()),
+                &mut own_global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_index_db
+                    .lock()
+                    .await,
+                Some(latest_block.header.proof_of_work_family),
+            )
+            .unwrap();
+        assert!(
+            own_global_state
+                .wallet_state
+                .wallet_db
+                .lock()
+                .await
+                .monitored_utxos
+                .len()
+                .is_one(),
+            "Monitored UTXO list must have length 1 at block 3a"
+        );
+        assert!(
+            own_global_state
+                .wallet_state
+                .wallet_db
+                .lock()
+                .await
+                .monitored_utxos
+                .get(0)
+                .abandoned_at
+                .is_none(),
+            "MUTXO may not be marked as abandoned at block 3a"
+        );
+
+        // Fork the blockchain with 3b, with no coinbase for us
+        let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
+            make_mock_block(&latest_block, None, other_recipient_address);
+        own_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_3b,
+                &mut own_global_state.wallet_state.wallet_db.lock().await,
+            )
+            .unwrap();
+        own_global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .write_block(
+                Box::new(block_3b.clone()),
+                &mut own_global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_index_db
+                    .lock()
+                    .await,
+                Some(latest_block.header.proof_of_work_family),
+            )
+            .unwrap();
+        assert!(
+            own_global_state
+            .wallet_state
+                .wallet_db
+                .lock()
+                .await
+                .monitored_utxos
+                .get(0)
+                .abandoned_at
+                .is_none(),
+            "MUTXO may not be marked as abandoned at block 3b, as the abandoned chain is not yet old enough and has not been pruned"
+        );
+        let prune_count_3b = own_global_state
+            .wallet_state
+            .prune_abandoned_monitored_utxos_with_lock(
+                10,
+                &mut own_global_state.wallet_state.wallet_db.lock().await,
+                &block_3b.header,
+                own_global_state.chain.archival_state.as_ref().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(prune_count_3b.is_zero());
+
+        // Mine nine blocks on top of 3b, update states
+        latest_block = block_3b;
+        for _ in 4..=11 {
+            let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
+                make_mock_block(&latest_block, None, other_recipient_address);
+            own_global_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &new_block,
+                    &mut own_global_state.wallet_state.wallet_db.lock().await,
+                )
+                .unwrap();
+            own_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .write_block(
+                    Box::new(new_block.clone()),
+                    &mut own_global_state
+                        .chain
+                        .archival_state
+                        .as_ref()
+                        .unwrap()
+                        .block_index_db
+                        .lock()
+                        .await,
+                    Some(latest_block.header.proof_of_work_family),
+                )
+                .unwrap();
+            latest_block = new_block;
+        }
+
+        let prune_count_11 = own_global_state
+            .wallet_state
+            .prune_abandoned_monitored_utxos_with_lock(
+                10,
+                &mut own_global_state.wallet_state.wallet_db.lock().await,
+                &latest_block.header,
+                own_global_state.chain.archival_state.as_ref().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(prune_count_11.is_zero());
+        assert!(
+            own_global_state
+                .wallet_state
+                .wallet_db
+                .lock()
+                .await
+                .monitored_utxos
+                .get(0)
+                .abandoned_at
+                .is_none(),
+            "MUTXO must not be abandoned at height 11"
+        );
+
+        // Mine *one* more block. Verify that MUTXO is pruned
+        let (block_12, _, _) = make_mock_block(&latest_block, None, other_recipient_address);
+        own_global_state
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_12,
+                &mut own_global_state.wallet_state.wallet_db.lock().await,
+            )
+            .unwrap();
+        own_global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .write_block(
+                Box::new(block_12.clone()),
+                &mut own_global_state
+                    .chain
+                    .archival_state
+                    .as_ref()
+                    .unwrap()
+                    .block_index_db
+                    .lock()
+                    .await,
+                Some(latest_block.header.proof_of_work_family),
+            )
+            .unwrap();
+        assert!(
+            own_global_state
+                .wallet_state
+                .wallet_db
+                .lock()
+                .await
+                .monitored_utxos
+                .get(0)
+                .abandoned_at
+                .is_none(),
+            "MUTXO must *not* be marked as abandoned at height 12, prior to pruning"
+        );
+        let prune_count_12 = own_global_state
+            .wallet_state
+            .prune_abandoned_monitored_utxos_with_lock(
+                10,
+                &mut own_global_state.wallet_state.wallet_db.lock().await,
+                &block_12.header,
+                own_global_state.chain.archival_state.as_ref().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(prune_count_12.is_one());
+        assert_eq!(
+            (
+                block_12.hash,
+                Duration::from_millis(block_12.header.timestamp.value()),
+                12u64.into()
+            ),
+            own_global_state
+                .wallet_state
+                .wallet_db
+                .lock()
+                .await
+                .monitored_utxos
+                .get(0)
+                .abandoned_at
+                .unwrap(),
+            "MUTXO must be marked as abandoned at height 12, after pruning"
+        );
     }
 }
