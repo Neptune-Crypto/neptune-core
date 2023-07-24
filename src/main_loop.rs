@@ -1060,7 +1060,7 @@ impl MainLoopHandler {
 
                 // Handle messages from peer threads
                 Some(msg) = peer_thread_to_main_rx.recv() => {
-                    info!("Received message sent to main thread.");
+                    debug!("Received message sent to main thread.");
                     self.handle_peer_thread_message(
                         msg,
                         &mut main_loop_state,
