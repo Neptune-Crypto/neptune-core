@@ -385,13 +385,13 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
         let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let wallet_state = get_mock_wallet_state(Some(own_wallet_secret.clone())).await;
+        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret.clone())).await;
         let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_recipient_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
 
-        let mut monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert!(
             monitored_utxos.is_empty(),
             "Monitored UTXO list must be empty at init"
@@ -403,7 +403,7 @@ mod wallet_tests {
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
             make_mock_block(&genesis_block, None, own_recipient_address);
 
-        wallet_state
+        own_wallet_state
             .expected_utxos
             .write()
             .unwrap()
@@ -416,18 +416,18 @@ mod wallet_tests {
             .unwrap();
         assert_eq!(
             1,
-            wallet_state.expected_utxos.read().unwrap().len(),
+            own_wallet_state.expected_utxos.read().unwrap().len(),
             "Expected UTXO list must have length 1 before block registration"
         );
-        wallet_state.update_wallet_state_with_new_block(
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_1,
-            &mut wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
         assert_eq!(
             1,
-            wallet_state.expected_utxos.read().unwrap().len(),
+            own_wallet_state.expected_utxos.read().unwrap().len(),
             "A: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
-        let expected_utxos = wallet_state
+        let expected_utxos = own_wallet_state
             .expected_utxos
             .read()
             .unwrap()
@@ -438,7 +438,7 @@ mod wallet_tests {
             expected_utxos[0].mined_in_block.unwrap().0,
             "Expected UTXO must be registered as being mined"
         );
-        monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         assert_eq!(
             1,
             monitored_utxos.len(),
@@ -462,7 +462,7 @@ mod wallet_tests {
         // under this block as tip
         let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address);
         let (block_3, _, _) = make_mock_block(&block_2, None, other_recipient_address);
-        monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
@@ -478,15 +478,15 @@ mod wallet_tests {
             );
         }
         // Verify that the membership proof is valid *after* running the updater
-        wallet_state.update_wallet_state_with_new_block(
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_2,
-            &mut wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
-        wallet_state.update_wallet_state_with_new_block(
+        own_wallet_state.update_wallet_state_with_new_block(
             &block_3,
-            &mut wallet_state.wallet_db.lock().await,
+            &mut own_wallet_state.wallet_db.lock().await,
         )?;
-        monitored_utxos = get_monitored_utxos(&wallet_state).await;
+        monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
 
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
