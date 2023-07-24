@@ -349,9 +349,17 @@ impl WalletState {
                         "Strong key must be unique in wallet DB"
                     );
                 }
-                None => warn!(
-                    "Unable to find valid membership proof for UTXO with digest {utxo_digest}"
-                ),
+                None => {
+                    // Was MUTXO marked as abandoned? Then this is fine. Otherwise, log a warning.
+                    // TODO: If MUTXO was spent, maybe we also don't want to maintain it?
+                    if monitored_utxo.abandoned_at.is_some() {
+                        debug!("Monitored UTXO with digest {utxo_digest} was marked as abandoned. Skipping.");
+                    } else {
+                        warn!(
+                        "Unable to find valid membership proof for UTXO with digest {utxo_digest}"
+                    );
+                    }
+                }
             }
         }
 
