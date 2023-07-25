@@ -13,6 +13,7 @@ use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 pub struct ActiveWindow<H: AlgebraicHasher + BFieldCodec> {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     pub sbf: Vec<u32>,
+    #[bfield_codec(ignore)]
     _hasher: PhantomData<H>,
 }
 
