@@ -87,7 +87,7 @@ impl RemovalRecordsIntegrityWitness {
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct RemovalRecordsIntegrity {
     pub supported_claim: SupportedClaim,
 }

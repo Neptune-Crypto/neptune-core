@@ -3,8 +3,9 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::compiled_program::CompiledProgram;
 use tasm_lib::library::Library;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToLockScripts {
     pub supported_claim: SupportedClaim,
 }

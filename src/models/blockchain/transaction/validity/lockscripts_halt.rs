@@ -6,7 +6,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use triton_vm::StarkParameters;
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 use super::{ClaimSupport, SupportedClaim, ValidationLogic};
 use crate::models::blockchain::{

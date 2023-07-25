@@ -103,42 +103,12 @@ impl GetSize for SingleProof {
 
 // TODO: Remove this allow once `ValidityLogic` is more sane
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum Witness {
     Primitive(PrimitiveWitness),
     SingleProof(SingleProof),
     ValidityLogic((TransactionValidityLogic, PrimitiveWitness)),
     Faith,
-}
-
-impl BFieldCodec for Witness {
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>> {
-        if sequence.is_empty() {
-            Ok(Box::new(Self::Faith))
-        } else {
-            Ok(Box::new(Self::Primitive(*PrimitiveWitness::decode(
-                sequence,
-            )?)))
-        }
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        let inner_encoding = match self {
-            Witness::Primitive(pw) => pw.encode(),
-            Witness::SingleProof(sp) => sp.encode(),
-            Witness::ValidityLogic(vl) => vl.encode(),
-            Witness::Faith => vec![],
-        };
-        [
-            vec![BFieldElement::new(self.get_index() as u64)],
-            inner_encoding,
-        ]
-        .concat()
-    }
-
-    fn static_length() -> Option<usize> {
-        None
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]

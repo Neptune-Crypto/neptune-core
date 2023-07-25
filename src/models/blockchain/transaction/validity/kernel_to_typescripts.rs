@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::compiled_program::CompiledProgram;
 use tasm_lib::library::Library;
 use triton_vm::instruction::LabelledInstruction;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToTypeScripts {
     pub supported_claim: SupportedClaim,
 }
