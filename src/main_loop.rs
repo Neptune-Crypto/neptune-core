@@ -229,7 +229,6 @@ impl PotentialPeersState {
     fn get_distant_candidate(
         &self,
         connected_clients: &[PeerInfo],
-        own_listen_socket: Option<SocketAddr>,
         own_instance_id: u128,
     ) -> Option<(SocketAddr, u8)> {
         let peers_instance_ids: Vec<u128> =
@@ -238,16 +237,17 @@ impl PotentialPeersState {
         // Only pick those peers that report a listening port
         let peers_listen_addresses: Vec<SocketAddr> = connected_clients
             .iter()
-            .filter_map(|x| x.address_for_incoming_connections)
+            .filter_map(|x| x.listen_address())
             .collect();
 
         // Find the appropriate candidates
         let not_connected_peers = self
             .potential_peers
             .iter()
-            // Prevent connecting to self
+            // Prevent connecting to self. Note that we *only* use instance ID to prevent this,
+            // meaning this will allow multiple nodes e.g. runnig on the same computer to form
+            // a complete graph.
             .filter(|pp| pp.1.instance_id != own_instance_id)
-            .filter(|pp| own_listen_socket.is_some() && *pp.0 != own_listen_socket.unwrap())
             // Prevent connecting to peer we already are connected to
             .filter(|potential_peer| !peers_instance_ids.contains(&potential_peer.1.instance_id))
             .filter(|potential_peer| !peers_listen_addresses.contains(potential_peer.0))
@@ -801,7 +801,6 @@ impl MainLoopHandler {
         let (peer_candidate, candidate_distance) =
             match main_loop_state.potential_peers.get_distant_candidate(
                 &connected_peers,
-                self.global_state.cli.get_own_listen_address(),
                 self.global_state.net.instance_id,
             ) {
                 Some(candidate) => candidate,

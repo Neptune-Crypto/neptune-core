@@ -127,7 +127,7 @@ pub fn get_dummy_peer(address: SocketAddr) -> PeerInfo {
         last_seen: SystemTime::now(),
         standing: PeerStanding::default(),
         version: get_dummy_version(),
-        address_for_incoming_connections: Some(address),
+        port_for_incoming_connections: Some(8080),
         is_archival_node: true,
     }
 }
@@ -154,11 +154,11 @@ pub fn get_dummy_latest_block(
 }
 
 /// Return a handshake object with a randomly set instance ID
-pub fn get_dummy_handshake_data_for_genesis(network: Network, id: u8) -> HandshakeData {
+pub fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
         tip_header: get_dummy_latest_block(None).2.lock().unwrap().to_owned(),
-        listen_address: Some(get_dummy_socket_address(id)),
+        listen_port: Some(8080),
         network,
         version: get_dummy_version(),
         is_archival_node: true,
@@ -177,7 +177,7 @@ pub fn get_dummy_peer_connection_data_genesis(
     network: Network,
     id: u8,
 ) -> (HandshakeData, SocketAddr) {
-    let handshake = get_dummy_handshake_data_for_genesis(network, id);
+    let handshake = get_dummy_handshake_data_for_genesis(network);
     let socket_address = get_dummy_socket_address(id);
 
     (handshake, socket_address)
@@ -250,7 +250,7 @@ pub async fn get_test_genesis_setup(
         to_main_tx,
         _to_main_rx1,
         state,
-        get_dummy_handshake_data_for_genesis(network, 0),
+        get_dummy_handshake_data_for_genesis(network),
     ))
 }
 

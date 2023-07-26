@@ -67,7 +67,7 @@ async fn get_connection_status(
         return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
     }
 
-    // Disallow connection to already connected peer
+    // Disallow connection to already connected peer.
     if pm.values().any(|peer| {
         peer.instance_id == other_handshake.instance_id || *peer_address == peer.connected_address
     }) {
@@ -410,8 +410,8 @@ mod connect_tests {
     #[tokio::test]
     async fn test_outgoing_connection_succeed() -> Result<()> {
         let network = Network::Alpha;
-        let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
+        let other_handshake = get_dummy_handshake_data_for_genesis(network);
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
             .write(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -458,7 +458,7 @@ mod connect_tests {
 
         // Get an address for a peer that's not already connected
         let (other_handshake, peer_sa) = get_dummy_peer_connection_data_genesis(network, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network, 2);
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
 
         let mut status =
             get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
@@ -545,8 +545,8 @@ mod connect_tests {
         // object will panic, and the `await` operator will evaluate
         // to Error.
         let network = Network::Alpha;
-        let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
+        let other_handshake = get_dummy_handshake_data_for_genesis(network);
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -586,8 +586,8 @@ mod connect_tests {
     #[tokio::test]
     async fn test_incoming_connection_fail_bad_magic_value() -> Result<()> {
         let network = Network::Alpha;
-        let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
+        let other_handshake = get_dummy_handshake_data_for_genesis(network);
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_RESPONSE.to_vec(),
@@ -615,8 +615,8 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_incoming_connection_fail_bad_network() -> Result<()> {
-        let other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(Network::Alpha, 0);
+        let other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet);
+        let own_handshake = get_dummy_handshake_data_for_genesis(Network::Alpha);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -651,8 +651,8 @@ mod connect_tests {
         // In this scenario a node attempts to make an ingoing connection but this
         // node is banned, so this should not succeed.
         let network = Network::Alpha;
-        let other_handshake = get_dummy_handshake_data_for_genesis(network, 1);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
+        let other_handshake = get_dummy_handshake_data_for_genesis(network);
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),
@@ -691,8 +691,8 @@ mod connect_tests {
         // In this scenario a peer has been banned, and is attempting to make an ingoing
         // connection. This should not be possible.
         let network = Network::Alpha;
-        let other_handshake = get_dummy_handshake_data_for_genesis(network, 3);
-        let own_handshake = get_dummy_handshake_data_for_genesis(network, 0);
+        let other_handshake = get_dummy_handshake_data_for_genesis(network);
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
         let mock = Builder::new()
             .read(&to_bytes(&PeerMessage::Handshake(Box::new((
                 MAGIC_STRING_REQUEST.to_vec(),

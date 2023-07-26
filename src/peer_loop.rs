@@ -325,11 +325,12 @@ impl PeerLoopHandler {
                     .lock()
                     .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                     .values()
-                    .filter(|peer_info| peer_info.address_for_incoming_connections.is_some())
+                    .filter(|peer_info| peer_info.listen_address().is_some())
                     .take(MAX_PEER_LIST_LENGTH) // limit length of response
                     .map(|peer_info| {
                         (
-                            peer_info.address_for_incoming_connections.unwrap(),
+                            // unwrap is safe bc of above `filter`
+                            peer_info.listen_address().unwrap(),
                             peer_info.instance_id,
                         )
                     })
@@ -358,9 +359,8 @@ impl PeerLoopHandler {
             }
             PeerMessage::Block(t_block) => {
                 info!(
-                    "Got new block from peer {} (listen: {:?}), block height {}",
+                    "Got new block from peer {}, block height {}",
                     self.peer_address,
-                    self.peer_handshake_data.listen_address,
                     t_block.header.height
                 );
                 let new_block_height = t_block.header.height;
@@ -1012,7 +1012,7 @@ impl PeerLoopHandler {
 
         // Add peer to peer map
         let new_peer = PeerInfo {
-            address_for_incoming_connections: self.peer_handshake_data.listen_address,
+            port_for_incoming_connections: self.peer_handshake_data.listen_port,
             connected_address: self.peer_address,
             inbound: self.inbound_connection,
             instance_id: self.peer_handshake_data.instance_id,
@@ -2060,7 +2060,7 @@ mod peer_loop_tests {
         let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
         let expected_peer_list_resp = vec![
             (
-                peer_infos[0].address_for_incoming_connections.unwrap(),
+                peer_infos[0].listen_address().unwrap(),
                 peer_infos[0].instance_id,
             ),
             (sa_1, hsd_1.instance_id),

@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::{CheckedSub, Zero};
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -314,17 +314,17 @@ impl GlobalState {
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
-        let listen_addr_socket = SocketAddr::new(self.cli.listen_addr, self.cli.peer_port);
         let latest_block_header = self.chain.light_state.get_latest_block_header().await;
 
         HandshakeData {
             tip_header: latest_block_header,
-            listen_address: Some(listen_addr_socket),
+            // TODO: Should be `None` if incoming connections are not accepted
+            listen_port: Some(self.cli.peer_port),
             network: self.cli.network,
             instance_id: self.net.instance_id,
             version: VERSION.to_string(),
             // For now, all nodes are archival nodes
-            is_archival_node: true,
+            is_archival_node: self.chain.archival_state.is_some(),
         }
     }
 

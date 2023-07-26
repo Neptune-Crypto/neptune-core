@@ -125,13 +125,6 @@ pub struct Args {
     pub privacy: bool,
 }
 
-impl Args {
-    pub fn get_own_listen_address(&self) -> Option<SocketAddr> {
-        // TODO: Should this function return Option<SocketAddr> or SocketAddr?
-        Some(SocketAddr::new(self.listen_addr, self.peer_port))
-    }
-}
-
 impl Default for Args {
     fn default() -> Self {
         let empty: Vec<String> = vec![];

@@ -31,7 +31,7 @@ pub type InstanceId = u128;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PeerInfo {
-    pub address_for_incoming_connections: Option<SocketAddr>,
+    pub port_for_incoming_connections: Option<u16>,
     pub connected_address: SocketAddr,
     pub instance_id: InstanceId,
     pub inbound: bool,
@@ -39,6 +39,14 @@ pub struct PeerInfo {
     pub standing: PeerStanding,
     pub version: String,
     pub is_archival_node: bool,
+}
+
+impl PeerInfo {
+    /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
+    /// incoming connections.
+    pub fn listen_address(&self) -> Option<SocketAddr> {
+        self.port_for_incoming_connections.map(|port| SocketAddr::new(self.connected_address.ip(), port))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -183,7 +191,7 @@ impl PeerStanding {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HandshakeData {
     pub tip_header: BlockHeader,
-    pub listen_address: Option<SocketAddr>,
+    pub listen_port: Option<u16>,
     pub network: Network,
     pub instance_id: u128,
     pub version: String,
