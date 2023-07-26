@@ -370,6 +370,11 @@ impl GlobalState {
         'outer: for i in 0..num_monitored_utxos {
             let mut monitored_utxo = monitored_utxos.get(i).clone();
 
+            // Ignore those MUTXOs that were marked as abandoned
+            if monitored_utxo.abandoned_at.is_some() {
+                continue;
+            }
+
             // ignore synced ones
             if monitored_utxo.is_synced_to(&tip_hash) {
                 continue;

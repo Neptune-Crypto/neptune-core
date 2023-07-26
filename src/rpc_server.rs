@@ -8,7 +8,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
-use tracing::info;
+use tracing::{error, info};
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -42,7 +42,7 @@ pub struct DashBoardOverviewDataFromClient {
 
 #[tarpc::service]
 pub trait RPC {
-    /* READ DATA */
+    /******** READ DATA ********/
     // Place all methods that only read here
     // Return which network the client is running
     async fn get_network() -> Network;
@@ -93,7 +93,7 @@ pub trait RPC {
     /// Determine whether the given amount is less than (or equal to) the balance
     async fn amount_leq_balance(amount: Amount) -> bool;
 
-    /* CHANGE THINGS */
+    /******** CHANGE THINGS ********/
     // Place all things that change state here
     // Gracious shutdown.
     async fn shutdown() -> bool;
@@ -116,6 +116,9 @@ pub trait RPC {
 
     // Start miner if not running
     async fn restart_miner();
+
+    // mark MUTXOs as abandoned
+    async fn prune_abandoned_monitored_utxos() -> usize;
 }
 
 #[derive(Clone)]
@@ -150,6 +153,7 @@ impl RPC for NeptuneRPCServer {
     type GetDashboardOverviewDataFut = Ready<DashBoardOverviewDataFromClient>;
     type PauseMinerFut = Ready<()>;
     type RestartMinerFut = Ready<()>;
+    type PruneAbandonedMonitoredUtxosFut = Ready<usize>;
 
     fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
         let network = self.state.cli.network;
@@ -505,6 +509,43 @@ impl RPC for NeptuneRPCServer {
         }
 
         future::ready(())
+    }
+
+    fn prune_abandoned_monitored_utxos(
+        self,
+        _context: tarpc::context::Context,
+    ) -> Self::PruneAbandonedMonitoredUtxosFut {
+        let prune_count_res = {
+            // Hold lock on wallet_db
+            let mut wallet_db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
+            let tip_block_header =
+                executor::block_on(self.state.chain.light_state.get_latest_block_header());
+            const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
+
+            let prune_count_res = executor::block_on(
+                self.state
+                    .wallet_state
+                    .prune_abandoned_monitored_utxos_with_lock(
+                        DEFAULT_MUTXO_PRUNE_DEPTH,
+                        &mut wallet_db_lock,
+                        &tip_block_header,
+                        &self.state.chain.archival_state.unwrap(),
+                    ),
+            );
+
+            prune_count_res
+        };
+
+        match prune_count_res {
+            Ok(prune_count) => {
+                info!("Marked {prune_count} monitored UTXOs as abandoned");
+                future::ready(prune_count)
+            }
+            Err(err) => {
+                error!("Pruning monitored UTXOs failed with error: {err}");
+                future::ready(0)
+            }
+        }
     }
 }
 

@@ -39,6 +39,7 @@ enum Command {
     GetReceivingAddress,
     MempoolTxCount,
     MempoolSize,
+    PruneAbandonedMonitoredUtxos,
 }
 
 #[derive(Debug, Parser)]
@@ -145,6 +146,13 @@ async fn main() -> Result<()> {
         Command::MempoolSize => {
             let size_in_bytes: usize = client.get_mempool_size(context::current()).await?;
             println!("{} bytes", size_in_bytes);
+        }
+
+        Command::PruneAbandonedMonitoredUtxos => {
+            let prunt_res_count = client
+                .prune_abandoned_monitored_utxos(context::current())
+                .await?;
+            println!("{prunt_res_count} monitored UTXOs marked as abandoned");
         }
     }
 
