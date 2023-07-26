@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use futures::{SinkExt, TryStreamExt};
+use futures::{FutureExt, SinkExt, TryStreamExt};
 use std::{fmt::Debug, net::SocketAddr};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -83,7 +83,52 @@ async fn get_connection_status(
     ConnectionStatus::Accepted
 }
 
-pub async fn answer_peer<S>(
+pub async fn answer_peer_wrapper<S>(
+    stream: S,
+    state: GlobalState,
+    peer_address: std::net::SocketAddr,
+    main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
+    peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
+    own_handshake_data: HandshakeData,
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + std::fmt::Debug + std::marker::Unpin,
+{
+    let state_clone = state.clone();
+    let peer_thread_to_main_tx_clone = peer_thread_to_main_tx.clone();
+    let mut inner_ret: anyhow::Result<()> = Ok(());
+
+    let panic_result = std::panic::AssertUnwindSafe(async {
+        inner_ret = answer_peer(
+            stream,
+            state,
+            peer_address,
+            main_to_peer_thread_rx,
+            peer_thread_to_main_tx,
+            own_handshake_data,
+        )
+        .await;
+    })
+    .catch_unwind()
+    .await;
+
+    match panic_result {
+        Ok(_) => (),
+        Err(_err) => {
+            error!("Peer thread (incoming) for {peer_address} panicked. Invoking close connection callback");
+            let _ret = close_peer_connected_callback(
+                &state_clone,
+                peer_address,
+                &peer_thread_to_main_tx_clone,
+            )
+            .await;
+        }
+    }
+
+    inner_ret
+}
+
+async fn answer_peer<S>(
     stream: S,
     state: GlobalState,
     peer_address: std::net::SocketAddr,
@@ -167,6 +212,8 @@ where
     Ok(())
 }
 
+/// Perform handshake and establish connection to a new peer while handling any panics in the peer
+/// thread gracefully.
 pub async fn call_peer_wrapper(
     peer_address: std::net::SocketAddr,
     state: GlobalState,
@@ -175,30 +222,49 @@ pub async fn call_peer_wrapper(
     own_handshake_data: HandshakeData,
     distance: u8,
 ) {
-    debug!("Attempting to initiate connection");
-    match tokio::net::TcpStream::connect(peer_address).await {
-        Err(e) => {
-            warn!("Failed to establish connection: {}", e);
-        }
-        Ok(stream) => {
-            match call_peer(
-                stream,
-                state,
-                peer_address,
-                main_to_peer_thread_rx,
-                peer_thread_to_main_tx,
-                &own_handshake_data,
-                distance,
-            )
-            .await
-            {
-                Ok(()) => (),
-                Err(e) => error!("An error occurred: {}. Connection closing", e),
+    let state_clone = state.clone();
+    let peer_thread_to_main_tx_clone = peer_thread_to_main_tx.clone();
+    let panic_result = std::panic::AssertUnwindSafe(async {
+        debug!("Attempting to initiate connection");
+        match tokio::net::TcpStream::connect(peer_address).await {
+            Err(e) => {
+                warn!("Failed to establish connection: {}", e);
             }
-        }
-    };
+            Ok(stream) => {
+                match call_peer(
+                    stream,
+                    state,
+                    peer_address,
+                    main_to_peer_thread_rx,
+                    peer_thread_to_main_tx,
+                    &own_handshake_data,
+                    distance,
+                )
+                .await
+                {
+                    Ok(()) => (),
+                    Err(e) => error!("An error occurred: {}. Connection closing", e),
+                }
+            }
+        };
 
-    info!("Connection closing");
+        info!("Connection closing");
+    })
+    .catch_unwind()
+    .await;
+
+    match panic_result {
+        Ok(_) => (),
+        Err(_) => {
+            error!("Peer thread (outgoing) for {peer_address} panicked. Invoking close connection callback");
+            let _ret = close_peer_connected_callback(
+                &state_clone,
+                peer_address,
+                &peer_thread_to_main_tx_clone,
+            )
+            .await;
+        }
+    }
 }
 
 async fn call_peer<S>(
