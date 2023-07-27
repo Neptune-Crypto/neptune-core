@@ -37,7 +37,7 @@ ctags:
 	rusty-tags vi
 
 format:
-	cargo fmt
+	cargo fmt --all --check
 
 install:
 	cp target/$(target)/$(prog) ~/bin/$(prog)$(extension)
@@ -65,7 +65,7 @@ bench-no-run:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
 	cargo bench --no-run
 
-all: lint build test bench-no-run
+all: lint format build test bench-no-run
 
 help:
 	@echo "usage: make [debug=1]"

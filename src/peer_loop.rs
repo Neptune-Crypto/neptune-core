@@ -360,8 +360,7 @@ impl PeerLoopHandler {
             PeerMessage::Block(t_block) => {
                 info!(
                     "Got new block from peer {}, block height {}",
-                    self.peer_address,
-                    t_block.header.height
+                    self.peer_address, t_block.header.height
                 );
                 let new_block_height = t_block.header.height;
 

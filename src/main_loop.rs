@@ -798,14 +798,13 @@ impl MainLoopHandler {
             .send(MainToPeerThread::MakePeerDiscoveryRequest)?;
 
         // 1)
-        let (peer_candidate, candidate_distance) =
-            match main_loop_state.potential_peers.get_distant_candidate(
-                &connected_peers,
-                self.global_state.net.instance_id,
-            ) {
-                Some(candidate) => candidate,
-                None => return Ok(()),
-            };
+        let (peer_candidate, candidate_distance) = match main_loop_state
+            .potential_peers
+            .get_distant_candidate(&connected_peers, self.global_state.net.instance_id)
+        {
+            Some(candidate) => candidate,
+            None => return Ok(()),
+        };
 
         // 2)
         info!(

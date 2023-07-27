@@ -45,7 +45,8 @@ impl PeerInfo {
     /// Return the socket address that the peer is expected to listen on. Returns `None` if peer does not accept
     /// incoming connections.
     pub fn listen_address(&self) -> Option<SocketAddr> {
-        self.port_for_incoming_connections.map(|port| SocketAddr::new(self.connected_address.ip(), port))
+        self.port_for_incoming_connections
+            .map(|port| SocketAddr::new(self.connected_address.ip(), port))
     }
 }
 
