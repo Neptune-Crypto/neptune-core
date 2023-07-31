@@ -111,7 +111,7 @@ impl SendScreen {
         *notice_arc.lock().await = "Validated amount; checking against balance ...".to_string();
 
         let enough_balance = rpc_client
-            .amount_leq_balance(context::current(), valid_amount)
+            .amount_leq_synced_balance(context::current(), valid_amount)
             .await
             .unwrap();
         if !enough_balance {

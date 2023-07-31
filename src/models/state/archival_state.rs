@@ -1549,11 +1549,17 @@ mod archival_state_tests {
         // Now Alice should have a balance of 100 and Bob a balance of 200
         assert_eq!(
             Into::<Amount>::into(100),
-            alice_state.wallet_state.get_balance().await
+            alice_state
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_amount
         );
         assert_eq!(
             Into::<Amount>::into(200),
-            bob_state.wallet_state.get_balance().await
+            bob_state
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_amount
         );
 
         // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
@@ -1678,8 +1684,16 @@ mod archival_state_tests {
                 &mut bob_state.wallet_state.wallet_db.lock().await,
             )
             .unwrap();
-        assert!(alice_state.wallet_state.get_balance().await.is_zero());
-        assert!(bob_state.wallet_state.get_balance().await.is_zero());
+        assert!(alice_state
+            .get_wallet_status_for_tip()
+            .await
+            .synced_unspent_amount
+            .is_zero());
+        assert!(bob_state
+            .get_wallet_status_for_tip()
+            .await
+            .synced_unspent_amount
+            .is_zero());
 
         // Update genesis wallet and verify that all ingoing UTXOs are recorded
         for rec_data in receiver_data_from_alice {

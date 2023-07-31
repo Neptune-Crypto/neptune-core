@@ -18,6 +18,7 @@ use self::mempool::Mempool;
 use self::networking_state::NetworkingState;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
+use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::transaction::transaction_kernel::{
     PubScriptHashAndInput, TransactionKernel,
 };
@@ -77,6 +78,14 @@ pub struct UtxoReceiverData {
 }
 
 impl GlobalState {
+    pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
+        // Grab locks in canonical order, hold over execution of request to wallet
+        let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
+        let block_lock = self.chain.light_state.latest_block.lock().await;
+        self.wallet_state
+            .get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
+    }
+
     /// Create a transaction that sends coins to the given
     /// `recipient_utxos` from some selection of owned UTXOs.
     /// A change UTXO will be added if needed; the caller
@@ -691,7 +700,8 @@ mod global_state_tests {
         }
 
         // Verify that wallet has a monitored UTXO (from genesis)
-        assert!(!global_state.wallet_state.get_balance().await.is_zero());
+        let wallet_status = global_state.get_wallet_status_for_tip().await;
+        assert!(!wallet_status.synced_unspent_amount.is_zero());
 
         // Verify that this is unsynced with mock_block_1a
         assert!(

@@ -724,9 +724,13 @@ mod wallet_tests {
         let premine_receiver_global_state =
             get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
         let preminers_original_balance = premine_receiver_global_state
-            .wallet_state
-            .get_balance()
-            .await;
+            .get_wallet_status_for_tip()
+            .await
+            .synced_unspent_amount;
+        assert!(
+            !preminers_original_balance.is_zero(),
+            "Premine must have non-zero synced balance"
+        );
 
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
 
@@ -816,9 +820,9 @@ mod wallet_tests {
                 .checked_sub(&Into::<Amount>::into(15))
                 .unwrap(),
             premine_receiver_global_state
-                .wallet_state
-                .get_balance()
-                .await,
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_amount,
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 

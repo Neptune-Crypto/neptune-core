@@ -34,7 +34,7 @@ enum Command {
         fee: Amount,
     },
     Shutdown,
-    Balance,
+    SyncedBalance,
     WalletStatus,
     GetReceivingAddress,
     MempoolTxCount,
@@ -122,8 +122,12 @@ async fn main() -> Result<()> {
             println!("Shutdown-command completed successfully.");
         }
 
-        Command::Balance => {
-            let balance: BigUint = client.get_balance(context::current()).await?.0.into();
+        Command::SyncedBalance => {
+            let balance: BigUint = client
+                .get_synced_balance(context::current())
+                .await?
+                .0
+                .into();
             println!("{}", balance);
         }
 

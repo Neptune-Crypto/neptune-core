@@ -31,7 +31,7 @@ use super::screen::Screen;
 
 #[derive(Debug, Clone)]
 pub struct OverviewData {
-    balance: Option<Amount>,
+    synced_balance: Option<Amount>,
     confirmations: Option<usize>,
     synchronization_percentage: Option<f64>,
 
@@ -64,7 +64,7 @@ pub struct OverviewData {
 impl OverviewData {
     pub fn new(network: Network, listen_address: Option<SocketAddr>) -> Self {
         Self {
-            balance: Default::default(),
+            synced_balance: Default::default(),
             confirmations: Default::default(),
             synchronization_percentage: Default::default(),
             network,
@@ -91,7 +91,7 @@ impl OverviewData {
     }
     pub fn test() -> Self {
         OverviewData {
-            balance: Some(Amount::zero()),
+            synced_balance: Some(Amount::zero()),
             confirmations: Some(17),
             synchronization_percentage: Some(99.5),
 
@@ -198,7 +198,7 @@ impl OverviewScreen {
                                 own_overview_data.peer_count=resp.peer_count;
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
-                                own_overview_data.balance = Some(resp.balance);
+                                own_overview_data.synced_balance = Some(resp.synced_balance);
                                 own_overview_data.is_mining = resp.is_mining;
                             }
 
@@ -351,8 +351,8 @@ impl Widget for OverviewScreen {
 
         // balance
         lines.push(format!(
-            "balance: {} {}",
-            dashifnotset!(data.balance),
+            "synced balance: {} {}",
+            dashifnotset!(data.synced_balance),
             match data.confirmations {
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),

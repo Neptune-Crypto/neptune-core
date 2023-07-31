@@ -29,7 +29,7 @@ use crate::models::state::{GlobalState, UtxoReceiverData};
 pub struct DashBoardOverviewDataFromClient {
     pub tip_header: BlockHeader,
     pub syncing: bool,
-    pub balance: Amount,
+    pub synced_balance: Amount,
     pub mempool_size: usize,
     pub mempool_tx_count: usize,
 
@@ -66,7 +66,7 @@ pub trait RPC {
     async fn get_header(hash: Digest) -> Option<BlockHeader>;
 
     // Get sum of unspent UTXOs.
-    async fn get_balance() -> Amount;
+    async fn get_synced_balance() -> Amount;
 
     async fn get_history() -> Vec<(Duration, Amount, Sign)>;
 
@@ -91,7 +91,7 @@ pub trait RPC {
     async fn validate_amount(amount: String) -> Option<Amount>;
 
     /// Determine whether the given amount is less than (or equal to) the balance
-    async fn amount_leq_balance(amount: Amount) -> bool;
+    async fn amount_leq_synced_balance(amount: Amount) -> bool;
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
@@ -140,9 +140,9 @@ impl RPC for NeptuneRPCServer {
     type SendFut = Ready<Option<Digest>>;
     type ValidateAddressFut = Ready<Option<generation_address::ReceivingAddress>>;
     type ValidateAmountFut = Ready<Option<Amount>>;
-    type AmountLeqBalanceFut = Ready<bool>;
+    type AmountLeqSyncedBalanceFut = Ready<bool>;
     type ShutdownFut = Ready<bool>;
-    type GetBalanceFut = Ready<Amount>;
+    type GetSyncedBalanceFut = Ready<Amount>;
     type GetWalletStatusFut = Ready<WalletStatus>;
     type GetTipHeaderFut = Ready<BlockHeader>;
     type GetHeaderFut = Ready<Option<BlockHeader>>;
@@ -248,28 +248,23 @@ impl RPC for NeptuneRPCServer {
         future::ready(Some(amount))
     }
 
-    fn amount_leq_balance(
+    fn amount_leq_synced_balance(
         self,
         _ctx: context::Context,
         amount: Amount,
-    ) -> Self::AmountLeqBalanceFut {
+    ) -> Self::AmountLeqSyncedBalanceFut {
         // test inequality
-        let balance = executor::block_on(self.state.wallet_state.get_balance());
-        future::ready(amount <= balance)
+        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
+        future::ready(amount <= wallet_status.synced_unspent_amount)
     }
 
-    fn get_balance(self, _context: tarpc::context::Context) -> Self::GetBalanceFut {
-        let balance = executor::block_on(self.state.wallet_state.get_balance());
-        future::ready(balance)
+    fn get_synced_balance(self, _context: tarpc::context::Context) -> Self::GetSyncedBalanceFut {
+        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
+        future::ready(wallet_status.synced_unspent_amount)
     }
 
     fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {
-        let mut db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
-        let block_lock = executor::block_on(self.state.chain.light_state.latest_block.lock());
-        let wallet_status = self
-            .state
-            .wallet_state
-            .get_wallet_status_from_lock(&mut db_lock, &block_lock);
+        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
         future::ready(wallet_status)
     }
 
@@ -335,7 +330,7 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
     ) -> Self::GetDashboardOverviewDataFut {
         let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
-        let balance = executor::block_on(self.state.wallet_state.get_balance());
+        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
         let syncing = self.state.net.syncing.read().unwrap().to_owned();
         let mempool_size = self.state.mempool.get_size();
         let mempool_tx_count = self.state.mempool.len();
@@ -354,7 +349,7 @@ impl RPC for NeptuneRPCServer {
         future::ready(DashBoardOverviewDataFromClient {
             tip_header,
             syncing,
-            balance,
+            synced_balance: wallet_status.synced_unspent_amount,
             mempool_size,
             mempool_tx_count,
             peer_count,
@@ -588,7 +583,7 @@ mod rpc_server_tests {
             rpc_server_to_main_tx: dummy_tx,
         };
 
-        let balance = rpc_server.get_balance(context::current()).await;
+        let balance = rpc_server.get_synced_balance(context::current()).await;
         assert!(balance.is_zero());
 
         Ok(())

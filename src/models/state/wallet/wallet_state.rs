@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -616,37 +616,6 @@ impl WalletState {
             }
         }
         true
-    }
-
-    pub async fn get_balance(&self) -> Amount {
-        debug!("get_balance: Attempting to acquire lock on wallet DB.");
-
-        // Limit scope of wallet DB lock to release it ASAP
-        let sum: Amount = {
-            // As long as we're only grabbing one lock here, there
-            // shouln't be any risk of a deadlock
-            let lock = self.wallet_db.lock().await;
-
-            let tick = SystemTime::now();
-
-            let num_monitored_utxos = lock.monitored_utxos.len();
-            let mut balance = Amount::zero();
-            for i in 0..num_monitored_utxos {
-                let monitored_utxo = lock.monitored_utxos.get(i);
-                if monitored_utxo.spent_in_block.is_none() {
-                    balance = balance + monitored_utxo.utxo.get_native_coin_amount();
-                }
-            }
-            debug!(
-                "Computed balance of {} UTXOs in {:?}",
-                num_monitored_utxos,
-                tick.elapsed(),
-            );
-            balance
-        };
-
-        debug!("get_balance: Released wallet DB lock");
-        sum
     }
 
     pub fn get_wallet_status_from_lock(
