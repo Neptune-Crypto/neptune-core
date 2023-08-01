@@ -1,9 +1,9 @@
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
     snippet::{DataType, Snippet},
-    structure::get_field::GetField,
     ExecutionState,
 };
+use triton_vm::{instruction::LabelledInstructions, triton_asm, BFieldElement};
 use twenty_first::{
     shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
@@ -20,20 +20,23 @@ impl HashRemovalRecordIndices {
     fn pseudorandom_init_state(seed: [u8; 32]) -> ExecutionState {
         use std::collections::HashMap;
 
-        use rand::{Rng, RngCore};
+        use rand::Rng;
         use tasm_lib::get_init_tvm_stack;
-        use triton_vm::BFieldElement;
 
         use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
         let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
         let removal_record = pseudorandom_removal_record::<Hash>(rng.gen());
-        let address: BFieldElement = BFieldElement::new(rng.next_u64() % (1u64 << 20));
+        let address: BFieldElement = BFieldElement::new(rng.gen_range(2..(1 << 20)));
 
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         for (i, v) in removal_record.encode().iter().enumerate() {
             memory.insert(address + BFieldElement::new(i as u64), *v);
         }
+        memory.insert(
+            address - BFieldElement::new(1),
+            BFieldElement::new(removal_record.encode().len() as u64),
+        );
 
         let mut stack = get_init_tvm_stack();
         stack.push(address);
@@ -80,26 +83,25 @@ impl Snippet for HashRemovalRecordIndices {
     }
 
     fn function_code(&self, library: &mut Library) -> String {
-        let get_field = library.import(Box::new(GetField));
+        type Rrh = RemovalRecord<Hash>;
+        let rr_to_ais_with_size = tasm_lib::field_with_size!(Rrh::absolute_indices);
         let hash_varlen = library.import(Box::new(HashVarlen));
         let entrypoint = self.entrypoint();
 
-        format!(
-            "
+        let code = triton_asm! {
         // BEFORE: _ *removal_record
         // AFTER: _ [digest]
         {entrypoint}:
-            push 0 // _ *removal_record 0 (= field absolute_index_set)
 
-            call {get_field} // _ *ais_si
+            {&rr_to_ais_with_size}  // *absolute_index_set 180
 
-            push 1 add
-
-            read_mem swap 1 push 1 add swap 1
+            // push 0 assert
 
             call {hash_varlen}
-            return"
-        )
+
+            return
+        };
+        LabelledInstructions(code).to_string()
     }
 
     fn crash_conditions(&self) -> Vec<String> {
@@ -161,28 +163,21 @@ impl Snippet for HashRemovalRecordIndices {
         memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
     ) {
         // read address
-        let mut address = stack.pop().unwrap();
+        let address = stack.pop().unwrap();
 
         // read object
         let mut encoding = vec![];
-        encoding.push(*memory.get(&address).unwrap());
-        address.increment();
-        let size_field_0 = encoding.last().unwrap().value() as usize;
-        for _ in 0..size_field_0 {
-            encoding.push(*memory.get(&address).unwrap());
-            address.increment();
-        }
-        encoding.push(*memory.get(&address).unwrap());
-        address.increment();
-        let size_field_1 = encoding.last().unwrap().value() as usize;
-        for _ in 0..size_field_1 {
-            encoding.push(*memory.get(&address).unwrap());
-            address.increment();
+        let size = memory
+            .get(&(address - BFieldElement::new(1)))
+            .unwrap()
+            .value();
+        for i in 0..size {
+            encoding.push(*memory.get(&(address + BFieldElement::new(i))).unwrap());
         }
         let removal_record = *RemovalRecord::<Hash>::decode(&encoding).unwrap();
 
         // hash absolute index set
-        let digest = Hash::hash_varlen(&removal_record.absolute_indices.encode()[1..]);
+        let digest = Hash::hash_varlen(&removal_record.absolute_indices.encode());
 
         // write hash to stack
         stack.push(digest.values()[4]);
@@ -199,7 +194,7 @@ mod tests {
 
     use itertools::Itertools;
     use num_traits::Zero;
-    use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+    use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{
         get_init_tvm_stack,
         list::{
@@ -235,12 +230,12 @@ mod tests {
         let removal_records = (0..num_removal_records)
             .map(|_| pseudorandom_removal_record::<Hash>(rng.gen()))
             .collect_vec();
-        let address = BFieldElement::new(rng.next_u64() % (1 << 20));
+        let address = BFieldElement::new(rng.gen_range(2..(1 << 20)));
 
         // compute digests
         let rust_digests = removal_records
             .iter()
-            .map(|rr| Hash::hash_varlen(&rr.absolute_indices.encode()[1..]))
+            .map(|rr| Hash::hash_varlen(&rr.absolute_indices.encode()))
             .collect_vec();
 
         // populate memory

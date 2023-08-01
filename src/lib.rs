@@ -1,4 +1,4 @@
-#![recursion_limit = "512"]
+#![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
 pub mod config_models;
 mod connect_to_peers;

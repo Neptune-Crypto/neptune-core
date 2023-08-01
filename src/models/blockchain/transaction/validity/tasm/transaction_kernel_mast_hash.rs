@@ -1,5 +1,5 @@
 use crate::models::blockchain::shared::Hash;
-use itertools::Itertools;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use num_traits::One;
 use tasm_lib::library::Library;
 use tasm_lib::{
@@ -9,10 +9,11 @@ use tasm_lib::{
     },
     rust_shadowing_helper_functions,
     snippet::{DataType, Snippet},
-    structure::get_field_with_size::GetFieldWithSize,
     ExecutionState,
 };
-use triton_vm::BFieldElement;
+use triton_vm::instruction::LabelledInstructions;
+use triton_vm::{triton_asm, BFieldElement};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::{
     shared_math::{tip5::Digest, tip5::DIGEST_LENGTH},
     util_types::algebraic_hasher::AlgebraicHasher,
@@ -33,12 +34,20 @@ impl Snippet for TransactionKernelMastHash {
         let set_element = library.import(Box::new(UnsafeSet(DataType::Digest)));
         let set_length = library.import(Box::new(UnsafeSetLength(DataType::Digest)));
 
-        let get_field_with_size = library.import(Box::new(GetFieldWithSize));
+        let kernel_to_inputs_with_size = tasm_lib::field_with_size!(TransactionKernel::inputs);
+        let kernel_to_outputs_with_size = tasm_lib::field_with_size!(TransactionKernel::outputs);
+        let kernel_to_pubscripts_with_size =
+            tasm_lib::field_with_size!(TransactionKernel::pubscript_hashes_and_inputs);
+        let kernel_to_fee_with_size = tasm_lib::field_with_size!(TransactionKernel::fee);
+        let kernel_to_coinbase_with_size = tasm_lib::field_with_size!(TransactionKernel::coinbase);
+        let kernel_to_timestamp_with_size =
+            tasm_lib::field_with_size!(TransactionKernel::timestamp);
+        let kernel_to_mutator_set_hash_with_size =
+            tasm_lib::field_with_size!(TransactionKernel::mutator_set_hash);
 
         let hash_varlen = library.import(Box::new(HashVarlen));
 
-        format!(
-            "
+        let code = triton_asm! {
         // BEFORE: _ *kernel
         // AFTER: _ d4 d3 d2 d1 d0
         {entrypoint}:
@@ -51,56 +60,54 @@ impl Snippet for TransactionKernelMastHash {
 
             // populate list[8] with inputs digest
             dup 1                       // _ *kernel *list *kernel
-            push 0
-            call {get_field_with_size}  // _ *kernel *list *inputs *inputs_size
+            {&kernel_to_inputs_with_size}
+                                        // _ *kernel *list *inputs *inputs_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 8                // _ *kernel *list d4 d3 d2 d1 d0 *list 8
             call {set_element}          // _ *kernel *list
 
             // populate list[9] with outputs digest
             dup 1                       // _ *kernel *list *kernel
-            push 1
-            call {get_field_with_size}  // _ *kernel *list *outputs *outputs_size
+            {&kernel_to_outputs_with_size}  // _ *kernel *list *outputs *outputs_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 9                // _ *kernel *list d4 d3 d2 d1 d0 *list 9
             call {set_element}          // _ *kernel *list
 
             // populate list[10] with pubscript_hashes_and_inputs digest
             dup 1                       // _ *kernel *list *kernel
-            push 2
-            call {get_field_with_size}  // _ *kernel *list *pubscript_hashes_and_inputs *pubscript_hashes_and_inputs_size_size
+            {&kernel_to_pubscripts_with_size}
+                                        // _ *kernel *list *pubscript_hashes_and_inputs *pubscript_hashes_and_inputs_size_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 10               // _ *kernel *list d4 d3 d2 d1 d0 *list 10
             call {set_element}          // _ *kernel *list
 
             // populate list[11] with fee digest
             dup 1                       // _ *kernel *list *kernel
-            push 3
-            call {get_field_with_size}  // _ *kernel *list *fee *fee_size
+            {&kernel_to_fee_with_size}   // _ *kernel *list *fee *fee_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 11               // _ *kernel *list d4 d3 d2 d1 d0 *list 11
             call {set_element}          // _ *kernel *list
 
             // populate list[12] with coinbase digest
             dup 1                       // _ *kernel *list *kernel
-            push 4
-            call {get_field_with_size}  // _ *kernel *list *coinbase *coinbase_size
+            {&kernel_to_coinbase_with_size}
+                                        // _ *kernel *list *coinbase *coinbase_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 12               // _ *kernel *list d4 d3 d2 d1 d0 *list 12
             call {set_element}          // _ *kernel *list
 
             // populate list[13] with timestamp digest
             dup 1                       // _ *kernel *list *kernel
-            push 5
-            call {get_field_with_size}  // _ *kernel *list *timestamp *timestamp_size
+            {&kernel_to_timestamp_with_size}
+                                        // _ *kernel *list *timestamp *timestamp_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 13               // _ *kernel *list d4 d3 d2 d1 d0 *list 13
             call {set_element}          // _ *kernel *list
 
             // populate list[14] with mutator set hash digest
             dup 1                       // _ *kernel *list *kernel
-            push 6
-            call {get_field_with_size}  // _ *kernel *list *mutator_set_hash *mutator_set_hash_size
+            {&kernel_to_mutator_set_hash_with_size}
+                                        // _ *kernel *list *mutator_set_hash *mutator_set_hash_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 14               // _ *kernel *list d4 d3 d2 d1 d0 *list 14
             call {set_element}          // _ *kernel *list
@@ -188,8 +195,8 @@ impl Snippet for TransactionKernelMastHash {
             call {get_element}          // _ d4 d3 d2 d1 d0
 
             return
-            "
-        )
+        };
+        LabelledInstructions(code).to_string()
     }
 
     fn rust_shadowing(
@@ -200,94 +207,118 @@ impl Snippet for TransactionKernelMastHash {
         memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
     ) {
         // read address
-        let mut address = stack.pop().unwrap();
+        let address = stack.pop().unwrap();
+
+        let mut sequence = vec![];
+        let size = memory
+            .get(&(address - BFieldElement::new(1)))
+            .unwrap()
+            .value();
+        for i in 0..size {
+            sequence.push(*memory.get(&(BFieldElement::new(i) + address)).unwrap());
+        }
+        let kernel = *TransactionKernel::decode(&sequence).unwrap();
 
         // inputs
-        let inputs_size = memory.get(&address).unwrap().value() as usize;
-        let inputs_encoded = (0..inputs_size)
-            .map(|i| {
-                *memory
-                    .get(&(address + BFieldElement::new(1 + i as u64)))
-                    .unwrap()
-            })
-            .collect_vec();
+        // let inputs_size = memory.get(&address).unwrap().value() as usize;
+        // let inputs_encoded = (0..inputs_size)
+        //     .map(|i| {
+        //         *memory
+        //             .get(&(address + BFieldElement::new(i as u64)))
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
+        let inputs = kernel.inputs;
+        let inputs_encoded = inputs.encode();
         let inputs_hash = Hash::hash_varlen(&inputs_encoded);
-        address += BFieldElement::one() + BFieldElement::new(inputs_size as u64);
+        // address += BFieldElement::one() + BFieldElement::new(inputs_size as u64);
 
         // outputs
-        let outputs_size = memory.get(&address).unwrap().value() as usize;
-        let outputs_encoded = (0..outputs_size)
-            .map(|i| {
-                *memory
-                    .get(&(address + BFieldElement::new(1 + i as u64)))
-                    .unwrap()
-            })
-            .collect_vec();
+        // let outputs_size = memory.get(&address).unwrap().value() as usize;
+        // let outputs_encoded = (0..outputs_size)
+        //     .map(|i| {
+        //         *memory
+        //             .get(&(address + BFieldElement::new(i as u64)))
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
+        let outputs = kernel.outputs;
+        let outputs_encoded = outputs.encode();
         let outputs_hash = Hash::hash_varlen(&outputs_encoded);
-        address += BFieldElement::one() + BFieldElement::new(outputs_size as u64);
+        // address += BFieldElement::one() + BFieldElement::new(outputs_size as u64);
 
         // pubscript_hashes_and_inputs
-        let pubscript_hashes_and_inputs_size = memory.get(&address).unwrap().value() as usize;
-        let pubscript_hashes_and_inputs_encoded = (0..pubscript_hashes_and_inputs_size)
-            .map(|i| {
-                *memory
-                    .get(&(address + BFieldElement::new(1 + i as u64)))
-                    .unwrap()
-            })
-            .collect_vec();
+        // let pubscript_hashes_and_inputs_size = memory.get(&address).unwrap().value() as usize;
+        // let pubscript_hashes_and_inputs_encoded = (0..pubscript_hashes_and_inputs_size)
+        //     .map(|i| {
+        //         *memory
+        //             .get(&(address + BFieldElement::new(i as u64)))
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
+        let pubscript_hashes_and_inputs = kernel.pubscript_hashes_and_inputs;
+        let pubscript_hashes_and_inputs_encoded = pubscript_hashes_and_inputs.encode();
         let pubscript_hashes_and_inputs_hash =
             Hash::hash_varlen(&pubscript_hashes_and_inputs_encoded);
-        address +=
-            BFieldElement::one() + BFieldElement::new(pubscript_hashes_and_inputs_size as u64);
+        // address +=
+        //     BFieldElement::one() + BFieldElement::new(pubscript_hashes_and_inputs_size as u64);
 
         // fee
-        let fee_size = memory.get(&address).unwrap().value() as usize;
-        let fee_encoded = (0..fee_size)
-            .map(|i| {
-                *memory
-                    .get(&(address + BFieldElement::new(1 + i as u64)))
-                    .unwrap()
-            })
-            .collect_vec();
+        // let fee_size = memory.get(&address).unwrap().value() as usize;
+        // let fee_encoded = (0..fee_size)
+        //     .map(|i| {
+        //         *memory
+        //             .get(&(address + BFieldElement::new(i as u64)))
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
+        let fee = kernel.fee;
+        let fee_encoded = fee.encode();
         let fee_hash = Hash::hash_varlen(&fee_encoded);
-        address += BFieldElement::one() + BFieldElement::new(fee_size as u64);
+        // address += BFieldElement::one() + BFieldElement::new(fee_size as u64);
 
         // coinbase
-        let coinbase_size = memory.get(&address).unwrap().value() as usize;
-        let coinbase_encoded = (0..coinbase_size)
-            .map(|i| {
-                *memory
-                    .get(&(address + BFieldElement::new(1 + i as u64)))
-                    .unwrap()
-            })
-            .collect_vec();
+        // let coinbase_size = memory.get(&address).unwrap().value() as usize;
+        // let coinbase_encoded = (0..coinbase_size)
+        //     .map(|i| {
+        //         *memory
+        //             .get(&(address + BFieldElement::new(i as u64)))
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
+        let coinbase = kernel.coinbase;
+        let coinbase_encoded = coinbase.encode();
         let coinbase_hash = Hash::hash_varlen(&coinbase_encoded);
-        address += BFieldElement::one() + BFieldElement::new(coinbase_size as u64);
+        // address += BFieldElement::one() + BFieldElement::new(coinbase_size as u64);
 
         // timestamp
-        let timestamp_size = memory.get(&address).unwrap().value() as usize;
-        assert_eq!(timestamp_size, 1);
-        let timestamp_encoded = (0..timestamp_size)
-            .map(|i| {
-                *memory
-                    .get(&(address + BFieldElement::new(1 + i as u64)))
-                    .unwrap()
-            })
-            .collect_vec();
+        // let timestamp_size = memory.get(&address).unwrap().value() as usize;
+        // assert_eq!(timestamp_size, 1);
+        // let timestamp_encoded = (0..timestamp_size)
+        //     .map(|i| {
+        //         *memory
+        //             .get(&(address + BFieldElement::new(i as u64)))
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
+        let timestamp = kernel.timestamp;
+        let timestamp_encoded = timestamp.encode();
         let timestamp_hash = Hash::hash_varlen(&timestamp_encoded);
-        address += BFieldElement::one() + BFieldElement::new(timestamp_size as u64);
+        // address += BFieldElement::one() + BFieldElement::new(timestamp_size as u64);
 
         // mutator_set_hash
-        let mutator_set_hash_size = memory.get(&address).unwrap().value() as usize;
-        let mutator_set_hash_encoded = (0..mutator_set_hash_size)
-            .map(|i| {
-                *memory
-                    .get(&(address + BFieldElement::new(1 + i as u64)))
-                    .unwrap()
-            })
-            .collect_vec();
+        // let mutator_set_hash_size = memory.get(&address).unwrap().value() as usize;
+        // let mutator_set_hash_encoded = (0..mutator_set_hash_size)
+        //     .map(|i| {
+        //         *memory
+        //             .get(&(address + BFieldElement::new(i as u64)))
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
+        let mutator_set_hash = kernel.mutator_set_hash;
+        let mutator_set_hash_encoded = mutator_set_hash.encode();
         let mutator_set_hash_hash = Hash::hash_varlen(&mutator_set_hash_encoded);
-        address += BFieldElement::one() + BFieldElement::new(mutator_set_hash_size as u64);
+        // address += BFieldElement::one() + BFieldElement::new(mutator_set_hash_size as u64);
 
         // padding
         let zero = Digest::default();
@@ -369,7 +400,7 @@ impl Snippet for TransactionKernelMastHash {
         #[cfg(test)]
         {
             vec![input_state_with_kernel_in_memory(
-                BFieldElement::new(rand::Rng::gen_range(&mut rand::thread_rng(), 0..(1 << 20))),
+                BFieldElement::new(rand::Rng::gen_range(&mut rand::thread_rng(), 2..(1 << 20))),
                 &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
                     &crate::tests::shared::random_transaction_kernel(),
                 ),
@@ -441,12 +472,17 @@ fn input_state_with_kernel_in_memory(
     address: BFieldElement,
     transaction_kernel_encoded: &[BFieldElement],
 ) -> ExecutionState {
+    assert!(address.value() > 1);
     // populate memory
     let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
         std::collections::HashMap::new();
     for (i, t) in transaction_kernel_encoded.iter().enumerate() {
         memory.insert(address + BFieldElement::new(i as u64), *t);
     }
+    memory.insert(
+        address - BFieldElement::new(1),
+        BFieldElement::new(transaction_kernel_encoded.len() as u64),
+    );
 
     // set dynamic allocator
     memory.insert(
@@ -485,7 +521,7 @@ mod tests {
         let tx_kernel = pseudorandom_transaction_kernel(rng.gen(), 2, 2, 1);
         let mut output_with_known_digest = test_rust_equivalence_given_execution_state(
             &TransactionKernelMastHash,
-            input_state_with_kernel_in_memory(BFieldElement::one(), &tx_kernel.encode()),
+            input_state_with_kernel_in_memory(BFieldElement::new(3), &tx_kernel.encode()),
         );
 
         // read the digest from the very short TX kernel
