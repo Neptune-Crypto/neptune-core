@@ -6,6 +6,7 @@ use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
 use tasm_lib::compiled_program::CompiledProgram;
 use tasm_lib::library::Library;
+use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::{
     io::load_struct_from_input::LoadStructFromInput,
     list::{
@@ -17,7 +18,6 @@ use tasm_lib::{
     },
     mmr::bag_peaks::BagPeaks,
     snippet::{DataType, InputSource},
-    structure::get_field::GetField,
     DIGEST_LENGTH,
 };
 use tracing::{debug, warn};
@@ -57,7 +57,18 @@ use super::{
     hash_utxo::HashUtxo, verify_aocl_membership::VerifyAoclMembership,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, FieldCount)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    GetSize,
+    BFieldCodec,
+    FieldCount,
+    TasmObject,
+)]
 pub struct RemovalRecordsIntegrityWitness {
     pub input_utxos: Vec<Utxo>,
     pub membership_proofs: Vec<MsMembershipProof<Hash>>,
@@ -137,7 +148,7 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                     &StarkParameters::default(),
                     &self.supported_claim.claim,
                     &Self::program(),
-                    witness,
+                    &witness.encode(), // double-encode, so as to prepend length
                 )
                 .expect("Proving integrity of removal records must succeed.");
                 self.supported_claim.support = ClaimSupport::Proof(proof);
@@ -165,8 +176,9 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                 //     self.supported_claim.claim.input.clone().into(),
                 //     witness.clone().into(),
                 // );
+                // double-encode witness to get length, so as to be able to read it from secin
                 let vm_result =
-                    Self::program().run(self.supported_claim.claim.input.clone(), witness.to_vec());
+                    Self::program().run(self.supported_claim.claim.input.clone(), witness.encode());
                 match vm_result {
                     Ok(observed_output) => {
                         let found_expected_output =
@@ -209,9 +221,13 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
 
         // 1. read and process witness data
-        let witness =
-            *RemovalRecordsIntegrityWitness::decode(&secret_input.iter().copied().collect_vec())
-                .unwrap();
+        let witness = *RemovalRecordsIntegrityWitness::decode(
+            &secret_input.iter().skip(1).copied().collect_vec(),
+        )
+        .unwrap();
+
+        println!("first element of witness: {}", witness.encode()[0]);
+        println!("first element of kernel: {}", witness.kernel.encode()[0]);
 
         // 2. assert that the kernel from the witness matches the hash in the public input
         // now we can trust all data in kernel
@@ -293,8 +309,6 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
     fn code() -> (Vec<LabelledInstruction>, Library) {
         let mut library = Library::new();
-        let num_fields_on_witness = RemovalRecordsIntegrityWitness::field_count();
-        let get_field = library.import(Box::new(GetField));
         let transaction_kernel_mast_hash = library.import(Box::new(TransactionKernelMastHash));
         let load_struct_from_input = library.import(Box::new(LoadStructFromInput {
             input_source: InputSource::SecretIn,
@@ -342,18 +356,31 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
         let _compute_indices = library.import(Box::new(ComputeIndices));
 
-        let code = triton_asm!(
+        // field getters
+        let witness_to_kernel = tasm_lib::field!(RemovalRecordsIntegrityWitness::kernel);
+        let witness_to_swbfa_hash = tasm_lib::field!(RemovalRecordsIntegrityWitness::swbfa_hash);
+        let witness_to_swbfi = tasm_lib::field!(RemovalRecordsIntegrityWitness::swbfi);
+        type MmraH = MmrAccumulator<Hash>;
+        let swbfi_to_peaks = tasm_lib::field!(MmraH::peaks);
+        let witness_to_aocl = tasm_lib::field!(RemovalRecordsIntegrityWitness::aocl);
+        let kernel_to_mutator_set_hash = tasm_lib::field!(TransactionKernel::mutator_set_hash);
+        let witness_to_utxos = tasm_lib::field!(RemovalRecordsIntegrityWitness::input_utxos);
+        let witness_to_mps = tasm_lib::field!(RemovalRecordsIntegrityWitness::membership_proofs);
+        let kernel_to_inputs = tasm_lib::field!(TransactionKernel::inputs);
+        let aocl_to_leaf_count = tasm_lib::field!(MmraH::leaf_count);
+        let aocl_to_peaks = tasm_lib::field!(MmraH::peaks);
+
+        let code = triton_asm! {
 
         // 1. read RemovalRecordsIntegrityWitness from secio
-        push {num_fields_on_witness}
+        push 1 // read 1 list, which is the encoding of the witness
         call {load_struct_from_input} // _ *witness
+        push 1 add
 
         // 2. assert that witness kernel hash == public input
         dup 0 // _ *witness *witness
-        push 5 // _ *witness *witness 5 (= field kernel)
-        call {get_field} // _ *witness *kernel_size_indicator
 
-        push 1 add       // _ *witness *kernel
+        {&witness_to_kernel}       // _ *witness *kernel
         dup 0 // _ *witness *kernel *kernel
         call {transaction_kernel_mast_hash} // _ *witness *kernel [witness_kernel_digest]
         {read_input} // _ *witness *kernel [witness_kernel_digest] [input_kernel_digest]
@@ -365,30 +392,21 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         push 0 push 0 push 0 push 0 push 0 // _ *witness *kernel 0 0 0 0 0
         dup 6 // _ *witness *kernel 0^5 *witness
-        push 4 // _ *witness *kernel 0^5 *witness 4 (= field swbfa_hash)
-        call {get_field} // _ *witness *kernel 0^5 *witness_swbfa_li
-        push 1 add // _ *witness *kernel 0^5 *witness_swbfa_hash
+        {&witness_to_swbfa_hash} // _ *witness *kernel 0^5 *witness_swbfa_hash
         call {read_digest}
 
         hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [garbage]
         pop pop pop pop pop // _ *witness *kernel [H(H(swbfaw)||0^5)]
 
         dup 6 // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness
-        push 3 // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness 3 (= field swbfi)
-        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_li
-        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi
-        push 1 // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi 1 (= field peaks)
-        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_peaks_li
-        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_peaks
+
+        {&witness_to_swbfi} // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi
+        {&swbfi_to_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness_swbfi_peaks
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash]
 
         dup 11 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness
-        push 2 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness 2 (= field aocl)
-        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_size_indicator
-        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl
-        push 1 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl 1 (= field peaks)
-        call {get_field} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks_li
-        push 1 add // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
+        {&witness_to_aocl.clone()} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl
+        {&aocl_to_peaks.clone()} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] [witness_aocl_hash]
 
         hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)] [garbage]
@@ -398,9 +416,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         pop pop pop pop pop // _ *witness *kernel [Hw]
 
         dup 5 // _ *witness *kernel [Hw] *kernel
-        push 6 // _ *witness *kernel [Hw] *kernel 6 (= field mutator_set_hash)
-        call {get_field} // _ *witness *kernel [Hw] *kernel_msh_li
-        push 1 add // _ *witness *kernel [Hw] *kernel_msh
+        {&kernel_to_mutator_set_hash} // _ *witness *kernel [Hw] *kernel_msh
         call {read_digest}
         // _ *witness *kernel [Hw] [Hk]
 
@@ -411,14 +427,12 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         // 4. derive index sets and match them against kernel
         dup 1 // _ *witness *kernel *witness
-        push 0 call {get_field} // _ *witness *kernel *utxos_si
-        push 1 add // _ *witness *kernel *utxos
+        {&witness_to_utxos} // _ *witness *kernel *utxos
         call {get_pointer_list} // _ *witness *kernel *[*utxo]
         call {map_hash_utxo} // _ *witness *kernel *[item]
 
         dup 2 // _ *witness *kernel *[item] *witness
-        push 1 call {get_field} // _ *witness *kernel *[item] *mps_si
-        push 1 add //_ *witness *kernel *[items] *mps
+        {&witness_to_mps} //_ *witness *kernel *[items] *mps
         call {get_pointer_list} //_ *witness *kernel *[item] *[*mp]
         swap 1 //_ *witness *kernel *[*mp] *[item]
         call {zip_digest_with_void_pointer} // _ *witness *kernel *[(*mp, item)]
@@ -434,9 +448,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {map_hash_index_list} // _  *[(*mp, item)] *witness *kernel *[index_list_hash]
 
         dup 1 // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel
-        push 0 // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel 0 (= field inputs)
-        call {get_field} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel_inputs_si
-        push 1 add // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel_inputs
+        {&kernel_to_inputs} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel_inputs
         call {get_pointer_list} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *[*tx_input]
         call {map_hash_removal_record_indices} // _  *[(*mp, item)] *witness *kernel *[witness_index_list_hash] *[kernel_index_list_hash]
 
@@ -446,17 +458,15 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // 5. verify that all items' commitments live in the aocl
         // get aocl leaf count
         dup 1 // _ *[(*mp, item)] *witness *kernel *witness
-        push 2 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl_si
-        push 1 add              // _ *[(*mp, item)] *witness *kernel *aocl
+        {&witness_to_aocl}              // _ *[(*mp, item)] *witness *kernel *aocl
         dup 0                   // _ *[(*mp, item)] *witness *kernel *aocl *aocl
-        push 0 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count_si
-        push 2 add // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count+2
+        {&aocl_to_leaf_count} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count_si
+        push 1 add // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count+2
         read_mem swap 1 push -1 add // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi *leaf_count+1
         read_mem swap 1 pop // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo
 
         dup 2                   // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *aocl
-        push 1 call {get_field} // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks_si
-        push 1 add              // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
+        {&aocl_to_peaks}              // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
 
 
         swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(*mp, item)]
@@ -477,7 +487,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         assert
 
         halt
-        );
+        };
 
         (code, library)
     }
@@ -645,8 +655,31 @@ mod tests {
                     .0)
         );
 
+        println!(
+            "kernel's mutator set accumulator hash: {}",
+            removal_record_integrity_witness.kernel.mutator_set_hash
+        );
+
+        println!(
+            "witness's active window hash: {}",
+            removal_record_integrity_witness.swbfa_hash
+        );
+        println!(
+            "peaks bag of swbfi: {}",
+            removal_record_integrity_witness.swbfi.bag_peaks()
+        );
+        println!(
+            "peaks: {}",
+            removal_record_integrity_witness
+                .swbfi
+                .get_peaks()
+                .iter()
+                .join(";")
+        );
+
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
-        let run_res = program.debug_terminal_state(stdin.clone(), secret_in.clone(), None, None);
+        // double-encode secret in so that we can read the struct from input
+        let run_res = program.debug_terminal_state(stdin.clone(), secret_in.encode(), None, None);
         match run_res {
             Ok(_) => (),
             Err((state, msg)) => panic!("Failed: {msg}\n last state was: {state}"),
@@ -659,8 +692,12 @@ mod tests {
         };
 
         if std::env::var("DYING_TO_PROVE").is_ok() {
-            let maybe_proof =
-                triton_vm::prove(&StarkParameters::default(), &claim, &program, &secret_in);
+            let maybe_proof = triton_vm::prove(
+                &StarkParameters::default(),
+                &claim,
+                &program,
+                &secret_in.encode(),
+            );
             assert!(maybe_proof.is_ok());
 
             assert!(triton_vm::verify(
@@ -687,7 +724,7 @@ mod tests {
         let witness = pseudorandom_removal_record_integrity_witness(rng.gen());
         let kernel_hash = witness.kernel.mast_hash().reversed().values();
         let public_input = kernel_hash.to_vec();
-        let witness = witness.encode();
+        let witness = witness.encode().encode(); // double encoding to read struct from input
 
         test_rust_shadow::<RemovalRecordsIntegrity>(&public_input, &witness);
     }
