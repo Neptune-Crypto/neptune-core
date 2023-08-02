@@ -1,82 +1,51 @@
 tasm_neptune_transaction_removal_records_integrity:
 
 # call graph
- tasm_io_load_struct_from_input_secin: 74699
-   tasm_io_load_from_input_secin: 658
+ tasm_io_load_struct_from_input_secin: 76122
+   tasm_io_load_from_input_secin: 76110
      tasm_memory_dyn_malloc: 25
-     tasm_io_load_from_input_secin_loop: 616
-   tasm_io_load_struct_from_input_secin_loop: 74034
-     tasm_io_load_from_input_secin: 38878
-       tasm_memory_dyn_malloc: 25
-       tasm_io_load_from_input_secin_loop: 38836
-     tasm_io_load_from_input_secin: 2660
-       tasm_memory_dyn_malloc: 25
-       tasm_io_load_from_input_secin_loop: 2618
-     tasm_io_load_from_input_secin: 320
-       tasm_memory_dyn_malloc: 25
-       tasm_io_load_from_input_secin_loop: 278
-     tasm_io_load_from_input_secin: 112
-       tasm_memory_dyn_malloc: 25
-       tasm_io_load_from_input_secin_loop: 70
-     tasm_io_load_from_input_secin: 32014
-       tasm_memory_dyn_malloc: 25
-       tasm_io_load_from_input_secin_loop: 31972
- tasm_structure_get_field: 73
-   tasm_structure_get_field_loop: 70
- tasm_neptune_transaction_transaction_kernel_mast_hash: 21527
+     tasm_io_load_from_input_secin_loop: 76068
+   tasm_io_load_struct_from_input_secin_loop: 5
+ tasm_neptune_transaction_transaction_kernel_mast_hash: 21792
    tasm_list_unsafe_u32_new_digest: 33
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_digest: 2
-   tasm_structure_get_field_with_size: 13
-     tasm_structure_get_field_with_size_loop: 5
-   tasm_hashing_hash_varlen: 18808
-     tasm_hashing_hash_varlen_loop: 18655
+   tasm_hashing_hash_varlen: 19354
+     tasm_hashing_hash_varlen_loop: 19201
        tasm_hashing_hash_varlen_if_branch: 4
      tasm_hashing_hash_varlen_pad_varnum_zeros: 93
      tasm_hashing_hash_varlen_read_remaining_elements: 22
    tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_structure_get_field_with_size: 26
-     tasm_structure_get_field_with_size_loop: 18
    tasm_hashing_hash_varlen: 244
      tasm_hashing_hash_varlen_loop: 91
        tasm_hashing_hash_varlen_if_branch: 4
      tasm_hashing_hash_varlen_pad_varnum_zeros: 93
      tasm_hashing_hash_varlen_read_remaining_elements: 22
    tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_structure_get_field_with_size: 39
-     tasm_structure_get_field_with_size_loop: 31
-   tasm_hashing_hash_varlen: 412
+   tasm_hashing_hash_varlen: 406
      tasm_hashing_hash_varlen_loop: 247
        tasm_hashing_hash_varlen_if_branch: 4
-     tasm_hashing_hash_varlen_pad_varnum_zeros: 71
-     tasm_hashing_hash_varlen_read_remaining_elements: 56
+     tasm_hashing_hash_varlen_pad_varnum_zeros: 82
+     tasm_hashing_hash_varlen_read_remaining_elements: 39
    tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_structure_get_field_with_size: 52
-     tasm_structure_get_field_with_size_loop: 44
+   tasm_hashing_hash_varlen: 184
+     tasm_hashing_hash_varlen_loop: 9
+     tasm_hashing_hash_varlen_pad_varnum_zeros: 60
+     tasm_hashing_hash_varlen_read_remaining_elements: 73
+     tasm_hashing_hash_varlen_if_first_time_absob_init: 4
+   tasm_list_unsafe_u32_set_element_digest: 25
    tasm_hashing_hash_varlen: 190
      tasm_hashing_hash_varlen_loop: 9
      tasm_hashing_hash_varlen_pad_varnum_zeros: 49
      tasm_hashing_hash_varlen_read_remaining_elements: 90
      tasm_hashing_hash_varlen_if_first_time_absob_init: 4
    tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_structure_get_field_with_size: 65
-     tasm_structure_get_field_with_size_loop: 57
-   tasm_hashing_hash_varlen: 196
-     tasm_hashing_hash_varlen_loop: 9
-     tasm_hashing_hash_varlen_pad_varnum_zeros: 38
-     tasm_hashing_hash_varlen_read_remaining_elements: 107
-     tasm_hashing_hash_varlen_if_first_time_absob_init: 4
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_structure_get_field_with_size: 78
-     tasm_structure_get_field_with_size_loop: 70
    tasm_hashing_hash_varlen: 166
      tasm_hashing_hash_varlen_loop: 9
      tasm_hashing_hash_varlen_pad_varnum_zeros: 93
      tasm_hashing_hash_varlen_read_remaining_elements: 22
      tasm_hashing_hash_varlen_if_first_time_absob_init: 4
    tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_structure_get_field_with_size: 91
-     tasm_structure_get_field_with_size_loop: 83
    tasm_hashing_hash_varlen: 190
      tasm_hashing_hash_varlen_loop: 9
      tasm_hashing_hash_varlen_pad_varnum_zeros: 49
@@ -106,13 +75,7 @@ tasm_neptune_transaction_removal_records_integrity:
    tasm_list_unsafe_u32_get_element_digest: 25
    tasm_list_unsafe_u32_set_element_digest: 25
    tasm_list_unsafe_u32_get_element_digest: 25
- tasm_structure_get_field: 60
-   tasm_structure_get_field_loop: 57
  tasm_memory_push_ram_to_stack_digest: 22
- tasm_structure_get_field: 47
-   tasm_structure_get_field_loop: 44
- tasm_structure_get_field: 21
-   tasm_structure_get_field_loop: 18
  tasm_mmr_bag_peaks: 149
    tasm_list_unsafe_u32_length_long_digest: 4
    tasm_mmr_bag_peaks_length_is_not_zero: 135
@@ -121,10 +84,6 @@ tasm_neptune_transaction_removal_records_integrity:
        tasm_list_unsafe_u32_get_element_digest: 25
        tasm_mmr_bag_peaks_loop: 48
          tasm_list_unsafe_u32_get_element_digest: 25
- tasm_structure_get_field: 34
-   tasm_structure_get_field_loop: 31
- tasm_structure_get_field: 21
-   tasm_structure_get_field_loop: 18
  tasm_mmr_bag_peaks: 1697
    tasm_list_unsafe_u32_length_long_digest: 4
    tasm_mmr_bag_peaks_length_is_not_zero: 1683
@@ -169,47 +128,39 @@ tasm_neptune_transaction_removal_records_integrity:
          tasm_list_unsafe_u32_get_element_digest: 25
          tasm_list_unsafe_u32_get_element_digest: 25
          tasm_list_unsafe_u32_get_element_digest: 25
- tasm_structure_get_field: 86
-   tasm_structure_get_field_loop: 83
  tasm_memory_push_ram_to_stack_digest: 22
- tasm_structure_get_field: 8
-   tasm_structure_get_field_loop: 5
- tasm_list_contiguous_list_get_pointer_list_unsafe: 162
-   tasm_list_contiguous_list_get_length: 55
-     tasm_list_contiguous_list_get_length_loop: 43
+ tasm_list_contiguous_list_get_pointer_list_unsafe: 111
+   tasm_list_contiguous_list_get_length: 4
    tasm_list_unsafe_u32_new_void_pointer: 31
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_void_pointer: 2
    tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 57
      tasm_list_unsafe_u32_set_element_void_pointer: 7
      tasm_list_unsafe_u32_set_element_void_pointer: 7
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo: 822
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo: 750
    tasm_list_unsafe_u32_length_long_void_pointer: 4
    tasm_list_unsafe_u32_new_digest: 33
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo_loop: 771
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo_loop: 699
      tasm_list_unsafe_u32_get_element_void_pointer: 7
-     tasm_neptune_transaction_hash_utxo: 337
-       tasm_hashing_hash_varlen: 328
-         tasm_hashing_hash_varlen_loop: 169
+     tasm_neptune_transaction_hash_utxo: 301
+       tasm_hashing_hash_varlen: 292
+         tasm_hashing_hash_varlen_loop: 91
            tasm_hashing_hash_varlen_if_branch: 4
-         tasm_hashing_hash_varlen_pad_varnum_zeros: 82
-         tasm_hashing_hash_varlen_read_remaining_elements: 39
+         tasm_hashing_hash_varlen_pad_varnum_zeros: 5
+         tasm_hashing_hash_varlen_read_remaining_elements: 158
      tasm_list_unsafe_u32_set_element_digest: 25
      tasm_list_unsafe_u32_get_element_void_pointer: 7
-     tasm_neptune_transaction_hash_utxo: 337
-       tasm_hashing_hash_varlen: 328
-         tasm_hashing_hash_varlen_loop: 169
+     tasm_neptune_transaction_hash_utxo: 301
+       tasm_hashing_hash_varlen: 292
+         tasm_hashing_hash_varlen_loop: 91
            tasm_hashing_hash_varlen_if_branch: 4
-         tasm_hashing_hash_varlen_pad_varnum_zeros: 82
-         tasm_hashing_hash_varlen_read_remaining_elements: 39
+         tasm_hashing_hash_varlen_pad_varnum_zeros: 5
+         tasm_hashing_hash_varlen_read_remaining_elements: 158
      tasm_list_unsafe_u32_set_element_digest: 25
- tasm_structure_get_field: 21
-   tasm_structure_get_field_loop: 18
- tasm_list_contiguous_list_get_pointer_list_unsafe: 162
-   tasm_list_contiguous_list_get_length: 55
-     tasm_list_contiguous_list_get_length_loop: 43
+ tasm_list_contiguous_list_get_pointer_list_unsafe: 111
+   tasm_list_contiguous_list_get_length: 4
    tasm_list_unsafe_u32_new_void_pointer: 31
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_void_pointer: 2
@@ -231,22 +182,14 @@ tasm_neptune_transaction_removal_records_integrity:
        tasm_memory_memcpy_loop: 24
      tasm_memory_memcpy: 105
        tasm_memory_memcpy_loop: 100
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10450
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10312
    tasm_list_unsafe_u32_length_long_pair_Ldigest_and_void_pointerR: 4
    tasm_list_unsafe_u32_new_void_pointer: 31
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_pair_Ldigest_and_void_pointerR: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10401
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
      tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
-     tasm_neptune_transaction_compute_indices: 5148
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
-       tasm_structure_get_field: 21
-         tasm_structure_get_field_loop: 18
-       tasm_structure_get_field: 34
-         tasm_structure_get_field_loop: 31
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
+     tasm_neptune_transaction_compute_indices: 5079
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_neptune_mutator_get_swbf_indices_1048576_45: 4976
@@ -445,15 +388,7 @@ tasm_neptune_transaction_removal_records_integrity:
              tasm_list_unsafe_u32_set_element_u128: 21
      tasm_list_unsafe_u32_set_element_void_pointer: 7
      tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
-     tasm_neptune_transaction_compute_indices: 5148
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
-       tasm_structure_get_field: 21
-         tasm_structure_get_field_loop: 18
-       tasm_structure_get_field: 34
-         tasm_structure_get_field_loop: 31
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
+     tasm_neptune_transaction_compute_indices: 5079
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_neptune_mutator_get_swbf_indices_1048576_45: 4976
@@ -673,27 +608,22 @@ tasm_neptune_transaction_removal_records_integrity:
          tasm_hashing_hash_varlen_pad_varnum_zeros: 104
          tasm_hashing_hash_varlen_read_remaining_elements: 5
      tasm_list_unsafe_u32_set_element_digest: 25
- tasm_structure_get_field: 8
-   tasm_structure_get_field_loop: 5
- tasm_list_contiguous_list_get_pointer_list_unsafe: 162
-   tasm_list_contiguous_list_get_length: 55
-     tasm_list_contiguous_list_get_length_loop: 43
+ tasm_list_contiguous_list_get_pointer_list_unsafe: 111
+   tasm_list_contiguous_list_get_length: 4
    tasm_list_unsafe_u32_new_void_pointer: 31
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_void_pointer: 2
    tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 57
      tasm_list_unsafe_u32_set_element_void_pointer: 7
      tasm_list_unsafe_u32_set_element_void_pointer: 7
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3314
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3282
    tasm_list_unsafe_u32_length_long_void_pointer: 4
    tasm_list_unsafe_u32_new_digest: 33
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3263
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3231
      tasm_list_unsafe_u32_get_element_void_pointer: 7
-     tasm_neptune_transaction_hash_removal_record_indices: 1583
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
+     tasm_neptune_transaction_hash_removal_record_indices: 1567
        tasm_hashing_hash_varlen: 1564
          tasm_hashing_hash_varlen_loop: 1417
            tasm_hashing_hash_varlen_if_branch: 4
@@ -701,9 +631,7 @@ tasm_neptune_transaction_removal_records_integrity:
          tasm_hashing_hash_varlen_read_remaining_elements: 5
      tasm_list_unsafe_u32_set_element_digest: 25
      tasm_list_unsafe_u32_get_element_void_pointer: 7
-     tasm_neptune_transaction_hash_removal_record_indices: 1583
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
+     tasm_neptune_transaction_hash_removal_record_indices: 1567
        tasm_hashing_hash_varlen: 1564
          tasm_hashing_hash_varlen_loop: 1417
            tasm_hashing_hash_varlen_if_branch: 4
@@ -728,47 +656,29 @@ tasm_neptune_transaction_removal_records_integrity:
        tasm_list_unsafe_u32_multiset_equality_running_product_loop: 99
      tasm_list_unsafe_u32_multiset_equality_running_product: 113
        tasm_list_unsafe_u32_multiset_equality_running_product_loop: 99
- tasm_structure_get_field: 34
-   tasm_structure_get_field_loop: 31
- tasm_structure_get_field: 8
-   tasm_structure_get_field_loop: 5
- tasm_structure_get_field: 21
-   tasm_structure_get_field_loop: 18
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 490
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 428
    tasm_list_unsafe_u32_length_long_pair_Ldigest_and_void_pointerR: 4
    tasm_list_unsafe_u32_new_pair_Lvoid_pointer_and_digestR: 33
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafe_u32_set_length_pair_Ldigest_and_void_pointerR: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 439
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
      tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
-     tasm_neptune_transaction_compute_commitment: 145
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
-       tasm_structure_get_field: 21
-         tasm_structure_get_field_loop: 18
+     tasm_neptune_transaction_compute_commitment: 114
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_neptune_mutator_set_commit: 13
      tasm_list_unsafe_u32_set_element_pair_Lvoid_pointer_and_digestR: 29
      tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
-     tasm_neptune_transaction_compute_commitment: 145
-       tasm_structure_get_field: 8
-         tasm_structure_get_field_loop: 5
-       tasm_structure_get_field: 21
-         tasm_structure_get_field_loop: 18
+     tasm_neptune_transaction_compute_commitment: 114
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_neptune_mutator_set_commit: 13
      tasm_list_unsafe_u32_set_element_pair_Lvoid_pointer_and_digestR: 29
- tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12567
+ tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
    tasm_list_unsafe_u32_length_long_pair_Lvoid_pointer_and_digestR: 4
-   tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12555
+   tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
      tasm_list_unsafe_u32_get_element_pair_Lvoid_pointer_and_digestR: 29
-     tasm_neptune_transaction_verify_aocl_membership: 6216
-       tasm_structure_get_field: 34
-         tasm_structure_get_field_loop: 31
-       tasm_structure_get_field: 34
-         tasm_structure_get_field_loop: 31
+     tasm_neptune_transaction_verify_aocl_membership: 6160
        tasm_mmr_verify_from_memory_unsafe: 6101
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 128
            tasm_arithmetic_u64_lt: 6
@@ -1130,11 +1040,7 @@ tasm_neptune_transaction_removal_records_integrity:
          tasm_list_unsafe_u32_get_element_digest: 25
          tasm_hashing_eq_digest: 15
      tasm_list_unsafe_u32_get_element_pair_Lvoid_pointer_and_digestR: 29
-     tasm_neptune_transaction_verify_aocl_membership: 6246
-       tasm_structure_get_field: 34
-         tasm_structure_get_field_loop: 31
-       tasm_structure_get_field: 34
-         tasm_structure_get_field_loop: 31
+     tasm_neptune_transaction_verify_aocl_membership: 6190
        tasm_mmr_verify_from_memory_unsafe: 6131
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 128
            tasm_arithmetic_u64_lt: 6
@@ -1497,26 +1403,22 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_eq: 8
          tasm_list_unsafe_u32_get_element_digest: 25
          tasm_hashing_eq_digest: 15
- total: 131322
+ total: 132089
 
 # aggregated
- tasm_io_load_struct_from_input_secin: 74699
-   tasm_io_load_from_input_secin: 74642
-     tasm_memory_dyn_malloc: 500
-     tasm_io_load_from_input_secin_loop: 74390
-   tasm_io_load_struct_from_input_secin_loop: 74034
- tasm_structure_get_field: 794
-   tasm_structure_get_field_loop: 701
- tasm_neptune_transaction_transaction_kernel_mast_hash: 21527
+ tasm_io_load_struct_from_input_secin: 76122
+   tasm_io_load_from_input_secin: 76110
+     tasm_memory_dyn_malloc: 375
+     tasm_io_load_from_input_secin_loop: 76068
+   tasm_io_load_struct_from_input_secin_loop: 5
+ tasm_neptune_transaction_transaction_kernel_mast_hash: 21792
    tasm_list_unsafe_u32_new_digest: 132
    tasm_list_unsafe_u32_set_length_digest: 2
-   tasm_structure_get_field_with_size: 364
-     tasm_structure_get_field_with_size_loop: 308
-   tasm_hashing_hash_varlen: 27594
-     tasm_hashing_hash_varlen_loop: 25217
+   tasm_hashing_hash_varlen: 28050
+     tasm_hashing_hash_varlen_loop: 25607
        tasm_hashing_hash_varlen_if_branch: 44
-     tasm_hashing_hash_varlen_pad_varnum_zeros: 1274
-     tasm_hashing_hash_varlen_read_remaining_elements: 517
+     tasm_hashing_hash_varlen_pad_varnum_zeros: 1153
+     tasm_hashing_hash_varlen_read_remaining_elements: 704
    tasm_list_unsafe_u32_set_element_digest: 525
      tasm_hashing_hash_varlen_if_first_time_absob_init: 16
    tasm_list_unsafe_u32_get_element_digest: 4625
@@ -1526,30 +1428,29 @@ tasm_neptune_transaction_removal_records_integrity:
    tasm_mmr_bag_peaks_length_is_not_zero: 1818
      tasm_mmr_bag_peaks_length_is_not_one: 1802
        tasm_mmr_bag_peaks_loop: 1644
- tasm_list_contiguous_list_get_pointer_list_unsafe: 486
-   tasm_list_contiguous_list_get_length: 165
-     tasm_list_contiguous_list_get_length_loop: 129
+ tasm_list_contiguous_list_get_pointer_list_unsafe: 333
+   tasm_list_contiguous_list_get_length: 12
    tasm_list_unsafe_u32_new_void_pointer: 124
    tasm_list_unsafe_u32_set_length_void_pointer: 12
    tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 171
      tasm_list_unsafe_u32_set_element_void_pointer: 56
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo: 822
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo: 750
    tasm_list_unsafe_u32_length_long_void_pointer: 16
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo_loop: 771
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo_loop: 699
      tasm_list_unsafe_u32_get_element_void_pointer: 42
-     tasm_neptune_transaction_hash_utxo: 674
+     tasm_neptune_transaction_hash_utxo: 602
  tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest: 406
    tasm_list_unsafe_u32_new_pair_Lvoid_pointer_and_digestR: 66
    tasm_list_unsafe_u32_set_length_pair_Lvoid_pointer_and_digestR: 2
    tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest_loop: 345
      tasm_memory_memcpy: 268
        tasm_memory_memcpy_loop: 248
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10450
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10312
    tasm_list_unsafe_u32_length_long_pair_Ldigest_and_void_pointerR: 8
    tasm_list_unsafe_u32_set_length_pair_Ldigest_and_void_pointerR: 4
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10401
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
      tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 116
-     tasm_neptune_transaction_compute_indices: 10296
+     tasm_neptune_transaction_compute_indices: 10158
        tasm_neptune_mutator_get_swbf_indices_1048576_45: 9952
          tasm_arithmetic_u128_shift_right_static_3: 48
          tasm_arithmetic_u128_shift_left_static_12: 44
@@ -1568,23 +1469,23 @@ tasm_neptune_transaction_removal_records_integrity:
  tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list: 3294
    tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list_loop: 3243
      tasm_neptune_transaction_hash_index_list: 3146
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3314
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3263
-     tasm_neptune_transaction_hash_removal_record_indices: 3166
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3282
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3231
+     tasm_neptune_transaction_hash_removal_record_indices: 3134
  tasm_list_unsafe_u32_multiset_equality: 780
    tasm_list_unsafe_u32_multiset_equality_continue: 757
      tasm_list_unsafe_u32_multiset_equality_running_product: 226
        tasm_list_unsafe_u32_multiset_equality_running_product_loop: 198
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 490
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 439
-     tasm_neptune_transaction_compute_commitment: 290
+ tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 428
+   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
+     tasm_neptune_transaction_compute_commitment: 228
        tasm_neptune_mutator_set_commit: 26
      tasm_list_unsafe_u32_set_element_pair_Lvoid_pointer_and_digestR: 58
- tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12567
+ tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
    tasm_list_unsafe_u32_length_long_pair_Lvoid_pointer_and_digestR: 4
-   tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12555
+   tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
      tasm_list_unsafe_u32_get_element_pair_Lvoid_pointer_and_digestR: 58
-     tasm_neptune_transaction_verify_aocl_membership: 12462
+     tasm_neptune_transaction_verify_aocl_membership: 12350
        tasm_mmr_verify_from_memory_unsafe: 12232
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 256
            tasm_arithmetic_u64_lt: 12
@@ -1604,4 +1505,4 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_div2: 1764
            tasm_hashing_swap_digest: 784
          tasm_hashing_eq_digest: 30
- total: 131322
+ total: 132089

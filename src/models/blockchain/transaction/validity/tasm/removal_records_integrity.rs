@@ -757,7 +757,8 @@ mod bench {
             .reversed()
             .values()
             .to_vec();
-        let secret_in: Vec<BFieldElement> = removal_record_integrity_witness.encode();
+        // double-encoding to enable reading from stdin as struct
+        let secret_in: Vec<BFieldElement> = removal_record_integrity_witness.encode().encode();
 
         bench_program::<RemovalRecordsIntegrity>(
             "tasm_neptune_transaction_removal_records_integrity".to_string(),

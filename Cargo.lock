@@ -256,7 +256,9 @@ checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
 name = "bfieldcodec_derive"
-version = "0.3.0"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5852a273af4c10d6714f535f2a3b358e568ef7a485c1c43bfc236291d4f775c7"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -693,6 +695,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
+source = "git+https://github.com/TritonVM/tasm-lib.git?tag=v0.2.1#e520afa2aea396ae06a2a3d2219134e440ae8e67"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -2235,7 +2238,8 @@ dependencies = [
 
 [[package]]
 name = "tasm-lib"
-version = "0.1.0"
+version = "0.2.1"
+source = "git+https://github.com/TritonVM/tasm-lib.git?tag=v0.2.1#e520afa2aea396ae06a2a3d2219134e440ae8e67"
 dependencies = [
  "anyhow",
  "derive_tasm_object",
@@ -2517,7 +2521,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.31.1"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac1e43400c18654fd04b54bdc2483c640508a8a4a7028cdf5df4afd5fa7cd2e5"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2557,7 +2563,9 @@ dependencies = [
 
 [[package]]
 name = "twenty-first"
-version = "0.30.0"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9795a24d9f13517efe45b10d7cf05636984d0a5908464d2f662cae04257098a"
 dependencies = [
  "anyhow",
  "bfieldcodec_derive",

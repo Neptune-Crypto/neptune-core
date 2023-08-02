@@ -132,6 +132,7 @@ impl Snippet for VerifyAoclMembership {
         type MsMpH = MsMembershipProof<Hash>;
         type MmrMpH = MmrMembershipProof<Hash>;
         let msmp_to_mmrmp = tasm_lib::field!(MsMpH::auth_path_aocl);
+        let mmr_mp_to_li = tasm_lib::field!(MmrMpH::leaf_index);
         let mmr_mp_to_auth_path = tasm_lib::field!(MmrMpH::authentication_path);
         let entrypoint = self.entrypoint();
 
@@ -143,7 +144,9 @@ impl Snippet for VerifyAoclMembership {
         // get leaf index
             dup 5               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *msmp
             {&msmp_to_mmrmp.clone()}
-                                // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *mp
+                                // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *mmrmp
+            {&mmr_mp_to_li}     // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li
+
             push 1              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li 1
             add                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li_hi
             read_mem            // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li_hi li_hi
@@ -153,7 +156,6 @@ impl Snippet for VerifyAoclMembership {
             read_mem            // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi *li_lo li_lo
             swap 1              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *li_lo
             pop                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo
-                                // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo
 
             // get auth path
             dup 7               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *msmp
