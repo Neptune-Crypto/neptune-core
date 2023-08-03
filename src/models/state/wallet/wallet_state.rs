@@ -32,6 +32,7 @@ use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::IncomingUtxoRecoveryData;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -428,6 +429,17 @@ impl WalletState {
                 let new_own_membership_proof =
                     msa_state.prove(&utxo_digest, &sender_randomness, &receiver_preimage);
 
+                // Add the data required to restore the UTXOs membership proof from public
+                // data to the secret's file.
+                let utxo_ms_recovery_data = IncomingUtxoRecoveryData {
+                    utxo: utxo.clone(),
+                    sender_randomness,
+                    receiver_preimage,
+                    aocl_index: new_own_membership_proof.auth_path_aocl.leaf_index,
+                };
+                self.wallet_secret
+                    .store_utxo_ms_recovery_data(utxo_ms_recovery_data)?;
+
                 valid_membership_proofs_and_own_utxo_count.insert(
                     StrongUtxoKey::new(
                         utxo_digest,
@@ -439,7 +451,7 @@ impl WalletState {
                     ),
                 );
 
-                // Add a new UTXO to the list of monitored UTXOs
+                // Add the new UTXO to the list of monitored UTXOs
                 let mut mutxo = MonitoredUtxo::new(utxo, self.number_of_mps_per_utxo);
                 mutxo.confirmed_in_block = Some((
                     block.hash,
@@ -773,7 +785,7 @@ mod tests {
     use crate::{
         config_models::network::Network,
         models::state::wallet::generate_secret_key,
-        tests::shared::{get_mock_global_state, make_mock_block},
+        tests::shared::{get_mock_global_state, make_mock_block, unit_test_data_directory},
     };
 
     use super::*;
@@ -794,10 +806,15 @@ mod tests {
         // Prune
         // Verify that MUTXO *is* marked as abandoned
 
-        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let network = Network::Testnet;
+        let own_wallet_secret = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
-        let own_global_state =
-            get_mock_global_state(Network::Testnet, 0, Some(own_wallet_secret)).await;
+        let own_global_state = get_mock_global_state(network, 0, Some(own_wallet_secret)).await;
         let genesis_block = Block::genesis_block();
         let monitored_utxos_count_init = own_global_state
             .wallet_state
@@ -812,9 +829,14 @@ mod tests {
         );
 
         // Add two blocks with no UTXOs for us
-        let other_recipient_address = WalletSecret::new(generate_secret_key())
-            .nth_generation_spending_key(0)
-            .to_address();
+        let other_recipient_address = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .nth_generation_spending_key(0)
+        .to_address();
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =

@@ -8,7 +8,8 @@ pub mod wallet_status;
 use anyhow::{bail, Context, Result};
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{LineWriter, Write};
 use std::path::{Path, PathBuf};
 use tracing::info;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -19,6 +20,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::Hash;
 
 use self::address::generation_address;
@@ -45,6 +47,9 @@ pub struct WalletSecret {
 
     pub secret_seed: Digest,
     version: u8,
+
+    incoming_randomness_file_path: PathBuf,
+    outgoing_randomness_file_path: PathBuf,
 }
 
 /// Struct for containing file paths for secrets. To be communicated to user upon
@@ -55,29 +60,17 @@ pub struct WalletSecretFileLocations {
     pub outgoing_randomness_file: PathBuf,
 }
 
+/// Contains the cryptographic (non-public) data that is needed to recover the mutator set
+/// membership proof of a UTXO.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct IncomingUtxoRecoveryData {
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
+    pub receiver_preimage: Digest,
+    pub aocl_index: u64,
+}
+
 impl WalletSecret {
-    /// Create new `Wallet` given a `secret` key.
-    pub fn new(secret_seed: Digest) -> Self {
-        Self {
-            name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed,
-            version: STANDARD_WALLET_VERSION,
-        }
-    }
-
-    /// Create a `Wallet` with a fixed digest
-    pub fn devnet_wallet() -> Self {
-        let secret_seed = Digest::new([
-            BFieldElement::new(12063201067205522823),
-            BFieldElement::new(1529663126377206632),
-            BFieldElement::new(2090171368883726200),
-            BFieldElement::new(12975872837767296928),
-            BFieldElement::new(11492877804687889759),
-        ]);
-
-        WalletSecret::new(secret_seed)
-    }
-
     fn wallet_secret_path(wallet_directory_path: &Path) -> PathBuf {
         wallet_directory_path.join(WALLET_SECRET_FILE_NAME)
     }
@@ -88,6 +81,67 @@ impl WalletSecret {
 
     fn wallet_incoming_secrets_path(wallet_directory_path: &Path) -> PathBuf {
         wallet_directory_path.join(WALLET_INCOMING_SECRETS_FILE_NAME)
+    }
+
+    /// Create new `Wallet` given a `secret` key.
+    pub fn new(secret_seed: Digest, wallet_directory_path: &Path) -> Self {
+        Self {
+            name: STANDARD_WALLET_NAME.to_string(),
+            secret_seed,
+            version: STANDARD_WALLET_VERSION,
+            incoming_randomness_file_path: Self::wallet_incoming_secrets_path(
+                wallet_directory_path,
+            ),
+            outgoing_randomness_file_path: Self::wallet_outgoing_secrets_path(
+                wallet_directory_path,
+            ),
+        }
+    }
+
+    /// Create a `Wallet` with a fixed digest
+    pub fn devnet_wallet(wallet_directory_path: &Path) -> Self {
+        let secret_seed = Digest::new([
+            BFieldElement::new(12063201067205522823),
+            BFieldElement::new(1529663126377206632),
+            BFieldElement::new(2090171368883726200),
+            BFieldElement::new(12975872837767296928),
+            BFieldElement::new(11492877804687889759),
+        ]);
+
+        WalletSecret::new(secret_seed, wallet_directory_path)
+    }
+
+    /// Store information needed to recover mutator set membership proof of a UTXO, in case
+    /// the wallet database is deleted.
+    pub(super) fn store_utxo_ms_recovery_data(
+        &self,
+        utxo_ms_recovery_data: IncomingUtxoRecoveryData,
+    ) -> Result<()> {
+        // Open file
+        #[cfg(test)]
+        {
+            fs::create_dir_all(self.incoming_randomness_file_path.parent().unwrap())?;
+        }
+        let incoming_secrets_file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(self.incoming_randomness_file_path.clone())?;
+        let mut incoming_secrets_file = LineWriter::new(incoming_secrets_file);
+
+        // Create JSON string ending with a newline as this flushes the write
+        #[cfg(windows)]
+        const LINE_ENDING: &str = "\r\n";
+        #[cfg(not(windows))]
+        const LINE_ENDING: &str = "\n";
+
+        let mut json_string = serde_json::to_string(&utxo_ms_recovery_data)?;
+        json_string.push_str(LINE_ENDING);
+        incoming_secrets_file.write_all(json_string.as_bytes())?;
+
+        // Flush just in case, since this is cryptographic data, you can't be too sure
+        incoming_secrets_file.flush()?;
+
+        Ok(())
     }
 
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet
@@ -111,7 +165,7 @@ impl WalletSecret {
                 wallet_secret_path.display()
             );
             let new_secret: Digest = generate_secret_key();
-            let new_wallet: WalletSecret = WalletSecret::new(new_secret);
+            let new_wallet: WalletSecret = WalletSecret::new(new_secret, wallet_directory_path);
             new_wallet.create_wallet_secret_file(&wallet_secret_path)?;
             new_wallet
         };
@@ -290,7 +344,7 @@ mod wallet_tests {
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
         add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
-        make_mock_transaction_with_generation_key,
+        make_mock_transaction_with_generation_key, unit_test_data_directory,
     };
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
@@ -312,7 +366,14 @@ mod wallet_tests {
     async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
-        let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
+        let network = Network::Testnet;
+        let wallet_state_premine_recipient = get_mock_wallet_state(
+            None,
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
         let monitored_utxos_premine_wallet =
             get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
@@ -334,8 +395,19 @@ mod wallet_tests {
             "Auth wallet's monitored UTXO must match that from genesis block at initialization"
         );
 
-        let random_wallet = WalletSecret::new(generate_secret_key());
-        let wallet_state_other = get_mock_wallet_state(Some(random_wallet)).await;
+        let random_wallet = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
+        let wallet_state_other = get_mock_wallet_state(
+            Some(random_wallet),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
         let monitored_utxos_other = get_monitored_utxos(&wallet_state_other).await;
         assert!(
             monitored_utxos_other.is_empty(),
@@ -345,7 +417,12 @@ mod wallet_tests {
         // Add 12 blocks and verify that membership proofs are still valid
         let genesis_block = Block::genesis_block();
         let mut next_block = genesis_block.clone();
-        let other_wallet_secret = WalletSecret::new(random());
+        let other_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let other_receiver_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
@@ -384,9 +461,26 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
-        let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret.clone())).await;
-        let other_wallet_secret = WalletSecret::new(generate_secret_key());
+        let network = Network::Testnet;
+        let own_wallet_secret = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
+        let own_wallet_state = get_mock_wallet_state(
+            Some(own_wallet_secret.clone()),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
+        let other_wallet_secret = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let other_recipient_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
@@ -509,8 +603,20 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
-        let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret)).await;
+        let network = Network::Testnet;
+        let own_wallet_secret = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
+        let own_wallet_state = get_mock_wallet_state(
+            Some(own_wallet_secret),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -652,7 +758,12 @@ mod wallet_tests {
 
         // This block spends two UTXOs and gives us none, so the new balance
         // becomes 2000
-        let other_wallet = WalletSecret::new(generate_secret_key());
+        let other_wallet = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let other_wallet_recipient_address =
             other_wallet.nth_generation_spending_key(0).to_address();
         assert_eq!(Into::<BlockHeight>::into(22u64), next_block.header.height);
@@ -713,14 +824,33 @@ mod wallet_tests {
         // So it's just used to generate test data, not in any of the functions that are
         // actually tested.
         // let (archival_state, _peer_databases) = make_unit_test_archival_state(Network::Main).await;
-        let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret)).await;
+        let network = Network::Testnet;
+        let own_wallet_secret = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
+        let own_wallet_state = get_mock_wallet_state(
+            Some(own_wallet_secret),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
         let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block();
-        let premine_wallet = get_mock_wallet_state(None).await.wallet_secret;
+        let premine_wallet = get_mock_wallet_state(
+            None,
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await
+        .wallet_secret;
         let premine_receiver_global_state =
             get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
         let preminers_original_balance = premine_receiver_global_state
@@ -1140,7 +1270,12 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn basic_wallet_secret_functionality_test() {
-        let random_wallet_secret = WalletSecret::new(generate_secret_key());
+        let random_wallet_secret = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(Network::Testnet)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let spending_key = random_wallet_secret.nth_generation_spending_key(0);
         let _address = spending_key.to_address();
         let _sender_randomness = random_wallet_secret
@@ -1150,7 +1285,12 @@ mod wallet_tests {
     #[test]
     fn master_seed_is_not_sender_randomness() {
         let secret = generate_secret_key();
-        let wallet = WalletSecret::new(secret);
+        let wallet = WalletSecret::new(
+            secret,
+            &unit_test_data_directory(Network::Testnet)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         assert_ne!(
             wallet.generate_sender_randomness(BlockHeight::genesis(), random()),
             secret
@@ -1160,7 +1300,11 @@ mod wallet_tests {
     #[test]
     fn get_devnet_wallet_info() {
         // Helper function/test to print the public key associated with the authority signatures
-        let devnet_wallet = WalletSecret::devnet_wallet();
+        let devnet_wallet = WalletSecret::devnet_wallet(
+            &unit_test_data_directory(Network::Testnet)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let spending_key = devnet_wallet.nth_generation_spending_key(0);
         let address = spending_key.to_address();
         println!(

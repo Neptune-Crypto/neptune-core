@@ -1099,7 +1099,8 @@ mod peer_loop_tests {
         tests::shared::{
             add_block, get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
             get_test_genesis_setup, make_mock_block_with_invalid_pow,
-            make_mock_block_with_valid_pow, make_mock_transaction, Action, Mock,
+            make_mock_block_with_valid_pow, make_mock_transaction, unit_test_data_directory,
+            Action, Mock,
         },
     };
 
@@ -1184,8 +1185,9 @@ mod peer_loop_tests {
         // In this scenario a peer provides another genesis block than what has been
         // hardcoded. This should lead to the closing of the connection to this peer
         // and a ban.
+        let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
@@ -1199,7 +1201,12 @@ mod peer_loop_tests {
             .await;
         different_genesis_block.header.nonce[2].increment();
         different_genesis_block.hash = Hash::hash(&different_genesis_block.header);
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1_with_different_genesis, _, _) =
             make_mock_block_with_valid_pow(&different_genesis_block, None, a_recipient_address);
@@ -1259,8 +1266,9 @@ mod peer_loop_tests {
     async fn block_without_valid_pow_test() -> Result<()> {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
+        let network = Network::Alpha;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
@@ -1272,7 +1280,12 @@ mod peer_loop_tests {
 
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_without_valid_pow, _, _) =
             make_mock_block_with_invalid_pow(&genesis_block, None, a_recipient_address);
@@ -1348,8 +1361,9 @@ mod peer_loop_tests {
         // The scenario tested here is that a client receives a block that is already
         // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main thread.
+        let network = Network::Alpha;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
@@ -1359,7 +1373,12 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
 
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
@@ -1412,8 +1431,9 @@ mod peer_loop_tests {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
         // are returned.
+        let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1422,7 +1442,12 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
         let peer_address = get_dummy_socket_address(0);
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
@@ -1496,8 +1521,9 @@ mod peer_loop_tests {
     async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
+        let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let genesis_block: Block = state
             .chain
             .archival_state
@@ -1506,7 +1532,12 @@ mod peer_loop_tests {
             .get_latest_block()
             .await;
         let peer_address = get_dummy_socket_address(0);
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
@@ -1553,9 +1584,15 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
+        let network = Network::Testnet;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Alpha, 0).await?;
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
@@ -1614,8 +1651,9 @@ mod peer_loop_tests {
     async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 2, meaning that block 1 will have to be requested.
+        let network = Network::Testnet;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
@@ -1624,7 +1662,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
@@ -1769,8 +1812,9 @@ mod peer_loop_tests {
     async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
+        let network = Network::Testnet;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let peer_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block: Block = state
             .chain
@@ -1779,7 +1823,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
@@ -1849,8 +1898,9 @@ mod peer_loop_tests {
     async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 3, meaning that block 2 and 1 will have to be requested.
+        let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
 
         let genesis_block: Block = state
@@ -1860,7 +1910,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
@@ -1929,9 +1984,15 @@ mod peer_loop_tests {
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         // But the requests are interrupted by the peer sending another message: a new block
         // notification.
+        let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
-        let a_wallet_secret = WalletSecret::new(random());
+            get_test_genesis_setup(network, 0).await?;
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
         let genesis_block: Block = state
@@ -2026,8 +2087,9 @@ mod peer_loop_tests {
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         // But the requests are interrupted by the peer sending another message: a request
         // for a list of peers.
+        let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 1).await?;
+            get_test_genesis_setup(network, 1).await?;
         let peer_infos: Vec<PeerInfo> = state
             .net
             .peer_map
@@ -2044,7 +2106,12 @@ mod peer_loop_tests {
             .unwrap()
             .get_latest_block()
             .await;
-        let a_wallet_secret = WalletSecret::new(random());
+        let a_wallet_secret = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
@@ -2056,7 +2123,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
         add_block(&state, block_1.clone()).await?;
 
-        let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
+        let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let expected_peer_list_resp = vec![
             (
                 peer_infos[0].listen_address().unwrap(),

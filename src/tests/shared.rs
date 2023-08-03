@@ -191,7 +191,7 @@ pub async fn get_mock_global_state(
     peer_count: u8,
     wallet: Option<WalletSecret>,
 ) -> GlobalState {
-    let (archival_state, peer_db_lock) = make_unit_test_archival_state(network).await;
+    let (archival_state, peer_db_lock, data_dir) = make_unit_test_archival_state(network).await;
 
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
@@ -216,7 +216,7 @@ pub async fn get_mock_global_state(
         chain: blockchain_state,
         cli: cli_args.clone(),
         net: networking_state,
-        wallet_state: get_mock_wallet_state(wallet).await,
+        wallet_state: get_mock_wallet_state(wallet, &data_dir.wallet_directory_path()).await,
         mempool,
         mining: Arc::new(std::sync::RwLock::new(cli_args.mine)),
     }
@@ -1070,10 +1070,13 @@ pub fn make_mock_block_with_invalid_pow(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) -> WalletState {
+pub async fn get_mock_wallet_state(
+    maybe_wallet_secret: Option<WalletSecret>,
+    wallet_directory_path: &Path,
+) -> WalletState {
     let wallet_secret = match maybe_wallet_secret {
         Some(wallet) => wallet,
-        None => WalletSecret::devnet_wallet(),
+        None => WalletSecret::devnet_wallet(wallet_directory_path),
     };
 
     let cli_args: cli_args::Args = cli_args::Args {
@@ -1085,13 +1088,17 @@ pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) ->
 
 pub async fn make_unit_test_archival_state(
     network: Network,
-) -> (ArchivalState, Arc<tokio::sync::Mutex<PeerDatabases>>) {
+) -> (
+    ArchivalState,
+    Arc<tokio::sync::Mutex<PeerDatabases>>,
+    DataDirectory,
+) {
     let (block_index_db, peer_db, data_dir) = unit_test_databases(network).unwrap();
 
     let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
     let ams_lock = Arc::new(tokio::sync::Mutex::new(ams));
 
-    let archival_state = ArchivalState::new(data_dir, block_index_db, ams_lock).await;
+    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams_lock).await;
 
-    (archival_state, peer_db)
+    (archival_state, peer_db, data_dir)
 }

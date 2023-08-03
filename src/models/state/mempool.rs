@@ -503,7 +503,7 @@ mod tests {
         },
         tests::shared::{
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
-            make_mock_transaction_with_wallet,
+            make_mock_transaction_with_wallet, unit_test_data_directory,
         },
         util_types::mutator_set::mutator_set_trait::MutatorSet,
     };
@@ -520,7 +520,13 @@ mod tests {
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state = get_mock_wallet_state(
+            None,
+            &unit_test_data_directory(Network::Alpha)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
         let transaction_digest = &Hash::hash(&transaction);
@@ -542,9 +548,15 @@ mod tests {
     }
 
     // Create a mempool with n transactions.
-    async fn setup(transactions_count: u32) -> Mempool {
+    async fn setup(transactions_count: u32, network: Network) -> Mempool {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state = get_mock_wallet_state(
+            None,
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
                 vec![],
@@ -562,7 +574,7 @@ mod tests {
     #[tokio::test]
     async fn get_densest_transactions() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
-        let mempool = setup(10).await;
+        let mempool = setup(10, Network::Alpha).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -578,7 +590,7 @@ mod tests {
     #[tokio::test]
     async fn get_sorted_iter() {
         // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
-        let mempool = setup(10).await;
+        let mempool = setup(10, Network::Alpha).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -592,7 +604,14 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn prune_stale_transactions() {
-        let wallet_state = get_mock_wallet_state(None).await;
+        let network = Network::Testnet;
+        let wallet_state = get_mock_wallet_state(
+            None,
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .await;
         let mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
@@ -633,11 +652,17 @@ mod tests {
     async fn remove_transactions_with_block_test() -> Result<()> {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
+        let network = Network::Alpha;
         let premine_receiver_global_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new(generate_secret_key());
+        let other_wallet_secret = WalletSecret::new(
+            generate_secret_key(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        );
         let other_global_state =
             get_mock_global_state(Network::Alpha, 2, Some(other_wallet_secret.clone())).await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
@@ -886,7 +911,7 @@ mod tests {
     async fn get_mempool_size() {
         // Verify that the `get_size` method on mempool returns sane results
         let tx_count_small = 10;
-        let mempool_small = setup(10).await;
+        let mempool_small = setup(10, Network::Alpha).await;
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small =
             bincode::serialize(&mempool_small.internal.read().unwrap().tx_dictionary)
@@ -903,7 +928,7 @@ mod tests {
         );
 
         let tx_count_big = 100;
-        let mempool_big = setup(tx_count_big).await;
+        let mempool_big = setup(tx_count_big, Network::Alpha).await;
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big =
             bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
