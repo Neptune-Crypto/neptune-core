@@ -9,7 +9,7 @@ use anyhow::{bail, Context, Result};
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::io::{LineWriter, Write};
+use std::io::{BufRead, BufReader, LineWriter, Write};
 use std::path::{Path, PathBuf};
 use tracing::info;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -63,7 +63,7 @@ pub struct WalletSecretFileLocations {
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
 /// membership proof of a UTXO.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct IncomingUtxoRecoveryData {
+pub(crate) struct IncomingUtxoRecoveryData {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
@@ -142,6 +142,26 @@ impl WalletSecret {
         incoming_secrets_file.flush()?;
 
         Ok(())
+    }
+
+    /// Read recovery-information for mutator set membership proof of a UTXO. Returns all lines in the files,
+    /// where each line represents an incoming UTXO.
+    pub(crate) fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
+        let incoming_secrets_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open(self.incoming_randomness_file_path.clone())?;
+
+        let file_reader = BufReader::new(incoming_secrets_file);
+        let mut ret = vec![];
+        for line in file_reader.lines() {
+            let line = line?;
+            let utxo_ms_recovery_data: IncomingUtxoRecoveryData =
+                serde_json::from_str(&line).expect("Could not parse JSON string");
+            ret.push(utxo_ms_recovery_data);
+        }
+
+        Ok(ret)
     }
 
     /// Read wallet from `wallet_file` if the file exists, or, if none exists, create new wallet

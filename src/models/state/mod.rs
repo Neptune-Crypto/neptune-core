@@ -3,7 +3,7 @@ use itertools::Itertools;
 use num_traits::{CheckedSub, Zero};
 use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
@@ -30,6 +30,7 @@ use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDBIterator;
 use crate::models::peer::{HandshakeData, PeerStanding};
+use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
@@ -366,7 +367,120 @@ impl GlobalState {
         }
     }
 
-    pub async fn resync_membership_proofs_to_tip(&self, tip_hash: Digest) -> Result<()> {
+    /// In case the wallet database is corrupted or deleted, this method will restore
+    /// monitored UTXO data structures from recovery data. This method should only be
+    /// called on startup, not while the program is running, since it will only restore
+    /// a wallet state, if the monitored UTXOs have been deleted. Not merely if they
+    /// are not synced with a valid mutator set membership proof. And this corruption
+    /// can only happen if the wallet database is deleted or corrupted.
+    pub(crate) async fn restore_monitored_utxos_from_recovery_data(&self) -> Result<()> {
+        // Grab locks in canonical order to avoid deadlocks
+        let mut wallet_db = self.wallet_state.wallet_db.lock().await;
+        let ams_lock = self
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .archival_mutator_set
+            .lock()
+            .await;
+        let tip = self.chain.light_state.latest_block.lock().await;
+        assert_eq!(
+            tip.hash,
+            ams_lock.get_sync_label(),
+            "Archival mutator set must be synced to tip for successful MUTXO recovery"
+        );
+
+        // Fetch all incoming UTXOs from recovery data
+        let incoming_utxos = self
+            .wallet_state
+            .wallet_secret
+            .read_utxo_ms_recovery_data()?;
+
+        // Loop over all `incoming_utxos` and check if they have a corresponding
+        // monitored UTXO in the database.
+        let mut recovery_data_for_missing_mutxos = vec![];
+        let mutxo_count = wallet_db.monitored_utxos.len();
+        '_outer: for incoming_utxo in incoming_utxos {
+            // Find match in monitored UTXOs in wallet database
+            let mut searched_index = 0;
+            'inner: while mutxo_count > searched_index {
+                // TODO: It's inefficient to fetch each monitored UTXO in this loop.
+                // It would be better to fetch all monitored UTXOs at once and then
+                // run the loop.
+                let monitored_utxo = wallet_db.monitored_utxos.get(searched_index);
+                if monitored_utxo.utxo == incoming_utxo.utxo {
+                    let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
+                    let msmp = match msmp_res {
+                        Some((_blockh_hash, msmp_val)) => msmp_val,
+                        None => continue 'inner,
+                    };
+
+                    // If UTXO matches, then check if the AOCL index is also a match.
+                    // If it is, then the UTXO is already in the wallet database.
+                    if msmp.auth_path_aocl.leaf_index == incoming_utxo.aocl_index {
+                        continue '_outer;
+                    }
+                }
+                searched_index += 1;
+            }
+
+            // If no match is found, add the UTXO to the list of missing UTXOs
+            recovery_data_for_missing_mutxos.push(incoming_utxo);
+        }
+
+        if recovery_data_for_missing_mutxos.is_empty() {
+            info!("No missing monitored UTXOs found in wallet database. Database looks good.");
+            return Ok(());
+        }
+
+        // For all recovery data where we did not find a matching monitored UTXO,
+        // recover the MS membership proof, and insert a new monitored UTXO into the
+        // wallet database.
+        info!(
+            "Attempting to restore {} missing monitored UTXOs to wallet database",
+            recovery_data_for_missing_mutxos.len()
+        );
+        let mut restored_mutxos = 0;
+        for incoming_utxo in recovery_data_for_missing_mutxos {
+            let ms_item = &Hash::hash(&incoming_utxo.utxo);
+            let restored_msmp_res = ams_lock.ams.restore_membership_proof(
+                ms_item,
+                &incoming_utxo.sender_randomness,
+                &incoming_utxo.receiver_preimage,
+                incoming_utxo.aocl_index,
+            );
+            let restored_msmp = match restored_msmp_res {
+                Ok(msmp) => {
+                    // Verify that the restored MSMP is valid
+                    if !ams_lock.ams.verify(ms_item, &msmp) {
+                        warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", incoming_utxo.aocl_index);
+                        continue;
+                    }
+
+                    msmp
+                }
+                Err(err) => bail!("Could not restore MS membership proof. Got: {err}"),
+            };
+
+            let mut restored_mutxo =
+                MonitoredUtxo::new(incoming_utxo.utxo, self.wallet_state.number_of_mps_per_utxo);
+            restored_mutxo.add_membership_proof_for_tip(tip.hash, restored_msmp);
+
+            wallet_db.monitored_utxos.push(restored_mutxo);
+            restored_mutxos += 1;
+        }
+
+        wallet_db.persist();
+        info!("Successfully restored {restored_mutxos} monitored UTXOs to wallet database");
+
+        Ok(())
+    }
+
+    pub async fn resync_membership_proofs_from_stored_blocks(
+        &self,
+        tip_hash: Digest,
+    ) -> Result<()> {
         // loop over all monitored utxos
         let mut monitored_utxos = self
             .wallet_state
@@ -539,8 +653,12 @@ mod global_state_tests {
     use crate::{
         config_models::network::Network,
         models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},
-        tests::shared::{get_mock_global_state, make_mock_block, unit_test_data_directory},
+        tests::shared::{
+            add_block_to_light_state, get_mock_global_state, make_mock_block,
+            unit_test_data_directory,
+        },
     };
+    use num_traits::One;
     use rand::random;
     use tracing_test::traced_test;
 
@@ -667,6 +785,86 @@ mod global_state_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn restore_monitored_utxos_from_recovery_data_test() {
+        let network = Network::Alpha;
+        let global_state = get_mock_global_state(network, 2, None).await;
+        let other_receiver_address = WalletSecret::new(
+            random(),
+            &unit_test_data_directory(network)
+                .unwrap()
+                .wallet_directory_path(),
+        )
+        .nth_generation_spending_key(0)
+        .to_address();
+        let genesis_block = Block::genesis_block();
+        let (mock_block_1, _, _) = make_mock_block(&genesis_block, None, other_receiver_address);
+        crate::tests::shared::add_block_to_archival_state(
+            global_state.chain.archival_state.as_ref().unwrap(),
+            mock_block_1.clone(),
+        )
+        .await
+        .unwrap();
+        add_block_to_light_state(&global_state.chain.light_state, mock_block_1.clone())
+            .await
+            .unwrap();
+
+        // Delete everything from monitored UTXO (the premined UTXO)
+        {
+            let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+            assert!(
+                wallet_db_lock.monitored_utxos.len().is_one(),
+                "MUTXO must have genesis element before emptying it"
+            );
+            wallet_db_lock.monitored_utxos.pop();
+
+            assert!(
+                wallet_db_lock.monitored_utxos.is_empty(),
+                "MUTXO must be empty after emptying it"
+            );
+        }
+
+        // Recover the MUTXO from the recovery data, and verify that MUTXOs are restored
+        global_state
+            .restore_monitored_utxos_from_recovery_data()
+            .await
+            .unwrap();
+        {
+            let wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+            assert!(
+                wallet_db_lock.monitored_utxos.len().is_one(),
+                "MUTXO must have genesis element after recovering it"
+            );
+
+            // Verify that the restored MUTXO has a valid MSMP
+            let own_premine_mutxo = wallet_db_lock.monitored_utxos.get(0);
+            let ms_item = Hash::hash(&own_premine_mutxo.utxo);
+            global_state
+                .chain
+                .light_state
+                .get_latest_block()
+                .await
+                .body
+                .next_mutator_set_accumulator
+                .verify(
+                    &ms_item,
+                    &own_premine_mutxo
+                        .get_latest_membership_proof_entry()
+                        .unwrap()
+                        .1,
+                );
+            assert_eq!(
+                mock_block_1.hash,
+                own_premine_mutxo
+                    .get_latest_membership_proof_entry()
+                    .unwrap()
+                    .0,
+                "MUTXO must have the correct latest block digest value"
+            );
+        }
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let network = Network::RegTest;
         let global_state = get_mock_global_state(network, 2, None).await;
@@ -682,13 +880,7 @@ mod global_state_tests {
             .to_address();
 
         // 1. Create new block 1 and store it to the DB
-        let genesis_block = global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block = Block::genesis_block();
         let (mock_block_1a, _, _) = make_mock_block(&genesis_block, None, other_receiver_address);
         {
             let mut block_db_lock = global_state
@@ -731,7 +923,7 @@ mod global_state_tests {
 
         // Call resync
         global_state
-            .resync_membership_proofs_to_tip(mock_block_1a.hash)
+            .resync_membership_proofs_from_stored_blocks(mock_block_1a.hash)
             .await
             .unwrap();
 
@@ -858,7 +1050,7 @@ mod global_state_tests {
 
         // Call resync which fails to sync the UTXO that was abandoned when block 1a was abandoned
         global_state
-            .resync_membership_proofs_to_tip(parent_block.hash)
+            .resync_membership_proofs_from_stored_blocks(parent_block.hash)
             .await
             .unwrap();
 
@@ -1056,7 +1248,7 @@ mod global_state_tests {
 
         // Run the resync and verify that MPs are synced
         global_state
-            .resync_membership_proofs_to_tip(fork_b_block.hash)
+            .resync_membership_proofs_from_stored_blocks(fork_b_block.hash)
             .await
             .unwrap();
         let wallet_status_on_b_fork_after_resync =
@@ -1121,7 +1313,7 @@ mod global_state_tests {
         // Run the resync and verify that UTXO from genesis is synced, but that
         // UTXO from 1a is not synced.
         global_state
-            .resync_membership_proofs_to_tip(fork_c_block.hash)
+            .resync_membership_proofs_from_stored_blocks(fork_c_block.hash)
             .await
             .unwrap();
         let wallet_status_on_c_fork_after_resync =

@@ -254,6 +254,20 @@ pub async fn get_test_genesis_setup(
     ))
 }
 
+pub async fn add_block_to_light_state(light_state: &LightState, new_block: Block) -> Result<()> {
+    let mut light_state_locked: tokio::sync::MutexGuard<Block> =
+        light_state.latest_block.lock().await;
+
+    let previous_pow_family = light_state_locked.header.proof_of_work_family;
+    if previous_pow_family < new_block.header.proof_of_work_family {
+        *light_state_locked = new_block;
+    } else {
+        panic!("Attempted to add to light state an older block than the current light state block");
+    }
+
+    Ok(())
+}
+
 pub async fn add_block_to_archival_state(
     archival_state: &ArchivalState,
     new_block: Block,
@@ -270,10 +284,15 @@ pub async fn add_block_to_archival_state(
             .block_header
     });
     archival_state.write_block(
-        Box::new(new_block),
+        Box::new(new_block.clone()),
         &mut db_lock,
         tip_header.map(|x| x.proof_of_work_family),
     )?;
+
+    let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+    archival_state
+        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)
+        .unwrap();
 
     Ok(())
 }

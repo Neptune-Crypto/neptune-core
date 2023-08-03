@@ -109,11 +109,13 @@ impl ArchivalState {
     /// Find the path connecting two blocks. Every path involves
     /// going down some number of steps and then going up some number
     /// of steps. So this function returns two lists: the list of
-    /// down steps and the list of up steps.
-    pub async fn find_path(
+    /// down steps and the list of up steps. Caller must provide block
+    /// DB lock.
+    pub fn find_path_with_lock(
         &self,
         start: &Digest,
         stop: &Digest,
+        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
     ) -> (Vec<Digest>, Digest, Vec<Digest>) {
         // We build two lists, initially populated with the start
         // and stop of the walk. We extend the lists downwards by
@@ -123,19 +125,18 @@ impl ArchivalState {
 
         // Get DB lock and hold it until this function call is completed.
         // This is done to avoid having to take and release the lock a lot of times.
-        let mut block_db_lock = self.block_index_db.lock().await;
         let mut leaving_deepest_block_header = self
-            .get_block_header_with_lock(&mut block_db_lock, *leaving.last().unwrap())
+            .get_block_header_with_lock(block_db_lock, *leaving.last().unwrap())
             .unwrap();
         let mut arriving_deepest_block_header = self
-            .get_block_header_with_lock(&mut block_db_lock, *arriving.last().unwrap())
+            .get_block_header_with_lock(block_db_lock, *arriving.last().unwrap())
             .unwrap();
         while leaving_deepest_block_header.height != arriving_deepest_block_header.height {
             if leaving_deepest_block_header.height < arriving_deepest_block_header.height {
                 arriving.push(arriving_deepest_block_header.prev_block_digest);
                 arriving_deepest_block_header = self
                     .get_block_header_with_lock(
-                        &mut block_db_lock,
+                        block_db_lock,
                         arriving_deepest_block_header.prev_block_digest,
                     )
                     .unwrap();
@@ -143,7 +144,7 @@ impl ArchivalState {
                 leaving.push(leaving_deepest_block_header.prev_block_digest);
                 leaving_deepest_block_header = self
                     .get_block_header_with_lock(
-                        &mut block_db_lock,
+                        block_db_lock,
                         leaving_deepest_block_header.prev_block_digest,
                     )
                     .unwrap();
@@ -153,12 +154,12 @@ impl ArchivalState {
         // Extend both lists until their deepest blocks match.
         while leaving.last().unwrap() != arriving.last().unwrap() {
             let leaving_predecessor = self
-                .get_block_header_with_lock(&mut block_db_lock, *leaving.last().unwrap())
+                .get_block_header_with_lock(block_db_lock, *leaving.last().unwrap())
                 .unwrap()
                 .prev_block_digest;
             leaving.push(leaving_predecessor);
             let arriving_predecessor = self
-                .get_block_header_with_lock(&mut block_db_lock, *arriving.last().unwrap())
+                .get_block_header_with_lock(block_db_lock, *arriving.last().unwrap())
                 .unwrap()
                 .prev_block_digest;
             arriving.push(arriving_predecessor);
@@ -170,6 +171,19 @@ impl ArchivalState {
         arriving.reverse();
 
         (leaving, luca, arriving)
+    }
+
+    /// Find the path connecting two blocks. Every path involves
+    /// going down some number of steps and then going up some number
+    /// of steps. So this function returns two lists: the list of
+    /// down steps and the list of up steps.
+    pub async fn find_path(
+        &self,
+        start: &Digest,
+        stop: &Digest,
+    ) -> (Vec<Digest>, Digest, Vec<Digest>) {
+        let mut block_db_lock = self.block_index_db.lock().await;
+        self.find_path_with_lock(start, stop, &mut block_db_lock)
     }
 
     pub async fn new(
@@ -610,10 +624,13 @@ impl ArchivalState {
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
     /// rolled back are present in the DB. The input block is considered chain tip. All blocks
     /// stored in the database are assumed to be valid.
-    pub fn update_mutator_set(
+    pub fn update_mutator_set<'a>(
         &self,
-        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
-        ams_lock: &mut tokio::sync::MutexGuard<RustyArchivalMutatorSet<Hash>>,
+        block_db_lock: &mut tokio::sync::MutexGuard<
+            'a,
+            RustyLevelDB<BlockIndexKey, BlockIndexValue>,
+        >,
+        ams_lock: &mut tokio::sync::MutexGuard<'a, RustyArchivalMutatorSet<Hash>>,
         new_block: &Block,
     ) -> Result<()> {
         // Get the block digest that the mutator set was most recently synced to
@@ -622,18 +639,18 @@ impl ArchivalState {
         // Process roll back, if necessary.
         // Until the mutator set isn't synced with the previous block, roll back, unless we've
         // reached the genesis block in which case, we cannot roll back further.
-        let mut ms_block_rollback_digest = ms_block_sync_digest;
-        while ms_block_rollback_digest != new_block.header.prev_block_digest {
-            // The mutator set rollback digest should never be equal to the genesis block hash,
-            // but this function has crashed a lot, so we add this sanity check. This would
-            // indicate an invalid block, and previous validation should have caught that.
-            if ms_block_rollback_digest == self.genesis_block.hash {
-                panic!("Attempted to roll back genesis block in archival mutator set");
-            }
 
+        // Find path from mutator set sync digest to new block
+        let (backwards, _luca, forwards) = self.find_path_with_lock(
+            &ms_block_sync_digest,
+            &new_block.header.prev_block_digest,
+            block_db_lock,
+        );
+
+        for digest in backwards {
             // Roll back mutator set
             let roll_back_block = self
-                .get_block_with_lock(block_db_lock, ms_block_rollback_digest)
+                .get_block_with_lock(block_db_lock, digest)
                 .expect("Fetching block must succeed");
 
             debug!(
@@ -654,52 +671,64 @@ impl ArchivalState {
             for removal_record in roll_back_block.body.transaction.kernel.inputs.iter() {
                 ams_lock.ams.revert_remove(removal_record);
             }
-
-            ms_block_rollback_digest = roll_back_block.header.prev_block_digest;
         }
 
-        let mut addition_records: Vec<AdditionRecord> =
-            new_block.body.transaction.kernel.outputs.clone();
-        addition_records.reverse();
-        let mut removal_records = new_block.body.transaction.kernel.inputs.clone();
-        removal_records.reverse();
-        let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
-            removal_records.iter_mut().collect::<Vec<_>>();
+        let forwards = vec![forwards, vec![new_block.hash]].concat();
+        for digest in forwards {
+            // Add block to mutator set
+            let apply_forward_block = if digest == new_block.hash {
+                new_block.to_owned()
+            } else {
+                self.get_block_with_lock(block_db_lock, digest)
+                    .expect("Fetching block must succeed")
+            };
+            debug!(
+                "Updating mutator set: adding block with height {}",
+                apply_forward_block.header.height
+            );
 
-        // Add items, thus adding the output UTXOs to the mutator set
-        while let Some(addition_record) = addition_records.pop() {
-            // Batch-update all removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(
+            let mut addition_records: Vec<AdditionRecord> =
+                apply_forward_block.body.transaction.kernel.outputs.clone();
+            addition_records.reverse();
+            let mut removal_records = apply_forward_block.body.transaction.kernel.inputs.clone();
+            removal_records.reverse();
+            let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
+                removal_records.iter_mut().collect::<Vec<_>>();
+
+            // Add items, thus adding the output UTXOs to the mutator set
+            while let Some(addition_record) = addition_records.pop() {
+                // Batch-update all removal records to keep them valid after next addition
+                RemovalRecord::batch_update_from_addition(
                 &mut removal_records,
                 &mut ams_lock.ams.kernel,
             ).expect("MS removal record update from add must succeed in update_mutator_set as block should already be verified");
 
-            // Add the element to the mutator set
-            ams_lock.ams.add(&addition_record);
-        }
+                // Add the element to the mutator set
+                ams_lock.ams.add(&addition_record);
+            }
 
-        // Remove items, thus removing the input UTXOs from the mutator set
-        while let Some(removal_record) = removal_records.pop() {
-            // Batch-update all removal records to keep them valid after next removal
-            RemovalRecord::batch_update_from_remove(
+            // Remove items, thus removing the input UTXOs from the mutator set
+            while let Some(removal_record) = removal_records.pop() {
+                // Batch-update all removal records to keep them valid after next removal
+                RemovalRecord::batch_update_from_remove(
                 &mut removal_records,
                 removal_record,
             ).expect("MS removal record update from remove must succeed in update_mutator_set as block should already be verified");
 
-            // Remove the element from the mutator set
-            ams_lock.ams.remove(removal_record);
+                // Remove the element from the mutator set
+                ams_lock.ams.remove(removal_record);
+            }
         }
 
         // Sanity check that archival mutator set has been updated consistently with the new block
         debug!("sanity check: was AMS updated consistently with new block?");
-        let new_block_copy = new_block.clone();
         assert_eq!(
-            new_block_copy
+            new_block
                 .body
                 .next_mutator_set_accumulator
                 .hash(),
             ams_lock.ams.hash(),
-            "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block_copy.hash
+            "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash
         );
 
         // Persist updated mutator set to disk, with sync label
@@ -848,7 +877,9 @@ mod archival_state_tests {
             let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
 
-            archival_state.update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)?;
+            archival_state
+                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)
+                .unwrap();
         }
 
         // Create a new archival MS that should be synced to block 1, not the genesis block
@@ -879,7 +910,6 @@ mod archival_state_tests {
         // Verify that `update_mutator_set` writes the active window back to disk.
 
         let network = Network::Alpha;
-        let archival_state = make_test_archival_state(network).await;
         let genesis_wallet_state = get_mock_wallet_state(
             None,
             &unit_test_data_directory(network)
@@ -892,27 +922,41 @@ mod archival_state_tests {
         let genesis_receiver_global_state = get_mock_global_state(network, 0, Some(wallet)).await;
 
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
-            &archival_state.genesis_block,
+            &genesis_receiver_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .genesis_block,
             None,
             own_receiving_address,
         );
 
         {
-            let mut block_db_lock = archival_state.block_index_db.lock().await;
-            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
-
-            *genesis_receiver_global_state
+            add_block(&genesis_receiver_global_state, mock_block_1.clone()).await?;
+            let mut block_db_lock = genesis_receiver_global_state
                 .chain
-                .light_state
-                .latest_block
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_index_db
                 .lock()
-                .await = mock_block_1.clone();
+                .await;
+            let mut ams_lock = genesis_receiver_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .archival_mutator_set
+                .lock()
+                .await;
             genesis_receiver_global_state
                 .chain
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)?;
+                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)
+                .unwrap();
             genesis_receiver_global_state
                 .wallet_state
                 .update_wallet_state_with_new_block(
@@ -952,10 +996,31 @@ mod archival_state_tests {
             mock_block_2.accumulate_transaction(sender_tx);
 
             // Remove an element from the mutator set, verify that the active window DB is updated.
-            let mut block_db_lock = archival_state.block_index_db.lock().await;
-            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+            add_block(&genesis_receiver_global_state, mock_block_2.clone()).await?;
+            let mut block_db_lock = genesis_receiver_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .block_index_db
+                .lock()
+                .await;
+            let mut ams_lock = genesis_receiver_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .archival_mutator_set
+                .lock()
+                .await;
 
-            archival_state.update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_2)?;
+            genesis_receiver_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_2)
+                .unwrap();
 
             assert_ne!(0, ams_lock.ams.kernel.swbf_active.sbf.len());
         }
@@ -987,7 +1052,9 @@ mod archival_state_tests {
         )?;
 
         // 2. Update mutator set with this
-        archival_state.update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1a)?;
+        archival_state
+            .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1a)
+            .unwrap();
 
         // 3. Create competing block 1 and store it to DB
         let (mock_block_1b, _, _) = make_mock_block_with_valid_pow(
@@ -1002,7 +1069,9 @@ mod archival_state_tests {
         )?;
 
         // 4. Update mutator set with that
-        archival_state.update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1b)?;
+        archival_state
+            .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1b)
+            .unwrap();
 
         // 5. Experience rollback
 
@@ -1237,7 +1306,8 @@ mod archival_state_tests {
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .update_mutator_set(&mut block_db_lock, &mut ams_lock, &next_block)?;
+                    .update_mutator_set(&mut block_db_lock, &mut ams_lock, &next_block)
+                    .unwrap();
 
                 // 3. Update wallet state so we can continue making transactions
                 global_state
@@ -1298,7 +1368,8 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1b)?;
+                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1b)
+                .unwrap();
         }
 
         // 5. Verify correct rollback
@@ -2269,6 +2340,7 @@ mod archival_state_tests {
         //
         // Note that in the later test, 6b becomes the tip.
 
+        // Prior to this line, block 4a is tip.
         let (mock_block_3_c, _, _) =
             make_mock_block_with_valid_pow(&mock_block_2_a.clone(), None, own_receiving_address);
         add_block_to_archival_state(&archival_state, mock_block_3_c.clone()).await?;

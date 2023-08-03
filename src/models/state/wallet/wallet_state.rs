@@ -116,7 +116,10 @@ impl WalletState {
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
-        // from genesis would be unspendable. This should only be done *once* though
+        // from genesis would be unspendable. This should only be done *once* though.
+        // This also ensures that any premine outputs are added to the file containing the
+        // incoming randomness such that a wallet-DB recovery will include genesis block
+        // outputs.
         {
             let mut wallet_db_lock = rusty_wallet_database.lock().await;
             if wallet_db_lock.get_sync_label() == Digest::default() {
@@ -152,9 +155,7 @@ impl WalletState {
 
         ret
     }
-}
 
-impl WalletState {
     fn scan_for_spent_utxos(
         &self,
         transaction: &Transaction,

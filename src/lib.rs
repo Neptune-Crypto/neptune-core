@@ -136,6 +136,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         own_handshake_data.tip_header.height
     );
 
+    // Check if we need to restore the wallet database, and if so, do it.
+    state.restore_monitored_utxos_from_recovery_data().await?;
+
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];
     for peer_address in state.cli.peers.clone() {
