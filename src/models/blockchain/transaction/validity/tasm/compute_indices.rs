@@ -1,13 +1,20 @@
+use crate::models::blockchain::shared::Hash;
+use tasm_lib::library::Library;
+
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::get_swbf_indices::GetSwbfIndices,
     rust_shadowing_helper_functions,
     snippet::{DataType, Snippet},
-    structure::get_field::GetField,
 };
+use triton_vm::instruction::LabelledInstructions;
+use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::shared::{NUM_TRIALS, WINDOW_SIZE};
 
 pub(crate) struct ComputeIndices;
@@ -15,13 +22,15 @@ pub(crate) struct ComputeIndices;
 impl ComputeIndices {
     #[cfg(test)]
     fn pseudorandom_init_state(seed: [u8; 32]) -> tasm_lib::ExecutionState {
+        use rand::RngCore;
+
         let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
 
         let mut msmp =
             crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof::<
                 crate::Hash,
             >(rand::Rng::gen(&mut rng));
-        msmp.auth_path_aocl.leaf_index = rand::Rng::gen(&mut rng);
+        msmp.auth_path_aocl.leaf_index = rng.next_u32() as u64;
 
         let msmp_encoded = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&msmp);
 
@@ -29,12 +38,16 @@ impl ComputeIndices {
         let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
             std::collections::HashMap::new();
 
+        memory.insert(
+            BFieldElement::new(1u64),
+            BFieldElement::new(msmp_encoded.len() as u64),
+        );
         for (i, v) in msmp_encoded.iter().enumerate() {
-            memory.insert(BFieldElement::new(1u64 + i as u64), *v);
+            memory.insert(BFieldElement::new(2u64 + i as u64), *v);
         }
         memory.insert(
             <BFieldElement as num_traits::Zero>::zero(),
-            BFieldElement::new(1u64 + msmp_encoded.len() as u64),
+            BFieldElement::new(2u64 + msmp_encoded.len() as u64),
         );
 
         let mut stack = tasm_lib::get_init_tvm_stack();
@@ -43,14 +56,14 @@ impl ComputeIndices {
         stack.push(item.values()[2]);
         stack.push(item.values()[1]);
         stack.push(item.values()[0]);
-        stack.push(BFieldElement::new(1u64));
+        stack.push(BFieldElement::new(2u64));
 
         tasm_lib::ExecutionState {
             stack,
             std_in: vec![],
             secret_in: vec![],
             memory,
-            words_allocated: 1,
+            words_allocated: 2,
         }
     }
 }
@@ -90,8 +103,13 @@ impl Snippet for ComputeIndices {
         -5
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
-        let get_field = library.import(Box::new(GetField));
+    fn function_code(&self, library: &mut Library) -> String {
+        type MsMpH = MsMembershipProof<Hash>;
+        let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
+        let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
+        let mp_to_ap = tasm_lib::field!(MsMpH::auth_path_aocl);
+        type MmrMpH = MmrMembershipProof<Hash>;
+        let ap_to_li = tasm_lib::field!(MmrMpH::leaf_index);
         let entrypoint = self.entrypoint();
         let read_digest = library.import(Box::new(PushRamToStack {
             output_type: DataType::Digest,
@@ -101,33 +119,24 @@ impl Snippet for ComputeIndices {
             num_trials: NUM_TRIALS as usize,
         }));
 
-        format!(
-            "
+        let code = triton_asm! {
         // BEFORE: _ i4 i3 i2 i1 i0 *mp
         // AFTER: _ *indices
         {entrypoint}:
 
             // get fields
             dup 0 // _ [item] *mp *mp
-            push 0 // _ [item] *mp *mp 0 (= field sender_randomness)
-            call {get_field} // _ [item] *mp *sr_si
-            push 1 add // _ [item] *mp *sr
+            {&mp_to_sr} // _ [item] *mp *sr
 
             dup 1 // _ [item] *mp *sr *mp
-            push 1 // _ [item] *mr *sr *mp 1 (= field receiver_preimage)
-            call {get_field} // _ [item] *mp *sr *rp_si
-            push 1 add // _ [item] *mp *sr *rp
+            {&mp_to_rp} // _ [item] *mp *sr *rp
 
             swap 2 // _ [item] *rp *sr *mp
-            push 2 // _ [item] *rp *sr *mp 2 (= field auth_path_aocl)
-            call {get_field} // _ [item] *rp *sr *ap_si
-            push 1 add // _ [item] *rp *sr *ap
-            push 0 // _ [item] *rp *sr *ap 0 (= field leaf_index)
-            call {get_field} // _ [item] *rp *sr *li_si
-            // push 1 add // _ [item] *rp *sr *li
+            {&mp_to_ap} // _ [item] *rp *sr *ap
+            {&ap_to_li} // _ [item] *rp *sr *li
 
             // read leaf index from memory
-            read_mem // _ [item] *rp *sr *li li_lo 
+            read_mem // _ [item] *rp *sr *li li_lo
             swap 1   // _ [item] *rp *sr li_lo *li
             push 1 add // _ [item] *rp *sr li_lo *li+1
             read_mem // _ [item] *rp *sr li_lo *li+1 li_hi
@@ -178,8 +187,8 @@ impl Snippet for ComputeIndices {
             call {get_swbf_indices}
 
             return
-            "
-        )
+        };
+        LabelledInstructions(code).to_string()
     }
 
     fn crash_conditions(&self) -> Vec<String> {
@@ -237,7 +246,7 @@ impl Snippet for ComputeIndices {
         memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
     ) {
         // read address of membership proof
-        let mut address = stack.pop().unwrap();
+        let _address = stack.pop().unwrap();
 
         // read item
         let item = Digest::new([
@@ -248,77 +257,18 @@ impl Snippet for ComputeIndices {
             stack.pop().unwrap(),
         ]);
 
-        // read sender randomness
-        address.increment();
-        let sr0 = *memory.get(&address).unwrap();
-        address.increment();
-        let sr1 = *memory.get(&address).unwrap();
-        address.increment();
-        let sr2 = *memory.get(&address).unwrap();
-        address.increment();
-        let sr3 = *memory.get(&address).unwrap();
-        address.increment();
-        let sr4 = *memory.get(&address).unwrap();
-        address.increment();
-        let sender_randomness = Digest::new([sr0, sr1, sr2, sr3, sr4]);
-
-        // read receiver preimage
-        address.increment();
-        let rp0 = *memory.get(&address).unwrap();
-        address.increment();
-        let rp1 = *memory.get(&address).unwrap();
-        address.increment();
-        let rp2 = *memory.get(&address).unwrap();
-        address.increment();
-        let rp3 = *memory.get(&address).unwrap();
-        address.increment();
-        let rp4 = *memory.get(&address).unwrap();
-        address.increment();
-        let receiver_preimage = Digest::new([rp0, rp1, rp2, rp3, rp4]);
-
-        // read leaf index
-        address.increment();
-        let leaf_index_lo = memory.get(&address).unwrap().value();
-        address.increment();
-        let leaf_index_hi = memory.get(&address).unwrap().value();
-        address.increment();
-        let _aocl_leaf_index = (leaf_index_hi << 32) ^ leaf_index_lo;
-
-        // // compute indices
-        // let indices = get_swbf_indices::<Hash>(
-        //     &item,
-        //     &sender_randomness,
-        //     &receiver_preimage,
-        //     aocl_leaf_index,
-        // );
-
-        // // store to memory as unsafe list
-        // let list_pointer = rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(
-        //     4 * indices.len(),
-        //     memory,
-        // );
-        // rust_shadowing_helper_functions::unsafe_list::unsafe_list_new(list_pointer, memory);
-        // for index in indices {
-        //     let v0 = (index & u32::MAX as u128) as u32;
-        //     let v1 = ((index >> 32) & u32::MAX as u128) as u32;
-        //     let v2 = ((index >> 64) & u32::MAX as u128) as u32;
-        //     let v3 = ((index >> 96) & u32::MAX as u128) as u32;
-        //     let value = vec![
-        //         BFieldElement::new(v0 as u64),
-        //         BFieldElement::new(v1 as u64),
-        //         BFieldElement::new(v2 as u64),
-        //         BFieldElement::new(v3 as u64),
-        //     ];
-        //     rust_shadowing_helper_functions::unsafe_list::unsafe_list_push(
-        //         list_pointer,
-        //         value,
-        //         memory,
-        //         4,
-        //     )
-        // }
-
-        // // leave list pointer on stack
-        // stack.push(list_pointer);
+        // read msmp
+        let size = memory.get(&BFieldElement::new(1)).unwrap().value();
+        let mut sequence = vec![];
+        for i in 0..size {
+            sequence.push(*memory.get(&BFieldElement::new(2u64 + i)).unwrap());
+        }
+        let msmp = *MsMembershipProof::<Hash>::decode(&sequence).unwrap();
+        let leaf_index = msmp.auth_path_aocl.leaf_index;
+        let leaf_index_hi = leaf_index >> 32;
+        let leaf_index_lo = leaf_index & (u32::MAX as u64);
+        let receiver_preimage = msmp.receiver_preimage;
+        let sender_randomness = msmp.sender_randomness;
 
         stack.push(BFieldElement::new(leaf_index_hi));
         stack.push(BFieldElement::new(leaf_index_lo));

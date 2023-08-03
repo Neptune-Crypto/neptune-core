@@ -27,7 +27,7 @@ impl TxValidationLogic for KernelToInputs {
         primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
         tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) -> Self {
-        let program = triton_opcodes::program::Program::default(); // TODO: implement!
+        let program = triton_vm::program::Program::default(); // TODO: implement!
         let program_digest = Hash::hash_varlen(&program.encode());
         let empty_string = vec![];
         let input = tx_kernel.mast_hash();

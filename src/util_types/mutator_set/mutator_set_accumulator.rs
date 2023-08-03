@@ -13,7 +13,7 @@ use super::{
     mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
 pub struct MutatorSetAccumulator<H: AlgebraicHasher + BFieldCodec> {
     pub kernel: MutatorSetKernel<H, MmrAccumulator<H>>,
 }
@@ -92,23 +92,6 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
     ) {
         self.kernel
             .batch_remove(removal_records, preserved_membership_proofs);
-    }
-}
-
-impl<H: AlgebraicHasher + BFieldCodec> BFieldCodec for MutatorSetAccumulator<H> {
-    fn decode(
-        sequence: &[twenty_first::shared_math::b_field_element::BFieldElement],
-    ) -> anyhow::Result<Box<Self>> {
-        let kernel = *MutatorSetKernel::decode(sequence)?;
-        Ok(Box::new(Self { kernel }))
-    }
-
-    fn encode(&self) -> Vec<twenty_first::shared_math::b_field_element::BFieldElement> {
-        self.kernel.encode()
-    }
-
-    fn static_length() -> Option<usize> {
-        None
     }
 }
 

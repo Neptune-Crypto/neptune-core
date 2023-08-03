@@ -1,4 +1,3 @@
-pub mod compiled_program;
 pub mod kernel_to_lock_scripts;
 pub mod kernel_to_typescripts;
 pub mod lockscripts_halt;
@@ -10,14 +9,14 @@ use anyhow::{Ok, Result};
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use tasm_lib::compiled_program::CompiledProgram;
 use tracing::{debug, info};
-use triton_opcodes::program::Program;
+use triton_vm::program::Program;
 use triton_vm::{proof::Proof, Claim};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use self::{
-    compiled_program::CompiledProgram,
     kernel_to_lock_scripts::KernelToLockScripts,
     kernel_to_typescripts::KernelToTypeScripts,
     lockscripts_halt::LockScriptsHalt,
@@ -26,7 +25,7 @@ use self::{
 };
 use super::{transaction_kernel::TransactionKernel, PrimitiveWitness};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum ClaimSupport {
     Proof(Proof),
     SecretWitness(Vec<BFieldElement>, Option<Program>),
@@ -35,7 +34,7 @@ pub enum ClaimSupport {
 
 /// SupportedClaim is a helper struct for ValiditySequence. It
 /// encodes a Claim with an optional witness.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct SupportedClaim {
     pub claim: triton_vm::Claim,
     pub support: ClaimSupport,
@@ -60,7 +59,7 @@ impl SupportedClaim {
 /// ValidityConditions is a helper struct. It contains a sequence of
 /// claims with optional witnesses. If all claims a true, then the
 /// transaction is valid.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TransactionValidityLogic {
     // programs: [lock_script], input: hash of tx kernel (MAST hash), witness: secret spending key, output: []
     pub lock_scripts_halt: LockScriptsHalt,

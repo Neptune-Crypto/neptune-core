@@ -1,14 +1,15 @@
 use crate::models::blockchain::shared::Hash;
 use num_traits::{One, Zero};
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::library::Library;
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::commit::Commit,
     snippet::{DataType, Snippet},
-    structure::get_field::GetField,
     ExecutionState,
 };
-use triton_vm::{BFieldElement, Digest};
+use triton_vm::instruction::LabelledInstructions;
+use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::util_types::mutator_set::{
@@ -112,45 +113,46 @@ impl Snippet for ComputeCanonicalCommitment {
         0
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
-        let get_field = library.import(Box::new(GetField));
+    fn function_code(&self, library: &mut Library) -> String {
+        type MsMpH = MsMembershipProof<Hash>;
+        let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
+        let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
         let commit = library.import(Box::new(Commit));
         let read_digest = library.import(Box::new(PushRamToStack {
             output_type: DataType::Digest,
         }));
         let entrypoint = self.entrypoint();
 
-        format!(
-            "
+        let code = triton_asm! {
         // BEFORE: _  i4 i3 i2 i1 i0 *mp
         // AFTER: _  *mp c4 c3 c2 c1 c0
         {entrypoint}:
             swap 5 swap 4 swap 3 swap 2 swap 1 dup 5
             // _  *mp i4 i3 i2 i1 i0 *mp
 
-            dup 0 push 0 call {get_field} // _ *mpi4 i3 i2 i1 i0 *mp *sr_si
-            swap 1 push 1 call {get_field} // _ *mpi4 i3 i2 i1 i0 *sr_si *rp_si
+            dup 0                   // _ *mp i4 i3 i2 i1 i0 *mp *mp
+            {&mp_to_sr}             // _ *mp i4 i3 i2 i1 i0 *mp *sr
+            swap 1                  // _ *mp i4 i3 i2 i1 i0 *sr *mp
+            {&mp_to_rp}             // _ *mp i4 i3 i2 i1 i0 *sr *rp_si
 
-            push 1 add  // _ *mpi4 i3 i2 i1 i0 *sr_si *rp
             push 0 push 0 push 0 push 0 push 0
-            swap 5                  // _ *mp i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 *rp
+            swap 5                  // _ *mp i4 i3 i2 i1 i0 *sr 0 0 0 0 0 *rp
 
-            call {read_digest} // _ *mp i4 i3 i2 i1 i0 *sr_si 0 0 0 0 0 [receiver_preimage]
+            call {read_digest} // _ *mp i4 i3 i2 i1 i0 *sr 0 0 0 0 0 [receiver_preimage]
             hash
             pop pop pop pop pop
-            // _ *mp i4 i3 i2 i1 i0 *sr_si rd4 rd3 rd2 rd1 rd0
+            // _ *mp i4 i3 i2 i1 i0 *sr rd4 rd3 rd2 rd1 rd0
 
-            swap 6                  // _ *mp i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 rd1 i0
-            swap 1                  // _ *mp i4 i3 i2 i1 rd0 *sr_si rd4 rd3 rd2 i0 rd1
-            swap 7                  // _ *mp i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 rd2 i0 i1
-            swap 2                  // _ *mp i4 i3 i2 rd1 rd0 *sr_si rd4 rd3 i1 i0 rd2
-            swap 8                  // _ *mp i4 i3 rd2 rd1 rd0 *sr_si rd4 rd3 i1 i0 i2
-            swap 3                  // _ *mp i4 i3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 rd3
-            swap 9                  // _ *mp i4 rd3 rd2 rd1 rd0 *sr_si rd4 i2 i1 i0 i3
-            swap 4                  // _ *mp i4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 rd4
-            swap 10                 // _ *mp rd4 rd3 rd2 rd1 rd0 *sr_si i3 i2 i1 i0 i4
-            swap 5                  // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr_si
-            push 1 add              // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr
+            swap 6                  // _ *mp i4 i3 i2 i1 rd0 *sr rd4 rd3 rd2 rd1 i0
+            swap 1                  // _ *mp i4 i3 i2 i1 rd0 *sr rd4 rd3 rd2 i0 rd1
+            swap 7                  // _ *mp i4 i3 i2 rd1 rd0 *sr rd4 rd3 rd2 i0 i1
+            swap 2                  // _ *mp i4 i3 i2 rd1 rd0 *sr rd4 rd3 i1 i0 rd2
+            swap 8                  // _ *mp i4 i3 rd2 rd1 rd0 *sr rd4 rd3 i1 i0 i2
+            swap 3                  // _ *mp i4 i3 rd2 rd1 rd0 *sr rd4 i2 i1 i0 rd3
+            swap 9                  // _ *mp i4 rd3 rd2 rd1 rd0 *sr rd4 i2 i1 i0 i3
+            swap 4                  // _ *mp i4 rd3 rd2 rd1 rd0 *sr i3 i2 i1 i0 rd4
+            swap 10                 // _ *mp rd4 rd3 rd2 rd1 rd0 *sr i3 i2 i1 i0 i4
+            swap 5                  // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 *sr
 
             call {read_digest} // _ *mp rd4 rd3 rd2 rd1 rd0 i4 i3 i2 i1 i0 sr4 sr3 sr2 sr1 sr0
 
@@ -169,8 +171,8 @@ impl Snippet for ComputeCanonicalCommitment {
             // _ *mp c4 c3 c2 c1 c0
 
             return
-            "
-        )
+        };
+        LabelledInstructions(code).to_string()
     }
 
     fn crash_conditions(&self) -> Vec<String> {

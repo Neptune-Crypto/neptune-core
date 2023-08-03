@@ -10,6 +10,7 @@ use twenty_first::{
 };
 
 use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
+use tasm_lib::library::Library;
 
 /// HashUtxo takes a VoidPointer to a UTXO living in a contiguous
 /// list, and hashes it.
@@ -84,7 +85,7 @@ impl Snippet for HashUtxo {
         4
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let entrypoint = self.entrypoint();
         let hash_varlen = library.import(Box::new(HashVarlen));
 

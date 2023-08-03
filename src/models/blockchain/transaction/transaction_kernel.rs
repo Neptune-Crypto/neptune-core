@@ -1,6 +1,7 @@
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
@@ -21,7 +22,7 @@ pub struct PubScriptHashAndInput {
     pub pubscript_input: Vec<BFieldElement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct TransactionKernel {
     pub inputs: Vec<RemovalRecord<Hash>>,
 

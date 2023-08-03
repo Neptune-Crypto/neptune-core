@@ -4,15 +4,17 @@ use crate::{
 };
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::library::Library;
 use tasm_lib::{
     list::ListType,
     mmr::verify_from_memory::MmrVerifyFromMemory,
     snippet::{DataType, Snippet},
-    structure::get_field::GetField,
     ExecutionState,
 };
-use triton_vm::{BFieldElement, Digest};
+use triton_vm::instruction::LabelledInstructions;
+use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 pub(crate) struct VerifyAoclMembership;
 
@@ -120,27 +122,31 @@ impl Snippet for VerifyAoclMembership {
         -5
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let verify_mmr_membership = library.import(Box::new(MmrVerifyFromMemory {
             list_type: ListType::Unsafe,
         }));
         // We do not need to use get field for MmrMembershipProof because
         // it has a custom implementation of BFieldCodec. However, we do
         // need it for MsMembershipProof.
-        let get_field = library.import(Box::new(GetField));
+        type MsMpH = MsMembershipProof<Hash>;
+        type MmrMpH = MmrMembershipProof<Hash>;
+        let msmp_to_mmrmp = tasm_lib::field!(MsMpH::auth_path_aocl);
+        let mmr_mp_to_li = tasm_lib::field!(MmrMpH::leaf_index);
+        let mmr_mp_to_auth_path = tasm_lib::field!(MmrMpH::authentication_path);
         let entrypoint = self.entrypoint();
 
-        format!(
-        "
+        let code = triton_asm! {
         // BEFORE: _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
         // AFTER: _ *peaks leaf_count_hi leaf_count_lo [bu ff er] b
         {entrypoint}:
-        
+
         // get leaf index
             dup 5               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *msmp
-            push 2              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *msmp 2
-            call {get_field}    // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *mp_si
-            push 1 add          // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *mp
+            {&msmp_to_mmrmp.clone()}
+                                // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *mmrmp
+            {&mmr_mp_to_li}     // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li
+
             push 1              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li 1
             add                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li_hi
             read_mem            // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li_hi li_hi
@@ -150,16 +156,12 @@ impl Snippet for VerifyAoclMembership {
             read_mem            // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi *li_lo li_lo
             swap 1              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *li_lo
             pop                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo
-                                // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo
 
             // get auth path
             dup 7               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *msmp
-            push 2              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *msmp 2
-            call {get_field}    // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *mp_si
-            push 1 add          // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *mp
-
-            // We don't need get field because MmrMembershipProof has a custom implementation of BFieldCodec.
-            push 2 add          // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *auth_path
+            {&msmp_to_mmrmp}    // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *mp
+            {&mmr_mp_to_auth_path}
+                                // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *auth_path
 
             // dup in correct order
             dup 14  // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *auth_path | *peaks
@@ -175,7 +177,7 @@ impl Snippet for VerifyAoclMembership {
             dup 10  // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *auth_path | *peaks leaf_count_hi leaf_count_lo li_hi li_lo c4 c3 c2 c1 c0 *auth_path
 
             // BEFORE:   _ *peaks leaf_count_hi leaf_count_lo leaf_index_hi leaf_index_lo [leaf_digest] *auth_path
-                call {verify_mmr_membership} 
+                call {verify_mmr_membership}
             // AFTER: _ *auth_path leaf_index_hi leaf_index_lo validation_result
             // _ ... | *auth_path li_hi li_lo validation_result
             // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *auth_path | *auth_path li_hi li_lo validation_result
@@ -189,8 +191,8 @@ impl Snippet for VerifyAoclMembership {
             // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] validation_result
 
             return
-        "
-        )
+        };
+        LabelledInstructions(code).to_string()
     }
 
     fn crash_conditions(&self) -> Vec<String> {

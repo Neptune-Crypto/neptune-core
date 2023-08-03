@@ -1,10 +1,11 @@
+use super::{SupportedClaim, ValidationLogic};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
-use triton_opcodes::program::Program;
+use tasm_lib::compiled_program::CompiledProgram;
+use tasm_lib::library::Library;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use super::{compiled_program::CompiledProgram, SupportedClaim, ValidationLogic};
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToLockScripts {
     pub supported_claim: SupportedClaim,
 }
@@ -37,17 +38,17 @@ impl ValidationLogic for KernelToLockScripts {
 
 impl CompiledProgram for KernelToLockScripts {
     fn rust_shadow(
-        _public_input: std::collections::VecDeque<triton_vm::BFieldElement>,
-        _secret_input: std::collections::VecDeque<triton_vm::BFieldElement>,
-    ) -> Vec<triton_vm::BFieldElement> {
+        _public_input: &[triton_vm::BFieldElement],
+        _secret_input: &[triton_vm::BFieldElement],
+    ) -> anyhow::Result<Vec<triton_vm::BFieldElement>> {
         todo!()
     }
 
-    fn program() -> triton_opcodes::program::Program {
-        Program::default()
+    fn crash_conditions() -> Vec<String> {
+        todo!()
     }
 
-    fn crash_conditions() -> Vec<String> {
+    fn code() -> (Vec<triton_vm::instruction::LabelledInstruction>, Library) {
         todo!()
     }
 }

@@ -6,6 +6,7 @@ use triton_vm::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::shared::Hash;
+use tasm_lib::library::Library;
 
 pub struct HashIndexList;
 
@@ -79,7 +80,7 @@ impl Snippet for HashIndexList {
         4
     }
 
-    fn function_code(&self, library: &mut tasm_lib::snippet_state::SnippetState) -> String {
+    fn function_code(&self, library: &mut Library) -> String {
         let hash_varlen = library.import(Box::new(HashVarlen));
         let entrypoint = self.entrypoint();
 

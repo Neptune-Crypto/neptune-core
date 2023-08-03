@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::ops::IndexMut;
+use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
@@ -40,7 +41,7 @@ pub enum MembershipProofError {
 }
 
 // In order to store this structure in the database, it needs to be serializable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
 pub struct MsMembershipProof<H: AlgebraicHasher> {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,

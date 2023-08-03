@@ -1,9 +1,10 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::{SupportedClaim, ValidationLogic};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScriptsHalt {
     pub supported_claims: Vec<SupportedClaim>,
 }

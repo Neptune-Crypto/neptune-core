@@ -1,3 +1,5 @@
+// recursion limit for macros (e.g. triton_asm!)
+#![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
 pub mod config_models;
 mod connect_to_peers;

@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
+use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -120,7 +121,7 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct RemovalRecord<H: AlgebraicHasher> {
     pub absolute_indices: AbsoluteIndexSet,
     pub target_chunks: ChunkDictionary<H>,

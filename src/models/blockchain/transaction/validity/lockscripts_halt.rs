@@ -6,7 +6,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use triton_vm::StarkParameters;
-use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
 use super::{ClaimSupport, SupportedClaim, ValidationLogic};
 use crate::models::blockchain::{
@@ -14,7 +14,7 @@ use crate::models::blockchain::{
     transaction::{transaction_kernel::TransactionKernel, PrimitiveWitness},
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, Default, BFieldCodec)]
 pub struct LockScriptsHalt {
     pub supported_claims: Vec<SupportedClaim>,
 }
@@ -67,7 +67,7 @@ impl ValidationLogic for LockScriptsHalt {
 
                     // sanity check
                     assert_eq!(supported_claim.claim.program_digest, program.hash::<Hash>());
-                    if triton_vm::vm::run(program, input_bfes, secret_witness.to_owned()).is_err() {
+                    if program.run(input_bfes, secret_witness.to_owned()).is_err() {
                         bail!("Lockscript execution failed for program:\n{program}")
                     }
 
@@ -128,7 +128,8 @@ impl ValidationLogic for LockScriptsHalt {
                 }
                 ClaimSupport::SecretWitness(secretw, maybe_program) => {
                     if let Some(program) = maybe_program {
-                        if triton_vm::vm::run(program, claim.input.to_vec(), secretw.to_owned())
+                        if program
+                            .run(claim.input.to_vec(), secretw.to_owned())
                             .is_err()
                         {
                             warn!("Execution of program failed:\n{}", program);

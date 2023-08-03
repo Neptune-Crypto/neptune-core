@@ -1,7 +1,7 @@
 use anyhow::bail;
 use num_traits::Zero;
 use std::collections::VecDeque;
-use triton_opcodes::{program::Program, shortcuts::halt};
+use triton_vm::{program::Program, triton_asm};
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
@@ -28,7 +28,7 @@ pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
 
 pub fn native_coin_program() -> Program {
     // todo: insert inflation check logic here
-    Program::new(&[halt()])
+    Program::new(&triton_asm!(halt))
 }
 
 pub fn native_coin_reference(
