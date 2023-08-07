@@ -5,7 +5,6 @@ use num_traits::{abs, Zero};
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 
-
 use tracing::{debug, warn};
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -458,7 +457,7 @@ mod block_tests {
             blockchain::transaction::PubScript, state::wallet::WalletSecret,
             state::UtxoReceiverData,
         },
-        tests::shared::{get_mock_global_state, make_mock_block, unit_test_data_directory},
+        tests::shared::{get_mock_global_state, make_mock_block},
     };
 
     use super::*;

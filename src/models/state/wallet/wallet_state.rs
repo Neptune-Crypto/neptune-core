@@ -4,7 +4,6 @@ use num_traits::Zero;
 use rusty_leveldb::DB;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::env;
 use std::error::Error;
 use std::fmt::Debug;
 use std::fs::OpenOptions;
@@ -54,7 +53,7 @@ pub struct WalletState {
     pub expected_utxos: Arc<std::sync::RwLock<UtxoNotificationPool>>,
 
     /// Path to directory containing wallet files
-    secrets_directory_path: PathBuf,
+    wallet_directory_path: PathBuf,
 }
 
 /// Contains the cryptographic (non-public) data that is needed to recover the mutator set
@@ -86,13 +85,16 @@ impl Debug for WalletState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WalletState")
             .field("wallet_secret", &self.wallet_secret)
+            .field("number_of_mps_per_utxo", &self.number_of_mps_per_utxo)
+            .field("expected_utxos", &self.expected_utxos)
+            .field("wallet_directory_path", &self.wallet_directory_path)
             .finish()
     }
 }
 
 impl WalletState {
     fn incoming_secrets_path(&self) -> PathBuf {
-        self.secrets_directory_path
+        self.wallet_directory_path
             .join(WALLET_INCOMING_SECRETS_FILE_NAME)
     }
 
@@ -105,7 +107,7 @@ impl WalletState {
         // Open file
         #[cfg(test)]
         {
-            std::fs::create_dir_all(self.secrets_directory_path.clone())?;
+            std::fs::create_dir_all(self.wallet_directory_path.clone())?;
         }
         let incoming_secrets_file = OpenOptions::new()
             .append(true)
@@ -150,29 +152,15 @@ impl WalletState {
     }
 
     pub async fn new_from_wallet_secret(
-        data_dir: Option<&DataDirectory>,
+        data_dir: &DataDirectory,
         wallet_secret: WalletSecret,
         cli_args: &Args,
     ) -> Self {
         // Create or connect to wallet block DB
-        let (wallet_db, secrets_directory_path) = match data_dir {
-            Some(data_dir) => (
-                DB::open(
-                    data_dir.wallet_database_dir_path(),
-                    rusty_leveldb::Options::default(),
-                ),
-                data_dir.wallet_database_dir_path(),
-            ),
-            // This case should only be hit when running unit-test
-            None => {
-                assert!(cfg!(test), "In memory database may only be used for tests");
-                (
-                    DB::open("in-memory DB", rusty_leveldb::in_memory()),
-                    env::temp_dir(),
-                )
-            }
-        };
-
+        let wallet_db = DB::open(
+            data_dir.wallet_database_dir_path(),
+            rusty_leveldb::Options::default(),
+        );
         let wallet_db = match wallet_db {
             Ok(wdb) => wdb,
             Err(err) => {
@@ -194,7 +182,7 @@ impl WalletState {
                 cli_args.max_utxo_notification_size,
                 cli_args.max_unconfirmed_utxo_notification_count_per_peer,
             ))),
-            secrets_directory_path,
+            wallet_directory_path: data_dir.wallet_directory_path(),
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -867,7 +855,7 @@ mod tests {
     use crate::{
         config_models::network::Network,
         models::state::wallet::generate_secret_key,
-        tests::shared::{get_mock_global_state, make_mock_block, unit_test_data_directory},
+        tests::shared::{get_mock_global_state, make_mock_block},
     };
 
     use super::*;

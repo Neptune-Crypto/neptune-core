@@ -1099,8 +1099,7 @@ mod peer_loop_tests {
         tests::shared::{
             add_block, get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
             get_test_genesis_setup, make_mock_block_with_invalid_pow,
-            make_mock_block_with_valid_pow, make_mock_transaction, unit_test_data_directory,
-            Action, Mock,
+            make_mock_block_with_valid_pow, make_mock_transaction, Action, Mock,
         },
     };
 
@@ -1559,7 +1558,6 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
-        let network = Network::Testnet;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(Network::Alpha, 0).await?;
         let a_wallet_secret = WalletSecret::new(random());

@@ -503,7 +503,7 @@ mod tests {
         },
         tests::shared::{
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
-            make_mock_transaction_with_wallet, unit_test_data_directory,
+            make_mock_transaction_with_wallet,
         },
         util_types::mutator_set::mutator_set_trait::MutatorSet,
     };
@@ -520,7 +520,8 @@ mod tests {
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(None).await;
+        let network = Network::Alpha;
+        let wallet_state = get_mock_wallet_state(None, network).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
         let transaction_digest = &Hash::hash(&transaction);
@@ -544,7 +545,7 @@ mod tests {
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32, network: Network) -> Mempool {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state = get_mock_wallet_state(None, network).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
                 vec![],
@@ -562,7 +563,7 @@ mod tests {
     #[tokio::test]
     async fn get_densest_transactions() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
-        let mempool = setup(10, Network::Alpha).await;
+        let mempool = setup(10, Network::RegTest).await;
 
         let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
@@ -592,8 +593,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn prune_stale_transactions() {
-        let network = Network::Testnet;
-        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state = get_mock_wallet_state(None, Network::Alpha).await;
         let mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
@@ -634,7 +634,6 @@ mod tests {
     async fn remove_transactions_with_block_test() -> Result<()> {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let network = Network::Alpha;
         let premine_receiver_global_state = get_mock_global_state(Network::Alpha, 2, None).await;
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);

@@ -650,10 +650,7 @@ mod global_state_tests {
     use crate::{
         config_models::network::Network,
         models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},
-        tests::shared::{
-            add_block_to_light_state, get_mock_global_state, make_mock_block,
-            unit_test_data_directory,
-        },
+        tests::shared::{add_block_to_light_state, get_mock_global_state, make_mock_block},
     };
     use num_traits::One;
     use rand::random;

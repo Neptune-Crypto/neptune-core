@@ -554,7 +554,7 @@ mod rpc_server_tests {
             state::wallet::{generate_secret_key, WalletSecret},
         },
         rpc_server::NeptuneRPCServer,
-        tests::shared::{get_mock_global_state, get_test_genesis_setup, unit_test_data_directory},
+        tests::shared::{get_mock_global_state, get_test_genesis_setup},
         RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;

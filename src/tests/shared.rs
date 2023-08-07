@@ -191,7 +191,7 @@ pub async fn get_mock_global_state(
     peer_count: u8,
     wallet: Option<WalletSecret>,
 ) -> GlobalState {
-    let (archival_state, peer_db_lock, data_dir) = make_unit_test_archival_state(network).await;
+    let (archival_state, peer_db_lock, _data_dir) = make_unit_test_archival_state(network).await;
 
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
@@ -216,7 +216,7 @@ pub async fn get_mock_global_state(
         chain: blockchain_state,
         cli: cli_args.clone(),
         net: networking_state,
-        wallet_state: get_mock_wallet_state(wallet).await,
+        wallet_state: get_mock_wallet_state(wallet, network).await,
         mempool,
         mining: Arc::new(std::sync::RwLock::new(cli_args.mine)),
     }
@@ -1089,7 +1089,10 @@ pub fn make_mock_block_with_invalid_pow(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) -> WalletState {
+pub async fn get_mock_wallet_state(
+    maybe_wallet_secret: Option<WalletSecret>,
+    network: Network,
+) -> WalletState {
     let wallet_secret = match maybe_wallet_secret {
         Some(wallet) => wallet,
         None => WalletSecret::devnet_wallet(),
@@ -1099,7 +1102,8 @@ pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) ->
         number_of_mps_per_utxo: 30,
         ..Default::default()
     };
-    WalletState::new_from_wallet_secret(None, wallet_secret, &cli_args).await
+    let data_dir = unit_test_data_directory(network).unwrap();
+    WalletState::new_from_wallet_secret(&data_dir, wallet_secret, &cli_args).await
 }
 
 pub async fn make_unit_test_archival_state(
