@@ -636,16 +636,21 @@ impl ArchivalState {
         // Get the block digest that the mutator set was most recently synced to
         let ms_block_sync_digest = ams_lock.get_sync_label();
 
-        // Process roll back, if necessary.
-        // Until the mutator set isn't synced with the previous block, roll back, unless we've
-        // reached the genesis block in which case, we cannot roll back further.
-
-        // Find path from mutator set sync digest to new block
-        let (backwards, _luca, forwards) = self.find_path_with_lock(
-            &ms_block_sync_digest,
-            &new_block.header.prev_block_digest,
-            block_db_lock,
-        );
+        // Find path from mutator set sync digest to new block. Optimize for the common case,
+        // where the new block is the child block of block that the mutator set is synced to.
+        let (backwards, _luca, forwards) =
+            if ms_block_sync_digest == new_block.header.prev_block_digest {
+                // Trivial path
+                (vec![], ms_block_sync_digest, vec![])
+            } else {
+                // Non-trivial path from current mutator set sync digest to new block
+                self.find_path_with_lock(
+                    &ms_block_sync_digest,
+                    &new_block.header.prev_block_digest,
+                    block_db_lock,
+                )
+            };
+        let forwards = vec![forwards, vec![new_block.hash]].concat();
 
         for digest in backwards {
             // Roll back mutator set
@@ -673,7 +678,6 @@ impl ArchivalState {
             }
         }
 
-        let forwards = vec![forwards, vec![new_block.hash]].concat();
         for digest in forwards {
             // Add block to mutator set
             let apply_forward_block = if digest == new_block.hash {
