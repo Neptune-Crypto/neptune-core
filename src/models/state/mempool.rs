@@ -520,13 +520,7 @@ mod tests {
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(
-            None,
-            &unit_test_data_directory(Network::Alpha)
-                .unwrap()
-                .wallet_directory_path(),
-        )
-        .await;
+        let wallet_state = get_mock_wallet_state(None).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
         let transaction_digest = &Hash::hash(&transaction);
@@ -550,13 +544,7 @@ mod tests {
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32, network: Network) -> Mempool {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(
-            None,
-            &unit_test_data_directory(network)
-                .unwrap()
-                .wallet_directory_path(),
-        )
-        .await;
+        let wallet_state = get_mock_wallet_state(None).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
                 vec![],
@@ -605,13 +593,7 @@ mod tests {
     #[tokio::test]
     async fn prune_stale_transactions() {
         let network = Network::Testnet;
-        let wallet_state = get_mock_wallet_state(
-            None,
-            &unit_test_data_directory(network)
-                .unwrap()
-                .wallet_directory_path(),
-        )
-        .await;
+        let wallet_state = get_mock_wallet_state(None).await;
         let mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
@@ -657,12 +639,7 @@ mod tests {
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new(
-            generate_secret_key(),
-            &unit_test_data_directory(network)
-                .unwrap()
-                .wallet_directory_path(),
-        );
+        let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_global_state =
             get_mock_global_state(Network::Alpha, 2, Some(other_wallet_secret.clone())).await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);

@@ -1,11 +1,11 @@
 use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::{abs, Zero};
-use rand::distributions::{Alphanumeric, DistString};
+
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
-use std::env;
-use std::path::Path;
+
+
 use tracing::{debug, warn};
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -149,10 +149,7 @@ impl Block {
 
     pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, Amount)> {
         // The premine UTXOs can be hardcoded here.
-        let dummy_path = env::temp_dir().join("neptune-unit-tests").join(Path::new(
-            &Alphanumeric.sample_string(&mut rand::thread_rng(), 16),
-        ));
-        let authority_wallet = WalletSecret::devnet_wallet(&dummy_path);
+        let authority_wallet = WalletSecret::devnet_wallet();
         let authority_receiving_address =
             authority_wallet.nth_generation_spending_key(0).to_address();
         vec![(authority_receiving_address, 20000.into())]
@@ -482,12 +479,7 @@ mod block_tests {
             .wallet_secret
             .nth_generation_spending_key(0);
         let address = spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new(
-            random(),
-            &unit_test_data_directory(network)
-                .unwrap()
-                .wallet_directory_path(),
-        );
+        let other_wallet_secret = WalletSecret::new(random());
         let other_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();

@@ -571,17 +571,8 @@ mod rpc_server_tests {
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         let network = Network::Alpha;
-        let state = get_mock_global_state(
-            network,
-            2,
-            Some(WalletSecret::new(
-                generate_secret_key(),
-                &unit_test_data_directory(network)
-                    .unwrap()
-                    .wallet_directory_path(),
-            )),
-        )
-        .await;
+        let state =
+            get_mock_global_state(network, 2, Some(WalletSecret::new(generate_secret_key()))).await;
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),

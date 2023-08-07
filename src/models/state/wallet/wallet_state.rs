@@ -2,9 +2,14 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::Zero;
 use rusty_leveldb::DB;
+use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
 use std::fmt::Debug;
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, LineWriter, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
@@ -20,7 +25,7 @@ use twenty_first::shared_math::digest::Digest;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
 use super::wallet_status::{WalletStatus, WalletStatusElement};
-use super::WalletSecret;
+use super::{WalletSecret, WALLET_INCOMING_SECRETS_FILE_NAME};
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::block_header::BlockHeader;
@@ -32,7 +37,6 @@ use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
-use crate::models::state::wallet::IncomingUtxoRecoveryData;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -46,8 +50,21 @@ pub struct WalletState {
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
 
-    // Anyone may read from expected_utxos, only main thread may write
+    // Any thread may read from expected_utxos, only main thread may write
     pub expected_utxos: Arc<std::sync::RwLock<UtxoNotificationPool>>,
+
+    /// Path to directory containing wallet files
+    secrets_directory_path: PathBuf,
+}
+
+/// Contains the cryptographic (non-public) data that is needed to recover the mutator set
+/// membership proof of a UTXO.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct IncomingUtxoRecoveryData {
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
+    pub receiver_preimage: Digest,
+    pub aocl_index: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,21 +91,85 @@ impl Debug for WalletState {
 }
 
 impl WalletState {
+    fn incoming_secrets_path(&self) -> PathBuf {
+        self.secrets_directory_path
+            .join(WALLET_INCOMING_SECRETS_FILE_NAME)
+    }
+
+    /// Store information needed to recover mutator set membership proof of a UTXO, in case
+    /// the wallet database is deleted.
+    fn store_utxo_ms_recovery_data(
+        &self,
+        utxo_ms_recovery_data: IncomingUtxoRecoveryData,
+    ) -> Result<()> {
+        // Open file
+        #[cfg(test)]
+        {
+            std::fs::create_dir_all(self.secrets_directory_path.clone())?;
+        }
+        let incoming_secrets_file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(self.incoming_secrets_path())?;
+        let mut incoming_secrets_file = LineWriter::new(incoming_secrets_file);
+
+        // Create JSON string ending with a newline as this flushes the write
+        #[cfg(windows)]
+        const LINE_ENDING: &str = "\r\n";
+        #[cfg(not(windows))]
+        const LINE_ENDING: &str = "\n";
+
+        let mut json_string = serde_json::to_string(&utxo_ms_recovery_data)?;
+        json_string.push_str(LINE_ENDING);
+        incoming_secrets_file.write_all(json_string.as_bytes())?;
+
+        // Flush just in case, since this is cryptographic data, you can't be too sure
+        incoming_secrets_file.flush()?;
+
+        Ok(())
+    }
+
+    /// Read recovery-information for mutator set membership proof of a UTXO. Returns all lines in the files,
+    /// where each line represents an incoming UTXO.
+    pub(crate) fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
+        let incoming_secrets_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open(self.incoming_secrets_path())?;
+
+        let file_reader = BufReader::new(incoming_secrets_file);
+        let mut ret = vec![];
+        for line in file_reader.lines() {
+            let line = line?;
+            let utxo_ms_recovery_data: IncomingUtxoRecoveryData =
+                serde_json::from_str(&line).expect("Could not parse JSON string");
+            ret.push(utxo_ms_recovery_data);
+        }
+
+        Ok(ret)
+    }
+
     pub async fn new_from_wallet_secret(
         data_dir: Option<&DataDirectory>,
         wallet_secret: WalletSecret,
         cli_args: &Args,
     ) -> Self {
         // Create or connect to wallet block DB
-        let wallet_db = match data_dir {
-            Some(data_dir) => DB::open(
+        let (wallet_db, secrets_directory_path) = match data_dir {
+            Some(data_dir) => (
+                DB::open(
+                    data_dir.wallet_database_dir_path(),
+                    rusty_leveldb::Options::default(),
+                ),
                 data_dir.wallet_database_dir_path(),
-                rusty_leveldb::Options::default(),
             ),
             // This case should only be hit when running unit-test
             None => {
                 assert!(cfg!(test), "In memory database may only be used for tests");
-                DB::open("in-memory DB", rusty_leveldb::in_memory())
+                (
+                    DB::open("in-memory DB", rusty_leveldb::in_memory()),
+                    env::temp_dir(),
+                )
             }
         };
 
@@ -113,6 +194,7 @@ impl WalletState {
                 cli_args.max_utxo_notification_size,
                 cli_args.max_unconfirmed_utxo_notification_count_per_peer,
             ))),
+            secrets_directory_path,
         };
 
         // Wallet state has to be initialized with the genesis block, otherwise the outputs
@@ -438,8 +520,7 @@ impl WalletState {
                     receiver_preimage,
                     aocl_index: new_own_membership_proof.auth_path_aocl.leaf_index,
                 };
-                self.wallet_secret
-                    .store_utxo_ms_recovery_data(utxo_ms_recovery_data)?;
+                self.store_utxo_ms_recovery_data(utxo_ms_recovery_data)?;
 
                 valid_membership_proofs_and_own_utxo_count.insert(
                     StrongUtxoKey::new(
@@ -808,12 +889,7 @@ mod tests {
         // Verify that MUTXO *is* marked as abandoned
 
         let network = Network::Testnet;
-        let own_wallet_secret = WalletSecret::new(
-            generate_secret_key(),
-            &unit_test_data_directory(network)
-                .unwrap()
-                .wallet_directory_path(),
-        );
+        let own_wallet_secret = WalletSecret::new(generate_secret_key());
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_global_state = get_mock_global_state(network, 0, Some(own_wallet_secret)).await;
         let genesis_block = Block::genesis_block();
@@ -830,14 +906,9 @@ mod tests {
         );
 
         // Add two blocks with no UTXOs for us
-        let other_recipient_address = WalletSecret::new(
-            generate_secret_key(),
-            &unit_test_data_directory(network)
-                .unwrap()
-                .wallet_directory_path(),
-        )
-        .nth_generation_spending_key(0)
-        .to_address();
+        let other_recipient_address = WalletSecret::new(generate_secret_key())
+            .nth_generation_spending_key(0)
+            .to_address();
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
