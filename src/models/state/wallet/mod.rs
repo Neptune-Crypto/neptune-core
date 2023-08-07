@@ -48,8 +48,8 @@ pub struct WalletSecret {
     pub secret_seed: Digest,
     version: u8,
 
-    incoming_randomness_file_path: PathBuf,
-    outgoing_randomness_file_path: PathBuf,
+    /// Path to directory containing all secrets
+    secrets_directory_path: PathBuf,
 }
 
 /// Struct for containing file paths for secrets. To be communicated to user upon
@@ -83,18 +83,18 @@ impl WalletSecret {
         wallet_directory_path.join(WALLET_INCOMING_SECRETS_FILE_NAME)
     }
 
+    fn incoming_secrets_path(&self) -> PathBuf {
+        self.secrets_directory_path
+            .join(WALLET_INCOMING_SECRETS_FILE_NAME)
+    }
+
     /// Create new `Wallet` given a `secret` key.
     pub fn new(secret_seed: Digest, wallet_directory_path: &Path) -> Self {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
             secret_seed,
             version: STANDARD_WALLET_VERSION,
-            incoming_randomness_file_path: Self::wallet_incoming_secrets_path(
-                wallet_directory_path,
-            ),
-            outgoing_randomness_file_path: Self::wallet_outgoing_secrets_path(
-                wallet_directory_path,
-            ),
+            secrets_directory_path: wallet_directory_path.to_owned(),
         }
     }
 
@@ -120,12 +120,12 @@ impl WalletSecret {
         // Open file
         #[cfg(test)]
         {
-            fs::create_dir_all(self.incoming_randomness_file_path.parent().unwrap())?;
+            fs::create_dir_all(self.secrets_directory_path.clone())?;
         }
         let incoming_secrets_file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(self.incoming_randomness_file_path.clone())?;
+            .open(self.incoming_secrets_path())?;
         let mut incoming_secrets_file = LineWriter::new(incoming_secrets_file);
 
         // Create JSON string ending with a newline as this flushes the write
@@ -150,7 +150,7 @@ impl WalletSecret {
         let incoming_secrets_file = OpenOptions::new()
             .read(true)
             .write(false)
-            .open(self.incoming_randomness_file_path.clone())?;
+            .open(self.incoming_secrets_path())?;
 
         let file_reader = BufReader::new(incoming_secrets_file);
         let mut ret = vec![];
