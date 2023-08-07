@@ -143,7 +143,7 @@ where
 
     /// Returns an authentication path for an element in the append-only commitment list
     pub fn get_aocl_authentication_path(
-        &mut self,
+        &self,
         index: u64,
     ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<H>, Box<dyn Error>> {
         if self.kernel.aocl.count_leaves() <= index {
@@ -160,7 +160,7 @@ where
 
     /// Returns an authentication path for a chunk in the sliding window Bloom filter
     pub fn get_chunk_and_auth_path(
-        &mut self,
+        &self,
         chunk_index: u64,
     ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<H>, Chunk), Box<dyn Error>> {
         if self.kernel.swbf_inactive.count_leaves() <= chunk_index {
@@ -191,7 +191,7 @@ where
     /// caller is better off using `get_aocl_authentication_path` and `get_chunk_and_auth_path` for the
     /// relevant indices.
     pub fn restore_membership_proof(
-        &mut self,
+        &self,
         item: &Digest,
         sender_randomness: &Digest,
         receiver_preimage: &Digest,

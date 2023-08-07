@@ -191,7 +191,7 @@ pub async fn get_mock_global_state(
     peer_count: u8,
     wallet: Option<WalletSecret>,
 ) -> GlobalState {
-    let (archival_state, peer_db_lock) = make_unit_test_archival_state(network).await;
+    let (archival_state, peer_db_lock, _data_dir) = make_unit_test_archival_state(network).await;
 
     let syncing = Arc::new(std::sync::RwLock::new(false));
     let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
@@ -216,7 +216,7 @@ pub async fn get_mock_global_state(
         chain: blockchain_state,
         cli: cli_args.clone(),
         net: networking_state,
-        wallet_state: get_mock_wallet_state(wallet).await,
+        wallet_state: get_mock_wallet_state(wallet, network).await,
         mempool,
         mining: Arc::new(std::sync::RwLock::new(cli_args.mine)),
     }
@@ -254,6 +254,20 @@ pub async fn get_test_genesis_setup(
     ))
 }
 
+pub async fn add_block_to_light_state(light_state: &LightState, new_block: Block) -> Result<()> {
+    let mut light_state_locked: tokio::sync::MutexGuard<Block> =
+        light_state.latest_block.lock().await;
+
+    let previous_pow_family = light_state_locked.header.proof_of_work_family;
+    if previous_pow_family < new_block.header.proof_of_work_family {
+        *light_state_locked = new_block;
+    } else {
+        panic!("Attempted to add to light state an older block than the current light state block");
+    }
+
+    Ok(())
+}
+
 pub async fn add_block_to_archival_state(
     archival_state: &ArchivalState,
     new_block: Block,
@@ -270,10 +284,15 @@ pub async fn add_block_to_archival_state(
             .block_header
     });
     archival_state.write_block(
-        Box::new(new_block),
+        Box::new(new_block.clone()),
         &mut db_lock,
         tip_header.map(|x| x.proof_of_work_family),
     )?;
+
+    let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+    archival_state
+        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)
+        .unwrap();
 
     Ok(())
 }
@@ -1070,7 +1089,10 @@ pub fn make_mock_block_with_invalid_pow(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) -> WalletState {
+pub async fn get_mock_wallet_state(
+    maybe_wallet_secret: Option<WalletSecret>,
+    network: Network,
+) -> WalletState {
     let wallet_secret = match maybe_wallet_secret {
         Some(wallet) => wallet,
         None => WalletSecret::devnet_wallet(),
@@ -1080,18 +1102,23 @@ pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) ->
         number_of_mps_per_utxo: 30,
         ..Default::default()
     };
-    WalletState::new_from_wallet_secret(None, wallet_secret, &cli_args).await
+    let data_dir = unit_test_data_directory(network).unwrap();
+    WalletState::new_from_wallet_secret(&data_dir, wallet_secret, &cli_args).await
 }
 
 pub async fn make_unit_test_archival_state(
     network: Network,
-) -> (ArchivalState, Arc<tokio::sync::Mutex<PeerDatabases>>) {
+) -> (
+    ArchivalState,
+    Arc<tokio::sync::Mutex<PeerDatabases>>,
+    DataDirectory,
+) {
     let (block_index_db, peer_db, data_dir) = unit_test_databases(network).unwrap();
 
     let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
     let ams_lock = Arc::new(tokio::sync::Mutex::new(ams));
 
-    let archival_state = ArchivalState::new(data_dir, block_index_db, ams_lock).await;
+    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams_lock).await;
 
-    (archival_state, peer_db)
+    (archival_state, peer_db, data_dir)
 }

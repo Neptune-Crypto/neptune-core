@@ -1,8 +1,10 @@
 use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::{abs, Zero};
+
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
+
 use tracing::{debug, warn};
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -451,7 +453,10 @@ impl Block {
 mod block_tests {
     use crate::{
         config_models::network::Network,
-        models::{blockchain::transaction::PubScript, state::UtxoReceiverData},
+        models::{
+            blockchain::transaction::PubScript, state::wallet::WalletSecret,
+            state::UtxoReceiverData,
+        },
         tests::shared::{get_mock_global_state, make_mock_block},
     };
 
@@ -466,7 +471,8 @@ mod block_tests {
     async fn merge_transaction_test() {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let global_state = get_mock_global_state(Network::Alpha, 2, None).await;
+        let network = Network::Alpha;
+        let global_state = get_mock_global_state(network, 2, None).await;
         let spending_key = global_state
             .wallet_state
             .wallet_secret

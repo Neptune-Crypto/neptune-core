@@ -377,7 +377,8 @@ impl MainLoopHandler {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)?;
+                        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)
+                        .expect("Updating mutator set must succeed");
 
                     // Notify wallet to expect the coinbase UTXO, as we mined this block
                     self.global_state
@@ -1165,7 +1166,7 @@ impl MainLoopHandler {
         if we_have_blocks {
             return self
                 .global_state
-                .resync_membership_proofs_to_tip(current_tip_digest)
+                .resync_membership_proofs_from_stored_blocks(current_tip_digest)
                 .await;
         }
 

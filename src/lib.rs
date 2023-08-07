@@ -75,7 +75,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         WalletSecret::read_from_file_or_create(&data_dir.wallet_directory_path())?;
     info!("Now getting wallet state. This may take a while if the database needs pruning.");
     let wallet_state =
-        WalletState::new_from_wallet_secret(Some(&data_dir), wallet_secret, &cli_args).await;
+        WalletState::new_from_wallet_secret(&data_dir, wallet_secret, &cli_args).await;
     info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync
@@ -135,6 +135,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height
     );
+
+    // Check if we need to restore the wallet database, and if so, do it.
+    state.restore_monitored_utxos_from_recovery_data().await?;
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];
