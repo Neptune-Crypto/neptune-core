@@ -427,7 +427,9 @@ impl GlobalState {
         }
 
         if recovery_data_for_missing_mutxos.is_empty() {
-            info!("No missing monitored UTXOs found in wallet database. Database looks good.");
+            info!(
+                "No missing monitored UTXOs found in wallet database. Wallet database looks good."
+            );
             return Ok(());
         }
 
