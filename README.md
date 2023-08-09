@@ -86,4 +86,4 @@ If you're restarting on a new chain and have no hope of recovering any funds, yo
 - `<data_directory>/<network>/wallet/outgoing_randomness.dat`.
 
 On Linux, with the standard settings, the `data_directory` is
-`~/.local/neptune/`.
+`~/.local/share/neptune/`.
