@@ -1084,7 +1084,7 @@ impl MainLoopHandler {
                 _ = &mut peer_discovery_timer => {
                     // Check number of peers we are connected to and connect to more peers
                     // if needed.
-                    debug!("Running peer discovery job");
+                    debug!("Timer: peer discovery job");
                     self.peer_discovery_and_reconnector(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in N seconds
@@ -1093,7 +1093,7 @@ impl MainLoopHandler {
 
                 // Handle synchronization (i.e. batch-downloading of blocks)
                 _ = &mut synchronization_timer => {
-                    debug!("Running block-synchronization job");
+                    debug!("Timer: block-synchronization job");
                     self.block_sync(&mut main_loop_state).await?;
 
                     // Reset the timer to run this branch again in M seconds
@@ -1102,7 +1102,7 @@ impl MainLoopHandler {
 
                 // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
                 _ = &mut mempool_cleanup_timer => {
-                    debug!("Running mempool-cleaner job");
+                    debug!("Timer: mempool-cleaner job");
                     self.global_state.mempool.prune_stale_transactions();
 
                     // Reset the timer to run this branch again in P seconds
@@ -1111,7 +1111,7 @@ impl MainLoopHandler {
 
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
                 _ = &mut utxo_notification_cleanup_timer => {
-                    debug!("Running UTXO notification pool cleanup job");
+                    debug!("Timer: UTXO notification pool cleanup job");
                     self.global_state.wallet_state.expected_utxos.write().unwrap().prune_stale_utxo_notifications();
 
                     utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
@@ -1119,7 +1119,7 @@ impl MainLoopHandler {
 
                 // Handle membership proof resynchronization
                 _ = &mut mp_resync_timer => {
-                    debug!("Running Membership proof resync job");
+                    debug!("Timer: Membership proof resync job");
                     self.resync_membership_proofs().await?;
 
                     mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_timer_interval);
