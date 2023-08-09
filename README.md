@@ -69,8 +69,21 @@ This repository contains unit tests, but multi-threaded programs are notoriously
 3. `run-multiple-instances.sh` to spin up three nodes that are connected through `localhost`. Instance `I0` and `I2` should be mining and all three clients should be converging on the same blocks. You can read the hashes of the blocks in the log output and verify that they all store the same blocks.
 4. Run `make restart` followed by `run-multiple-instances.sh` to verify that the nodes can start from the genesis block, create a database and store subsequent blocks in this database. This test is important to verify that the client software doesn't need an existing database to function.
 5. If you encounter an error in some of the stages later then (2), i.e. an error that wasn't caught by the compiler or the tests, consider if you could add a unit test that **would** have caught this error. If that's not possible consider if you can add a manual test (for example a shell script) where the tests would have been visible. Also consider if you can add anything to this list that would have caught this error (assuming you didn't write a unit test that caught it).
-6. 
+6. Make a transaction from e.g. `I0` to `I2` and verify that the transaction can successfully be mined and that the balances are updated correctly in each dashboard.
 
 ## Crash Procedures
 
-If any cryptographic data ends up in an invalid state, and the note crashes as a result, please back up your entire data directory (except `wallet.dat`) and share it publicly. If you're not on `main` net, which hasn't been released yet, it should be OK to share `wallet.dat`, which contains your secret key, as well.
+If any cryptographic data ends up in an invalid state, and the note crashes as a result, please copy your entire data directory (except `wallet.dat`, `incoming_randomness.dat`, and `outgoing_randomness.dat`) and share it publicly. If you're not on `main` net, which hasn't been released yet, it should be OK to share `wallet.dat`, which contains your secret key, as well.
+
+## Restarting Node from the Genesis Block
+
+In order to restart your node from the genesis block, you should delete these folders:
+- `<data_directory>/<network>/blocks/`
+- `<data_directory>/<network>/databases/`
+
+If you're restarting on a new chain and have no hope of recovering any funds, you should also delete these files:
+- `<data_directory>/<network>/wallet/incoming_randomness.dat`
+- `<data_directory>/<network>/wallet/outgoing_randomness.dat`.
+
+On Linux, with the standard settings, the `data_directory` is
+`~/.local/neptune/`.

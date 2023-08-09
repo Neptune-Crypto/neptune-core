@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::emojihash_trait::Emojihash;
+use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
 
@@ -440,8 +441,14 @@ impl GlobalState {
             "Attempting to restore {} missing monitored UTXOs to wallet database",
             recovery_data_for_missing_mutxos.len()
         );
+        let current_aocl_leaf_count = ams_lock.ams.kernel.aocl.count_leaves();
         let mut restored_mutxos = 0;
         for incoming_utxo in recovery_data_for_missing_mutxos {
+            // If the referenced UTXO is in the future from our tip, do not attempt to recover it. Instead: warn the user of this.
+            if current_aocl_leaf_count <= incoming_utxo.aocl_index {
+                warn!("Cannot restore UTXO with AOCL index {} because it is in the future from our tip. Current AOCL leaf count is {current_aocl_leaf_count}. Maybe this UTXO can be recovered once more blocks are downloaded from peers?", incoming_utxo.aocl_index);
+                continue;
+            }
             let ms_item = &Hash::hash(&incoming_utxo.utxo);
             let restored_msmp_res = ams_lock.ams.restore_membership_proof(
                 ms_item,
