@@ -223,10 +223,13 @@ impl WalletSecret {
     fn create_empty_wallet_randomness_file(file_path: &Path) -> Result<()> {
         let init_value: String = String::default();
 
-        if cfg!(not(unix)) {
-            Self::create_wallet_file_windows(&file_path.to_path_buf(), init_value)
-        } else {
+        #[cfg(unix)]
+        {
             Self::create_wallet_file_unix(&file_path.to_path_buf(), init_value)
+        }
+        #[cfg(not(unix))]
+        {
+            Self::create_wallet_file_windows(&file_path.to_path_buf(), init_value)
         }
     }
 
@@ -234,14 +237,17 @@ impl WalletSecret {
     fn create_wallet_secret_file(&self, wallet_file: &Path) -> Result<()> {
         let wallet_secret_as_json: String = serde_json::to_string(self).unwrap();
 
-        if cfg!(windows) {
-            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_secret_as_json)
-        } else {
+        #[cfg(unix)]
+        {
             Self::create_wallet_file_unix(&wallet_file.to_path_buf(), wallet_secret_as_json)
+        }
+        #[cfg(not(unix))]
+        {
+            Self::create_wallet_file_windows(&wallet_file.to_path_buf(), wallet_secret_as_json)
         }
     }
 
-    #[cfg(target_family = "unix")]
+    #[cfg(unix)]
     /// Create a wallet file, and set restrictive permissions
     fn create_wallet_file_unix(path: &PathBuf, file_content: String) -> Result<()> {
         // On Unix/Linux we set the file permissions to 600, to disallow
@@ -258,6 +264,7 @@ impl WalletSecret {
         fs::write(path.clone(), file_content).context("Failed to write wallet file to disk")
     }
 
+    #[cfg(not(unix))]
     /// Create a wallet file, without setting restrictive UNIX permissions
     fn create_wallet_file_windows(path: &PathBuf, wallet_as_json: String) -> Result<()> {
         fs::OpenOptions::new()
