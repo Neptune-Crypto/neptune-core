@@ -1,55 +1,24 @@
 on:
   push:
-
+    branches:
+      - master
   pull_request:
+    branches:
+      - master
 
 name: Rust
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
+  runner-matrix:
+    name: format, lint, test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-
-      - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-
-  lints:
-    name: Lints
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -70,3 +39,9 @@ jobs:
         with:
           command: clippy
           args: -- -D warnings
+
+      - name: Run cargo test without benches
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: -- --skip benches
