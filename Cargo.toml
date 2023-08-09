@@ -22,7 +22,7 @@ bytesize = "1"
 chrono = "^0.4.26"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0"
-directories = "4"
+directories = "5"
 field_count = "0.1.1"
 futures = "0"
 get-size = { version = "0", features = ["derive"] }
