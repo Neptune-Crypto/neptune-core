@@ -971,41 +971,37 @@ impl MainLoopHandler {
         let mp_resync_timer = time::sleep(mp_resync_timer_interval);
         tokio::pin!(mp_resync_timer);
 
-        // Handle SIGTERM and SIGINT signals on Unix systems
-        #[cfg(unix)]
-        let (sigterm, sigint, sigquit) = {
-            use tokio::signal::unix::{signal, SignalKind};
-            let sigterm = signal(SignalKind::terminate())?;
-            let sigint = signal(SignalKind::interrupt())?;
-            let sigquit = signal(SignalKind::quit())?;
-            (Some(sigterm), Some(sigint), Some(sigquit))
-        };
-        #[cfg(not(unix))]
-        let (mut sigterm, mut sigint, mut sigquit, mut sighup) = (None, None, None);
-
-        // Spawn threads to monitor for SIGTERM, SIGINT, and SIGQUIT
+        // Spawn threads to monitor for SIGTERM, SIGINT, and SIGQUIT. These
+        // signals are only used on Unix systems.
         let (tx_term, mut rx_term) = tokio::sync::mpsc::channel(2);
-        if let Some(mut sigterm_stream) = sigterm {
+        let (tx_int, mut rx_int) = tokio::sync::mpsc::channel(2);
+        let (tx_quit, mut rx_quit) = tokio::sync::mpsc::channel(2);
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+
+            // Monitor for SIGTERM
+            let mut sigterm = signal(SignalKind::terminate())?;
             tokio::spawn(async move {
-                if sigterm_stream.recv().await.is_some() {
+                if sigterm.recv().await.is_some() {
                     info!("Received SIGTERM");
                     tx_term.send(()).await.unwrap();
                 }
             });
-        }
-        let (tx_int, mut rx_int) = tokio::sync::mpsc::channel(2);
-        if let Some(mut sigint_stream) = sigint {
+
+            // Monitor for SIGINT
+            let mut sigint = signal(SignalKind::interrupt())?;
             tokio::spawn(async move {
-                if sigint_stream.recv().await.is_some() {
+                if sigint.recv().await.is_some() {
                     info!("Received SIGINT");
                     tx_int.send(()).await.unwrap();
                 }
             });
-        }
-        let (tx_quit, mut rx_quit) = tokio::sync::mpsc::channel(2);
-        if let Some(mut sigquit_stream) = sigquit {
+
+            // Monitor for SIGQUIT
+            let mut sigquit = signal(SignalKind::quit())?;
             tokio::spawn(async move {
-                if sigquit_stream.recv().await.is_some() {
+                if sigquit.recv().await.is_some() {
                     info!("Received SIGQUIT");
                     tx_quit.send(()).await.unwrap();
                 }
@@ -1019,7 +1015,7 @@ impl MainLoopHandler {
                     break;
                 }
 
-                // Monitor for SIGTERM, SIGINT, and SIGQUIT. SIGHUP is ignored.
+                // Monitor for SIGTERM, SIGINT, and SIGQUIT.
                 Some(_) = rx_term.recv() => {
                     info!("Detected SIGTERM signal.");
                     break;
