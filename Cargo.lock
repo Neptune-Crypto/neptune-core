@@ -637,22 +637,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossterm"
-version = "0.26.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a84cda67535339806297f1b331d6dd6320470d2a0fe65381e79ee9e156dd3d13"
-dependencies = [
- "bitflags 1.3.2",
- "crossterm_winapi",
- "libc",
- "mio",
- "parking_lot",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
-
-[[package]]
 name = "crossterm_winapi"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1305,7 +1289,7 @@ dependencies = [
  "cargo-husky",
  "chrono",
  "clap",
- "crossterm 0.26.1",
+ "crossterm",
  "directories",
  "field_count",
  "futures",
@@ -1322,8 +1306,8 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "strum 0.25.0",
- "strum_macros 0.25.1",
+ "strum",
+ "strum_macros",
  "tarpc",
  "tasm-lib",
  "tokio",
@@ -2142,12 +2126,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 
 [[package]]
-name = "strum"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
-
-[[package]]
 name = "strum_macros"
 version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2158,19 +2136,6 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6069ca09d878a33f883cc06aaa9718ede171841d3832450354410b718b097232"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn 2.0.27",
 ]
 
 [[package]]
@@ -2542,8 +2507,8 @@ dependencies = [
  "rayon",
  "serde",
  "serde_derive",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum",
+ "strum_macros",
  "twenty-first",
  "unicode-width",
 ]
@@ -2556,7 +2521,7 @@ checksum = "ccdd26cbd674007e649a272da4475fb666d3aa0ad0531da7136db6fab0e5bad1"
 dependencies = [
  "bitflags 1.3.2",
  "cassowary",
- "crossterm 0.25.0",
+ "crossterm",
  "unicode-segmentation",
  "unicode-width",
 ]
