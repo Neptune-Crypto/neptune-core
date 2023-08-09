@@ -36,12 +36,35 @@ fn get_codec_rules() -> LengthDelimitedCodec {
     codec_rules
 }
 
-async fn get_connection_status(
+/// Check if connection is allowed. Used for both ingoing and outgoing connections.
+async fn check_if_connection_is_allowed(
     state: &GlobalState,
     own_handshake: &HandshakeData,
     other_handshake: &HandshakeData,
     peer_address: &SocketAddr,
 ) -> ConnectionStatus {
+    fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
+        let own_version = semver::Version::parse(own_version)
+            .expect("Must be able to parse own version string. Got: {own_version}");
+        let other_version = match semver::Version::parse(other_version) {
+            Ok(version) => version,
+            Err(err) => {
+                warn!("Peer version is not a valid semver version. Got error: {err}",);
+                return false;
+            }
+        };
+
+        // All alphanet versions are incompatible with each other. Alphanet has versions
+        // "0.0.n". Alphanet is also incompatible with mainnet or any other versions.
+        if own_version.major == 0 && own_version.minor == 0
+            || other_version.major == 0 && other_version.minor == 0
+        {
+            return own_version == other_version;
+        }
+
+        true
+    }
+
     // Disallow connection if peer is banned via CLI arguments
     if state.cli.ban.contains(&peer_address.ip()) {
         warn!(
@@ -77,6 +100,15 @@ async fn get_connection_status(
     // Disallow connection to self
     if own_handshake.instance_id == other_handshake.instance_id {
         return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
+    }
+
+    // Disallow connection if versions are incompatible
+    if !versions_are_compatible(&own_handshake.version, &other_handshake.version) {
+        warn!(
+            "Attempting to connect to incompatible version. You might have to upgrade, or the other node does. Own version: {}, other version: {}",
+            own_handshake.version,
+            other_handshake.version);
+        return ConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion);
     }
 
     info!("ConnectionStatus::Accepted");
@@ -174,9 +206,10 @@ where
                 );
             }
 
-            // Check if connection is allowed
+            // Check if incoming connection is allowed
             let connection_status =
-                get_connection_status(&state, &own_handshake_data, &hsd, &peer_address).await;
+                check_if_connection_is_allowed(&state, &own_handshake_data, &hsd, &peer_address)
+                    .await;
 
             peer.send(PeerMessage::ConnectionStatus(connection_status))
                 .await?;
@@ -273,7 +306,7 @@ async fn call_peer<S>(
     peer_address: std::net::SocketAddr,
     main_to_peer_thread_rx: broadcast::Receiver<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    own_handshake_data: &HandshakeData,
+    own_handshake: &HandshakeData,
     peer_distance: u8,
 ) -> Result<()>
 where
@@ -293,23 +326,23 @@ where
     // Make Neptune handshake
     peer.send(PeerMessage::Handshake(Box::new((
         Vec::from(MAGIC_STRING_REQUEST),
-        own_handshake_data.to_owned(),
+        own_handshake.to_owned(),
     ))))
     .await?;
     debug!("Awaiting connection status response from {}", peer_address);
 
-    let peer_handshake_data: HandshakeData = match peer.try_next().await? {
+    let other_handshake: HandshakeData = match peer.try_next().await? {
         Some(PeerMessage::Handshake(payload)) => {
             let (v, hsd) = *payload;
             if v != MAGIC_STRING_RESPONSE {
                 bail!("Didn't get expected magic value for handshake");
             }
-            if hsd.network != own_handshake_data.network {
+            if hsd.network != own_handshake.network {
                 bail!(
                     "Cannot connect with {}: Peer runs {}, this client runs {}.",
                     peer_address,
                     hsd.network,
-                    own_handshake_data.network,
+                    own_handshake.network,
                 );
             }
             debug!("Got correct magic value response!");
@@ -332,11 +365,26 @@ where
         }
     }
 
+    // Peer accepted us. Check if we accept the peer. Note that the protocol does not stipulate
+    // that we answer with a connection status here, so if the connection is *not* accepted, we
+    // simply hang up but log the reason for the refusal.
+    let connection_status =
+        check_if_connection_is_allowed(&state, own_handshake, &other_handshake, &peer_address)
+            .await;
+    if let ConnectionStatus::Refused(refused_reason) = connection_status {
+        warn!(
+            "Outgoing connection refused. Reason: {:?}\nNow hanging up.",
+            refused_reason
+        );
+        peer.send(PeerMessage::Bye).await?;
+        bail!("Attempted to connect to peer that was not allowed. This connection attempt should not have been made.");
+    }
+
     let peer_loop_handler = PeerLoopHandler::new(
         peer_thread_to_main_tx,
         state,
         peer_address,
-        peer_handshake_data,
+        other_handshake,
         false,
         peer_distance,
     );
@@ -461,18 +509,21 @@ mod connect_tests {
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
 
         let mut status =
-            get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+            check_if_connection_is_allowed(&state, &own_handshake, &other_handshake, &peer_sa)
+                .await;
         if status != ConnectionStatus::Accepted {
             bail!("Must return ConnectionStatus::Accepted");
         }
 
-        status = get_connection_status(&state, &own_handshake, &own_handshake, &peer_sa).await;
+        status =
+            check_if_connection_is_allowed(&state, &own_handshake, &own_handshake, &peer_sa).await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
         }
 
         state.cli.max_peers = 1;
-        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+        status = check_if_connection_is_allowed(&state, &own_handshake, &other_handshake, &peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded) {
             bail!(
             "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
@@ -491,8 +542,13 @@ mod connect_tests {
             .clone();
         let mut mutated_other_handshake = other_handshake.clone();
         mutated_other_handshake.instance_id = connected_peer.instance_id;
-        status =
-            get_connection_status(&state, &own_handshake, &mutated_other_handshake, &peer_sa).await;
+        status = check_if_connection_is_allowed(
+            &state,
+            &own_handshake,
+            &mutated_other_handshake,
+            &peer_sa,
+        )
+        .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
             bail!(
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))"
@@ -502,13 +558,15 @@ mod connect_tests {
         // Verify that banned peers are rejected by this check
         // First check that peers can be banned by command-line arguments
         state.cli.ban.push(peer_sa.ip());
-        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+        status = check_if_connection_is_allowed(&state, &own_handshake, &other_handshake, &peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on CLI-ban");
         }
 
         state.cli.ban.pop();
-        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+        status = check_if_connection_is_allowed(&state, &own_handshake, &other_handshake, &peer_sa)
+            .await;
         if status != ConnectionStatus::Accepted {
             bail!("Must return ConnectionStatus::Accepted after unban");
         }
@@ -525,7 +583,8 @@ mod connect_tests {
         state
             .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
             .await;
-        status = get_connection_status(&state, &own_handshake, &other_handshake, &peer_sa).await;
+        status = check_if_connection_is_allowed(&state, &own_handshake, &other_handshake, &peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on db-ban");
         }
@@ -643,6 +702,65 @@ mod connect_tests {
         assert!(answer.is_err(), "bad network must result in error");
 
         Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_incoming_connection_fail_bad_version() {
+        let mut other_handshake = get_dummy_handshake_data_for_genesis(Network::Testnet);
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, own_state, _hsd) =
+            get_test_genesis_setup(Network::Alpha, 0).await.unwrap();
+        let mut own_handshake = own_state.get_own_handshakedata().await;
+
+        // Set reported versions to something incompatible
+        own_handshake.version = "0.0.3".to_owned();
+        other_handshake.version = "0.0.0".to_owned();
+
+        let peer_address = get_dummy_socket_address(55);
+        let connection_status = check_if_connection_is_allowed(
+            &own_state,
+            &own_handshake,
+            &other_handshake,
+            &peer_address,
+        )
+        .await;
+        assert_eq!(
+            ConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion),
+            connection_status,
+            "Connection status must be refused for incompatible version"
+        );
+
+        // Test that the same logic is applied when going through the full connection process
+        let mock = Builder::new()
+            .read(
+                &to_bytes(&PeerMessage::Handshake(Box::new((
+                    MAGIC_STRING_REQUEST.to_vec(),
+                    other_handshake,
+                ))))
+                .unwrap(),
+            )
+            .write(
+                &to_bytes(&PeerMessage::Handshake(Box::new((
+                    MAGIC_STRING_RESPONSE.to_vec(),
+                    own_handshake.clone(),
+                ))))
+                .unwrap(),
+            )
+            .build();
+
+        let answer = answer_peer(
+            mock,
+            own_state,
+            get_dummy_socket_address(0),
+            from_main_rx_clone,
+            to_main_tx,
+            own_handshake,
+        )
+        .await;
+        assert!(
+            answer.is_err(),
+            "incompatible version numbers must result in error in call to answer_peer"
+        );
     }
 
     #[traced_test]

@@ -242,6 +242,7 @@ impl From<&BlockHeader> for PeerBlockNotification {
 pub enum ConnectionRefusedReason {
     AlreadyConnected,
     BadStanding,
+    IncompatibleVersion,
     MaxPeerNumberExceeded,
     SelfConnect,
 }
