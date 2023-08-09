@@ -27,25 +27,6 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      # build with latest stable, but reset CI cache when new versions of Rust are released
-      - name: Determine build cache key
-        id: vars
-        run: |
-          RUST_VERSION=$(rustc -V | grep -Po '(?<=^rustc )\S+')
-          echo "rustc-version=$RUST_VERSION" >> $GITHUB_OUTPUT
-
-      # Don't include target/ -- only cache building 3rd-party libraries.
-      - name: Use build cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ steps.vars.outputs.rustc-version }}-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
         with:
