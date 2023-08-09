@@ -48,7 +48,6 @@ use tarpc::server::Channel;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_serde::formats::*;
-use tracing::debug;
 use tracing::info;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
@@ -66,7 +65,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Get data directory (wallet, block database), create one if none exists
     let data_dir = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
     DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path())?;
-    debug!("Data directory is {}", data_dir);
+    info!("Data directory is {}", data_dir);
 
     // Get wallet object, create various wallet secret files
     let wallet_dir = data_dir.wallet_directory_path();
