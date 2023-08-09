@@ -14,24 +14,31 @@ version = "1"
 [dependencies]
 aead = "0"
 aes-gcm = "0"
-bech32 = "0"
-field_count = "0.1.1"
 anyhow = "1"
+bech32 = "0"
 bincode = "1"
 bytes = "1"
+bytesize = "1"
 chrono = "^0.4.26"
 clap = { version = "4", features = ["derive"] }
+crossterm = "0"
 directories = "4"
+field_count = "0.1.1"
 futures = "0"
+get-size = { version = "0", features = ["derive"] }
 itertools = "0.11"
 memmap2 = "0.7"
 num-bigint = { version = "0", features = ["serde"] }
 num-traits = "0"
+num-rational = "0"
+priority-queue = "1"
 rand = "0.8"
 rusty-leveldb = "2"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
+strum = "0"
+strum_macros = "0"
 tarpc = { version = "0", features = ["tokio1", "serde-transport", "tcp"] }
 tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", tag = "v0.2.1" }
 tokio = { version = "1", features = ["full", "tracing"] }
@@ -47,15 +54,8 @@ tracing-subscriber = { version = "0", features = [
 tracing-test = "0"
 triton-vm = "0.32.1"
 twenty-first = "0.32.1"
-priority-queue = "1"
-get-size = { version = "0", features = ["derive"] }
-num-rational = "0"
-bytesize = "1"
 tui = "0"
-crossterm = "0"
 unicode-width = "0"
-strum = "0"
-strum_macros = "0"
 
 [dev-dependencies]
 pin-project-lite = "0"
