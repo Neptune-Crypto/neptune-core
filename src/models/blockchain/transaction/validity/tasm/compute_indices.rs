@@ -1,13 +1,13 @@
 use crate::models::blockchain::shared::Hash;
+use itertools::Itertools;
 use tasm_lib::library::Library;
 
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::get_swbf_indices::GetSwbfIndices,
     rust_shadowing_helper_functions,
-    snippet::{DataType, Snippet},
+    snippet::{DataType, DeprecatedSnippet},
 };
-use triton_vm::instruction::LabelledInstructions;
 use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -23,6 +23,7 @@ impl ComputeIndices {
     #[cfg(test)]
     fn pseudorandom_init_state(seed: [u8; 32]) -> tasm_lib::ExecutionState {
         use rand::RngCore;
+        use triton_vm::NonDeterminism;
 
         let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
 
@@ -61,19 +62,19 @@ impl ComputeIndices {
         tasm_lib::ExecutionState {
             stack,
             std_in: vec![],
-            secret_in: vec![],
+            nondeterminism: NonDeterminism::new(vec![]),
             memory,
             words_allocated: 2,
         }
     }
 }
 
-impl Snippet for ComputeIndices {
-    fn entrypoint(&self) -> String {
+impl DeprecatedSnippet for ComputeIndices {
+    fn entrypoint_name(&self) -> String {
         "tasm_neptune_transaction_compute_indices".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
+    fn input_field_names(&self) -> Vec<String> {
         vec![
             "i4".to_string(),
             "i3".to_string(),
@@ -95,7 +96,7 @@ impl Snippet for ComputeIndices {
         vec![DataType::VoidPointer]
     }
 
-    fn outputs(&self) -> Vec<String> {
+    fn output_field_names(&self) -> Vec<String> {
         vec!["*indices".to_string()]
     }
 
@@ -110,7 +111,7 @@ impl Snippet for ComputeIndices {
         let mp_to_ap = tasm_lib::field!(MsMpH::auth_path_aocl);
         type MmrMpH = MmrMembershipProof<Hash>;
         let ap_to_li = tasm_lib::field!(MmrMpH::leaf_index);
-        let entrypoint = self.entrypoint();
+        let entrypoint = self.entrypoint_name();
         let read_digest = library.import(Box::new(PushRamToStack {
             output_type: DataType::Digest,
         }));
@@ -188,7 +189,7 @@ impl Snippet for ComputeIndices {
 
             return
         };
-        LabelledInstructions(code).to_string()
+        format!("{}\n", code.iter().join("\n"))
     }
 
     fn crash_conditions(&self) -> Vec<String> {
@@ -326,7 +327,7 @@ mod tests {
             higher_order::{inner_function::InnerFunction, map::Map},
             ListType,
         },
-        test_helpers::test_rust_equivalence_multiple,
+        test_helpers::test_rust_equivalence_multiple_deprecated,
     };
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -340,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_compute_indices() {
-        test_rust_equivalence_multiple(&ComputeIndices, false);
+        test_rust_equivalence_multiple_deprecated(&ComputeIndices, false);
     }
 
     #[test]

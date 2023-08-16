@@ -1,14 +1,14 @@
 use crate::models::blockchain::shared::Hash;
+use itertools::Itertools;
 use num_traits::{One, Zero};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use tasm_lib::library::Library;
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::commit::Commit,
-    snippet::{DataType, Snippet},
+    snippet::{DataType, DeprecatedSnippet},
     ExecutionState,
 };
-use triton_vm::instruction::LabelledInstructions;
 use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -23,6 +23,7 @@ impl ComputeCanonicalCommitment {
         #[cfg(test)]
         {
             use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
+            use triton_vm::NonDeterminism;
 
             use rand::RngCore;
             use std::collections::HashMap;
@@ -58,7 +59,7 @@ impl ComputeCanonicalCommitment {
             ExecutionState {
                 stack,
                 std_in: vec![],
-                secret_in: vec![],
+                nondeterminism: NonDeterminism::new(vec![]),
                 memory,
                 words_allocated: 1,
             }
@@ -68,12 +69,12 @@ impl ComputeCanonicalCommitment {
     }
 }
 
-impl Snippet for ComputeCanonicalCommitment {
-    fn entrypoint(&self) -> String {
+impl DeprecatedSnippet for ComputeCanonicalCommitment {
+    fn entrypoint_name(&self) -> String {
         "tasm_neptune_transaction_compute_commitment".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
+    fn input_field_names(&self) -> Vec<String> {
         vec![
             "i4".to_string(),
             "i3".to_string(),
@@ -98,7 +99,7 @@ impl Snippet for ComputeCanonicalCommitment {
         )]
     }
 
-    fn outputs(&self) -> Vec<String> {
+    fn output_field_names(&self) -> Vec<String> {
         vec![
             "*mp".to_string(),
             "c4".to_string(),
@@ -121,7 +122,7 @@ impl Snippet for ComputeCanonicalCommitment {
         let read_digest = library.import(Box::new(PushRamToStack {
             output_type: DataType::Digest,
         }));
-        let entrypoint = self.entrypoint();
+        let entrypoint = self.entrypoint_name();
 
         let code = triton_asm! {
         // BEFORE: _  i4 i3 i2 i1 i0 *mp
@@ -172,7 +173,7 @@ impl Snippet for ComputeCanonicalCommitment {
 
             return
         };
-        LabelledInstructions(code).to_string()
+        format!("{}\n", code.iter().join("\n"))
     }
 
     fn crash_conditions(&self) -> Vec<String> {
@@ -267,13 +268,13 @@ impl Snippet for ComputeCanonicalCommitment {
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
+    use tasm_lib::test_helpers::test_rust_equivalence_multiple_deprecated;
 
     use super::*;
 
     #[test]
     fn test_compute_canonical_commitment() {
-        test_rust_equivalence_multiple(&ComputeCanonicalCommitment, false);
+        test_rust_equivalence_multiple_deprecated(&ComputeCanonicalCommitment, false);
     }
 }
 

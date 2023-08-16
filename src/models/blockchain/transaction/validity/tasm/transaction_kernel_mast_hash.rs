@@ -1,5 +1,6 @@
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use itertools::Itertools;
 use num_traits::One;
 use tasm_lib::library::Library;
 use tasm_lib::{
@@ -8,10 +9,9 @@ use tasm_lib::{
         get::UnsafeGet, new::UnsafeNew, set::UnsafeSet, set_length::UnsafeSetLength,
     },
     rust_shadowing_helper_functions,
-    snippet::{DataType, Snippet},
+    snippet::{DataType, DeprecatedSnippet},
     ExecutionState,
 };
-use triton_vm::instruction::LabelledInstructions;
 use triton_vm::{triton_asm, BFieldElement};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::{
@@ -23,12 +23,12 @@ use twenty_first::{
 #[derive(Debug, Clone)]
 pub struct TransactionKernelMastHash;
 
-impl Snippet for TransactionKernelMastHash {
-    fn entrypoint(&self) -> String {
+impl DeprecatedSnippet for TransactionKernelMastHash {
+    fn entrypoint_name(&self) -> String {
         "tasm_neptune_transaction_transaction_kernel_mast_hash".to_string()
     }
     fn function_code(&self, library: &mut Library) -> String {
-        let entrypoint = self.entrypoint();
+        let entrypoint = self.entrypoint_name();
         let new_list = library.import(Box::new(UnsafeNew(DataType::Digest)));
         let get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
         let set_element = library.import(Box::new(UnsafeSet(DataType::Digest)));
@@ -196,7 +196,7 @@ impl Snippet for TransactionKernelMastHash {
 
             return
         };
-        LabelledInstructions(code).to_string()
+        format!("{}\n", code.iter().join("\n"))
     }
 
     fn rust_shadowing(
@@ -370,7 +370,7 @@ impl Snippet for TransactionKernelMastHash {
         stack.push(root.values()[0]);
     }
 
-    fn inputs(&self) -> Vec<String> {
+    fn input_field_names(&self) -> Vec<String> {
         vec!["*transaction_kernel".to_string()]
     }
 
@@ -382,7 +382,7 @@ impl Snippet for TransactionKernelMastHash {
         vec![DataType::Digest]
     }
 
-    fn outputs(&self) -> Vec<String> {
+    fn output_field_names(&self) -> Vec<String> {
         ["d4", "d3", "d2", "d1", "d0"]
             .map(|s| s.to_string())
             .to_vec()
@@ -472,6 +472,8 @@ fn input_state_with_kernel_in_memory(
     address: BFieldElement,
     transaction_kernel_encoded: &[BFieldElement],
 ) -> ExecutionState {
+    use triton_vm::NonDeterminism;
+
     assert!(address.value() > 1);
     // populate memory
     let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
@@ -495,7 +497,7 @@ fn input_state_with_kernel_in_memory(
     ExecutionState {
         stack,
         std_in: vec![],
-        secret_in: vec![],
+        nondeterminism: NonDeterminism::new(vec![]),
         memory,
         words_allocated: 0,
     }
@@ -505,7 +507,8 @@ fn input_state_with_kernel_in_memory(
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::test_helpers::{
-        test_rust_equivalence_given_execution_state, test_rust_equivalence_multiple,
+        test_rust_equivalence_given_execution_state_deprecated,
+        test_rust_equivalence_multiple_deprecated,
     };
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -519,7 +522,7 @@ mod tests {
         seed[17] = 0x17;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let tx_kernel = pseudorandom_transaction_kernel(rng.gen(), 2, 2, 1);
-        let mut output_with_known_digest = test_rust_equivalence_given_execution_state(
+        let mut output_with_known_digest = test_rust_equivalence_given_execution_state_deprecated(
             &TransactionKernelMastHash,
             input_state_with_kernel_in_memory(BFieldElement::new(3), &tx_kernel.encode()),
         );
@@ -538,7 +541,7 @@ mod tests {
 
     #[test]
     fn new_prop_test() {
-        test_rust_equivalence_multiple(&TransactionKernelMastHash, false);
+        test_rust_equivalence_multiple_deprecated(&TransactionKernelMastHash, false);
     }
 }
 

@@ -21,8 +21,8 @@ use tasm_lib::{
     DIGEST_LENGTH,
 };
 use tracing::{debug, warn};
-use triton_vm::triton_asm;
 use triton_vm::{instruction::LabelledInstruction, BFieldElement, StarkParameters};
+use triton_vm::{triton_asm, NonDeterminism, PublicInput};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
@@ -148,7 +148,7 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                     &StarkParameters::default(),
                     &self.supported_claim.claim,
                     &Self::program(),
-                    &witness.encode(), // double-encode, so as to prepend length
+                    NonDeterminism::new(witness.encode()), // double-encode, so as to prepend length
                 )
                 .expect("Proving integrity of removal records must succeed.");
                 self.supported_claim.support = ClaimSupport::Proof(proof);
@@ -177,8 +177,10 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                 //     witness.clone().into(),
                 // );
                 // double-encode witness to get length, so as to be able to read it from secin
-                let vm_result =
-                    Self::program().run(self.supported_claim.claim.input.clone(), witness.encode());
+                let vm_result = Self::program().run(
+                    PublicInput::new(self.supported_claim.claim.input.clone()),
+                    NonDeterminism::new(witness.encode()),
+                );
                 match vm_result {
                     Ok(observed_output) => {
                         let found_expected_output =
@@ -314,7 +316,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             input_source: InputSource::SecretIn,
         }));
         let bag_peaks = library.import(Box::new(BagPeaks));
-        let read_input = "read_io\n".repeat(DIGEST_LENGTH);
+        // let read_input = vec![triton_instr!(read_io); DIGEST_LENGTH];
+        let read_input = "\nread_io\nread_io\nread_io\nread_io\nread_io\n".to_owned();
         let read_digest = library.import(Box::new(PushRamToStack {
             output_type: DataType::Digest,
         }));
@@ -405,8 +408,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash]
 
         dup 11 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness
-        {&witness_to_aocl.clone()} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl
-        {&aocl_to_peaks.clone()} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
+        {&witness_to_aocl} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl
+        {&aocl_to_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] [witness_aocl_hash]
 
         hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)] [garbage]
@@ -679,7 +682,12 @@ mod tests {
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
         // double-encode secret in so that we can read the struct from input
-        let run_res = program.debug_terminal_state(stdin.clone(), secret_in.encode(), None, None);
+        let run_res = program.debug_terminal_state(
+            PublicInput::new(stdin.clone()),
+            NonDeterminism::new(secret_in.encode()),
+            None,
+            None,
+        );
         match run_res {
             Ok(_) => (),
             Err((state, msg)) => panic!("Failed: {msg}\n last state was: {state}"),
@@ -696,7 +704,7 @@ mod tests {
                 &StarkParameters::default(),
                 &claim,
                 &program,
-                &secret_in.encode(),
+                NonDeterminism::new(secret_in.encode()),
             );
             assert!(maybe_proof.is_ok());
 

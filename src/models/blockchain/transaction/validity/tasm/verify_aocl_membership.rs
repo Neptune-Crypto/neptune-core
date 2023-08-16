@@ -8,10 +8,9 @@ use tasm_lib::library::Library;
 use tasm_lib::{
     list::ListType,
     mmr::verify_from_memory::MmrVerifyFromMemory,
-    snippet::{DataType, Snippet},
+    snippet::{DataType, DeprecatedSnippet},
     ExecutionState,
 };
-use triton_vm::instruction::LabelledInstructions;
 use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -26,6 +25,7 @@ impl VerifyAoclMembership {
             use rand::RngCore;
             use std::collections::HashMap;
             use tasm_lib::get_init_tvm_stack;
+            use triton_vm::NonDeterminism;
             use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
 
             let mut rng: StdRng = SeedableRng::from_seed(_seed);
@@ -77,7 +77,7 @@ impl VerifyAoclMembership {
             ExecutionState {
                 stack,
                 std_in: vec![],
-                secret_in: vec![],
+                nondeterminism: NonDeterminism::new(vec![]),
                 memory,
                 words_allocated: 1,
             }
@@ -87,12 +87,12 @@ impl VerifyAoclMembership {
     }
 }
 
-impl Snippet for VerifyAoclMembership {
-    fn entrypoint(&self) -> String {
+impl DeprecatedSnippet for VerifyAoclMembership {
+    fn entrypoint_name(&self) -> String {
         "tasm_neptune_transaction_verify_aocl_membership".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
+    fn input_field_names(&self) -> Vec<String> {
         vec![
             "*msmp".to_string(),
             "c4".to_string(),
@@ -114,7 +114,7 @@ impl Snippet for VerifyAoclMembership {
         vec![DataType::Bool]
     }
 
-    fn outputs(&self) -> Vec<String> {
+    fn output_field_names(&self) -> Vec<String> {
         vec!["b".to_string()]
     }
 
@@ -134,7 +134,7 @@ impl Snippet for VerifyAoclMembership {
         let msmp_to_mmrmp = tasm_lib::field!(MsMpH::auth_path_aocl);
         let mmr_mp_to_li = tasm_lib::field!(MmrMpH::leaf_index);
         let mmr_mp_to_auth_path = tasm_lib::field!(MmrMpH::authentication_path);
-        let entrypoint = self.entrypoint();
+        let entrypoint = self.entrypoint_name();
 
         let code = triton_asm! {
         // BEFORE: _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
@@ -143,7 +143,7 @@ impl Snippet for VerifyAoclMembership {
 
         // get leaf index
             dup 5               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *msmp
-            {&msmp_to_mmrmp.clone()}
+            {&msmp_to_mmrmp}
                                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *mmrmp
             {&mmr_mp_to_li}     // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li
 
@@ -192,7 +192,7 @@ impl Snippet for VerifyAoclMembership {
 
             return
         };
-        LabelledInstructions(code).to_string()
+        format!("{}\n", code.iter().join("\n"))
     }
 
     fn crash_conditions(&self) -> Vec<String> {
@@ -300,13 +300,13 @@ impl Snippet for VerifyAoclMembership {
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
 
     use super::*;
+    use tasm_lib::test_helpers::test_rust_equivalence_multiple_deprecated;
 
     #[test]
     fn test_verify_aocl_membership() {
-        test_rust_equivalence_multiple(&VerifyAoclMembership, false);
+        test_rust_equivalence_multiple_deprecated(&VerifyAoclMembership, false);
     }
 }
 

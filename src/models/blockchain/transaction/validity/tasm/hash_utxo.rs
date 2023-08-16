@@ -1,7 +1,7 @@
 use rand::{thread_rng, Rng};
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
-    snippet::{DataType, Snippet},
+    snippet::{DataType, DeprecatedSnippet},
     ExecutionState,
 };
 use triton_vm::BFieldElement;
@@ -20,6 +20,8 @@ impl HashUtxo {
     fn pseudorandom_input_state(_seed: [u8; 32]) -> ExecutionState {
         #[cfg(test)]
         {
+            use triton_vm::NonDeterminism;
+
             let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(_seed);
             let utxo = crate::tests::shared::pseudorandom_utxo(_seed);
             let address =
@@ -44,7 +46,7 @@ impl HashUtxo {
             ExecutionState {
                 stack,
                 std_in: vec![],
-                secret_in: vec![],
+                nondeterminism: NonDeterminism::new(vec![]),
                 memory,
                 words_allocated: 1,
             }
@@ -54,12 +56,12 @@ impl HashUtxo {
     }
 }
 
-impl Snippet for HashUtxo {
-    fn entrypoint(&self) -> String {
+impl DeprecatedSnippet for HashUtxo {
+    fn entrypoint_name(&self) -> String {
         "tasm_neptune_transaction_hash_utxo".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
+    fn input_field_names(&self) -> Vec<String> {
         vec!["*utxo_field_size_indicator".to_string()]
     }
 
@@ -71,7 +73,7 @@ impl Snippet for HashUtxo {
         vec![DataType::Digest]
     }
 
-    fn outputs(&self) -> Vec<String> {
+    fn output_field_names(&self) -> Vec<String> {
         vec![
             "d4".to_string(),
             "d3".to_string(),
@@ -86,7 +88,7 @@ impl Snippet for HashUtxo {
     }
 
     fn function_code(&self, library: &mut Library) -> String {
-        let entrypoint = self.entrypoint();
+        let entrypoint = self.entrypoint_name();
         let hash_varlen = library.import(Box::new(HashVarlen));
 
         format!(
@@ -172,13 +174,13 @@ impl Snippet for HashUtxo {
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
+    use tasm_lib::test_helpers::test_rust_equivalence_multiple_deprecated;
 
     use super::*;
 
     #[test]
     fn new_prop_test() {
-        test_rust_equivalence_multiple(&HashUtxo, false);
+        test_rust_equivalence_multiple_deprecated(&HashUtxo, false);
     }
 }
 

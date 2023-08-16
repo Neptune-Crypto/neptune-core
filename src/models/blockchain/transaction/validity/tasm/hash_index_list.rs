@@ -1,6 +1,6 @@
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
-    snippet::{DataType, Snippet},
+    snippet::{DataType, DeprecatedSnippet},
 };
 use triton_vm::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -14,6 +14,7 @@ impl HashIndexList {
     #[cfg(test)]
     fn pseudorandom_init_state(seed: [u8; 32], length: usize) -> tasm_lib::ExecutionState {
         use rand::RngCore;
+        use triton_vm::NonDeterminism;
 
         let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
         let mut index_list = Vec::<u128>::with_capacity(length);
@@ -42,19 +43,19 @@ impl HashIndexList {
         tasm_lib::ExecutionState {
             stack,
             std_in: vec![],
-            secret_in: vec![],
+            nondeterminism: NonDeterminism::new(vec![]),
             memory,
             words_allocated: 1,
         }
     }
 }
 
-impl Snippet for HashIndexList {
-    fn entrypoint(&self) -> String {
+impl DeprecatedSnippet for HashIndexList {
+    fn entrypoint_name(&self) -> String {
         "tasm_neptune_transaction_hash_index_list".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
+    fn input_field_names(&self) -> Vec<String> {
         vec!["*index_list".to_string()]
     }
 
@@ -66,7 +67,7 @@ impl Snippet for HashIndexList {
         vec![DataType::Digest]
     }
 
-    fn outputs(&self) -> Vec<String> {
+    fn output_field_names(&self) -> Vec<String> {
         vec![
             "d4".to_string(),
             "d3".to_string(),
@@ -82,7 +83,7 @@ impl Snippet for HashIndexList {
 
     fn function_code(&self, library: &mut Library) -> String {
         let hash_varlen = library.import(Box::new(HashVarlen));
-        let entrypoint = self.entrypoint();
+        let entrypoint = self.entrypoint_name();
 
         format!(
             "
@@ -192,7 +193,7 @@ mod tests {
             ListType,
         },
         rust_shadowing_helper_functions,
-        test_helpers::test_rust_equivalence_multiple,
+        test_helpers::test_rust_equivalence_multiple_deprecated,
     };
     use triton_vm::Digest;
     use twenty_first::{
@@ -204,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_hash_index_list() {
-        test_rust_equivalence_multiple(&HashIndexList, false);
+        test_rust_equivalence_multiple_deprecated(&HashIndexList, false);
     }
 
     #[test]

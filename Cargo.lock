@@ -688,7 +688,6 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?tag=v0.2.1#e520afa2aea396ae06a2a3d2219134e440ae8e67"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1049,6 +1048,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "443144c8cdadd93ebf52ddb4056d257f5b52c04d3c804e657d19eb73fc33668b"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "humantime"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1317,8 +1322,8 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "strum",
- "strum_macros",
+ "strum 0.24.1",
+ "strum_macros 0.24.3",
  "tarpc",
  "tasm-lib",
  "tokio",
@@ -2149,6 +2154,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
 
 [[package]]
+name = "strum"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
+
+[[package]]
 name = "strum_macros"
 version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2159,6 +2170,19 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad8d03b598d3d0fff69bf533ee3ef19b8eeb342729596df84bcc7e1f96ec4059"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.28",
 ]
 
 [[package]]
@@ -2227,11 +2251,11 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?tag=v0.2.1#e520afa2aea396ae06a2a3d2219134e440ae8e67"
 dependencies = [
  "anyhow",
  "derive_tasm_object",
- "itertools 0.11.0",
+ "hex",
+ "itertools 0.10.5",
  "num",
  "num-traits",
  "rand 0.8.5",
@@ -2510,16 +2534,16 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.32.1"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac1e43400c18654fd04b54bdc2483c640508a8a4a7028cdf5df4afd5fa7cd2e5"
+checksum = "a1088cf2ddf0c0f5d8ce55ba9b5c047dad72c4ee68582f55e94e8df13140647a"
 dependencies = [
  "anyhow",
  "bincode",
  "colored",
  "criterion",
  "get-size",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "lazy_static",
  "ndarray",
  "nom",
@@ -2531,8 +2555,8 @@ dependencies = [
  "rayon",
  "serde",
  "serde_derive",
- "strum",
- "strum_macros",
+ "strum 0.25.0",
+ "strum_macros 0.25.2",
  "twenty-first",
  "unicode-width",
 ]

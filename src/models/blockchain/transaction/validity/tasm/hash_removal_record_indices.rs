@@ -1,9 +1,10 @@
+use itertools::Itertools;
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
-    snippet::{DataType, Snippet},
+    snippet::{DataType, DeprecatedSnippet},
     ExecutionState,
 };
-use triton_vm::{instruction::LabelledInstructions, triton_asm, BFieldElement};
+use triton_vm::{triton_asm, BFieldElement};
 use twenty_first::{
     shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
@@ -22,6 +23,7 @@ impl HashRemovalRecordIndices {
 
         use rand::Rng;
         use tasm_lib::get_init_tvm_stack;
+        use triton_vm::NonDeterminism;
 
         use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
@@ -44,19 +46,19 @@ impl HashRemovalRecordIndices {
         ExecutionState {
             stack,
             std_in: vec![],
-            secret_in: vec![],
+            nondeterminism: NonDeterminism::new(vec![]),
             memory,
             words_allocated: 1,
         }
     }
 }
 
-impl Snippet for HashRemovalRecordIndices {
-    fn entrypoint(&self) -> String {
+impl DeprecatedSnippet for HashRemovalRecordIndices {
+    fn entrypoint_name(&self) -> String {
         "tasm_neptune_transaction_hash_removal_record_indices".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
+    fn input_field_names(&self) -> Vec<String> {
         vec!["*removal_record".to_string()]
     }
 
@@ -68,7 +70,7 @@ impl Snippet for HashRemovalRecordIndices {
         vec![DataType::Digest]
     }
 
-    fn outputs(&self) -> Vec<String> {
+    fn output_field_names(&self) -> Vec<String> {
         vec![
             "d4".to_string(),
             "d3".to_string(),
@@ -86,7 +88,7 @@ impl Snippet for HashRemovalRecordIndices {
         type Rrh = RemovalRecord<Hash>;
         let rr_to_ais_with_size = tasm_lib::field_with_size!(Rrh::absolute_indices);
         let hash_varlen = library.import(Box::new(HashVarlen));
-        let entrypoint = self.entrypoint();
+        let entrypoint = self.entrypoint_name();
 
         let code = triton_asm! {
         // BEFORE: _ *removal_record
@@ -101,7 +103,7 @@ impl Snippet for HashRemovalRecordIndices {
 
             return
         };
-        LabelledInstructions(code).to_string()
+        format!("{}\n", code.iter().join("\n"))
     }
 
     fn crash_conditions(&self) -> Vec<String> {
@@ -203,7 +205,7 @@ mod tests {
             ListType,
         },
         rust_shadowing_helper_functions,
-        test_helpers::test_rust_equivalence_multiple,
+        test_helpers::test_rust_equivalence_multiple_deprecated,
         VmHasher,
     };
     use triton_vm::{BFieldElement, Digest};
@@ -215,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_hash_removal_record_indices() {
-        test_rust_equivalence_multiple(&HashRemovalRecordIndices, false);
+        test_rust_equivalence_multiple_deprecated(&HashRemovalRecordIndices, false);
     }
 
     #[test]
