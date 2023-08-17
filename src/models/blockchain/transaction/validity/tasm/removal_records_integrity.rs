@@ -349,11 +349,11 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         let map_compute_canonical_commitment = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(ComputeCanonicalCommitment)),
+            f: InnerFunction::BasicSnippet(Box::new(ComputeCanonicalCommitment)),
         }));
         let all_verify_aocl_membership = library.import(Box::new(All {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(VerifyAoclMembership)),
+            f: InnerFunction::BasicSnippet(Box::new(VerifyAoclMembership)),
         }));
 
         let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
