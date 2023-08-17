@@ -22,9 +22,9 @@ impl ComputeCanonicalCommitment {
     pub fn pseudorandom_input_state(_seed: [u8; 32]) -> ExecutionState {
         #[cfg(test)]
         {
-            use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
             use triton_vm::NonDeterminism;
 
+            use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
             use rand::RngCore;
             use std::collections::HashMap;
             use tasm_lib::get_init_tvm_stack;

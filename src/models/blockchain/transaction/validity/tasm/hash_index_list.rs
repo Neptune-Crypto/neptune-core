@@ -1,92 +1,40 @@
+use std::collections::HashMap;
+
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tasm_lib::{
+    function::Function,
     hashing::hash_varlen::HashVarlen,
-    snippet::{DataType, DeprecatedSnippet},
+    snippet::{BasicSnippet, DataType},
+    snippet_bencher::BenchmarkCase,
 };
-use triton_vm::BFieldElement;
+use triton_vm::{triton_asm, BFieldElement};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::shared::Hash;
 use tasm_lib::library::Library;
 
+/// Hash a list of indices using hash_varlen
+#[derive(Debug, Clone)]
 pub struct HashIndexList;
 
-impl HashIndexList {
-    #[cfg(test)]
-    fn pseudorandom_init_state(seed: [u8; 32], length: usize) -> tasm_lib::ExecutionState {
-        use rand::RngCore;
-        use triton_vm::NonDeterminism;
-
-        let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-        let mut index_list = Vec::<u128>::with_capacity(length);
-        for _ in 0..length {
-            index_list.push(
-                ((rand::RngCore::next_u64(&mut rng) as u128) << 64)
-                    ^ (rand::RngCore::next_u64(&mut rng) as u128),
-            );
-        }
-
-        let address = BFieldElement::new(rng.next_u64() % (1u64 << 20));
-
-        let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
-            std::collections::HashMap::new();
-        let index_list_encoded =
-            twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&index_list);
-
-        for (i, v) in index_list_encoded.iter().enumerate() {
-            memory.insert(address + BFieldElement::new(i as u64), *v);
-        }
-        memory.insert(address, BFieldElement::new(length as u64));
-
-        let mut stack = tasm_lib::get_init_tvm_stack();
-        stack.push(address);
-
-        tasm_lib::ExecutionState {
-            stack,
-            std_in: vec![],
-            nondeterminism: NonDeterminism::new(vec![]),
-            memory,
-            words_allocated: 1,
-        }
+impl BasicSnippet for HashIndexList {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::VoidPointer, "*index_list".to_string())]
     }
-}
 
-impl DeprecatedSnippet for HashIndexList {
-    fn entrypoint_name(&self) -> String {
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::Digest, "digest".to_string())]
+    }
+
+    fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_hash_index_list".to_string()
     }
 
-    fn input_field_names(&self) -> Vec<String> {
-        vec!["*index_list".to_string()]
-    }
-
-    fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::VoidPointer]
-    }
-
-    fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Digest]
-    }
-
-    fn output_field_names(&self) -> Vec<String> {
-        vec![
-            "d4".to_string(),
-            "d3".to_string(),
-            "d2".to_string(),
-            "d1".to_string(),
-            "d0".to_string(),
-        ]
-    }
-
-    fn stack_diff(&self) -> isize {
-        4
-    }
-
-    fn function_code(&self, library: &mut Library) -> String {
+    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         let hash_varlen = library.import(Box::new(HashVarlen));
-        let entrypoint = self.entrypoint_name();
+        let entrypoint = self.entrypoint();
 
-        format!(
-            "
+        triton_asm!(
         // BEFORE: _ *index_list
         // AFTER: _ [digest]
         {entrypoint}:
@@ -94,65 +42,23 @@ impl DeprecatedSnippet for HashIndexList {
             read_mem // _ *index_list length
             push 4 mul // _ *index_list size
 
-            swap 1 // _ size *index_list 
+            swap 1 // _ size *index_list
             push 1 // _ size *index_list 1
             add    // _ size *index_list+1
             swap 1 // _ *index_list+1 size
 
             call {hash_varlen}
 
-            return"
+            return
         )
     }
+}
 
-    fn crash_conditions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    fn gen_input_states(&self) -> Vec<tasm_lib::ExecutionState> {
-        #[cfg(test)]
-        {
-            vec![
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng()), 0),
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng()), 5),
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng()), 10),
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng()), 45),
-            ]
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in testing environment")
-        }
-    }
-
-    fn common_case_input_state(&self) -> tasm_lib::ExecutionState {
-        #[cfg(test)]
-        {
-            Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng()), 45)
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in testing environment")
-        }
-    }
-
-    fn worst_case_input_state(&self) -> tasm_lib::ExecutionState {
-        #[cfg(test)]
-        {
-            Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng()), 45)
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in testing environment")
-        }
-    }
-
-    fn rust_shadowing(
+impl Function for HashIndexList {
+    fn rust_shadow(
         &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        _std_in: Vec<triton_vm::BFieldElement>,
-        _secret_in: Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
+        stack: &mut Vec<BFieldElement>,
+        memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
     ) {
         // read address
         let address = stack.pop().unwrap();
@@ -177,6 +83,46 @@ impl DeprecatedSnippet for HashIndexList {
         stack.push(digest.values()[1]);
         stack.push(digest.values()[0]);
     }
+
+    fn pseudorandom_initial_state(
+        &self,
+        seed: [u8; 32],
+        bench_case: Option<BenchmarkCase>,
+    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let length = if let Some(case) = bench_case {
+            match case {
+                BenchmarkCase::CommonCase => 45,
+                BenchmarkCase::WorstCase => 200,
+            }
+        } else {
+            ((rng.next_u32() as usize) % 5) * (1 << ((rng.next_u32() as usize) % 5))
+        };
+        let mut index_list = Vec::<u128>::with_capacity(length);
+        for _ in 0..length {
+            index_list.push(
+                ((rand::RngCore::next_u64(&mut rng) as u128) << 64)
+                    ^ (rand::RngCore::next_u64(&mut rng) as u128),
+            );
+        }
+
+        let address = BFieldElement::new(rng.next_u64() % (1u64 << 20));
+
+        let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
+            std::collections::HashMap::new();
+        let index_list_encoded =
+            twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&index_list);
+
+        for (i, v) in index_list_encoded.iter().enumerate() {
+            memory.insert(address + BFieldElement::new(i as u64), *v);
+        }
+        memory.insert(address, BFieldElement::new(length as u64));
+
+        let mut stack = tasm_lib::get_init_tvm_stack();
+        stack.push(address);
+
+        (stack, memory)
+    }
 }
 
 #[cfg(test)]
@@ -185,7 +131,10 @@ mod tests {
 
     use itertools::Itertools;
     use rand::{rngs::StdRng, RngCore, SeedableRng};
+    use tasm_lib::snippet::RustShadow;
+    use tasm_lib::test_helpers::link_and_run_tasm_for_test_deprecated;
     use tasm_lib::{
+        function::ShadowedFunction,
         get_init_tvm_stack,
         list::{
             contiguous_list::get_pointer_list::GetPointerList,
@@ -193,7 +142,6 @@ mod tests {
             ListType,
         },
         rust_shadowing_helper_functions,
-        test_helpers::test_rust_equivalence_multiple_deprecated,
     };
     use triton_vm::Digest;
     use twenty_first::{
@@ -205,7 +153,9 @@ mod tests {
 
     #[test]
     fn test_hash_index_list() {
-        test_rust_equivalence_multiple_deprecated(&HashIndexList, false);
+        let hash_index_list = HashIndexList;
+        let wrapper = ShadowedFunction::new(hash_index_list);
+        wrapper.test();
     }
 
     #[test]
@@ -246,7 +196,8 @@ mod tests {
         let get_pointer_list = GetPointerList {
             output_list_type: ListType::Unsafe,
         };
-        let _vm_output = get_pointer_list.link_and_run_tasm_for_test(
+        let _vm_output = link_and_run_tasm_for_test_deprecated(
+            &get_pointer_list,
             &mut stack,
             vec![],
             vec![],
@@ -263,9 +214,10 @@ mod tests {
         let new_malloc = memory[&BFieldElement::new(0)].value() as usize;
         let map_hash_removal_record_indices = Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashIndexList)),
+            f: InnerFunction::BasicSnippet(Box::new(HashIndexList)),
         };
-        let _vm_output_state = map_hash_removal_record_indices.link_and_run_tasm_for_test(
+        let _vm_output_state = link_and_run_tasm_for_test_deprecated(
+            &map_hash_removal_record_indices,
             &mut stack,
             vec![],
             vec![],
@@ -304,12 +256,12 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::snippet_bencher::bench_and_write;
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn hash_index_list_benchmark() {
-        bench_and_write(HashIndexList)
+        ShadowedFunction::new(HashIndexList).bench();
     }
 }

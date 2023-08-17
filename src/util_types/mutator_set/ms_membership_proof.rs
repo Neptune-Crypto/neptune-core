@@ -1,9 +1,12 @@
 use get_size::GetSize;
 use itertools::Itertools;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
+use std::marker::PhantomData;
 use std::ops::IndexMut;
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -17,7 +20,7 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use super::addition_record::AdditionRecord;
-use super::chunk_dictionary::ChunkDictionary;
+use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
 use super::mutator_set_accumulator::MutatorSetAccumulator;
 use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel};
 use super::removal_record::AbsoluteIndexSet;
@@ -502,6 +505,40 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
             );
 
         Ok(!mutated_mmr_mp_indices.is_empty() || !mutated_chunk_dictionary_index.is_empty())
+    }
+}
+
+/// Generate a pseudorandom mutator set membership proof from the given seed, for testing
+/// purposes.
+pub fn pseudorandom_mutator_set_membership_proof<H: AlgebraicHasher>(
+    seed: [u8; 32],
+) -> MsMembershipProof<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let sender_randomness: Digest = rng.gen();
+    let receiver_preimage: Digest = rng.gen();
+    let auth_path_aocl: MmrMembershipProof<H> = pseudorandom_mmr_membership_proof::<H>(rng.gen());
+    let target_chunks: ChunkDictionary<H> = pseudorandom_chunk_dictionary(rng.gen());
+    MsMembershipProof {
+        sender_randomness,
+        receiver_preimage,
+        auth_path_aocl,
+        target_chunks,
+    }
+}
+
+/// Generate a pseudorandom Merkle mountain range membership proof from the given seed,
+/// for testing purposes.
+pub fn pseudorandom_mmr_membership_proof<H: AlgebraicHasher>(
+    seed: [u8; 32],
+) -> MmrMembershipProof<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let leaf_index: u64 = rng.gen();
+    let authentication_path: Vec<Digest> =
+        (0..rng.gen_range(0..15)).map(|_| rng.gen()).collect_vec();
+    MmrMembershipProof {
+        leaf_index,
+        authentication_path,
+        _hasher: PhantomData,
     }
 }
 

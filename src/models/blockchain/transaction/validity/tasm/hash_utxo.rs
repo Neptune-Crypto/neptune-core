@@ -1,98 +1,47 @@
-use rand::{thread_rng, Rng};
+use std::collections::HashMap;
+
+use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tasm_lib::{
+    function::Function,
     hashing::hash_varlen::HashVarlen,
-    snippet::{DataType, DeprecatedSnippet},
-    ExecutionState,
+    snippet::{BasicSnippet, DataType},
+    snippet_bencher::BenchmarkCase,
 };
-use triton_vm::BFieldElement;
+use triton_vm::{triton_asm, BFieldElement};
+
+use tasm_lib::library::Library;
 use twenty_first::{
     shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
 
-use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
-use tasm_lib::library::Library;
+use crate::models::blockchain::{
+    shared::Hash,
+    transaction::utxo::{pseudorandom_utxo, Utxo},
+};
 
 /// HashUtxo takes a VoidPointer to a UTXO living in a contiguous
 /// list, and hashes it.
+#[derive(Debug, Clone)]
 pub struct HashUtxo;
 
-impl HashUtxo {
-    fn pseudorandom_input_state(_seed: [u8; 32]) -> ExecutionState {
-        #[cfg(test)]
-        {
-            use triton_vm::NonDeterminism;
-
-            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(_seed);
-            let utxo = crate::tests::shared::pseudorandom_utxo(_seed);
-            let address =
-                triton_vm::BFieldElement::new(rand::RngCore::next_u64(&mut rng) % (1 << 20));
-            let mut stack = tasm_lib::get_init_tvm_stack();
-            stack.push(address);
-            let mut memory: std::collections::HashMap<
-                triton_vm::BFieldElement,
-                triton_vm::BFieldElement,
-            > = std::collections::HashMap::new();
-            let encoded_utxo = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&utxo);
-            memory.insert(
-                address - BFieldElement::new(1),
-                triton_vm::BFieldElement::new(encoded_utxo.len() as u64),
-            );
-            for (i, v) in encoded_utxo.iter().enumerate() {
-                memory.insert(
-                    address + triton_vm::BFieldElement::new(i as u64),
-                    v.to_owned(),
-                );
-            }
-            ExecutionState {
-                stack,
-                std_in: vec![],
-                nondeterminism: NonDeterminism::new(vec![]),
-                memory,
-                words_allocated: 1,
-            }
-        }
-        #[cfg(not(test))]
-        unimplemented!("Cannot generate test input state when not in testing environment")
+impl BasicSnippet for HashUtxo {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::VoidPointer, "utxo".to_string())]
     }
-}
 
-impl DeprecatedSnippet for HashUtxo {
-    fn entrypoint_name(&self) -> String {
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::Digest, "digest".to_string())]
+    }
+
+    fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_hash_utxo".to_string()
     }
 
-    fn input_field_names(&self) -> Vec<String> {
-        vec!["*utxo_field_size_indicator".to_string()]
-    }
-
-    fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::VoidPointer]
-    }
-
-    fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Digest]
-    }
-
-    fn output_field_names(&self) -> Vec<String> {
-        vec![
-            "d4".to_string(),
-            "d3".to_string(),
-            "d2".to_string(),
-            "d1".to_string(),
-            "d0".to_string(),
-        ]
-    }
-
-    fn stack_diff(&self) -> isize {
-        4
-    }
-
-    fn function_code(&self, library: &mut Library) -> String {
-        let entrypoint = self.entrypoint_name();
+    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
+        let entrypoint = self.entrypoint();
         let hash_varlen = library.import(Box::new(HashVarlen));
 
-        format!(
-            "
+        triton_asm!(
         // BEFORE: _ *utxo
         // AFTER: _ [utxo_digest]
         {entrypoint}:
@@ -104,44 +53,15 @@ impl DeprecatedSnippet for HashUtxo {
 
             call {hash_varlen}
             return
-            "
         )
     }
+}
 
-    fn crash_conditions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    fn gen_input_states(&self) -> Vec<tasm_lib::ExecutionState> {
-        let mut rng = thread_rng();
-        vec![
-            Self::pseudorandom_input_state(rng.gen()),
-            Self::pseudorandom_input_state(rng.gen()),
-            Self::pseudorandom_input_state(rng.gen()),
-            Self::pseudorandom_input_state(rng.gen()),
-        ]
-    }
-
-    fn common_case_input_state(&self) -> tasm_lib::ExecutionState {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xa1;
-        seed[1] = 0x4f;
-        Self::pseudorandom_input_state(seed)
-    }
-
-    fn worst_case_input_state(&self) -> tasm_lib::ExecutionState {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xb1;
-        seed[1] = 0x5f;
-        Self::pseudorandom_input_state(seed)
-    }
-
-    fn rust_shadowing(
+impl Function for HashUtxo {
+    fn rust_shadow(
         &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        _std_in: Vec<triton_vm::BFieldElement>,
-        _secret_in: Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
+        stack: &mut Vec<BFieldElement>,
+        memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
     ) {
         // read address
         let address = stack.pop().unwrap();
@@ -170,28 +90,52 @@ impl DeprecatedSnippet for HashUtxo {
             stack.push(v);
         }
     }
+
+    fn pseudorandom_initial_state(
+        &self,
+        seed: [u8; 32],
+        _bench_case: Option<BenchmarkCase>,
+    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let utxo = pseudorandom_utxo(seed);
+        let address = triton_vm::BFieldElement::new(rng.next_u64() % (1 << 20));
+        let mut stack = tasm_lib::get_init_tvm_stack();
+        stack.push(address);
+        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+        let encoded_utxo = BFieldCodec::encode(&utxo);
+        memory.insert(
+            address - BFieldElement::new(1),
+            BFieldElement::new(encoded_utxo.len() as u64),
+        );
+        for (i, v) in encoded_utxo.iter().enumerate() {
+            memory.insert(address + BFieldElement::new(i as u64), v.to_owned());
+        }
+        (stack, memory)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple_deprecated;
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn new_prop_test() {
-        test_rust_equivalence_multiple_deprecated(&HashUtxo, false);
+        let shadowed_function = ShadowedFunction::new(HashUtxo);
+        shadowed_function.test();
     }
 }
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::snippet_bencher::bench_and_write;
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn hash_utxo_benchmark() {
-        bench_and_write(HashUtxo)
+        let shadowed_function = ShadowedFunction::new(HashUtxo);
+        shadowed_function.bench();
     }
 }

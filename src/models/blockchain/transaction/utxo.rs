@@ -1,6 +1,8 @@
 use crate::models::blockchain::shared::Hash;
 use get_size::GetSize;
 use num_traits::Zero;
+use rand::rngs::StdRng;
+use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use triton_vm::instruction::LabelledInstruction;
@@ -86,6 +88,15 @@ impl StdHash for Utxo {
     fn hash<H: StdHasher>(&self, state: &mut H) {
         let neptune_hash = Hash::hash(self);
         StdHash::hash(&neptune_hash, state);
+    }
+}
+
+/// Generate a UTXO pseudorandomly, for testing purposes
+pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    Utxo {
+        lock_script_hash: rng.gen(),
+        coins: Amount::from(rng.next_u32()).to_native_coins(),
     }
 }
 

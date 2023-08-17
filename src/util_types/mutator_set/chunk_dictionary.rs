@@ -1,8 +1,11 @@
 use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
+use rand::rngs::StdRng;
+use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use triton_vm::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
@@ -90,6 +93,29 @@ impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
     fn static_length() -> Option<usize> {
         None
     }
+}
+
+/// Generate pseudorandom chunk dictionary from the given seed, for testing purposes.
+pub fn pseudorandom_chunk_dictionary<H: AlgebraicHasher>(seed: [u8; 32]) -> ChunkDictionary<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+    let mut dictionary = HashMap::new();
+    for _ in 0..37 {
+        let key = rng.next_u64();
+        let authpath: Vec<Digest> = (0..rng.gen_range(0..6)).map(|_| rng.gen()).collect_vec();
+        let chunk: Vec<u32> = (0..rng.gen_range(0..17)).map(|_| rng.gen()).collect_vec();
+
+        dictionary.insert(
+            key,
+            (
+                MmrMembershipProof::new(key, authpath),
+                Chunk {
+                    relative_indices: chunk,
+                },
+            ),
+        );
+    }
+    ChunkDictionary::<H>::new(dictionary)
 }
 
 #[cfg(test)]

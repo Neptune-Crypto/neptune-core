@@ -1,4 +1,7 @@
 use get_size::GetSize;
+use itertools::Itertools;
+use rand::rngs::StdRng;
+use rand::{Rng, RngCore, SeedableRng};
 use serde::de::{SeqAccess, Visitor};
 use serde::ser::SerializeTuple;
 use serde::Deserialize;
@@ -12,7 +15,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use super::chunk_dictionary::ChunkDictionary;
+use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
 use super::mutator_set_kernel::MutatorSetKernel;
 use super::shared::{
     get_batch_mutation_argument_for_removal_record, indices_to_hash_map, BATCH_SIZE, CHUNK_SIZE,
@@ -292,6 +295,24 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
     /// Returns a hashmap from chunk index to chunk.
     pub fn get_chunkidx_to_indices_dict(&self) -> HashMap<u64, Vec<u128>> {
         indices_to_hash_map(&self.absolute_indices.to_array())
+    }
+}
+
+/// Generate a pseudorandom removal record from the given seed, for testing purposes.
+pub fn pseudorandom_removal_record<H: AlgebraicHasher>(seed: [u8; 32]) -> RemovalRecord<H> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let absolute_indices = AbsoluteIndexSet::new(
+        &(0..NUM_TRIALS as usize)
+            .map(|_| ((rng.next_u64() as u128) << 64) ^ rng.next_u64() as u128)
+            .collect_vec()
+            .try_into()
+            .unwrap(),
+    );
+    let target_chunks = pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>());
+
+    RemovalRecord {
+        absolute_indices,
+        target_chunks,
     }
 }
 

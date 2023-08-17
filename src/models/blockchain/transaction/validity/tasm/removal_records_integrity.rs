@@ -323,7 +323,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         }));
         let map_hash_utxo = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashUtxo)),
+            f: InnerFunction::BasicSnippet(Box::new(HashUtxo)),
         }));
         let get_pointer_list = library.import(Box::new(GetPointerList {
             output_list_type: ListType::Unsafe,
@@ -335,15 +335,15 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         }));
         let map_compute_indices = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(ComputeIndices)),
+            f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
         }));
         let map_hash_index_list = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashIndexList)),
+            f: InnerFunction::BasicSnippet(Box::new(HashIndexList)),
         }));
         let map_hash_removal_record_indices = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashRemovalRecordIndices)),
+            f: InnerFunction::BasicSnippet(Box::new(HashRemovalRecordIndices)),
         }));
         let multiset_equality = library.import(Box::new(MultisetEquality(ListType::Unsafe)));
 

@@ -61,7 +61,7 @@ tui = "0"
 unicode-width = "0"
 
 [dev-dependencies]
-pin-project-lite = "0"
+pin-project-lite = "0.2.12"
 tokio-test = "0"
 
 # needed because it otherwise takes too long to sign transaction with STARK proofs
