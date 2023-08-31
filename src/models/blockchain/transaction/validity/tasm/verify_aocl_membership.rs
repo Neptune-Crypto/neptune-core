@@ -31,7 +31,7 @@ pub(crate) struct VerifyAoclMembership;
 impl BasicSnippet for VerifyAoclMembership {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(
-            DataType::Pair(Box::new(DataType::VoidPointer), Box::new(DataType::Digest)),
+            DataType::Tuple(vec![DataType::VoidPointer, DataType::Digest]),
             "*msmp_and_commitment".to_string(),
         )]
     }

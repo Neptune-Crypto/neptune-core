@@ -170,9 +170,9 @@ tasm_neptune_transaction_removal_records_integrity:
  tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest: 406
    tasm_list_unsafe_u32_length_long_void_pointer: 4
    tasm_list_unsafe_u32_length_long_digest: 4
-   tasm_list_unsafe_u32_new_pair_Lvoid_pointer_and_digestR: 33
+   tasm_list_unsafe_u32_new_tuple_ofstart_void-pointer_digest_ofend_: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_pair_Lvoid_pointer_and_digestR: 2
+   tasm_list_unsafe_u32_set_length_tuple_ofstart_void-pointer_digest_ofend_: 2
    tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest_loop: 345
      tasm_memory_memcpy: 29
        tasm_memory_memcpy_loop: 24
@@ -183,12 +183,12 @@ tasm_neptune_transaction_removal_records_integrity:
      tasm_memory_memcpy: 105
        tasm_memory_memcpy_loop: 100
  tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10312
-   tasm_list_unsafe_u32_length_long_pair_Ldigest_and_void_pointerR: 4
+   tasm_list_unsafe_u32_length_long_tuple_ofstart_digest_void-pointer_ofend_: 4
    tasm_list_unsafe_u32_new_void_pointer: 31
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_pair_Ldigest_and_void_pointerR: 2
+   tasm_list_unsafe_u32_set_length_tuple_ofstart_digest_void-pointer_ofend_: 2
    tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
-     tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
      tasm_neptune_transaction_compute_indices: 5079
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
@@ -245,7 +245,7 @@ tasm_neptune_transaction_removal_records_integrity:
              tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
              tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
              tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 3031
+         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 3026
            tasm_list_unsafe_u32_length_long_u32: 4
            tasm_list_unsafe_u32_new_u128: 33
              tasm_memory_dyn_malloc: 25
@@ -387,7 +387,7 @@ tasm_neptune_transaction_removal_records_integrity:
              u32_to_u128_add_another_u128: 24
              tasm_list_unsafe_u32_set_element_u128: 21
      tasm_list_unsafe_u32_set_element_void_pointer: 7
-     tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
      tasm_neptune_transaction_compute_indices: 5079
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
@@ -444,7 +444,7 @@ tasm_neptune_transaction_removal_records_integrity:
              tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
              tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
              tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 3031
+         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 3026
            tasm_list_unsafe_u32_length_long_u32: 4
            tasm_list_unsafe_u32_new_u128: 33
              tasm_memory_dyn_malloc: 25
@@ -657,27 +657,27 @@ tasm_neptune_transaction_removal_records_integrity:
      tasm_list_unsafe_u32_multiset_equality_running_product: 113
        tasm_list_unsafe_u32_multiset_equality_running_product_loop: 99
  tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 428
-   tasm_list_unsafe_u32_length_long_pair_Ldigest_and_void_pointerR: 4
-   tasm_list_unsafe_u32_new_pair_Lvoid_pointer_and_digestR: 33
+   tasm_list_unsafe_u32_length_long_tuple_ofstart_digest_void-pointer_ofend_: 4
+   tasm_list_unsafe_u32_new_tuple_ofstart_void-pointer_digest_ofend_: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_pair_Ldigest_and_void_pointerR: 2
+   tasm_list_unsafe_u32_set_length_tuple_ofstart_digest_void-pointer_ofend_: 2
    tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
-     tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
      tasm_neptune_transaction_compute_commitment: 114
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_neptune_mutator_set_commit: 13
-     tasm_list_unsafe_u32_set_element_pair_Lvoid_pointer_and_digestR: 29
-     tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 29
+     tasm_list_unsafe_u32_set_element_tuple_ofstart_void-pointer_digest_ofend_: 29
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
      tasm_neptune_transaction_compute_commitment: 114
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_memory_push_ram_to_stack_digest: 22
        tasm_neptune_mutator_set_commit: 13
-     tasm_list_unsafe_u32_set_element_pair_Lvoid_pointer_and_digestR: 29
+     tasm_list_unsafe_u32_set_element_tuple_ofstart_void-pointer_digest_ofend_: 29
  tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
-   tasm_list_unsafe_u32_length_long_pair_Lvoid_pointer_and_digestR: 4
+   tasm_list_unsafe_u32_length_long_tuple_ofstart_void-pointer_digest_ofend_: 4
    tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
-     tasm_list_unsafe_u32_get_element_pair_Lvoid_pointer_and_digestR: 29
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_void-pointer_digest_ofend_: 29
      tasm_neptune_transaction_verify_aocl_membership: 6160
        tasm_mmr_verify_from_memory_unsafe: 6101
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 128
@@ -1039,7 +1039,7 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_eq: 8
          tasm_list_unsafe_u32_get_element_digest: 25
          tasm_hashing_eq_digest: 15
-     tasm_list_unsafe_u32_get_element_pair_Lvoid_pointer_and_digestR: 29
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_void-pointer_digest_ofend_: 29
      tasm_neptune_transaction_verify_aocl_membership: 6190
        tasm_mmr_verify_from_memory_unsafe: 6131
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 128
@@ -1440,16 +1440,16 @@ tasm_neptune_transaction_removal_records_integrity:
      tasm_list_unsafe_u32_get_element_void_pointer: 42
      tasm_neptune_transaction_hash_utxo: 602
  tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest: 406
-   tasm_list_unsafe_u32_new_pair_Lvoid_pointer_and_digestR: 66
-   tasm_list_unsafe_u32_set_length_pair_Lvoid_pointer_and_digestR: 2
+   tasm_list_unsafe_u32_new_tuple_ofstart_void-pointer_digest_ofend_: 66
+   tasm_list_unsafe_u32_set_length_tuple_ofstart_void-pointer_digest_ofend_: 2
    tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest_loop: 345
      tasm_memory_memcpy: 268
        tasm_memory_memcpy_loop: 248
  tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10312
-   tasm_list_unsafe_u32_length_long_pair_Ldigest_and_void_pointerR: 8
-   tasm_list_unsafe_u32_set_length_pair_Ldigest_and_void_pointerR: 4
+   tasm_list_unsafe_u32_length_long_tuple_ofstart_digest_void-pointer_ofend_: 8
+   tasm_list_unsafe_u32_set_length_tuple_ofstart_digest_void-pointer_ofend_: 4
    tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
-     tasm_list_unsafe_u32_get_element_pair_Ldigest_and_void_pointerR: 116
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 116
      tasm_neptune_transaction_compute_indices: 10158
        tasm_neptune_mutator_get_swbf_indices_1048576_45: 9952
          tasm_arithmetic_u128_shift_right_static_3: 48
@@ -1459,7 +1459,7 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_list_unsafe_u32_set_length_u32: 8
            tasm_hashing_sample_indices_to_unsafe_list_loop: 3560
              tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 1440
-         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 6062
+         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 6052
            tasm_list_unsafe_u32_length_long_u32: 8
            tasm_list_unsafe_u32_new_u128: 66
            tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128_loop: 5950
@@ -1480,11 +1480,11 @@ tasm_neptune_transaction_removal_records_integrity:
    tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
      tasm_neptune_transaction_compute_commitment: 228
        tasm_neptune_mutator_set_commit: 26
-     tasm_list_unsafe_u32_set_element_pair_Lvoid_pointer_and_digestR: 58
+     tasm_list_unsafe_u32_set_element_tuple_ofstart_void-pointer_digest_ofend_: 58
  tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
-   tasm_list_unsafe_u32_length_long_pair_Lvoid_pointer_and_digestR: 4
+   tasm_list_unsafe_u32_length_long_tuple_ofstart_void-pointer_digest_ofend_: 4
    tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
-     tasm_list_unsafe_u32_get_element_pair_Lvoid_pointer_and_digestR: 58
+     tasm_list_unsafe_u32_get_element_tuple_ofstart_void-pointer_digest_ofend_: 58
      tasm_neptune_transaction_verify_aocl_membership: 12350
        tasm_mmr_verify_from_memory_unsafe: 12232
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 256

@@ -27,14 +27,14 @@ pub(crate) struct ComputeCanonicalCommitment;
 impl BasicSnippet for ComputeCanonicalCommitment {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(
-            DataType::Pair(Box::new(DataType::Digest), Box::new(DataType::VoidPointer)),
+            DataType::Tuple(vec![DataType::Digest, DataType::VoidPointer]),
             "item_and_*membership_proof".to_string(),
         )]
     }
 
     fn outputs(&self) -> Vec<(DataType, String)> {
         vec![(
-            DataType::Pair(Box::new(DataType::VoidPointer), Box::new(DataType::Digest)),
+            DataType::Tuple(vec![DataType::VoidPointer, DataType::Digest]),
             "*membership_proof_and_canonical_commitment".to_string(),
         )]
     }

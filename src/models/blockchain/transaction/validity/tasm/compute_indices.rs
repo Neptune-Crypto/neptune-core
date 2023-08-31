@@ -31,7 +31,7 @@ pub(crate) struct ComputeIndices;
 impl BasicSnippet for ComputeIndices {
     fn inputs(&self) -> Vec<(DataType, String)> {
         vec![(
-            DataType::Pair(Box::new(DataType::Digest), Box::new(DataType::VoidPointer)),
+            DataType::Tuple(vec![DataType::Digest, DataType::VoidPointer]),
             "item_with_*membership_proof".to_string(),
         )]
     }
@@ -249,252 +249,6 @@ impl Function for ComputeIndices {
     }
 }
 
-// impl DeprecatedSnippet for ComputeIndices {
-//     fn entrypoint_name(&self) -> String {
-//         "tasm_neptune_transaction_compute_indices".to_string()
-//     }
-
-//     fn input_field_names(&self) -> Vec<String> {
-//         vec![
-//             "i4".to_string(),
-//             "i3".to_string(),
-//             "i2".to_string(),
-//             "i1".to_string(),
-//             "i0".to_string(),
-//             "*mp".to_string(),
-//         ]
-//     }
-
-//     fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-//         vec![DataType::Pair(
-//             Box::new(DataType::Digest),
-//             Box::new(DataType::VoidPointer),
-//         )]
-//     }
-
-//     fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-//         vec![DataType::VoidPointer]
-//     }
-
-//     fn output_field_names(&self) -> Vec<String> {
-//         vec!["*indices".to_string()]
-//     }
-
-//     fn stack_diff(&self) -> isize {
-//         -5
-//     }
-
-//     fn function_code(&self, library: &mut Library) -> String {
-//         type MsMpH = MsMembershipProof<Hash>;
-//         let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
-//         let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
-//         let mp_to_ap = tasm_lib::field!(MsMpH::auth_path_aocl);
-//         type MmrMpH = MmrMembershipProof<Hash>;
-//         let ap_to_li = tasm_lib::field!(MmrMpH::leaf_index);
-//         let entrypoint = self.entrypoint_name();
-//         let read_digest = library.import(Box::new(PushRamToStack {
-//             output_type: DataType::Digest,
-//         }));
-//         let get_swbf_indices = library.import(Box::new(GetSwbfIndices {
-//             window_size: WINDOW_SIZE,
-//             num_trials: NUM_TRIALS as usize,
-//         }));
-
-//         let code = triton_asm! {
-//         // BEFORE: _ i4 i3 i2 i1 i0 *mp
-//         // AFTER: _ *indices
-//         {entrypoint}:
-
-//             // get fields
-//             dup 0 // _ [item] *mp *mp
-//             {&mp_to_sr} // _ [item] *mp *sr
-
-//             dup 1 // _ [item] *mp *sr *mp
-//             {&mp_to_rp} // _ [item] *mp *sr *rp
-
-//             swap 2 // _ [item] *rp *sr *mp
-//             {&mp_to_ap} // _ [item] *rp *sr *ap
-//             {&ap_to_li} // _ [item] *rp *sr *li
-
-//             // read leaf index from memory
-//             read_mem // _ [item] *rp *sr *li li_lo
-//             swap 1   // _ [item] *rp *sr li_lo *li
-//             push 1 add // _ [item] *rp *sr li_lo *li+1
-//             read_mem // _ [item] *rp *sr li_lo *li+1 li_hi
-//             swap 1 pop // _ [item] *rp *sr li_lo li_hi
-
-//             // re-arrange so that leaf index is deepest in stack
-//                    // _ i4 i3 i2 i1 i0 *rp *sr li_lo li_hi
-//             swap 8 // _ li_hi i3 i2 i1 i0 *rp *sr li_lo i4
-//             swap 1 // _ li_hi i3 i2 i1 i0 *rp *sr i4 li_lo
-//             swap 7 // _ li_hi li_lo i2 i1 i0 *rp *sr i4 i3
-//             swap 2 // _ li_hi li_lo i2 i1 i0 *rp i3 i4 *sr
-//             swap 1 // _ li_hi li_lo i2 i1 i0 *rp i3 *sr i4
-//             swap 3 // _ li_hi li_lo i2 i1 i0 i4 i3 *sr *rp
-
-//             // read receiver_preimage from memory
-//             call {read_digest} // _ li_hi li_lo i2 i1 i0 i4 i3 *sr [rp]
-
-//             // read sender_randomness from memory
-//             push 1 // _ li_hi li_lo i2 i1 i0 i4 i3 *sr [rp] 1
-//             swap 6 // _ li_hi li_lo i2 i1 i0 i4 i3 1 [rp] *sr
-//             call {read_digest} // _ li_hi li_lo i2 i1 i0 i4 i3 1 [rp] [sr]
-
-//             // re-arrange stack in anticipation of swbf_get_indices
-//                     // _ li_hi li_lo i2 i1 i0 i4 i3 1 rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 sr0
-//             swap 9  // _ li_hi li_lo i2 i1 i0 i4 i3 1 sr0 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 rp4
-//             swap 15 // _ li_hi li_lo rp4 i1 i0 i4 i3 1 sr0 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 i2
-//             swap 8  // _ li_hi li_lo rp4 i1 i0 i4 i3 1 sr0 i2 rp2 rp1 rp0 sr4 sr3 sr2 sr1 rp3
-//             swap 14 // _ li_hi li_lo rp4 rp3 i0 i4 i3 1 sr0 i2 rp2 rp1 rp0 sr4 sr3 sr2 sr1 i1
-//             swap 7  // _ li_hi li_lo rp4 rp3 i0 i4 i3 1 sr0 i2 i1 rp1 rp0 sr4 sr3 sr2 sr1 rp2
-//             swap 13 // _ li_hi li_lo rp4 rp3 rp2 i4 i3 1 sr0 i2 i1 rp1 rp0 sr4 sr3 sr2 sr1 i0
-//             swap 6  // _ li_hi li_lo rp4 rp3 rp2 i4 i3 1 sr0 i2 i1 i0 rp0 sr4 sr3 sr2 sr1 rp1
-//             swap 12 // _ li_hi li_lo rp4 rp3 rp2 rp1 i3 1 sr0 i2 i1 i0 rp0 sr4 sr3 sr2 sr1 i4
-//             swap 5  // _ li_hi li_lo rp4 rp3 rp2 rp1 i3 1 sr0 i2 i1 i0 i4 sr4 sr3 sr2 sr1 rp0
-//             swap 11 // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 1 sr0 i2 i1 i0 i4 sr4 sr3 sr2 sr1 i3
-//             swap 4  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 1 sr0 i2 i1 i0 i4 i3 sr3 sr2 sr1 sr4
-//             swap 10 // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr0 i2 i1 i0 i4 i3 sr3 sr2 sr1 1
-//             pop     // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr0 i2 i1 i0 i4 i3 sr3 sr2 sr1
-//             swap 2  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr0 i2 i1 i0 i4 i3 sr1 sr2 sr3
-//             swap 8  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 i2 i1 i0 i4 i3 sr1 sr2 sr0
-//             swap 1  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 i2 i1 i0 i4 i3 sr1 sr0 sr2
-//             swap 7  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 i1 i0 i4 i3 sr1 sr0 i2
-//             swap 2  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 i1 i0 i4 i3 i2 sr0 sr1
-//             swap 6  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 i0 i4 i3 i2 sr0 i1
-//             swap 1  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 i0 i4 i3 i2 i1 sr0
-//             swap 5  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 sr0 i4 i3 i2 i1 i0
-//                     // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 sr0 i4 i3 i2 i1 i0
-
-//             call {get_swbf_indices}
-
-//             return
-//         };
-//         format!("{}\n", code.iter().join("\n"))
-//     }
-
-//     fn crash_conditions(&self) -> Vec<String> {
-//         vec![]
-//     }
-
-//     fn gen_input_states(&self) -> Vec<tasm_lib::ExecutionState> {
-//         #[cfg(test)]
-//         {
-//             vec![
-//                 Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng())),
-//                 Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng())),
-//                 Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng())),
-//             ]
-//         }
-//         #[cfg(not(test))]
-//         {
-//             unimplemented!("Cannot generate input states when not in testing environment");
-//         }
-//     }
-
-//     fn common_case_input_state(&self) -> tasm_lib::ExecutionState {
-//         #[cfg(test)]
-//         {
-//             let mut seed = [0u8; 32];
-//             seed[0] = 0xa8;
-//             seed[1] = 0xb6;
-//             Self::pseudorandom_init_state(seed)
-//         }
-//         #[cfg(not(test))]
-//         {
-//             unimplemented!("Cannot generate input states when not in testing environment");
-//         }
-//     }
-
-//     fn worst_case_input_state(&self) -> tasm_lib::ExecutionState {
-//         #[cfg(test)]
-//         {
-//             let mut seed = [0u8; 32];
-//             seed[0] = 0xa3;
-//             seed[1] = 0xb4;
-//             Self::pseudorandom_init_state(seed)
-//         }
-//         #[cfg(not(test))]
-//         {
-//             unimplemented!("Cannot generate input states when not in testing environment");
-//         }
-//     }
-
-//     fn rust_shadowing(
-//         &self,
-//         stack: &mut Vec<triton_vm::BFieldElement>,
-//         std_in: Vec<triton_vm::BFieldElement>,
-//         secret_in: Vec<triton_vm::BFieldElement>,
-//         memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
-//     ) {
-//         // read address of membership proof
-//         let _address = stack.pop().unwrap();
-
-//         // read item
-//         let item = Digest::new([
-//             stack.pop().unwrap(),
-//             stack.pop().unwrap(),
-//             stack.pop().unwrap(),
-//             stack.pop().unwrap(),
-//             stack.pop().unwrap(),
-//         ]);
-
-//         // read msmp
-//         let size = memory.get(&BFieldElement::new(1)).unwrap().value();
-//         let mut sequence = vec![];
-//         for i in 0..size {
-//             sequence.push(*memory.get(&BFieldElement::new(2u64 + i)).unwrap());
-//         }
-//         let msmp = *MsMembershipProof::<Hash>::decode(&sequence).unwrap();
-//         let leaf_index = msmp.auth_path_aocl.leaf_index;
-//         let leaf_index_hi = leaf_index >> 32;
-//         let leaf_index_lo = leaf_index & (u32::MAX as u64);
-//         let receiver_preimage = msmp.receiver_preimage;
-//         let sender_randomness = msmp.sender_randomness;
-
-//         stack.push(BFieldElement::new(leaf_index_hi));
-//         stack.push(BFieldElement::new(leaf_index_lo));
-//         stack.push(receiver_preimage.values()[4]);
-//         stack.push(receiver_preimage.values()[3]);
-//         stack.push(receiver_preimage.values()[2]);
-//         stack.push(receiver_preimage.values()[1]);
-//         stack.push(receiver_preimage.values()[0]);
-//         stack.push(sender_randomness.values()[4]);
-//         stack.push(sender_randomness.values()[3]);
-//         stack.push(sender_randomness.values()[2]);
-//         stack.push(sender_randomness.values()[1]);
-//         stack.push(sender_randomness.values()[0]);
-//         stack.push(item.values()[4]);
-//         stack.push(item.values()[3]);
-//         stack.push(item.values()[2]);
-//         stack.push(item.values()[1]);
-//         stack.push(item.values()[0]);
-//         let get_swbf_indices = GetSwbfIndices {
-//             window_size: WINDOW_SIZE,
-//             num_trials: NUM_TRIALS as usize,
-//         };
-//         get_swbf_indices.rust_shadowing(stack, std_in, secret_in, memory);
-
-//         // print absolute indices for debugging purposes
-//         let absolute_index_list_address: BFieldElement = *stack.last().unwrap();
-//         for i in 0..45 {
-//             println!(
-//                 "absolute index {i}: {}",
-//                 rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
-//                     absolute_index_list_address,
-//                     i,
-//                     memory,
-//                     4
-//                 )
-//                 .iter()
-//                 .map(|b| b.value() as u128)
-//                 .enumerate()
-//                 .map(|(j, v)| v << (32 * j))
-//                 .sum::<u128>()
-//             );
-//         }
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -509,12 +263,13 @@ mod tests {
             ListType,
         },
         snippet::RustShadow,
+        test_helpers::link_and_run_tasm_for_test,
     };
+    use triton_vm::NonDeterminism;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
     use crate::models::blockchain::shared::Hash;
     use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
-    use tasm_lib::test_helpers::link_and_run_tasm_for_test_deprecated;
 
     use super::*;
 
@@ -596,11 +351,11 @@ mod tests {
             list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
         };
-        let _vm_output_state = link_and_run_tasm_for_test_deprecated(
-            &map_compute_indices,
+        let _vm_output_state = link_and_run_tasm_for_test(
+            &ShadowedFunction::new(map_compute_indices),
             &mut stack,
             vec![],
-            vec![],
+            &NonDeterminism::new(vec![]),
             &mut memory,
             mallocked,
         );

@@ -132,7 +132,9 @@ mod tests {
     use itertools::Itertools;
     use rand::{rngs::StdRng, RngCore, SeedableRng};
     use tasm_lib::snippet::RustShadow;
-    use tasm_lib::test_helpers::link_and_run_tasm_for_test_deprecated;
+    use tasm_lib::test_helpers::{
+        link_and_run_tasm_for_test, link_and_run_tasm_for_test_deprecated,
+    };
     use tasm_lib::{
         function::ShadowedFunction,
         get_init_tvm_stack,
@@ -143,7 +145,7 @@ mod tests {
         },
         rust_shadowing_helper_functions,
     };
-    use triton_vm::Digest;
+    use triton_vm::{Digest, NonDeterminism};
     use twenty_first::{
         shared_math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH},
         util_types::emojihash_trait::Emojihash,
@@ -216,11 +218,11 @@ mod tests {
             list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(HashIndexList)),
         };
-        let _vm_output_state = link_and_run_tasm_for_test_deprecated(
-            &map_hash_removal_record_indices,
+        let _vm_output_state = link_and_run_tasm_for_test(
+            &ShadowedFunction::new(map_hash_removal_record_indices),
             &mut stack,
             vec![],
-            vec![],
+            &NonDeterminism::new(vec![]),
             &mut memory,
             new_malloc,
         );
