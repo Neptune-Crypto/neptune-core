@@ -1,15 +1,23 @@
+use std::collections::HashMap;
+
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use itertools::Itertools;
+use crate::models::blockchain::transaction::transaction_kernel::{
+    pseudorandom_transaction_kernel, TransactionKernel,
+};
 use num_traits::One;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+use tasm_lib::function::Function;
 use tasm_lib::library::Library;
+use tasm_lib::snippet::BasicSnippet;
+use tasm_lib::snippet_bencher::BenchmarkCase;
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
     list::unsafe_u32::{
         get::UnsafeGet, new::UnsafeNew, set::UnsafeSet, set_length::UnsafeSetLength,
     },
     rust_shadowing_helper_functions,
-    snippet::{DataType, DeprecatedSnippet},
+    snippet::DataType,
     ExecutionState,
 };
 use triton_vm::{triton_asm, BFieldElement};
@@ -23,12 +31,58 @@ use twenty_first::{
 #[derive(Debug, Clone)]
 pub struct TransactionKernelMastHash;
 
-impl DeprecatedSnippet for TransactionKernelMastHash {
-    fn entrypoint_name(&self) -> String {
+impl TransactionKernelMastHash {
+    pub(crate) fn input_state_with_kernel_in_memory(
+        address: BFieldElement,
+        transaction_kernel_encoded: &[BFieldElement],
+    ) -> ExecutionState {
+        use triton_vm::NonDeterminism;
+
+        assert!(address.value() > 1);
+        // populate memory
+        let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
+            std::collections::HashMap::new();
+        for (i, t) in transaction_kernel_encoded.iter().enumerate() {
+            memory.insert(address + BFieldElement::new(i as u64), *t);
+        }
+        memory.insert(
+            address - BFieldElement::new(1),
+            BFieldElement::new(transaction_kernel_encoded.len() as u64),
+        );
+
+        // set dynamic allocator
+        memory.insert(
+            <BFieldElement as num_traits::Zero>::zero(),
+            BFieldElement::new(transaction_kernel_encoded.len() as u64) + address,
+        );
+
+        let mut stack = tasm_lib::get_init_tvm_stack();
+        stack.push(address);
+        ExecutionState {
+            stack,
+            std_in: vec![],
+            nondeterminism: NonDeterminism::new(vec![]),
+            memory,
+            words_allocated: 0,
+        }
+    }
+}
+
+impl BasicSnippet for TransactionKernelMastHash {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::VoidPointer, "*transaction_kernel".to_string())]
+    }
+
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::Digest, "mast_hash".to_string())]
+    }
+
+    fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_transaction_kernel_mast_hash".to_string()
     }
-    fn function_code(&self, library: &mut Library) -> String {
-        let entrypoint = self.entrypoint_name();
+
+    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
+        let entrypoint = self.entrypoint();
         let new_list = library.import(Box::new(UnsafeNew(DataType::Digest)));
         let get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
         let set_element = library.import(Box::new(UnsafeSet(DataType::Digest)));
@@ -47,7 +101,7 @@ impl DeprecatedSnippet for TransactionKernelMastHash {
 
         let hash_varlen = library.import(Box::new(HashVarlen));
 
-        let code = triton_asm! {
+        triton_asm! {
         // BEFORE: _ *kernel
         // AFTER: _ d4 d3 d2 d1 d0
         {entrypoint}:
@@ -195,15 +249,14 @@ impl DeprecatedSnippet for TransactionKernelMastHash {
             call {get_element}          // _ d4 d3 d2 d1 d0
 
             return
-        };
-        format!("{}\n", code.iter().join("\n"))
+        }
     }
+}
 
-    fn rust_shadowing(
+impl Function for TransactionKernelMastHash {
+    fn rust_shadow(
         &self,
         stack: &mut Vec<triton_vm::BFieldElement>,
-        _std_in: Vec<triton_vm::BFieldElement>,
-        _secret_in: Vec<triton_vm::BFieldElement>,
         memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
     ) {
         // read address
@@ -370,149 +423,30 @@ impl DeprecatedSnippet for TransactionKernelMastHash {
         stack.push(root.values()[0]);
     }
 
-    fn input_field_names(&self) -> Vec<String> {
-        vec!["*transaction_kernel".to_string()]
-    }
-
-    fn input_types(&self) -> Vec<DataType> {
-        vec![DataType::VoidPointer]
-    }
-
-    fn output_types(&self) -> Vec<DataType> {
-        vec![DataType::Digest]
-    }
-
-    fn output_field_names(&self) -> Vec<String> {
-        ["d4", "d3", "d2", "d1", "d0"]
-            .map(|s| s.to_string())
-            .to_vec()
-    }
-
-    fn stack_diff(&self) -> isize {
-        4
-    }
-
-    fn crash_conditions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    fn gen_input_states(&self) -> Vec<ExecutionState> {
-        #[cfg(test)]
-        {
-            vec![input_state_with_kernel_in_memory(
-                BFieldElement::new(rand::Rng::gen_range(&mut rand::thread_rng(), 2..(1 << 20))),
-                &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
-                    &crate::tests::shared::random_transaction_kernel(),
-                ),
-            )]
-        }
-        #[cfg(not(test))]
-        {
-            panic!("`gen_input_states` cannot be called when not in testing environment")
-        }
-    }
-
-    #[allow(unreachable_code)]
-    fn common_case_input_state(&self) -> ExecutionState {
-        #[cfg(test)]
-        {
-            let mut seed = [0u8; 32];
-            seed[0] = 0xaa;
-            seed[1] = 0xf1;
-            seed[2] = 0xba;
-            seed[3] = 0xd5;
-            seed[4] = 0xee;
-            seed[5] = 0xd5;
-            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-            return input_state_with_kernel_in_memory(
-                BFieldElement::new(rand::Rng::gen_range(&mut rng, 0..(1 << 20))),
-                &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
-                    &crate::tests::shared::pseudorandom_transaction_kernel(
-                        rand::Rng::gen::<[u8; 32]>(&mut rng),
-                        2,
-                        2,
-                        0,
-                    ),
-                ),
-            );
-        }
-        panic!("`common_case_input_state` cannot be called when not in testing environment")
-    }
-
-    #[allow(unreachable_code)]
-    fn worst_case_input_state(&self) -> ExecutionState {
-        #[cfg(test)]
-        {
-            let mut seed = [0u8; 32];
-            seed[0] = 0xaa;
-            seed[1] = 0xf2;
-            seed[2] = 0xba;
-            seed[3] = 0xd5;
-            seed[4] = 0xee;
-            seed[5] = 0xd5;
-            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-            return input_state_with_kernel_in_memory(
-                BFieldElement::new(rand::Rng::gen_range(&mut rng, 0..(1 << 20))),
-                &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
-                    &crate::tests::shared::pseudorandom_transaction_kernel(
-                        rand::Rng::gen::<[u8; 32]>(&mut rng),
-                        4,
-                        4,
-                        2,
-                    ),
-                ),
-            );
-        }
-        panic!("`worst_case_input_state` cannot be called when not in testing environment")
-    }
-}
-
-#[cfg(test)]
-fn input_state_with_kernel_in_memory(
-    address: BFieldElement,
-    transaction_kernel_encoded: &[BFieldElement],
-) -> ExecutionState {
-    use triton_vm::NonDeterminism;
-
-    assert!(address.value() > 1);
-    // populate memory
-    let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
-        std::collections::HashMap::new();
-    for (i, t) in transaction_kernel_encoded.iter().enumerate() {
-        memory.insert(address + BFieldElement::new(i as u64), *t);
-    }
-    memory.insert(
-        address - BFieldElement::new(1),
-        BFieldElement::new(transaction_kernel_encoded.len() as u64),
-    );
-
-    // set dynamic allocator
-    memory.insert(
-        <BFieldElement as num_traits::Zero>::zero(),
-        BFieldElement::new(transaction_kernel_encoded.len() as u64) + address,
-    );
-
-    let mut stack = tasm_lib::get_init_tvm_stack();
-    stack.push(address);
-    ExecutionState {
-        stack,
-        std_in: vec![],
-        nondeterminism: NonDeterminism::new(vec![]),
-        memory,
-        words_allocated: 0,
+    fn pseudorandom_initial_state(
+        &self,
+        seed: [u8; 32],
+        _bench_case: Option<BenchmarkCase>,
+    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let input_state = Self::input_state_with_kernel_in_memory(
+            BFieldElement::new(rng.gen_range(0..(1 << 20))),
+            &twenty_first::shared_math::bfield_codec::BFieldCodec::encode(
+                &pseudorandom_transaction_kernel(rand::Rng::gen::<[u8; 32]>(&mut rng), 4, 4, 2),
+            ),
+        );
+        (input_state.stack, input_state.memory)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::test_helpers::{
-        test_rust_equivalence_given_execution_state_deprecated,
-        test_rust_equivalence_multiple_deprecated,
+    use tasm_lib::{
+        function::ShadowedFunction, snippet::RustShadow,
+        test_helpers::test_rust_equivalence_given_complete_state,
     };
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
-
-    use crate::tests::shared::pseudorandom_transaction_kernel;
 
     use super::*;
 
@@ -522,9 +456,20 @@ mod tests {
         seed[17] = 0x17;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let tx_kernel = pseudorandom_transaction_kernel(rng.gen(), 2, 2, 1);
-        let mut output_with_known_digest = test_rust_equivalence_given_execution_state_deprecated(
-            &TransactionKernelMastHash,
-            input_state_with_kernel_in_memory(BFieldElement::new(3), &tx_kernel.encode()),
+        let execution_state = TransactionKernelMastHash::input_state_with_kernel_in_memory(
+            BFieldElement::new(3),
+            &tx_kernel.encode(),
+        );
+
+        let nondeterminism = execution_state.nondeterminism;
+        let mut output_with_known_digest = test_rust_equivalence_given_complete_state(
+            &ShadowedFunction::new(TransactionKernelMastHash),
+            &execution_state.stack,
+            &execution_state.std_in,
+            &nondeterminism,
+            &execution_state.memory,
+            execution_state.words_allocated,
+            None,
         );
 
         // read the digest from the very short TX kernel
@@ -540,19 +485,20 @@ mod tests {
     }
 
     #[test]
-    fn new_prop_test() {
-        test_rust_equivalence_multiple_deprecated(&TransactionKernelMastHash, false);
+    fn test() {
+        ShadowedFunction::new(TransactionKernelMastHash).test()
     }
 }
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::snippet_bencher::bench_and_write;
+
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
-    fn get_transaction_kernel_field_benchmark() {
-        bench_and_write(TransactionKernelMastHash)
+    fn bench() {
+        ShadowedFunction::new(TransactionKernelMastHash).bench()
     }
 }

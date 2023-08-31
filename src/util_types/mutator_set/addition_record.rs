@@ -1,4 +1,6 @@
 use get_size::GetSize;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
@@ -13,6 +15,14 @@ impl AdditionRecord {
         Self {
             canonical_commitment,
         }
+    }
+}
+
+pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let ar: Digest = rng.gen();
+    AdditionRecord {
+        canonical_commitment: ar,
     }
 }
 

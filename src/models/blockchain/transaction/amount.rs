@@ -2,6 +2,7 @@ use anyhow::bail;
 use get_size::GetSize;
 use num_bigint::BigInt;
 use num_traits::{CheckedSub, Signed, Zero};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt::Display,
@@ -214,6 +215,12 @@ impl From<u64> for Amount {
         limbs[1] = (value >> 32) as u32;
         Amount(U32s::new(limbs))
     }
+}
+
+pub fn pseudorandom_amount(seed: [u8; 32]) -> Amount {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let number: [u32; 4] = rng.gen();
+    Amount(U32s::new(number))
 }
 
 #[cfg(test)]

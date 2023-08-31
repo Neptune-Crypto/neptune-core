@@ -1,5 +1,6 @@
 use get_size::GetSize;
 use itertools::Itertools;
+use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::{
@@ -10,9 +11,12 @@ use twenty_first::{
     },
 };
 
-use super::Amount;
+use super::{amount::pseudorandom_amount, Amount};
 use crate::{
-    util_types::mutator_set::{addition_record::AdditionRecord, removal_record::RemovalRecord},
+    util_types::mutator_set::{
+        addition_record::{pseudorandom_addition_record, AdditionRecord},
+        removal_record::{pseudorandom_removal_record, RemovalRecord},
+    },
     Hash,
 };
 
@@ -20,6 +24,17 @@ use crate::{
 pub struct PubScriptHashAndInput {
     pub pubscript_hash: Digest,
     pub pubscript_input: Vec<BFieldElement>,
+}
+
+pub fn pseudorandom_pubscript_struct(seed: [u8; 32]) -> PubScriptHashAndInput {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let digest: Digest = rng.gen();
+    let len = 10 + (rng.next_u32() % 50) as usize;
+    let input: Vec<BFieldElement> = (0..len).map(|_| rng.gen()).collect_vec();
+    PubScriptHashAndInput {
+        pubscript_hash: digest,
+        pubscript_input: input,
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
@@ -82,6 +97,47 @@ impl TransactionKernel {
 
         // compute Merkle tree and return hash
         <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs).get_root()
+    }
+}
+
+pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    if rng.next_u32() % 2 == 0 {
+        None
+    } else {
+        Some(thing)
+    }
+}
+
+pub fn pseudorandom_transaction_kernel(
+    seed: [u8; 32],
+    num_inputs: usize,
+    num_outputs: usize,
+    num_pubscripts: usize,
+) -> TransactionKernel {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let inputs = (0..num_inputs)
+        .map(|_| pseudorandom_removal_record(rng.gen::<[u8; 32]>()))
+        .collect_vec();
+    let outputs = (0..num_outputs)
+        .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
+        .collect_vec();
+    let pubscripts = (0..num_pubscripts)
+        .map(|_| pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>()))
+        .collect_vec();
+    let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
+    let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
+    let timestamp: BFieldElement = rng.gen();
+    let mutator_set_hash: Digest = rng.gen();
+
+    TransactionKernel {
+        inputs,
+        outputs,
+        pubscript_hashes_and_inputs: pubscripts,
+        fee,
+        coinbase,
+        timestamp,
+        mutator_set_hash,
     }
 }
 
