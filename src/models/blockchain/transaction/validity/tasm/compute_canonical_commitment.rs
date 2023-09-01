@@ -1,14 +1,18 @@
+use std::collections::HashMap;
+
 use crate::models::blockchain::shared::Hash;
+use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use num_traits::{One, Zero};
+use rand::RngCore;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::function::Function;
+use tasm_lib::get_init_tvm_stack;
 use tasm_lib::library::Library;
+use tasm_lib::snippet::BasicSnippet;
 use tasm_lib::{
-    memory::push_ram_to_stack::PushRamToStack,
-    neptune::mutator_set::commit::Commit,
-    snippet::{DataType, Snippet},
-    ExecutionState,
+    memory::push_ram_to_stack::PushRamToStack, neptune::mutator_set::commit::Commit,
+    snippet::DataType,
 };
-use triton_vm::instruction::LabelledInstructions;
 use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -16,104 +20,30 @@ use crate::util_types::mutator_set::{
     ms_membership_proof::MsMembershipProof, mutator_set_trait::commit,
 };
 
+/// Compute a canonical commitment from an item and its membership proof.
+#[derive(Debug, Clone)]
 pub(crate) struct ComputeCanonicalCommitment;
 
-impl ComputeCanonicalCommitment {
-    pub fn pseudorandom_input_state(_seed: [u8; 32]) -> ExecutionState {
-        #[cfg(test)]
-        {
-            use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
-
-            use rand::RngCore;
-            use std::collections::HashMap;
-            use tasm_lib::get_init_tvm_stack;
-
-            let mut rng: StdRng = SeedableRng::from_seed(_seed);
-
-            // generate random ms membership proof object
-            let membership_proof = pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen());
-
-            // populate memory, with the size of the encoding prepended
-            let address = BFieldElement::new(rng.next_u64() % (1 << 20));
-            let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
-            let mp_encoding = membership_proof.encode();
-            memory.insert(address, BFieldElement::new(mp_encoding.len() as u64));
-            for (i, v) in mp_encoding.iter().enumerate() {
-                memory.insert(
-                    address + BFieldElement::one() + BFieldElement::new(i as u64),
-                    *v,
-                );
-            }
-
-            // populate stack
-            let mut stack = get_init_tvm_stack();
-            let digest: Digest = rng.gen();
-            stack.push(digest.values()[4]);
-            stack.push(digest.values()[3]);
-            stack.push(digest.values()[2]);
-            stack.push(digest.values()[1]);
-            stack.push(digest.values()[0]);
-            stack.push(address + BFieldElement::new(1));
-
-            ExecutionState {
-                stack,
-                std_in: vec![],
-                secret_in: vec![],
-                memory,
-                words_allocated: 1,
-            }
-        }
-        #[cfg(not(test))]
-        unimplemented!("Cannot generate pseudorandom input state when not in test environment.")
+impl BasicSnippet for ComputeCanonicalCommitment {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![(
+            DataType::Tuple(vec![DataType::Digest, DataType::VoidPointer]),
+            "item_and_*membership_proof".to_string(),
+        )]
     }
-}
 
-impl Snippet for ComputeCanonicalCommitment {
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![(
+            DataType::Tuple(vec![DataType::VoidPointer, DataType::Digest]),
+            "*membership_proof_and_canonical_commitment".to_string(),
+        )]
+    }
+
     fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_compute_commitment".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
-        vec![
-            "i4".to_string(),
-            "i3".to_string(),
-            "i2".to_string(),
-            "i1".to_string(),
-            "i0".to_string(),
-            "*mp".to_string(),
-        ]
-    }
-
-    fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Pair(
-            Box::new(DataType::Digest),
-            Box::new(DataType::VoidPointer),
-        )]
-    }
-
-    fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Pair(
-            Box::new(DataType::VoidPointer),
-            Box::new(DataType::Digest),
-        )]
-    }
-
-    fn outputs(&self) -> Vec<String> {
-        vec![
-            "*mp".to_string(),
-            "c4".to_string(),
-            "c3".to_string(),
-            "c2".to_string(),
-            "c1".to_string(),
-            "c0".to_string(),
-        ]
-    }
-
-    fn stack_diff(&self) -> isize {
-        0
-    }
-
-    fn function_code(&self, library: &mut Library) -> String {
+    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         type MsMpH = MsMembershipProof<Hash>;
         let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
         let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
@@ -123,7 +53,7 @@ impl Snippet for ComputeCanonicalCommitment {
         }));
         let entrypoint = self.entrypoint();
 
-        let code = triton_asm! {
+        triton_asm! {
         // BEFORE: _  i4 i3 i2 i1 i0 *mp
         // AFTER: _  *mp c4 c3 c2 c1 c0
         {entrypoint}:
@@ -171,52 +101,15 @@ impl Snippet for ComputeCanonicalCommitment {
             // _ *mp c4 c3 c2 c1 c0
 
             return
-        };
-        LabelledInstructions(code).to_string()
+        }
     }
+}
 
-    fn crash_conditions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    fn gen_input_states(&self) -> Vec<tasm_lib::ExecutionState> {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xe2;
-        seed[1] = 0x75;
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-        vec![
-            Self::pseudorandom_input_state(rng.gen()),
-            Self::pseudorandom_input_state(rng.gen()),
-            Self::pseudorandom_input_state(rng.gen()),
-            Self::pseudorandom_input_state(rng.gen()),
-        ]
-    }
-
-    fn common_case_input_state(&self) -> tasm_lib::ExecutionState {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xe1;
-        seed[1] = 0x75;
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-        Self::pseudorandom_input_state(rng.gen())
-    }
-
-    fn worst_case_input_state(&self) -> tasm_lib::ExecutionState {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xe3;
-        seed[1] = 0x75;
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-        Self::pseudorandom_input_state(rng.gen())
-    }
-
-    fn rust_shadowing(
+impl Function for ComputeCanonicalCommitment {
+    fn rust_shadow(
         &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        _std_in: Vec<triton_vm::BFieldElement>,
-        _secret_in: Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
+        stack: &mut Vec<BFieldElement>,
+        memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
     ) {
         // read arguments
         let size_address = stack.pop().unwrap() - BFieldElement::new(1);
@@ -263,28 +156,66 @@ impl Snippet for ComputeCanonicalCommitment {
         stack.push(c.canonical_commitment.values()[1]);
         stack.push(c.canonical_commitment.values()[0]);
     }
+
+    fn pseudorandom_initial_state(
+        &self,
+        seed: [u8; 32],
+        _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
+    ) -> (
+        Vec<BFieldElement>,
+        std::collections::HashMap<BFieldElement, BFieldElement>,
+    ) {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+        // generate random ms membership proof object
+        let membership_proof = pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen());
+
+        // populate memory, with the size of the encoding prepended
+        let address = BFieldElement::new(rng.next_u64() % (1 << 20));
+        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+        let mp_encoding = membership_proof.encode();
+        memory.insert(address, BFieldElement::new(mp_encoding.len() as u64));
+        for (i, v) in mp_encoding.iter().enumerate() {
+            memory.insert(
+                address + BFieldElement::one() + BFieldElement::new(i as u64),
+                *v,
+            );
+        }
+
+        // populate stack
+        let mut stack = get_init_tvm_stack();
+        let digest: Digest = rng.gen();
+        stack.push(digest.values()[4]);
+        stack.push(digest.values()[3]);
+        stack.push(digest.values()[2]);
+        stack.push(digest.values()[1]);
+        stack.push(digest.values()[0]);
+        stack.push(address + BFieldElement::new(1));
+
+        (stack, memory)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn test_compute_canonical_commitment() {
-        test_rust_equivalence_multiple(&ComputeCanonicalCommitment, false);
+        ShadowedFunction::new(ComputeCanonicalCommitment).test();
     }
 }
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::snippet_bencher::bench_and_write;
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn compute_canonical_commitment_benchmark() {
-        bench_and_write(ComputeCanonicalCommitment)
+        ShadowedFunction::new(ComputeCanonicalCommitment).bench();
     }
 }

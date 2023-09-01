@@ -6,9 +6,9 @@ use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
 use tasm_lib::compiled_program::CompiledProgram;
 use tasm_lib::library::Library;
+use tasm_lib::ram_builder::RamBuilder;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::{
-    io::load_struct_from_input::LoadStructFromInput,
     list::{
         contiguous_list::get_pointer_list::GetPointerList,
         higher_order::{all::All, inner_function::InnerFunction, map::Map, zip::Zip},
@@ -17,12 +17,12 @@ use tasm_lib::{
         ListType,
     },
     mmr::bag_peaks::BagPeaks,
-    snippet::{DataType, InputSource},
+    snippet::DataType,
     DIGEST_LENGTH,
 };
 use tracing::{debug, warn};
-use triton_vm::triton_asm;
 use triton_vm::{instruction::LabelledInstruction, BFieldElement, StarkParameters};
+use triton_vm::{triton_asm, NonDeterminism, PublicInput};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
@@ -98,6 +98,7 @@ impl RemovalRecordsIntegrityWitness {
         }
     }
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct RemovalRecordsIntegrity {
     pub supported_claim: SupportedClaim,
@@ -125,14 +126,6 @@ impl ValidationLogic for RemovalRecordsIntegrity {
     }
 
     fn prove(&mut self) -> anyhow::Result<()> {
-        debug!(
-            "rri program digest: ({})",
-            Hash::hash_varlen(&Self::program().encode())
-        );
-        debug!(
-            "rri program digest: ({})",
-            Hash::hash_varlen(&Self::program().encode())
-        );
         match &self.supported_claim.support {
             ClaimSupport::Proof(_) => {
                 // nothing to do; proof already exists
@@ -144,11 +137,14 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                     Hash::hash_varlen(&Self::program().encode()),
                     self.supported_claim.claim.program_digest
                 );
+                let mut ram_builder = RamBuilder::start();
+                let _pointer = ram_builder.load(witness);
+                let nondeterminism = NonDeterminism::new(vec![]).with_ram(ram_builder.finish());
                 let proof = triton_vm::prove(
                     &StarkParameters::default(),
                     &self.supported_claim.claim,
                     &Self::program(),
-                    &witness.encode(), // double-encode, so as to prepend length
+                    nondeterminism,
                 )
                 .expect("Proving integrity of removal records must succeed.");
                 self.supported_claim.support = ClaimSupport::Proof(proof);
@@ -172,13 +168,19 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                 proof,
             ),
             ClaimSupport::SecretWitness(witness, _no_program) => {
+                let removal_record_integrity_witness =
+                    *RemovalRecordsIntegrityWitness::decode(witness)
+                        .expect("Provided witness is not a removal records integrity witness ...");
                 // let rust_output = Self::rust_shadow(
                 //     self.supported_claim.claim.input.clone().into(),
                 //     witness.clone().into(),
                 // );
-                // double-encode witness to get length, so as to be able to read it from secin
-                let vm_result =
-                    Self::program().run(self.supported_claim.claim.input.clone(), witness.encode());
+                let mut ram_builder = RamBuilder::start();
+                let _pointer = ram_builder.load(&removal_record_integrity_witness);
+                let vm_result = Self::program().run(
+                    PublicInput::new(self.supported_claim.claim.input.clone()),
+                    NonDeterminism::new(vec![]).with_ram(ram_builder.finish()),
+                );
                 match vm_result {
                     Ok(observed_output) => {
                         let found_expected_output =
@@ -207,11 +209,12 @@ impl ValidationLogic for RemovalRecordsIntegrity {
 
 impl CompiledProgram for RemovalRecordsIntegrity {
     fn rust_shadow(
-        public_input: &[BFieldElement],
-        secret_input: &[BFieldElement],
+        public_input: &PublicInput,
+        nondeterminism: &NonDeterminism<BFieldElement>,
     ) -> anyhow::Result<Vec<BFieldElement>> {
         let hash_of_kernel = *Digest::decode(
             &public_input
+                .individual_tokens
                 .iter()
                 .copied()
                 .take(DIGEST_LENGTH)
@@ -221,10 +224,12 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
 
         // 1. read and process witness data
-        let witness = *RemovalRecordsIntegrityWitness::decode(
-            &secret_input.iter().skip(1).copied().collect_vec(),
-        )
-        .unwrap();
+        let memory_length = nondeterminism.ram.len() as u64;
+        let memory_vector = (1u64..memory_length)
+            .map(BFieldElement::new)
+            .map(|b| *nondeterminism.ram.get(&b).unwrap_or(&BFieldElement::new(0)))
+            .collect_vec();
+        let witness = *RemovalRecordsIntegrityWitness::decode(&memory_vector).unwrap();
 
         println!("first element of witness: {}", witness.encode()[0]);
         println!("first element of kernel: {}", witness.kernel.encode()[0]);
@@ -310,17 +315,18 @@ impl CompiledProgram for RemovalRecordsIntegrity {
     fn code() -> (Vec<LabelledInstruction>, Library) {
         let mut library = Library::new();
         let transaction_kernel_mast_hash = library.import(Box::new(TransactionKernelMastHash));
-        let load_struct_from_input = library.import(Box::new(LoadStructFromInput {
-            input_source: InputSource::SecretIn,
-        }));
+        // let load_struct_from_input = library.import(Box::new(LoadStructFromInput {
+        //     input_source: InputSource::SecretIn,
+        // }));
         let bag_peaks = library.import(Box::new(BagPeaks));
-        let read_input = "read_io\n".repeat(DIGEST_LENGTH);
+        // let read_input = vec![triton_instr!(read_io); DIGEST_LENGTH];
+        let read_input = "\nread_io\nread_io\nread_io\nread_io\nread_io\n".to_owned();
         let read_digest = library.import(Box::new(PushRamToStack {
             output_type: DataType::Digest,
         }));
         let map_hash_utxo = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashUtxo)),
+            f: InnerFunction::BasicSnippet(Box::new(HashUtxo)),
         }));
         let get_pointer_list = library.import(Box::new(GetPointerList {
             output_list_type: ListType::Unsafe,
@@ -332,25 +338,25 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         }));
         let map_compute_indices = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(ComputeIndices)),
+            f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
         }));
         let map_hash_index_list = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashIndexList)),
+            f: InnerFunction::BasicSnippet(Box::new(HashIndexList)),
         }));
         let map_hash_removal_record_indices = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashRemovalRecordIndices)),
+            f: InnerFunction::BasicSnippet(Box::new(HashRemovalRecordIndices)),
         }));
         let multiset_equality = library.import(Box::new(MultisetEquality(ListType::Unsafe)));
 
         let map_compute_canonical_commitment = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(ComputeCanonicalCommitment)),
+            f: InnerFunction::BasicSnippet(Box::new(ComputeCanonicalCommitment)),
         }));
         let all_verify_aocl_membership = library.import(Box::new(All {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(VerifyAoclMembership)),
+            f: InnerFunction::BasicSnippet(Box::new(VerifyAoclMembership)),
         }));
 
         let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
@@ -372,10 +378,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         let code = triton_asm! {
 
-        // 1. read RemovalRecordsIntegrityWitness from secio
-        push 1 // read 1 list, which is the encoding of the witness
-        call {load_struct_from_input} // _ *witness
-        push 1 add
+        // 1. Witness was already loaded into memory, just point to it
+        push 1 // _ *witness
 
         // 2. assert that witness kernel hash == public input
         dup 0 // _ *witness *witness
@@ -405,8 +409,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash]
 
         dup 11 // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness
-        {&witness_to_aocl.clone()} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl
-        {&aocl_to_peaks.clone()} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
+        {&witness_to_aocl} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl
+        {&aocl_to_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] [witness_aocl_hash]
 
         hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)] [garbage]
@@ -540,7 +544,6 @@ mod tests {
             .reversed()
             .values()
             .to_vec();
-        let secret_in: Vec<BFieldElement> = removal_record_integrity_witness.encode();
 
         let witness_index_lists = removal_record_integrity_witness
             .input_utxos
@@ -678,25 +681,32 @@ mod tests {
         );
 
         // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
-        // double-encode secret in so that we can read the struct from input
-        let run_res = program.debug_terminal_state(stdin.clone(), secret_in.encode(), None, None);
+        let mut ram_builder = RamBuilder::start();
+        let _pointer = ram_builder.load(&removal_record_integrity_witness);
+        let memory = ram_builder.finish();
+        let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
+        let run_res = program.debug_terminal_state(
+            PublicInput::new(stdin.clone()),
+            nondeterminism.clone(),
+            None,
+            None,
+        );
         match run_res {
-            Ok(_) => (),
+            Ok(_) => println!("Run successful."),
             Err((state, msg)) => panic!("Failed: {msg}\n last state was: {state}"),
         };
 
-        let claim: Claim = Claim {
-            program_digest: Hash::hash_varlen(&program.encode()),
-            input: stdin,
-            output: vec![],
-        };
-
         if std::env::var("DYING_TO_PROVE").is_ok() {
+            let claim: Claim = Claim {
+                program_digest: program.hash::<Hash>(),
+                input: stdin,
+                output: vec![],
+            };
             let maybe_proof = triton_vm::prove(
                 &StarkParameters::default(),
                 &claim,
                 &program,
-                &secret_in.encode(),
+                nondeterminism,
             );
             assert!(maybe_proof.is_ok());
 
@@ -721,21 +731,23 @@ mod tests {
         seed[0] = 0xa0;
         seed[1] = 0xf1;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let mut ram_builder = RamBuilder::start();
         let witness = pseudorandom_removal_record_integrity_witness(rng.gen());
+        let _pointer = ram_builder.load(&witness);
+        let memory = ram_builder.finish();
+        let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
         let kernel_hash = witness.kernel.mast_hash().reversed().values();
-        let public_input = kernel_hash.to_vec();
-        let witness = witness.encode().encode(); // double encoding to read struct from input
+        let public_input = PublicInput::new(kernel_hash.to_vec());
 
-        test_rust_shadow::<RemovalRecordsIntegrity>(&public_input, &witness);
+        test_rust_shadow::<RemovalRecordsIntegrity>(&public_input, &nondeterminism);
     }
 }
 
 #[cfg(test)]
 mod bench {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::snippet_bencher::BenchmarkCase;
-    use triton_vm::BFieldElement;
-    use twenty_first::shared_math::bfield_codec::BFieldCodec;
+    use tasm_lib::{ram_builder::RamBuilder, snippet_bencher::BenchmarkCase};
+    use triton_vm::{BFieldElement, NonDeterminism, PublicInput};
 
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
 
@@ -757,14 +769,18 @@ mod bench {
             .reversed()
             .values()
             .to_vec();
-        // double-encoding to enable reading from stdin as struct
-        let secret_in: Vec<BFieldElement> = removal_record_integrity_witness.encode().encode();
+        let public_input = PublicInput::new(stdin);
+
+        let mut ram_builder = RamBuilder::start();
+        let _pointer = ram_builder.load(&removal_record_integrity_witness);
+        let memory = ram_builder.finish();
+        let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
 
         bench_program::<RemovalRecordsIntegrity>(
             "tasm_neptune_transaction_removal_records_integrity".to_string(),
             BenchmarkCase::CommonCase,
-            &stdin,
-            &secret_in,
+            &public_input,
+            &nondeterminism,
         );
     }
 }

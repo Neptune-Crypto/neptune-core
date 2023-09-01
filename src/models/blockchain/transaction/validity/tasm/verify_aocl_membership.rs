@@ -1,128 +1,50 @@
+use std::collections::HashMap;
+
+use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::{
     models::blockchain::shared::Hash,
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
 };
 use itertools::Itertools;
+use rand::RngCore;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::function::Function;
+use tasm_lib::get_init_tvm_stack;
 use tasm_lib::library::Library;
-use tasm_lib::{
-    list::ListType,
-    mmr::verify_from_memory::MmrVerifyFromMemory,
-    snippet::{DataType, Snippet},
-    ExecutionState,
-};
-use triton_vm::instruction::LabelledInstructions;
+use tasm_lib::snippet::BasicSnippet;
+use tasm_lib::{list::ListType, mmr::verify_from_memory::MmrVerifyFromMemory, snippet::DataType};
 use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
+/// Given a membership proof and a canonical commitment, verify membership in the AOCL.
+/// Note that the AOCL MMR accumulator is given deep in the stack, accounting for a 3-wide
+/// buffer so that this function can be mapped over.
+///
+/// input:  _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
+///  
+/// output: _ *peaks leaf_count_hi leaf_count_lo [bu ff er] validation_result
+#[derive(Debug, Clone)]
 pub(crate) struct VerifyAoclMembership;
 
-impl VerifyAoclMembership {
-    fn pseudorandom_initial_state(_seed: [u8; 32], _num_leafs: u64) -> ExecutionState {
-        #[cfg(test)]
-        {
-            use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
-            use rand::RngCore;
-            use std::collections::HashMap;
-            use tasm_lib::get_init_tvm_stack;
-            use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
-
-            let mut rng: StdRng = SeedableRng::from_seed(_seed);
-            let leafs = (0.._num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();
-            let mmr = get_rustyleveldb_ammr_from_digests::<Hash>(leafs);
-
-            let leaf_index = rng.next_u64() % _num_leafs;
-            let leaf = mmr.get_leaf(leaf_index);
-            let (mmr_mp, peaks) = mmr.prove_membership(leaf_index);
-            let mut msmp = pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen());
-            msmp.auth_path_aocl = mmr_mp;
-
-            // populate memory
-            let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
-            let mut address = BFieldElement::new(rng.next_u64() % (1 << 20));
-
-            let peaks_si_ptr = address;
-            memory.insert(address, BFieldElement::new(peaks.encode().len() as u64));
-            address.increment();
-            for v in peaks.encode().iter() {
-                memory.insert(address, *v);
-                address.increment();
-            }
-
-            let msmp_si_ptr = address;
-            memory.insert(msmp_si_ptr, BFieldElement::new(msmp.encode().len() as u64));
-            address.increment();
-            for v in msmp.encode().iter() {
-                memory.insert(address, *v);
-                address.increment();
-            }
-
-            // populate stack
-            // *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
-            let mut stack = get_init_tvm_stack();
-            stack.push(peaks_si_ptr + BFieldElement::new(1));
-            stack.push(BFieldElement::new(_num_leafs >> 32));
-            stack.push(BFieldElement::new(_num_leafs & u32::MAX as u64));
-            stack.push(rng.gen());
-            stack.push(rng.gen());
-            stack.push(rng.gen());
-            stack.push(msmp_si_ptr + BFieldElement::new(1));
-            stack.push(leaf.values()[4]);
-            stack.push(leaf.values()[3]);
-            stack.push(leaf.values()[2]);
-            stack.push(leaf.values()[1]);
-            stack.push(leaf.values()[0]);
-
-            ExecutionState {
-                stack,
-                std_in: vec![],
-                secret_in: vec![],
-                memory,
-                words_allocated: 1,
-            }
-        }
-        #[cfg(not(test))]
-        unimplemented!("Cannot generate input state when not in test environment.")
+impl BasicSnippet for VerifyAoclMembership {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![(
+            DataType::Tuple(vec![DataType::VoidPointer, DataType::Digest]),
+            "*msmp_and_commitment".to_string(),
+        )]
     }
-}
 
-impl Snippet for VerifyAoclMembership {
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::Bool, "validation_result".to_string())]
+    }
+
     fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_verify_aocl_membership".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
-        vec![
-            "*msmp".to_string(),
-            "c4".to_string(),
-            "c3".to_string(),
-            "c2".to_string(),
-            "c1".to_string(),
-            "c0".to_string(),
-        ]
-    }
-
-    fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Pair(
-            Box::new(DataType::VoidPointer),
-            Box::new(DataType::Digest),
-        )]
-    }
-
-    fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Bool]
-    }
-
-    fn outputs(&self) -> Vec<String> {
-        vec!["b".to_string()]
-    }
-
-    fn stack_diff(&self) -> isize {
-        -5
-    }
-
-    fn function_code(&self, library: &mut Library) -> String {
+    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         let verify_mmr_membership = library.import(Box::new(MmrVerifyFromMemory {
             list_type: ListType::Unsafe,
         }));
@@ -136,14 +58,14 @@ impl Snippet for VerifyAoclMembership {
         let mmr_mp_to_auth_path = tasm_lib::field!(MmrMpH::authentication_path);
         let entrypoint = self.entrypoint();
 
-        let code = triton_asm! {
+        triton_asm! {
         // BEFORE: _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
         // AFTER: _ *peaks leaf_count_hi leaf_count_lo [bu ff er] b
         {entrypoint}:
 
         // get leaf index
             dup 5               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *msmp
-            {&msmp_to_mmrmp.clone()}
+            {&msmp_to_mmrmp}
                                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *mmrmp
             {&mmr_mp_to_li}     // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li
 
@@ -191,49 +113,15 @@ impl Snippet for VerifyAoclMembership {
             // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] validation_result
 
             return
-        };
-        LabelledInstructions(code).to_string()
+        }
     }
+}
 
-    fn crash_conditions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    fn gen_input_states(&self) -> Vec<tasm_lib::ExecutionState> {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xc3;
-        seed[1] = 0x88;
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        vec![
-            Self::pseudorandom_initial_state(rng.gen(), 1),
-            Self::pseudorandom_initial_state(rng.gen(), 8),
-            Self::pseudorandom_initial_state(rng.gen(), 15),
-            Self::pseudorandom_initial_state(rng.gen(), 51),
-        ]
-    }
-
-    fn common_case_input_state(&self) -> tasm_lib::ExecutionState {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xc4;
-        seed[1] = 0x89;
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        Self::pseudorandom_initial_state(rng.gen(), (1 << 8) - 1)
-    }
-
-    fn worst_case_input_state(&self) -> tasm_lib::ExecutionState {
-        let mut seed = [0u8; 32];
-        seed[0] = 0xb3;
-        seed[1] = 0x78;
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        Self::pseudorandom_initial_state(rng.gen(), (1 << 12) - 1)
-    }
-
-    fn rust_shadowing(
+impl Function for VerifyAoclMembership {
+    fn rust_shadow(
         &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        _std_in: Vec<triton_vm::BFieldElement>,
-        _secret_in: Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
+        stack: &mut Vec<BFieldElement>,
+        memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
     ) {
         // read arguments from stack
         // *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
@@ -296,28 +184,88 @@ impl Snippet for VerifyAoclMembership {
         stack.push(_er);
         stack.push(BFieldElement::new(validation_result as u64));
     }
+
+    fn pseudorandom_initial_state(
+        &self,
+        seed: [u8; 32],
+        _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
+    ) -> (
+        Vec<BFieldElement>,
+        std::collections::HashMap<BFieldElement, BFieldElement>,
+    ) {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let num_leafs = rng.gen_range(0..100);
+        let leafs = (0..num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();
+        let mmr = get_rustyleveldb_ammr_from_digests::<Hash>(leafs);
+
+        let leaf_index = rng.next_u64() % num_leafs;
+        let leaf = mmr.get_leaf(leaf_index);
+        let (mmr_mp, peaks) = mmr.prove_membership(leaf_index);
+        let mut msmp = pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen());
+        msmp.auth_path_aocl = mmr_mp;
+
+        // populate memory
+        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+        let mut address = BFieldElement::new(rng.next_u64() % (1 << 20));
+
+        let peaks_si_ptr = address;
+        memory.insert(address, BFieldElement::new(peaks.encode().len() as u64));
+        address.increment();
+        for v in peaks.encode().iter() {
+            memory.insert(address, *v);
+            address.increment();
+        }
+
+        let msmp_si_ptr = address;
+        memory.insert(msmp_si_ptr, BFieldElement::new(msmp.encode().len() as u64));
+        address.increment();
+        for v in msmp.encode().iter() {
+            memory.insert(address, *v);
+            address.increment();
+        }
+
+        // populate stack
+        // *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
+        let mut stack = get_init_tvm_stack();
+        stack.push(peaks_si_ptr + BFieldElement::new(1));
+        stack.push(BFieldElement::new(num_leafs >> 32));
+        stack.push(BFieldElement::new(num_leafs & u32::MAX as u64));
+        stack.push(rng.gen());
+        stack.push(rng.gen());
+        stack.push(rng.gen());
+        stack.push(msmp_si_ptr + BFieldElement::new(1));
+        stack.push(leaf.values()[4]);
+        stack.push(leaf.values()[3]);
+        stack.push(leaf.values()[2]);
+        stack.push(leaf.values()[1]);
+        stack.push(leaf.values()[0]);
+
+        (stack, memory)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::test_helpers::test_rust_equivalence_multiple;
+
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn test_verify_aocl_membership() {
-        test_rust_equivalence_multiple(&VerifyAoclMembership, false);
+        ShadowedFunction::new(VerifyAoclMembership).test();
     }
 }
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::snippet_bencher::bench_and_write;
+
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn verify_aocl_membership_benchmark() {
-        bench_and_write(VerifyAoclMembership)
+        ShadowedFunction::new(VerifyAoclMembership).bench();
     }
 }

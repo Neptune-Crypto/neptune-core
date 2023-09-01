@@ -41,7 +41,9 @@ serde_json = "1"
 strum = "0"
 strum_macros = "0"
 tarpc = { version = "0", features = ["tokio1", "serde-transport", "tcp"] }
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", tag = "v0.2.1" }
+# tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", tag = "v0.2.1" }
+# tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", branch = "asz/refactor-snippet-traits" }
+tasm-lib = { path = "../tasm-lib/tasm-lib/" }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-serde = { version = "0", features = ["bincode", "json"] }
 tokio-util = { version = "0", features = ["codec"] }
@@ -53,13 +55,13 @@ tracing-subscriber = { version = "0", features = [
     "fmt",
 ] }
 tracing-test = "0"
-triton-vm = "0.32.1"
+triton-vm = "0.33.0"
 twenty-first = "0.32.1"
 tui = "0"
 unicode-width = "0"
 
 [dev-dependencies]
-pin-project-lite = "0"
+pin-project-lite = "0.2.12"
 tokio-test = "0"
 
 # needed because it otherwise takes too long to sign transaction with STARK proofs

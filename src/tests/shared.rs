@@ -29,7 +29,6 @@ use std::{
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
-use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -48,7 +47,11 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::transaction;
+use crate::models::blockchain::transaction::amount::pseudorandom_amount;
 use crate::models::blockchain::transaction::amount::Amount;
+use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
+use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_pubscript_struct;
+use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::tasm::removal_records_integrity::RemovalRecordsIntegrityWitness;
@@ -73,7 +76,10 @@ use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::GlobalState;
 use crate::models::state::UtxoReceiverData;
+use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
+use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
@@ -81,11 +87,8 @@ use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::test_shared::mutator_set::pseudorandom_chunk_dictionary;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra_with_mps;
-use crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof;
-use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
@@ -534,46 +537,6 @@ pub fn random_transaction_kernel() -> TransactionKernel {
     pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts)
 }
 
-pub fn pseudorandom_transaction_kernel(
-    seed: [u8; 32],
-    num_inputs: usize,
-    num_outputs: usize,
-    num_pubscripts: usize,
-) -> TransactionKernel {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let inputs = (0..num_inputs)
-        .map(|_| pseudorandom_removal_record(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let outputs = (0..num_outputs)
-        .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let pubscripts = (0..num_pubscripts)
-        .map(|_| pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>()))
-        .collect_vec();
-    let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
-    let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
-    let timestamp: BFieldElement = rng.gen();
-    let mutator_set_hash: Digest = rng.gen();
-
-    TransactionKernel {
-        inputs,
-        outputs,
-        pubscript_hashes_and_inputs: pubscripts,
-        fee,
-        coinbase,
-        timestamp,
-        mutator_set_hash,
-    }
-}
-
-pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let ar: Digest = rng.gen();
-    AdditionRecord {
-        canonical_commitment: ar,
-    }
-}
-
 pub fn random_addition_record() -> AdditionRecord {
     let mut rng = thread_rng();
     pseudorandom_addition_record(rng.gen::<[u8; 32]>())
@@ -584,40 +547,14 @@ pub fn random_pubscript_struct() -> PubScriptHashAndInput {
     pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>())
 }
 
-pub fn pseudorandom_pubscript_struct(seed: [u8; 32]) -> PubScriptHashAndInput {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let digest: Digest = rng.gen();
-    let len = 10 + (rng.next_u32() % 50) as usize;
-    let input: Vec<BFieldElement> = (0..len).map(|_| rng.gen()).collect_vec();
-    PubScriptHashAndInput {
-        pubscript_hash: digest,
-        pubscript_input: input,
-    }
-}
-
 pub fn random_amount() -> Amount {
     let mut rng = thread_rng();
     pseudorandom_amount(rng.gen::<[u8; 32]>())
 }
 
-pub fn pseudorandom_amount(seed: [u8; 32]) -> Amount {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let number: [u32; 4] = rng.gen();
-    Amount(U32s::new(number))
-}
-
 pub fn random_option<T>(thing: T) -> Option<T> {
     let mut rng = thread_rng();
     pseudorandom_option(rng.gen::<[u8; 32]>(), thing)
-}
-
-pub fn pseudorandom_option<T>(seed: [u8; 32], thing: T) -> Option<T> {
-    let mut rng: StdRng = SeedableRng::from_seed(seed);
-    if rng.next_u32() % 2 == 0 {
-        None
-    } else {
-        Some(thing)
-    }
 }
 
 // pub fn add_output_to_block(block: &mut Block, utxo: Utxo) {

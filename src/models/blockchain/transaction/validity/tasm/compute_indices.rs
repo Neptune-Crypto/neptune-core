@@ -1,109 +1,49 @@
+use std::collections::HashMap;
+
 use crate::models::blockchain::shared::Hash;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+use tasm_lib::function::Function;
 use tasm_lib::library::Library;
 
+use tasm_lib::snippet::BasicSnippet;
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
-    neptune::mutator_set::get_swbf_indices::GetSwbfIndices,
-    rust_shadowing_helper_functions,
-    snippet::{DataType, Snippet},
+    neptune::mutator_set::get_swbf_indices::GetSwbfIndices, rust_shadowing_helper_functions,
+    snippet::DataType,
 };
-use triton_vm::instruction::LabelledInstructions;
 use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::ms_membership_proof::{
+    pseudorandom_mutator_set_membership_proof, MsMembershipProof,
+};
 use crate::util_types::mutator_set::shared::{NUM_TRIALS, WINDOW_SIZE};
 
+/// Given a mutator set item and its membership proof, compute its removal record indices.
+#[derive(Debug, Clone)]
 pub(crate) struct ComputeIndices;
 
-impl ComputeIndices {
-    #[cfg(test)]
-    fn pseudorandom_init_state(seed: [u8; 32]) -> tasm_lib::ExecutionState {
-        use rand::RngCore;
-
-        let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-
-        let mut msmp =
-            crate::util_types::test_shared::mutator_set::pseudorandom_mutator_set_membership_proof::<
-                crate::Hash,
-            >(rand::Rng::gen(&mut rng));
-        msmp.auth_path_aocl.leaf_index = rng.next_u32() as u64;
-
-        let msmp_encoded = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&msmp);
-
-        let item: Digest = rand::Rng::gen(&mut rng);
-        let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
-            std::collections::HashMap::new();
-
-        memory.insert(
-            BFieldElement::new(1u64),
-            BFieldElement::new(msmp_encoded.len() as u64),
-        );
-        for (i, v) in msmp_encoded.iter().enumerate() {
-            memory.insert(BFieldElement::new(2u64 + i as u64), *v);
-        }
-        memory.insert(
-            <BFieldElement as num_traits::Zero>::zero(),
-            BFieldElement::new(2u64 + msmp_encoded.len() as u64),
-        );
-
-        let mut stack = tasm_lib::get_init_tvm_stack();
-        stack.push(item.values()[4]);
-        stack.push(item.values()[3]);
-        stack.push(item.values()[2]);
-        stack.push(item.values()[1]);
-        stack.push(item.values()[0]);
-        stack.push(BFieldElement::new(2u64));
-
-        tasm_lib::ExecutionState {
-            stack,
-            std_in: vec![],
-            secret_in: vec![],
-            memory,
-            words_allocated: 2,
-        }
+impl BasicSnippet for ComputeIndices {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![(
+            DataType::Tuple(vec![DataType::Digest, DataType::VoidPointer]),
+            "item_with_*membership_proof".to_string(),
+        )]
     }
-}
 
-impl Snippet for ComputeIndices {
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::VoidPointer, "*indices".to_string())]
+    }
+
     fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_compute_indices".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
-        vec![
-            "i4".to_string(),
-            "i3".to_string(),
-            "i2".to_string(),
-            "i1".to_string(),
-            "i0".to_string(),
-            "*mp".to_string(),
-        ]
-    }
-
-    fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Pair(
-            Box::new(DataType::Digest),
-            Box::new(DataType::VoidPointer),
-        )]
-    }
-
-    fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::VoidPointer]
-    }
-
-    fn outputs(&self) -> Vec<String> {
-        vec!["*indices".to_string()]
-    }
-
-    fn stack_diff(&self) -> isize {
-        -5
-    }
-
-    fn function_code(&self, library: &mut Library) -> String {
+    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         type MsMpH = MsMembershipProof<Hash>;
         let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
         let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
@@ -119,7 +59,7 @@ impl Snippet for ComputeIndices {
             num_trials: NUM_TRIALS as usize,
         }));
 
-        let code = triton_asm! {
+        triton_asm! {
         // BEFORE: _ i4 i3 i2 i1 i0 *mp
         // AFTER: _ *indices
         {entrypoint}:
@@ -187,63 +127,15 @@ impl Snippet for ComputeIndices {
             call {get_swbf_indices}
 
             return
-        };
-        LabelledInstructions(code).to_string()
-    }
-
-    fn crash_conditions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    fn gen_input_states(&self) -> Vec<tasm_lib::ExecutionState> {
-        #[cfg(test)]
-        {
-            vec![
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng())),
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng())),
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rand::thread_rng())),
-            ]
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in testing environment");
         }
     }
+}
 
-    fn common_case_input_state(&self) -> tasm_lib::ExecutionState {
-        #[cfg(test)]
-        {
-            let mut seed = [0u8; 32];
-            seed[0] = 0xa8;
-            seed[1] = 0xb6;
-            Self::pseudorandom_init_state(seed)
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in testing environment");
-        }
-    }
-
-    fn worst_case_input_state(&self) -> tasm_lib::ExecutionState {
-        #[cfg(test)]
-        {
-            let mut seed = [0u8; 32];
-            seed[0] = 0xa3;
-            seed[1] = 0xb4;
-            Self::pseudorandom_init_state(seed)
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in testing environment");
-        }
-    }
-
-    fn rust_shadowing(
+impl Function for ComputeIndices {
+    fn rust_shadow(
         &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        std_in: Vec<triton_vm::BFieldElement>,
-        secret_in: Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
+        stack: &mut Vec<BFieldElement>,
+        memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
     ) {
         // read address of membership proof
         let _address = stack.pop().unwrap();
@@ -291,7 +183,7 @@ impl Snippet for ComputeIndices {
             window_size: WINDOW_SIZE,
             num_trials: NUM_TRIALS as usize,
         };
-        get_swbf_indices.rust_shadowing(stack, std_in, secret_in, memory);
+        get_swbf_indices.rust_shadow(stack, memory);
 
         // print absolute indices for debugging purposes
         let absolute_index_list_address: BFieldElement = *stack.last().unwrap();
@@ -312,6 +204,48 @@ impl Snippet for ComputeIndices {
             );
         }
     }
+
+    fn pseudorandom_initial_state(
+        &self,
+        seed: [u8; 32],
+        _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
+    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+        use rand::RngCore;
+
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+        let mut msmp =
+            pseudorandom_mutator_set_membership_proof::<crate::Hash>(rand::Rng::gen(&mut rng));
+        msmp.auth_path_aocl.leaf_index = rng.next_u32() as u64;
+
+        let msmp_encoded = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&msmp);
+
+        let item: Digest = rand::Rng::gen(&mut rng);
+        let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
+            std::collections::HashMap::new();
+
+        memory.insert(
+            BFieldElement::new(1u64),
+            BFieldElement::new(msmp_encoded.len() as u64),
+        );
+        for (i, v) in msmp_encoded.iter().enumerate() {
+            memory.insert(BFieldElement::new(2u64 + i as u64), *v);
+        }
+        memory.insert(
+            <BFieldElement as num_traits::Zero>::zero(),
+            BFieldElement::new(2u64 + msmp_encoded.len() as u64),
+        );
+
+        let mut stack = tasm_lib::get_init_tvm_stack();
+        stack.push(item.values()[4]);
+        stack.push(item.values()[3]);
+        stack.push(item.values()[2]);
+        stack.push(item.values()[1]);
+        stack.push(item.values()[0]);
+        stack.push(BFieldElement::new(2u64));
+
+        (stack, memory)
+    }
 }
 
 #[cfg(test)]
@@ -321,26 +255,26 @@ mod tests {
     use itertools::Itertools;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
     use tasm_lib::{
+        function::ShadowedFunction,
         get_init_tvm_stack,
         list::{
             higher_order::{inner_function::InnerFunction, map::Map},
             ListType,
         },
-        test_helpers::test_rust_equivalence_multiple,
+        snippet::RustShadow,
+        test_helpers::link_and_run_tasm_for_test,
     };
+    use triton_vm::NonDeterminism;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
     use crate::models::blockchain::shared::Hash;
-    use crate::util_types::{
-        mutator_set::mutator_set_kernel::get_swbf_indices,
-        test_shared::mutator_set::pseudorandom_mutator_set_membership_proof,
-    };
+    use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 
     use super::*;
 
     #[test]
     fn test_compute_indices() {
-        test_rust_equivalence_multiple(&ComputeIndices, false);
+        ShadowedFunction::new(ComputeIndices).test();
     }
 
     #[test]
@@ -414,12 +348,13 @@ mod tests {
         let mallocked = address.value() as usize;
         let map_compute_indices = Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(ComputeIndices)),
+            f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
         };
-        let _vm_output_state = map_compute_indices.link_and_run_tasm_for_test(
+        let _vm_output_state = link_and_run_tasm_for_test(
+            &ShadowedFunction::new(map_compute_indices),
             &mut stack,
             vec![],
-            vec![],
+            &NonDeterminism::new(vec![]),
             &mut memory,
             mallocked,
         );
@@ -491,12 +426,12 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::snippet_bencher::bench_and_write;
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn compute_index_set_benchmark() {
-        bench_and_write(ComputeIndices)
+        ShadowedFunction::new(ComputeIndices).bench()
     }
 }

@@ -1,94 +1,48 @@
+use std::collections::HashMap;
+
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use tasm_lib::{
+    function::Function,
+    get_init_tvm_stack,
     hashing::hash_varlen::HashVarlen,
-    snippet::{DataType, Snippet},
-    ExecutionState,
+    snippet::{BasicSnippet, DataType},
+    snippet_bencher::BenchmarkCase,
 };
-use triton_vm::{instruction::LabelledInstructions, triton_asm, BFieldElement};
+use triton_vm::{triton_asm, BFieldElement};
 use twenty_first::{
     shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
 
 use crate::{
-    models::blockchain::shared::Hash, util_types::mutator_set::removal_record::RemovalRecord,
+    models::blockchain::shared::Hash,
+    util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord},
 };
 use tasm_lib::library::Library;
 
+/// Compute the hash (using hash_varlen) of the given removal record indices.
+#[derive(Debug, Clone)]
 pub struct HashRemovalRecordIndices;
 
-impl HashRemovalRecordIndices {
-    #[cfg(test)]
-    fn pseudorandom_init_state(seed: [u8; 32]) -> ExecutionState {
-        use std::collections::HashMap;
-
-        use rand::Rng;
-        use tasm_lib::get_init_tvm_stack;
-
-        use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
-
-        let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-        let removal_record = pseudorandom_removal_record::<Hash>(rng.gen());
-        let address: BFieldElement = BFieldElement::new(rng.gen_range(2..(1 << 20)));
-
-        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
-        for (i, v) in removal_record.encode().iter().enumerate() {
-            memory.insert(address + BFieldElement::new(i as u64), *v);
-        }
-        memory.insert(
-            address - BFieldElement::new(1),
-            BFieldElement::new(removal_record.encode().len() as u64),
-        );
-
-        let mut stack = get_init_tvm_stack();
-        stack.push(address);
-
-        ExecutionState {
-            stack,
-            std_in: vec![],
-            secret_in: vec![],
-            memory,
-            words_allocated: 1,
-        }
+impl BasicSnippet for HashRemovalRecordIndices {
+    fn inputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::VoidPointer, "*removal_record".to_string())]
     }
-}
 
-impl Snippet for HashRemovalRecordIndices {
+    fn outputs(&self) -> Vec<(DataType, String)> {
+        vec![(DataType::Digest, "digest".to_string())]
+    }
+
     fn entrypoint(&self) -> String {
         "tasm_neptune_transaction_hash_removal_record_indices".to_string()
     }
 
-    fn inputs(&self) -> Vec<String> {
-        vec!["*removal_record".to_string()]
-    }
-
-    fn input_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::VoidPointer]
-    }
-
-    fn output_types(&self) -> Vec<tasm_lib::snippet::DataType> {
-        vec![DataType::Digest]
-    }
-
-    fn outputs(&self) -> Vec<String> {
-        vec![
-            "d4".to_string(),
-            "d3".to_string(),
-            "d2".to_string(),
-            "d1".to_string(),
-            "d0".to_string(),
-        ]
-    }
-
-    fn stack_diff(&self) -> isize {
-        4
-    }
-
-    fn function_code(&self, library: &mut Library) -> String {
+    fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         type Rrh = RemovalRecord<Hash>;
         let rr_to_ais_with_size = tasm_lib::field_with_size!(Rrh::absolute_indices);
         let hash_varlen = library.import(Box::new(HashVarlen));
         let entrypoint = self.entrypoint();
 
-        let code = triton_asm! {
+        triton_asm! {
         // BEFORE: _ *removal_record
         // AFTER: _ [digest]
         {entrypoint}:
@@ -100,67 +54,15 @@ impl Snippet for HashRemovalRecordIndices {
             call {hash_varlen}
 
             return
-        };
-        LabelledInstructions(code).to_string()
-    }
-
-    fn crash_conditions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    fn gen_input_states(&self) -> Vec<ExecutionState> {
-        #[cfg(test)]
-        {
-            let mut seed = [0u8; 32];
-            seed[0] = 0x26;
-            seed[1] = 0x53;
-            let mut rng: rand::rngs::StdRng = rand::SeedableRng::from_seed(seed);
-            vec![
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rng)),
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rng)),
-                Self::pseudorandom_init_state(rand::Rng::gen(&mut rng)),
-            ]
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in test environment.")
         }
     }
+}
 
-    fn common_case_input_state(&self) -> tasm_lib::ExecutionState {
-        #[cfg(test)]
-        {
-            let mut seed = [0u8; 32];
-            seed[0] = 0x41;
-            seed[1] = 0x55;
-            Self::pseudorandom_init_state(seed)
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in test environment.")
-        }
-    }
-
-    fn worst_case_input_state(&self) -> tasm_lib::ExecutionState {
-        #[cfg(test)]
-        {
-            let mut seed = [0u8; 32];
-            seed[0] = 0x47;
-            seed[1] = 0xf5;
-            Self::pseudorandom_init_state(seed)
-        }
-        #[cfg(not(test))]
-        {
-            unimplemented!("Cannot generate input states when not in test environment.")
-        }
-    }
-
-    fn rust_shadowing(
+impl Function for HashRemovalRecordIndices {
+    fn rust_shadow(
         &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        _std_in: Vec<triton_vm::BFieldElement>,
-        _secret_in: Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
+        stack: &mut Vec<BFieldElement>,
+        memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
     ) {
         // read address
         let address = stack.pop().unwrap();
@@ -186,6 +88,30 @@ impl Snippet for HashRemovalRecordIndices {
         stack.push(digest.values()[1]);
         stack.push(digest.values()[0]);
     }
+
+    fn pseudorandom_initial_state(
+        &self,
+        seed: [u8; 32],
+        _bench_case: Option<BenchmarkCase>,
+    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let removal_record = pseudorandom_removal_record::<Hash>(rng.gen());
+        let address: BFieldElement = BFieldElement::new(rng.gen_range(2..(1 << 20)));
+
+        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+        for (i, v) in removal_record.encode().iter().enumerate() {
+            memory.insert(address + BFieldElement::new(i as u64), *v);
+        }
+        memory.insert(
+            address - BFieldElement::new(1),
+            BFieldElement::new(removal_record.encode().len() as u64),
+        );
+
+        let mut stack = get_init_tvm_stack();
+        stack.push(address);
+
+        (stack, memory)
+    }
 }
 
 #[cfg(test)]
@@ -195,7 +121,11 @@ mod tests {
     use itertools::Itertools;
     use num_traits::Zero;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use tasm_lib::test_helpers::{
+        link_and_run_tasm_for_test, link_and_run_tasm_for_test_deprecated,
+    };
     use tasm_lib::{
+        function::ShadowedFunction,
         get_init_tvm_stack,
         list::{
             contiguous_list::get_pointer_list::GetPointerList,
@@ -203,19 +133,18 @@ mod tests {
             ListType,
         },
         rust_shadowing_helper_functions,
-        test_helpers::test_rust_equivalence_multiple,
-        VmHasher,
+        snippet::RustShadow,
     };
-    use triton_vm::{BFieldElement, Digest};
+    use triton_vm::{BFieldElement, Digest, NonDeterminism};
     use twenty_first::shared_math::tip5::DIGEST_LENGTH;
-
-    use crate::util_types::test_shared::mutator_set::pseudorandom_removal_record;
 
     use super::*;
 
     #[test]
     fn test_hash_removal_record_indices() {
-        test_rust_equivalence_multiple(&HashRemovalRecordIndices, false);
+        let hash_removal_record_indices = HashRemovalRecordIndices;
+        let wrapper = ShadowedFunction::new(hash_removal_record_indices);
+        wrapper.test();
     }
 
     #[test]
@@ -241,7 +170,7 @@ mod tests {
         // populate memory
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let removal_records_encoded = removal_records.encode();
-        Vec::<RemovalRecord<VmHasher>>::decode(&removal_records_encoded).unwrap();
+        Vec::<RemovalRecord<Hash>>::decode(&removal_records_encoded).unwrap();
         for (i, v) in removal_records_encoded.iter().enumerate() {
             memory.insert(address + BFieldElement::new(i as u64), *v);
         }
@@ -263,7 +192,8 @@ mod tests {
         let get_pointer_list = GetPointerList {
             output_list_type: ListType::Unsafe,
         };
-        let _vm_output = get_pointer_list.link_and_run_tasm_for_test(
+        let _vm_output = link_and_run_tasm_for_test_deprecated(
+            &get_pointer_list,
             &mut stack,
             vec![],
             vec![],
@@ -322,12 +252,13 @@ mod tests {
         // run map snippet
         let map_hash_removal_record_indices = Map {
             list_type: ListType::Unsafe,
-            f: InnerFunction::Snippet(Box::new(HashRemovalRecordIndices)),
+            f: InnerFunction::BasicSnippet(Box::new(HashRemovalRecordIndices)),
         };
-        let _vm_output_state = map_hash_removal_record_indices.link_and_run_tasm_for_test(
+        let _vm_output_state = link_and_run_tasm_for_test(
+            &ShadowedFunction::new(map_hash_removal_record_indices),
             &mut stack,
             vec![],
-            vec![],
+            &NonDeterminism::new(vec![]),
             &mut memory,
             new_dyn_malloc_value,
         );
@@ -369,12 +300,14 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::snippet_bencher::bench_and_write;
+    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
 
     use super::*;
 
     #[test]
     fn hash_removal_record_indices_benchmark() {
-        bench_and_write(HashRemovalRecordIndices)
+        let hash_removal_record_indices = HashRemovalRecordIndices;
+        let wrapper = ShadowedFunction::new(hash_removal_record_indices);
+        wrapper.bench();
     }
 }

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::compiled_program::CompiledProgram;
 use tasm_lib::library::Library;
 use triton_vm::instruction::LabelledInstruction;
+use triton_vm::{BFieldElement, NonDeterminism, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -39,9 +40,9 @@ impl ValidationLogic for KernelToTypeScripts {
 
 impl CompiledProgram for KernelToTypeScripts {
     fn rust_shadow(
-        _public_input: &[triton_vm::BFieldElement],
-        _secret_input: &[triton_vm::BFieldElement],
-    ) -> anyhow::Result<Vec<triton_vm::BFieldElement>> {
+        _public_input: &PublicInput,
+        _secret_input: &NonDeterminism<BFieldElement>,
+    ) -> anyhow::Result<Vec<BFieldElement>> {
         todo!()
     }
 

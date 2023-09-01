@@ -1,16 +1,16 @@
 [
   {
     "name": "tasm_neptune_transaction_verify_aocl_membership",
-    "clock_cycle_count": 937,
-    "hash_table_height": 42,
-    "u32_table_height": 135,
+    "clock_cycle_count": 819,
+    "hash_table_height": 36,
+    "u32_table_height": 116,
     "case": "CommonCase"
   },
   {
     "name": "tasm_neptune_transaction_verify_aocl_membership",
-    "clock_cycle_count": 1258,
-    "hash_table_height": 60,
-    "u32_table_height": 202,
+    "clock_cycle_count": 834,
+    "hash_table_height": 36,
+    "u32_table_height": 116,
     "case": "WorstCase"
   }
 ]

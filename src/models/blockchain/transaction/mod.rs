@@ -17,7 +17,7 @@ use tracing::{debug, error, warn};
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::proof::Proof;
-use triton_vm::triton_asm;
+use triton_vm::{triton_asm, NonDeterminism, PublicInput};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -376,7 +376,10 @@ impl Transaction {
             // without crashing). We do not care about the output.
             let public_input = Hash::hash(&self.kernel).reversed().encode();
 
-            match lock_script.program.run(public_input, secret_input.to_vec()) {
+            match lock_script.program.run(
+                public_input.into(),
+                NonDeterminism::new(secret_input.to_vec()),
+            ) {
                 Ok(_) => (),
                 Err(err) => {
                     warn!("Failed to verify lock script of transaction. Got: \"{err}\"");
@@ -447,7 +450,8 @@ impl Transaction {
 
             // The type script is satisfied if it halts gracefully, i.e.,
             // without panicking. So we don't care about the output
-            if let Err(e) = type_script.run(public_input, secret_input) {
+            if let Err(e) = type_script.run(public_input.into(), NonDeterminism::new(secret_input))
+            {
                 warn!(
                     "Type script {} not satisfied for transaction: {}",
                     type_script_hash.emojihash(),
@@ -539,10 +543,10 @@ impl Transaction {
             let secret_input: Vec<BFieldElement> = vec![];
 
             // The pubscript is satisfied if it halts gracefully without crashing.
-            if let Err(err) = pubscript
-                .program
-                .run(pubscript_input.to_vec(), secret_input)
-            {
+            if let Err(err) = pubscript.program.run(
+                PublicInput::new(pubscript_input.to_vec()),
+                NonDeterminism::new(secret_input),
+            ) {
                 warn!("Could not verify pubscript for transaction; got err: \"{err}\".");
                 return false;
             }
