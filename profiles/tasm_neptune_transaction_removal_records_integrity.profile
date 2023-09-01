@@ -1,11 +1,6 @@
 tasm_neptune_transaction_removal_records_integrity:
 
 # call graph
- tasm_io_load_struct_from_input_secin: 76122
-   tasm_io_load_from_input_secin: 76110
-     tasm_memory_dyn_malloc: 25
-     tasm_io_load_from_input_secin_loop: 76068
-   tasm_io_load_struct_from_input_secin_loop: 5
  tasm_neptune_transaction_transaction_kernel_mast_hash: 21792
    tasm_list_unsafe_u32_new_digest: 33
      tasm_memory_dyn_malloc: 25
@@ -1403,16 +1398,12 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_eq: 8
          tasm_list_unsafe_u32_get_element_digest: 25
          tasm_hashing_eq_digest: 15
- total: 132089
+ total: 55964
 
 # aggregated
- tasm_io_load_struct_from_input_secin: 76122
-   tasm_io_load_from_input_secin: 76110
-     tasm_memory_dyn_malloc: 375
-     tasm_io_load_from_input_secin_loop: 76068
-   tasm_io_load_struct_from_input_secin_loop: 5
  tasm_neptune_transaction_transaction_kernel_mast_hash: 21792
    tasm_list_unsafe_u32_new_digest: 132
+     tasm_memory_dyn_malloc: 350
    tasm_list_unsafe_u32_set_length_digest: 2
    tasm_hashing_hash_varlen: 28050
      tasm_hashing_hash_varlen_loop: 25607
@@ -1505,4 +1496,4 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_div2: 1764
            tasm_hashing_swap_digest: 784
          tasm_hashing_eq_digest: 30
- total: 132089
+ total: 55964

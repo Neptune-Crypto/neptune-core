@@ -6,12 +6,11 @@ use rand::SeedableRng;
 use tasm_lib::function::Function;
 use tasm_lib::library::Library;
 
-use tasm_lib::snippet::BasicSnippet;
+use tasm_lib::snippet::{BasicSnippet, DeprecatedSnippet};
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
-    neptune::mutator_set::get_swbf_indices::GetSwbfIndices,
-    rust_shadowing_helper_functions,
-    snippet::{DataType, DeprecatedSnippet},
+    neptune::mutator_set::get_swbf_indices::GetSwbfIndices, rust_shadowing_helper_functions,
+    snippet::DataType,
 };
 use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
