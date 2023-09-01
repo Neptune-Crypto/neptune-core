@@ -766,8 +766,8 @@ mod connect_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_incoming_connection_fail_max_peers_exceeded() -> Result<()> {
-        // In this scenario a node attempts to make an ingoing connection but this
-        // node is banned, so this should not succeed.
+        // In this scenario a node attempts to make an ingoing connection but the max
+        // peer count should prevent a new incoming connection from being accepted.
         let network = Network::Alpha;
         let other_handshake = get_dummy_handshake_data_for_genesis(network);
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
@@ -780,6 +780,9 @@ mod connect_tests {
                 MAGIC_STRING_RESPONSE.to_vec(),
                 own_handshake.clone(),
             ))))?)
+            .write(&to_bytes(&PeerMessage::ConnectionStatus(
+                ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded),
+            ))?)
             .build();
 
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, mut state, _hsd) =
