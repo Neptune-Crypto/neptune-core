@@ -6,7 +6,7 @@ use rand::SeedableRng;
 use tasm_lib::function::Function;
 use tasm_lib::library::Library;
 
-use tasm_lib::snippet::{BasicSnippet, DeprecatedSnippet};
+use tasm_lib::snippet::BasicSnippet;
 use tasm_lib::{
     memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::get_swbf_indices::GetSwbfIndices, rust_shadowing_helper_functions,
@@ -183,7 +183,7 @@ impl Function for ComputeIndices {
             window_size: WINDOW_SIZE,
             num_trials: NUM_TRIALS as usize,
         };
-        get_swbf_indices.rust_shadowing(stack, vec![], vec![], memory);
+        get_swbf_indices.rust_shadow(stack, memory);
 
         // print absolute indices for debugging purposes
         let absolute_index_list_address: BFieldElement = *stack.last().unwrap();
