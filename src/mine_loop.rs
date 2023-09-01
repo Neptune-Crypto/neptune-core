@@ -122,7 +122,7 @@ async fn mine_block(
     // Mining takes place here
     while Hash::hash(&block_header) >= threshold {
         if state.cli.throttled_mining {
-            tokio::time::sleep(Duration::from_micros(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
         // If the sender is cancelled, the parent to this thread most
