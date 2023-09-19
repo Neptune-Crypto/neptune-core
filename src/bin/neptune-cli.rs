@@ -1,5 +1,6 @@
-use anyhow::Result;
-use clap::Parser;
+use anyhow::{bail, Result};
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::transaction::amount::Amount;
@@ -11,6 +12,7 @@ use tarpc::{client, context, tokio_serde::formats::Json};
 
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::rpc_server::RPCClient;
+use std::io::stdout;
 use twenty_first::shared_math::digest::Digest;
 
 #[derive(Debug, Parser)]
@@ -40,6 +42,9 @@ enum Command {
     MempoolTxCount,
     MempoolSize,
     PruneAbandonedMonitoredUtxos,
+
+    /// Dump shell completions.
+    Completions,
 }
 
 #[derive(Debug, Parser)]
@@ -157,6 +162,14 @@ async fn main() -> Result<()> {
                 .prune_abandoned_monitored_utxos(context::current())
                 .await?;
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
+        }
+
+        Command::Completions => {
+            if let Some(shell) = Shell::from_env() {
+                generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
+            } else {
+                bail!("Unknown shell.  Shell completions not available.")
+            }
         }
     }
 
