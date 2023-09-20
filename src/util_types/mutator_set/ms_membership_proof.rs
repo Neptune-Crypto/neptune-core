@@ -223,9 +223,11 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
 
         // Gather the indices the are returned. These indices indicate which membership
         // proofs that have been mutated.
-        let mut all_mutated_mp_indices: Vec<usize> = [swbf_mutated_indices,
+        let mut all_mutated_mp_indices: Vec<usize> = [
+            swbf_mutated_indices,
             indices_for_updated_mps,
-            mps_for_new_chunk_dictionary_entry]
+            mps_for_new_chunk_dictionary_entry,
+        ]
         .concat();
         all_mutated_mp_indices.sort_unstable();
         all_mutated_mp_indices.dedup();

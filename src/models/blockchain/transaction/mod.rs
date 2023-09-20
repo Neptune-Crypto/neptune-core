@@ -277,8 +277,10 @@ impl Transaction {
         let merged_kernel = TransactionKernel {
             inputs: [self.kernel.inputs, other.kernel.inputs].concat(),
             outputs: [self.kernel.outputs, other.kernel.outputs].concat(),
-            pubscript_hashes_and_inputs: [self.kernel.pubscript_hashes_and_inputs,
-                other.kernel.pubscript_hashes_and_inputs]
+            pubscript_hashes_and_inputs: [
+                self.kernel.pubscript_hashes_and_inputs,
+                other.kernel.pubscript_hashes_and_inputs,
+            ]
             .concat(),
             fee: self.kernel.fee + other.kernel.fee,
             coinbase: merged_coinbase,
@@ -289,20 +291,30 @@ impl Transaction {
         let merged_witness = match (&self.witness, &other.witness) {
             (Witness::Primitive(self_witness), Witness::Primitive(other_witness)) => {
                 Witness::Primitive(PrimitiveWitness {
-                    input_utxos: [self_witness.input_utxos.clone(),
-                        other_witness.input_utxos.clone()]
+                    input_utxos: [
+                        self_witness.input_utxos.clone(),
+                        other_witness.input_utxos.clone(),
+                    ]
                     .concat(),
-                    lock_script_witnesses: [self_witness.lock_script_witnesses.clone(),
-                        other_witness.lock_script_witnesses.clone()]
+                    lock_script_witnesses: [
+                        self_witness.lock_script_witnesses.clone(),
+                        other_witness.lock_script_witnesses.clone(),
+                    ]
                     .concat(),
-                    input_membership_proofs: [self_witness.input_membership_proofs.clone(),
-                        other_witness.input_membership_proofs.clone()]
+                    input_membership_proofs: [
+                        self_witness.input_membership_proofs.clone(),
+                        other_witness.input_membership_proofs.clone(),
+                    ]
                     .concat(),
-                    output_utxos: [self_witness.output_utxos.clone(),
-                        other_witness.output_utxos.clone()]
+                    output_utxos: [
+                        self_witness.output_utxos.clone(),
+                        other_witness.output_utxos.clone(),
+                    ]
                     .concat(),
-                    pubscripts: [self_witness.pubscripts.clone(),
-                        other_witness.pubscripts.clone()]
+                    pubscripts: [
+                        self_witness.pubscripts.clone(),
+                        other_witness.pubscripts.clone(),
+                    ]
                     .concat(),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
                     input_lock_scripts: [

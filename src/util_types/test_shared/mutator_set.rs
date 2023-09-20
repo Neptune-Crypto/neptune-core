@@ -212,11 +212,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
             (original_index, mmr_index, mt_index, peak_index)
         })
         .collect_vec();
-    let leafs_and_indices = leafs
-        .iter()
-        .copied()
-        .zip(leaf_indices)
-        .collect_vec();
+    let leafs_and_indices = leafs.iter().copied().zip(leaf_indices).collect_vec();
 
     // iterate over all trees
     let mut peaks = vec![];
