@@ -394,7 +394,7 @@ mod tests {
         // test against rust shadow
         let rust_index_sets = items
             .into_iter()
-            .zip(membership_proofs.into_iter())
+            .zip(membership_proofs)
             .map(|(item, mp)| {
                 get_swbf_indices::<Hash>(
                     &item,

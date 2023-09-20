@@ -650,7 +650,7 @@ impl ArchivalState {
                     block_db_lock,
                 )
             };
-        let forwards = vec![forwards, vec![new_block.hash]].concat();
+        let forwards = [forwards, vec![new_block.hash]].concat();
 
         for digest in backwards {
             // Roll back mutator set

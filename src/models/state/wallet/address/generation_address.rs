@@ -348,7 +348,7 @@ impl ReceivingAddress {
         let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
         ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
 
-        let pubscript = vec![triton_asm![read_io; ciphertext.len()], triton_asm!(halt)].concat();
+        let pubscript = [triton_asm![read_io; ciphertext.len()], triton_asm!(halt)].concat();
 
         Ok((pubscript.into(), ciphertext))
     }
@@ -379,7 +379,7 @@ impl ReceivingAddress {
         // ]
         // .concat();
 
-        let mut instructions = vec![
+        let mut instructions = [
             vec![triton_instr!(divine); DIGEST_LENGTH],
             triton_asm!(hash),
             vec![triton_instr!(pop); DIGEST_LENGTH],

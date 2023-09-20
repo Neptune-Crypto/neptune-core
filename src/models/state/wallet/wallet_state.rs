@@ -265,7 +265,7 @@ impl WalletState {
         // TODO: These spending keys should probably be derived dynamically from some
         // state in the wallet. And we should allow for other types than just generation
         // addresses.
-        let spending_keys = vec![self.wallet_secret.nth_generation_spending_key(0)];
+        let spending_keys = [self.wallet_secret.nth_generation_spending_key(0)];
 
         // get recognized UTXOs
         let recognized_utxos = spending_keys

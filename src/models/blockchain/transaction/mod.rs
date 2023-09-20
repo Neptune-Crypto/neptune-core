@@ -275,9 +275,9 @@ impl Transaction {
         };
 
         let merged_kernel = TransactionKernel {
-            inputs: vec![self.kernel.inputs, other.kernel.inputs].concat(),
-            outputs: vec![self.kernel.outputs, other.kernel.outputs].concat(),
-            pubscript_hashes_and_inputs: vec![
+            inputs: [self.kernel.inputs, other.kernel.inputs].concat(),
+            outputs: [self.kernel.outputs, other.kernel.outputs].concat(),
+            pubscript_hashes_and_inputs: [
                 self.kernel.pubscript_hashes_and_inputs,
                 other.kernel.pubscript_hashes_and_inputs,
             ]
@@ -291,27 +291,27 @@ impl Transaction {
         let merged_witness = match (&self.witness, &other.witness) {
             (Witness::Primitive(self_witness), Witness::Primitive(other_witness)) => {
                 Witness::Primitive(PrimitiveWitness {
-                    input_utxos: vec![
+                    input_utxos: [
                         self_witness.input_utxos.clone(),
                         other_witness.input_utxos.clone(),
                     ]
                     .concat(),
-                    lock_script_witnesses: vec![
+                    lock_script_witnesses: [
                         self_witness.lock_script_witnesses.clone(),
                         other_witness.lock_script_witnesses.clone(),
                     ]
                     .concat(),
-                    input_membership_proofs: vec![
+                    input_membership_proofs: [
                         self_witness.input_membership_proofs.clone(),
                         other_witness.input_membership_proofs.clone(),
                     ]
                     .concat(),
-                    output_utxos: vec![
+                    output_utxos: [
                         self_witness.output_utxos.clone(),
                         other_witness.output_utxos.clone(),
                     ]
                     .concat(),
-                    pubscripts: vec![
+                    pubscripts: [
                         self_witness.pubscripts.clone(),
                         other_witness.pubscripts.clone(),
                     ]
