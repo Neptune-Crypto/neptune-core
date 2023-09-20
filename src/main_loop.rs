@@ -909,7 +909,7 @@ impl MainLoopHandler {
 
         // List of digests, ordered after which block we would like to find descendents from,
         // from highest to lowest.
-        let most_canonical_digests = vec![vec![tip_digest], most_canonical_digests].concat();
+        let most_canonical_digests = [vec![tip_digest], most_canonical_digests].concat();
 
         // Send message to the relevant peer loop to request the blocks
         let chosen_peer = chosen_peer.unwrap();

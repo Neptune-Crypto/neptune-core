@@ -129,7 +129,7 @@ impl LockScript {
     pub fn anyone_can_spend() -> Self {
         Self {
             program: Program::new(
-                &vec![triton_asm![read_io; DIGEST_LENGTH], triton_asm!(halt)].concat(),
+                &[triton_asm![read_io; DIGEST_LENGTH], triton_asm!(halt)].concat(),
             ),
         }
     }
@@ -226,7 +226,7 @@ mod utxo_tests {
             .filter(|name| !difficult_instructions.contains(name))
             .collect_vec();
 
-        let generators = vec![vec!["simple"], difficult_instructions].concat();
+        let generators = [vec!["simple"], difficult_instructions].concat();
         // Test difficult instructions more frequently.
         let weights = vec![simple_instructions.len(), 2, 6, 6, 2, 10];
 

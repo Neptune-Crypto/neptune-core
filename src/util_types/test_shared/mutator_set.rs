@@ -215,7 +215,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
     let leafs_and_indices = leafs
         .iter()
         .copied()
-        .zip(leaf_indices.into_iter())
+        .zip(leaf_indices)
         .collect_vec();
 
     // iterate over all trees
