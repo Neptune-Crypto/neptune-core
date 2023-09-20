@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use std::{
-    cell::RefCell,
     cmp::min,
     sync::{Arc, Mutex},
     time::Duration,
@@ -138,7 +137,7 @@ pub struct OverviewScreen {
     in_focus: bool,
     data: Arc<std::sync::Mutex<OverviewData>>,
     server: Arc<RPCClient>,
-    poll_thread: Option<Arc<RefCell<JoinHandle<()>>>>,
+    poll_thread: Option<Arc<Mutex<JoinHandle<()>>>>,
     escalatable_event: Arc<std::sync::Mutex<Option<DashboardEvent>>>,
 }
 
@@ -259,7 +258,7 @@ impl Screen for OverviewScreen {
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
         let escalatable_event_arc = self.escalatable_event.clone();
-        self.poll_thread = Some(Arc::new(RefCell::new(tokio::spawn(async move {
+        self.poll_thread = Some(Arc::new(Mutex::new(tokio::spawn(async move {
             OverviewScreen::run_polling_loop(server_arc, data_arc, escalatable_event_arc).await;
         }))));
     }
@@ -267,7 +266,7 @@ impl Screen for OverviewScreen {
     fn deactivate(&mut self) {
         self.active = false;
         if let Some(thread_handle) = &self.poll_thread {
-            thread_handle.borrow_mut().abort();
+            (*thread_handle.lock().unwrap()).abort();
         }
     }
 
