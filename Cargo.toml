@@ -57,6 +57,7 @@ triton-vm = "0.33.0"
 twenty-first = "0.32.1"
 tui = "0"
 unicode-width = "0"
+clap_complete = "4.4.1"
 
 [dev-dependencies]
 pin-project-lite = "0.2.12"
