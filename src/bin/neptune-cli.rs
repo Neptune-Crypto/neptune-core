@@ -64,6 +64,17 @@ struct Config {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Config = Config::parse();
+
+    // Check for completions command before establishing server connection.
+    if let Command::Completions = args.command {
+        if let Some(shell) = Shell::from_env() {
+            generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
+            return Ok(());
+        } else {
+            bail!("Unknown shell.  Shell completions not available.")
+        }
+    }
+
     let transport = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default);
     let client = RPCClient::new(client::Config::default(), transport.await?).spawn();
 
@@ -164,13 +175,7 @@ async fn main() -> Result<()> {
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
         }
 
-        Command::Completions => {
-            if let Some(shell) = Shell::from_env() {
-                generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
-            } else {
-                bail!("Unknown shell.  Shell completions not available.")
-            }
-        }
+        Command::Completions => {} // handled before server connection.
     }
 
     Ok(())
