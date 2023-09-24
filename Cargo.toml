@@ -19,7 +19,7 @@ bech32 = "0"
 bincode = "1"
 bytes = "1"
 bytesize = "1"
-chrono = "^0.4.26"
+chrono = "^0.4.30"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0"
 directories = "5"
