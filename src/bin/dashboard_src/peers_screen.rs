@@ -8,14 +8,14 @@ use super::{dashboard_app::DashboardEvent, screen::Screen};
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use neptune_core::{models::peer::PeerInfo, rpc_server::RPCClient};
-use tarpc::context;
-use tokio::time::sleep;
-use tokio::{select, task::JoinHandle};
-use tui::{
+use ratatui::{
     layout::{Constraint, Margin},
     style::{Color, Style},
     widgets::{Block, Borders, Cell, Row, Table, Widget},
 };
+use tarpc::context;
+use tokio::time::sleep;
+use tokio::{select, task::JoinHandle};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone)]
@@ -140,7 +140,7 @@ impl Screen for PeersScreen {
 }
 
 impl Widget for PeersScreen {
-    fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
+    fn render(self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
         // overview box
         let style: Style = if self.in_focus {
             Style::default().fg(Color::LightCyan).bg(self.bg)

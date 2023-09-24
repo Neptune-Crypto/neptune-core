@@ -21,6 +21,7 @@ bytes = "1"
 bytesize = "1"
 chrono = "^0.4.26"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4.4.1"
 crossterm = "0"
 directories = "5"
 field_count = "0.1.1"
@@ -33,6 +34,7 @@ num-traits = "0"
 num-rational = "0"
 priority-queue = "1"
 rand = "0.8"
+ratatui = "0.20.0"
 rusty-leveldb = "2"
 semver = "^1.0.18"
 serde = { version = "1", features = ["derive"] }
@@ -55,9 +57,7 @@ tracing-subscriber = { version = "0", features = [
 tracing-test = "0"
 triton-vm = "0.33.0"
 twenty-first = "0.32.1"
-tui = "0"
 unicode-width = "0"
-clap_complete = "4.4.1"
 
 [dev-dependencies]
 pin-project-lite = "0.2.12"

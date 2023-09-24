@@ -12,14 +12,14 @@ use neptune_core::{
     rpc_server::RPCClient,
 };
 use num_traits::{CheckedSub, Zero};
-use tarpc::context;
-use tokio::time::sleep;
-use tokio::{select, task::JoinHandle};
-use tui::{
+use ratatui::{
     layout::{Constraint, Margin},
     style::{Color, Style},
     widgets::{Block, Borders, Cell, Row, Table, Widget},
 };
+use tarpc::context;
+use tokio::time::sleep;
+use tokio::{select, task::JoinHandle};
 use unicode_width::UnicodeWidthStr;
 
 type BalanceUpdate = (Duration, Amount, Sign, Amount);
@@ -131,7 +131,7 @@ impl Screen for HistoryScreen {
 }
 
 impl Widget for HistoryScreen {
-    fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
+    fn render(self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
         // history box
         let style: Style = if self.in_focus {
             Style::default().fg(Color::LightCyan).bg(self.bg)
