@@ -15,13 +15,13 @@ use neptune_core::models::blockchain::shared::Hash;
 use neptune_core::models::blockchain::transaction::amount::Amount;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
-use tarpc::context;
-use tokio::{select, task::JoinHandle, time};
-use tui::{
+use ratatui::{
     layout::{Margin, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, List, ListItem, Widget},
 };
+use tarpc::context;
+use tokio::{select, task::JoinHandle, time};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -314,7 +314,7 @@ impl VerticalRectifier {
 }
 
 impl Widget for OverviewScreen {
-    fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
+    fn render(self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
         // overview box
         let style: Style = if self.in_focus {
             Style::default().fg(Color::LightCyan).bg(self.bg)

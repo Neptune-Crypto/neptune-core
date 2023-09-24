@@ -18,14 +18,14 @@ use neptune_core::{
 };
 
 use num_traits::Zero;
-use tarpc::context;
-use tokio::{sync::Mutex, time::sleep};
-use tui::{
+use ratatui::{
     layout::{Alignment, Margin},
     style::{Color, Modifier, Style},
     text::{Span, Spans, Text},
     widgets::{Block, Borders, Paragraph, Widget},
 };
+use tarpc::context;
+use tokio::{sync::Mutex, time::sleep};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendScreenWidget {
@@ -302,7 +302,7 @@ impl Screen for SendScreen {
 }
 
 impl Widget for SendScreen {
-    fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
+    fn render(self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
         let own_focus = if let Ok(of) = self.focus.try_lock() {
             of.to_owned()
         } else {

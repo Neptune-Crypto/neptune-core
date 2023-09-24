@@ -5,6 +5,14 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
+use ratatui::{
+    backend::{Backend, CrosstermBackend},
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    text::{Span, Spans, Text},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
+    Frame, Terminal,
+};
 use std::{
     cell::{RefCell, RefMut},
     collections::HashMap,
@@ -18,14 +26,6 @@ use std::{
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 use tokio::{sync::Mutex, time::sleep};
-use tui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Span, Spans, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame, Terminal,
-};
 
 use super::{
     history_screen::HistoryScreen, overview_screen::OverviewScreen, peers_screen::PeersScreen,

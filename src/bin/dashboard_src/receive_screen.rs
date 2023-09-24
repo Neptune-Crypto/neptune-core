@@ -11,13 +11,13 @@ use super::{
 };
 use crossterm::event::{Event, KeyCode};
 use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
-use tarpc::context;
-use tui::{
+use ratatui::{
     layout::{Alignment, Margin},
     style::{Color, Style},
     text::{Span, Spans, Text},
     widgets::{Block, Borders, Paragraph, Widget},
 };
+use tarpc::context;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Sign {
@@ -150,7 +150,7 @@ impl Screen for ReceiveScreen {
 }
 
 impl Widget for ReceiveScreen {
-    fn render(self, area: tui::layout::Rect, buf: &mut tui::buffer::Buffer) {
+    fn render(self, area: ratatui::layout::Rect, buf: &mut ratatui::buffer::Buffer) {
         // receive box
         let style: Style = if self.in_focus {
             Style::default().fg(Color::LightCyan).bg(self.bg)
