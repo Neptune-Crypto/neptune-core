@@ -194,7 +194,7 @@ impl Function for VerifyAoclMembership {
         std::collections::HashMap<BFieldElement, BFieldElement>,
     ) {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let num_leafs = rng.gen_range(0..100);
+        let num_leafs = rng.gen_range(1..100);
         let leafs = (0..num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();
         let mmr = get_rustyleveldb_ammr_from_digests::<Hash>(leafs);
 
