@@ -31,7 +31,7 @@ use super::screen::Screen;
 #[derive(Debug, Clone)]
 pub struct OverviewData {
     synced_balance: Option<Amount>,
-    confirmations: Option<usize>,
+    confirmations: Option<u64>,
     synchronization_percentage: Option<f64>,
 
     network: Network,
@@ -199,6 +199,7 @@ impl OverviewScreen {
                                 own_overview_data.syncing=resp.syncing;
                                 own_overview_data.synced_balance = Some(resp.synced_balance);
                                 own_overview_data.is_mining = resp.is_mining;
+                                own_overview_data.confirmations = resp.confirmations;
                             }
 
                             reset_poller!(dashboard_overview_data, Duration::from_secs(3));

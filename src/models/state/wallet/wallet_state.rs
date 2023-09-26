@@ -820,31 +820,62 @@ impl WalletState {
         self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, block)
     }
 
-    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, Amount, Sign)> {
+    /// Retrieve wallet balance history
+    ///
+    /// todo: ignore abandoned/unsynced utxo.  
+    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
+    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
         let db_lock = self.wallet_db.lock().await;
         let monitored_utxos = db_lock.monitored_utxos.clone();
         let num_monitored_utxos = monitored_utxos.len();
         let mut history = vec![];
         for i in 0..num_monitored_utxos {
             let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
-            if let Some((confirming_block, confirmation_timestamp, _)) =
+            if let Some((confirming_block, confirmation_timestamp, confirmation_height)) =
                 monitored_utxo.confirmed_in_block
             {
                 let amount = monitored_utxo.utxo.get_native_coin_amount();
                 history.push((
                     confirming_block,
                     confirmation_timestamp,
+                    confirmation_height,
                     amount,
                     Sign::NonNegative,
                 ));
-                if let Some((spending_block, spending_timestamp, _block_height)) =
+                if let Some((spending_block, spending_timestamp, spending_height)) =
                     monitored_utxo.spent_in_block
                 {
-                    history.push((spending_block, spending_timestamp, amount, Sign::Negative));
+                    history.push((
+                        spending_block,
+                        spending_timestamp,
+                        spending_height,
+                        amount,
+                        Sign::Negative,
+                    ));
                 }
             }
         }
         history
+    }
+
+    /// Retrieve block height of last change to wallet balance.
+    ///
+    /// todo: ignore abandoned/unsynced utxo.  
+    ///       also an issue for get_balance_history().
+    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
+    pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
+        let db_lock = self.wallet_db.lock().await;
+        let len = db_lock.monitored_utxos.len();
+        if len > 0 {
+            let utxo = db_lock.monitored_utxos.get(len - 1);
+            if let Some((.., confirmation_height)) = utxo.confirmed_in_block {
+                if let Some((.., spending_height)) = utxo.spent_in_block {
+                    return Some(spending_height);
+                }
+                return Some(confirmation_height);
+            }
+        }
+        None
     }
 }
 

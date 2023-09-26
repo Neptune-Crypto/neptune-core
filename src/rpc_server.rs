@@ -38,6 +38,10 @@ pub struct DashBoardOverviewDataFromClient {
 
     // `None` symbolizes failure to get mining status
     pub is_mining: Option<bool>,
+
+    // # of confirmations since last wallet balance change.
+    // `None` indicates that wallet balance has never changed.
+    pub confirmations: Option<u64>,
 }
 
 #[tarpc::service]
@@ -51,6 +55,13 @@ pub trait RPC {
 
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
+
+    /// Returns the number of blocks (confirmations) since wallet balance last changed.
+    ///
+    /// returns Option<u64>
+    ///
+    /// return value will be None if wallet has not received any incoming funds.
+    async fn get_confirmations() -> Option<u64>;
 
     /// Returns info about the peers we are connected to
     async fn get_peer_info() -> Vec<PeerInfo>;
@@ -132,6 +143,7 @@ impl RPC for NeptuneRPCServer {
     type GetNetworkFut = Ready<Network>;
     type GetListenAddressForPeersFut = Ready<Option<SocketAddr>>;
     type BlockHeightFut = Ready<BlockHeight>;
+    type GetConfirmationsFut = Ready<Option<u64>>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
     type HeadFut = Ready<Digest>;
     type HeadsFut = Ready<Vec<Digest>>;
@@ -176,6 +188,24 @@ impl RPC for NeptuneRPCServer {
         let latest_block_header =
             executor::block_on(self.state.chain.light_state.get_latest_block_header());
         future::ready(latest_block_header.height)
+    }
+
+    fn get_confirmations(self, _: context::Context) -> Self::GetConfirmationsFut {
+        match executor::block_on(self.state.wallet_state.get_latest_balance_height()) {
+            Some(latest_balance_height) => {
+                let tip_block_header =
+                    executor::block_on(self.state.chain.light_state.get_latest_block_header());
+
+                assert!(tip_block_header.height >= latest_balance_height);
+                assert!(tip_block_header.height - latest_balance_height <= u64::MAX.into());
+
+                // subtract latest balance height from chain tip.
+                // the cast to u64 is safe given we passed the above asserts.
+                let confirmations: u64 = (tip_block_header.height - latest_balance_height) as u64;
+                future::ready(Some(confirmations))
+            }
+            None => future::ready(None),
+        }
     }
 
     fn head(self, _: context::Context) -> Self::HeadFut {
@@ -317,7 +347,7 @@ impl RPC for NeptuneRPCServer {
         // sort
         let mut display_history: Vec<(Duration, Amount, Sign)> = history
             .iter()
-            .map(|(_h, t, a, s)| (*t, *a, *s))
+            .map(|(_h, t, _bh, a, s)| (*t, *a, *s))
             .collect::<Vec<_>>();
         display_history.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
@@ -327,7 +357,7 @@ impl RPC for NeptuneRPCServer {
 
     fn get_dashboard_overview_data(
         self,
-        _context: tarpc::context::Context,
+        context: tarpc::context::Context,
     ) -> Self::GetDashboardOverviewDataFut {
         let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
@@ -346,6 +376,8 @@ impl RPC for NeptuneRPCServer {
             Err(_) => None,
         };
 
+        let confirmations = executor::block_on(self.get_confirmations(context));
+
         future::ready(DashBoardOverviewDataFromClient {
             tip_header,
             syncing,
@@ -354,6 +386,7 @@ impl RPC for NeptuneRPCServer {
             mempool_tx_count,
             peer_count,
             is_mining,
+            confirmations,
         })
     }
 
