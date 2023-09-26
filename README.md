@@ -16,7 +16,7 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
 
 ## Running & Connecting
 
- - Generate a wallet file: `wallet_gen`
+ - Generate a wallet file: `neptune-wallet-gen`
  - Run neptune-core daemon: `neptune-core` with flags
    - `--peers [ip_address:port]` to connect to a given peer, for instance `--peers 51.15.139.238:9798` or `--peers 139.162.193.206:9798` or both
    - `--mine` to mine, and with `--throttled-mining` to avoid assigning too much CPU power to mining
@@ -28,7 +28,7 @@ This software comes with a dashboard that communicates with the daemon. The dash
 
 ## Command-Line Interface
 
-In addition to a dashboard, the software comes with a CLI client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available commands, execute 
+In addition to a dashboard, the software comes with a CLI client to invoke procedures in the daemon. This can be invoked from another terminal window when the daemon is running. To get all available commands, execute
 ```
 neptune-cli --help
 ```
