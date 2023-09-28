@@ -11,6 +11,7 @@ use chrono::DateTime;
 use itertools::Itertools;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
+use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::models::blockchain::shared::Hash;
 use neptune_core::models::blockchain::transaction::amount::Amount;
 use neptune_core::rpc_server::RPCClient;
@@ -31,7 +32,7 @@ use super::screen::Screen;
 #[derive(Debug, Clone)]
 pub struct OverviewData {
     synced_balance: Option<Amount>,
-    confirmations: Option<u64>,
+    confirmations: Option<BlockHeight>,
     synchronization_percentage: Option<f64>,
 
     network: Network,
@@ -91,7 +92,7 @@ impl OverviewData {
     pub fn test() -> Self {
         OverviewData {
             synced_balance: Some(Amount::zero()),
-            confirmations: Some(17),
+            confirmations: Some(17.into()),
             synchronization_percentage: Some(99.5),
 
             listen_address: None,
