@@ -41,7 +41,7 @@ pub struct DashBoardOverviewDataFromClient {
 
     // # of confirmations since last wallet balance change.
     // `None` indicates that wallet balance has never changed.
-    pub confirmations: Option<u64>,
+    pub confirmations: Option<BlockHeight>,
 }
 
 #[tarpc::service]
@@ -58,10 +58,10 @@ pub trait RPC {
 
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
-    /// returns Option<u64>
+    /// returns Option<BlockHeight>
     ///
     /// return value will be None if wallet has not received any incoming funds.
-    async fn get_confirmations() -> Option<u64>;
+    async fn get_confirmations() -> Option<BlockHeight>;
 
     /// Returns info about the peers we are connected to
     async fn get_peer_info() -> Vec<PeerInfo>;
@@ -143,7 +143,7 @@ impl RPC for NeptuneRPCServer {
     type GetNetworkFut = Ready<Network>;
     type GetListenAddressForPeersFut = Ready<Option<SocketAddr>>;
     type BlockHeightFut = Ready<BlockHeight>;
-    type GetConfirmationsFut = Ready<Option<u64>>;
+    type GetConfirmationsFut = Ready<Option<BlockHeight>>;
     type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
     type HeadFut = Ready<Digest>;
     type HeadsFut = Ready<Vec<Digest>>;
@@ -197,11 +197,12 @@ impl RPC for NeptuneRPCServer {
                     executor::block_on(self.state.chain.light_state.get_latest_block_header());
 
                 assert!(tip_block_header.height >= latest_balance_height);
-                assert!(tip_block_header.height - latest_balance_height <= u64::MAX.into());
 
                 // subtract latest balance height from chain tip.
-                // the cast to u64 is safe given we passed the above asserts.
-                let confirmations: u64 = (tip_block_header.height - latest_balance_height) as u64;
+                // note: BlockHeight is u64 internally and BlockHeight::sub() returns i128.
+                //       The subtraction and cast is safe given we passed the above assert.
+                let confirmations: BlockHeight =
+                    ((tip_block_header.height - latest_balance_height) as u64).into();
                 future::ready(Some(confirmations))
             }
             None => future::ready(None),

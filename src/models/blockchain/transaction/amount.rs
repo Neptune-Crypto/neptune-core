@@ -43,6 +43,16 @@ pub enum Sign {
     Negative,
 }
 
+impl Display for Sign {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match *self {
+            Self::NonNegative => "",
+            Self::Negative => "-",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 pub const AMOUNT_SIZE_FOR_U32: usize = 4;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec)]
