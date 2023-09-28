@@ -822,7 +822,7 @@ impl WalletState {
 
     /// Retrieve wallet balance history
     ///
-    /// todo: ignore abandoned/unsynced utxo.  
+    /// todo: ignore abandoned/unsynced utxo.
     /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
     pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
         let db_lock = self.wallet_db.lock().await;
@@ -856,63 +856,6 @@ impl WalletState {
             }
         }
         history
-    }
-
-    /// Retrieve block height of last change to wallet balance.
-    ///
-    /// note: this fn could be implemented as:
-    ///   1. get_balance_history()
-    ///   2. sort by height
-    ///   3. return height of last entry.
-    ///
-    /// this implementation is a bit more efficient as it avoids
-    ///   the sort and some minor work looking up amount and confirmation
-    ///   height of each utxo.
-    ///
-    /// Presently this is o(n) with the number of monitored utxos.
-    /// if storage could keep track of latest spend utxo, then this could
-    /// be o(1).
-    ///
-    /// todo: ignore abandoned/unsynced utxo.  
-    ///       also an issue for get_balance_history().
-    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
-    pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
-        let monitored_utxos = self.wallet_db.lock().await.monitored_utxos.clone();
-        let len = monitored_utxos.len();
-
-        if len > 0 {
-            let mut latest: BlockHeight = 0.into();
-
-            // note: would be nicer to use an iterator to find max spending_height.
-            // perhaps someday: https://github.com/Neptune-Crypto/twenty-first/issues/139
-            for i in 0..len {
-                // latest change to balance could be a spend utxo, and it could be anywhere
-                // in the monitored_utxos list, so we must check each entry in list.
-                let utxo = monitored_utxos.get(i);
-                if let Some((.., spending_height)) = utxo.spent_in_block {
-                    if spending_height > latest {
-                        latest = spending_height;
-                    }
-                }
-
-                // if latest change is an incoming utxo, we can save some work by checking only
-                // the last entry because monitored_utxos is already ordered by
-                // confirmation_height ascending
-                if i == len - 1 {
-                    if let Some((.., confirmation_height)) = utxo.confirmed_in_block {
-                        if confirmation_height > latest {
-                            latest = confirmation_height;
-                        }
-                    }
-                }
-            }
-            assert!(
-                latest > 0.into() || (len == 1 && monitored_utxos.get(0).spent_in_block.is_none())
-            );
-            Some(latest)
-        } else {
-            None
-        }
     }
 }
 

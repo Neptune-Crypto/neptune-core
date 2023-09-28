@@ -191,7 +191,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_confirmations(self, _: context::Context) -> Self::GetConfirmationsFut {
-        match executor::block_on(self.state.wallet_state.get_latest_balance_height()) {
+        match executor::block_on(self.state.get_latest_balance_height()) {
             Some(latest_balance_height) => {
                 let tip_block_header =
                     executor::block_on(self.state.chain.light_state.get_latest_block_header());

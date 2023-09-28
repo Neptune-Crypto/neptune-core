@@ -20,6 +20,7 @@ use self::networking_state::NetworkingState;
 use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
+use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::transaction::transaction_kernel::{
     PubScriptHashAndInput, TransactionKernel,
 };
@@ -86,6 +87,71 @@ impl GlobalState {
         let block_lock = self.chain.light_state.latest_block.lock().await;
         self.wallet_state
             .get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
+    }
+
+    /// Retrieve block height of last change to wallet balance.
+    ///
+    /// note: this fn could be implemented as:
+    ///   1. get_balance_history()
+    ///   2. sort by height
+    ///   3. return height of last entry.
+    ///
+    /// this implementation is a bit more efficient as it avoids
+    ///   the sort and some minor work looking up amount and confirmation
+    ///   height of each utxo.
+    ///
+    /// Presently this is o(n) with the number of monitored utxos.
+    /// if storage could keep track of latest spend utxo, then this could
+    /// be o(1).
+    ///
+    /// todo: ignore abandoned/unsynced utxo.
+    ///       also an issue for get_balance_history().
+    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
+    pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
+        let current_tip_digest = self.chain.light_state.get_latest_block().await.hash;
+        let monitored_utxos = self
+            .wallet_state
+            .wallet_db
+            .lock()
+            .await
+            .monitored_utxos
+            .clone();
+        let len = monitored_utxos.len();
+
+        let mut latest: Option<BlockHeight> = None;
+        // note: would be nicer to use an iterator to find max spending_height.
+        // perhaps someday: https://github.com/Neptune-Crypto/twenty-first/issues/139
+        for i in 0..len {
+            // latest change to balance could be a spent utxo, and it could be anywhere
+            // in the monitored_utxos list, so we must check each entry in list.
+            let utxo = monitored_utxos.get(i);
+            if let Some((.., spending_height)) = utxo.spent_in_block {
+                if utxo
+                    .get_membership_proof_for_block(&current_tip_digest)
+                    .is_some()
+                    && (latest.is_none() || latest.is_some_and(|x| x < spending_height))
+                {
+                    latest = Some(spending_height);
+                }
+            }
+
+            // if latest change is an incoming utxo, we can save some work by checking only
+            // the last entry because monitored_utxos is already ordered by
+            // confirmation_height ascending
+            if i == len - 1 {
+                if let Some((.., confirmation_height)) = utxo.confirmed_in_block {
+                    if utxo
+                        .get_membership_proof_for_block(&current_tip_digest)
+                        .is_some()
+                        && (latest.is_none() || latest.is_some_and(|x| x < confirmation_height))
+                    {
+                        latest = Some(confirmation_height);
+                    }
+                }
+            }
+        }
+
+        latest
     }
 
     /// Create a transaction that sends coins to the given
