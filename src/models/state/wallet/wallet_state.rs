@@ -960,6 +960,10 @@ mod tests {
             monitored_utxos_count_init.is_zero(),
             "Monitored UTXO list must be empty at init"
         );
+        assert!(
+            own_global_state.get_latest_balance_height().await.is_none(),
+            "Latest balance height must be None at init"
+        );
 
         // Add two blocks with no UTXOs for us
         let other_recipient_address = WalletSecret::new(generate_secret_key())
@@ -994,6 +998,7 @@ mod tests {
                     Some(latest_block.header.proof_of_work_family),
                 )
                 .unwrap();
+            *own_global_state.chain.light_state.latest_block.lock().await = new_block.clone();
             latest_block = new_block;
         }
         assert!(
@@ -1006,6 +1011,10 @@ mod tests {
                 .len()
                 .is_zero(),
             "Monitored UTXO list must be empty at height 2"
+        );
+        assert!(
+            own_global_state.get_latest_balance_height().await.is_none(),
+            "Latest balance height must be None at height 2"
         );
 
         // Add block 3a with a coinbase UTXO for us
@@ -1049,6 +1058,7 @@ mod tests {
                 Some(latest_block.header.proof_of_work_family),
             )
             .unwrap();
+        *own_global_state.chain.light_state.latest_block.lock().await = block_3a.clone();
         assert!(
             own_global_state
                 .wallet_state
@@ -1071,6 +1081,11 @@ mod tests {
                 .abandoned_at
                 .is_none(),
             "MUTXO may not be marked as abandoned at block 3a"
+        );
+        assert_eq!(
+            Some(3.into()),
+            own_global_state.get_latest_balance_height().await,
+            "Latest balance height 3 at block 3a"
         );
 
         // Fork the blockchain with 3b, with no coinbase for us
@@ -1101,6 +1116,7 @@ mod tests {
                 Some(latest_block.header.proof_of_work_family),
             )
             .unwrap();
+        *own_global_state.chain.light_state.latest_block.lock().await = block_3b.clone();
         assert!(
             own_global_state
             .wallet_state
@@ -1112,6 +1128,10 @@ mod tests {
                 .abandoned_at
                 .is_none(),
             "MUTXO may not be marked as abandoned at block 3b, as the abandoned chain is not yet old enough and has not been pruned"
+        );
+        assert!(
+            own_global_state.get_latest_balance_height().await.is_none(),
+            "Latest balance height must be None at block 3b"
         );
         let prune_count_3b = own_global_state
             .wallet_state
@@ -1155,6 +1175,7 @@ mod tests {
                     Some(latest_block.header.proof_of_work_family),
                 )
                 .unwrap();
+            *own_global_state.chain.light_state.latest_block.lock().await = new_block.clone();
             latest_block = new_block;
         }
 
@@ -1180,6 +1201,10 @@ mod tests {
                 .abandoned_at
                 .is_none(),
             "MUTXO must not be abandoned at height 11"
+        );
+        assert!(
+            own_global_state.get_latest_balance_height().await.is_none(),
+            "Latest balance height must be None at height 11"
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
@@ -1209,6 +1234,7 @@ mod tests {
                 Some(latest_block.header.proof_of_work_family),
             )
             .unwrap();
+        *own_global_state.chain.light_state.latest_block.lock().await = block_12.clone();
         assert!(
             own_global_state
                 .wallet_state
@@ -1248,6 +1274,10 @@ mod tests {
                 .abandoned_at
                 .unwrap(),
             "MUTXO must be marked as abandoned at height 12, after pruning"
+        );
+        assert!(
+            own_global_state.get_latest_balance_height().await.is_none(),
+            "Latest balance height must be None at height 12"
         );
     }
 }
