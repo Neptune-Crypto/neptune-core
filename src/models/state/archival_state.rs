@@ -113,15 +113,15 @@ impl ArchivalState {
     /// DB lock.
     pub fn find_path_with_lock(
         &self,
-        start: &Digest,
-        stop: &Digest,
+        start: Digest,
+        stop: Digest,
         block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
     ) -> (Vec<Digest>, Digest, Vec<Digest>) {
         // We build two lists, initially populated with the start
         // and stop of the walk. We extend the lists downwards by
         // appending predecessors.
-        let mut leaving = vec![*start];
-        let mut arriving = vec![*stop];
+        let mut leaving = vec![start];
+        let mut arriving = vec![stop];
 
         // Get DB lock and hold it until this function call is completed.
         // This is done to avoid having to take and release the lock a lot of times.
@@ -179,8 +179,8 @@ impl ArchivalState {
     /// down steps and the list of up steps.
     pub async fn find_path(
         &self,
-        start: &Digest,
-        stop: &Digest,
+        start: Digest,
+        stop: Digest,
     ) -> (Vec<Digest>, Digest, Vec<Digest>) {
         let mut block_db_lock = self.block_index_db.lock().await;
         self.find_path_with_lock(start, stop, &mut block_db_lock)
@@ -586,9 +586,7 @@ impl ArchivalState {
         }
 
         // Find the path from block to tip and check if this involves stepping back
-        let (backwards, _, _) = self
-            .find_path(&block_header_digest, &tip_header_digest)
-            .await;
+        let (backwards, _, _) = self.find_path(block_header_digest, tip_header_digest).await;
 
         backwards.is_empty()
     }
@@ -645,8 +643,8 @@ impl ArchivalState {
             } else {
                 // Non-trivial path from current mutator set sync digest to new block
                 self.find_path_with_lock(
-                    &ms_block_sync_digest,
-                    &new_block.header.prev_block_digest,
+                    ms_block_sync_digest,
+                    new_block.header.prev_block_digest,
                     block_db_lock,
                 )
             };
@@ -1994,7 +1992,7 @@ mod archival_state_tests {
 
         // Test that `find_path` returns the correct result
         let (backwards_0, luca_0, forwards_0) =
-            archival_state.find_path(&genesis.hash, &genesis.hash).await;
+            archival_state.find_path(genesis.hash, genesis.hash).await;
         assert!(
             backwards_0.is_empty(),
             "Backwards path from genesis to genesis is empty"
@@ -2021,7 +2019,7 @@ mod archival_state_tests {
 
         // Test 1a
         let (backwards_1, luca_1, forwards_1) = archival_state
-            .find_path(&genesis.hash, &mock_block_1_a.hash)
+            .find_path(genesis.hash, mock_block_1_a.hash)
             .await;
         assert!(
             backwards_1.is_empty(),
@@ -2036,7 +2034,7 @@ mod archival_state_tests {
 
         // Test 1b
         let (backwards_2, luca_2, forwards_2) = archival_state
-            .find_path(&genesis.hash, &mock_block_1_b.hash)
+            .find_path(genesis.hash, mock_block_1_b.hash)
             .await;
         assert!(
             backwards_2.is_empty(),
@@ -2051,7 +2049,7 @@ mod archival_state_tests {
 
         // Test 1a to 1b
         let (backwards_3, luca_3, forwards_3) = archival_state
-            .find_path(&mock_block_1_a.hash, &mock_block_1_b.hash)
+            .find_path(mock_block_1_a.hash, mock_block_1_b.hash)
             .await;
         assert_eq!(
             vec![mock_block_1_a.hash],
@@ -2076,15 +2074,15 @@ mod archival_state_tests {
 
         /// Assert that the `find_path` result agrees with the result from `get_ancestor_block_digests`
         async fn dag_walker_leash_prop(
-            start: &Digest,
-            stop: &Digest,
+            start: Digest,
+            stop: Digest,
             archival_state: &ArchivalState,
         ) {
             let (mut backwards, luca, mut forwards) = archival_state.find_path(start, stop).await;
 
             if let Some(last_forward) = forwards.pop() {
                 assert_eq!(
-                    *stop, last_forward,
+                    stop, last_forward,
                     "Last forward digest must be `stop` digest"
                 );
 
@@ -2120,7 +2118,7 @@ mod archival_state_tests {
                 // does not return the starting point
                 let first_backwards = backwards.remove(0);
                 assert_eq!(
-                    *start, first_backwards,
+                    start, first_backwards,
                     "First backwards must be `start` digest"
                 );
             }
@@ -2194,8 +2192,8 @@ mod archival_state_tests {
                 "only chain {} is canonical",
                 i
             );
-            dag_walker_leash_prop(&block.hash, &mock_block_4_a.hash, &archival_state).await;
-            dag_walker_leash_prop(&mock_block_4_a.hash, &block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash, mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_4_a.hash, block.hash, &archival_state).await;
         }
 
         assert!(
@@ -2236,8 +2234,8 @@ mod archival_state_tests {
                 "canonical chain {} is canonical",
                 i
             );
-            dag_walker_leash_prop(&block.hash, &mock_block_4_a.hash, &archival_state).await;
-            dag_walker_leash_prop(&mock_block_4_a.hash, &block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash, mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_4_a.hash, block.hash, &archival_state).await;
         }
 
         // These blocks do not belong to the canonical chain since block 4_a has a higher PoW family
@@ -2258,8 +2256,8 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(&block.hash, &mock_block_4_a.hash, &archival_state).await;
-            dag_walker_leash_prop(&mock_block_4_a.hash, &block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash, mock_block_4_a.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_4_a.hash, block.hash, &archival_state).await;
         }
 
         // Make a complicated tree and verify that the function identifies the correct blocks as part
@@ -2340,8 +2338,8 @@ mod archival_state_tests {
                 "canonical chain {} is canonical, complicated",
                 i
             );
-            dag_walker_leash_prop(&mock_block_6_d.hash, &block.hash, &archival_state).await;
-            dag_walker_leash_prop(&block.hash, &mock_block_6_d.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_d.hash, block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash, mock_block_6_d.hash, &archival_state).await;
         }
 
         for (i, block) in [
@@ -2371,8 +2369,8 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(&mock_block_6_d.hash, &block.hash, &archival_state).await;
-            dag_walker_leash_prop(&block.hash, &mock_block_6_d.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_d.hash, block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash, mock_block_6_d.hash, &archival_state).await;
         }
 
         // Make a new block, 6b, canonical and verify that all checks work
@@ -2407,8 +2405,8 @@ mod archival_state_tests {
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(&mock_block_6_b.hash, &block.hash, &archival_state).await;
-            dag_walker_leash_prop(&block.hash, &mock_block_6_b.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_b.hash, block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash, mock_block_6_b.hash, &archival_state).await;
         }
 
         for (i, block) in [
@@ -2430,8 +2428,8 @@ mod archival_state_tests {
                 "canonical chain {} is canonical, complicated",
                 i
             );
-            dag_walker_leash_prop(&mock_block_6_b.hash, &block.hash, &archival_state).await;
-            dag_walker_leash_prop(&block.hash, &mock_block_6_b.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_b.hash, block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash, mock_block_6_b.hash, &archival_state).await;
         }
 
         // An explicit test of `find_path`
@@ -2448,7 +2446,7 @@ mod archival_state_tests {
         //
         // Note that in the later test, 6b becomes the tip.
         let (backwards, luca, forwards) = archival_state
-            .find_path(&mock_block_5_e.hash, &mock_block_6_b.hash)
+            .find_path(mock_block_5_e.hash, mock_block_6_b.hash)
             .await;
         assert_eq!(
             vec![

@@ -146,7 +146,7 @@ impl Function for ComputeCanonicalCommitment {
             membership_proof.sender_randomness
         );
         println!("\nitem:\n{}", item);
-        let c = commit::<Hash>(&item, &membership_proof.sender_randomness, &receiver_digest);
+        let c = commit::<Hash>(item, membership_proof.sender_randomness, receiver_digest);
 
         // push onto stack
         stack.push(mp_pointer);

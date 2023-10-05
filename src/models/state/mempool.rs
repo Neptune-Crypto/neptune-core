@@ -79,13 +79,13 @@ impl Mempool {
     }
 
     /// Computes in O(1) from HashMap
-    pub fn contains(&self, transaction_id: &Digest) -> bool {
+    pub fn contains(&self, transaction_id: Digest) -> bool {
         let lock = self.internal.read().unwrap();
         lock.contains(transaction_id)
     }
 
     /// Computes in O(1) from HashMap
-    pub fn get(&self, transaction_id: &Digest) -> Option<Transaction> {
+    pub fn get(&self, transaction_id: Digest) -> Option<Transaction> {
         let lock = self.internal.read().unwrap();
         lock.get(transaction_id).cloned()
     }
@@ -99,7 +99,7 @@ impl Mempool {
 
     /// The operation is performed in Ο(log(N)) time (worst case).
     /// Computes in θ(lg N)
-    pub fn remove(&self, transaction_id: &Digest) -> Option<Transaction> {
+    pub fn remove(&self, transaction_id: Digest) -> Option<Transaction> {
         let mut lock = self.internal.write().unwrap();
         lock.remove(transaction_id)
     }
@@ -168,7 +168,7 @@ impl Mempool {
     /// // insert transactions here.
     /// let mut most_valuable_transactions = vec![];
     /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
-    ///    let t = mempool.get(&transaction_digest);
+    ///    let t = mempool.get(transaction_digest);
     ///    most_valuable_transactions.push(t);
     /// }
     /// ```
@@ -231,12 +231,12 @@ impl MempoolInternal {
         }
     }
 
-    fn contains(&self, transaction_id: &Digest) -> bool {
-        self.tx_dictionary.contains_key(transaction_id)
+    fn contains(&self, transaction_id: Digest) -> bool {
+        self.tx_dictionary.contains_key(&transaction_id)
     }
 
-    fn get(&self, transaction_id: &Digest) -> Option<&Transaction> {
-        self.tx_dictionary.get(transaction_id)
+    fn get(&self, transaction_id: Digest) -> Option<&Transaction> {
+        self.tx_dictionary.get(&transaction_id)
     }
 
     /// Returns `Some(txid, transaction)` iff a transcation conflicts with a block that's already in
@@ -287,7 +287,7 @@ impl MempoolInternal {
             if tx.fee_density() < transaction.fee_density() {
                 // If new transaction has a higher fee density than the one previously seen
                 // remove the old one.
-                self.remove(&txid);
+                self.remove(txid);
             } else {
                 // If new transaction has a lower fee density than the one previous seen,
                 // ignore it. Stop execution here.
@@ -314,9 +314,9 @@ impl MempoolInternal {
         None
     }
 
-    fn remove(&mut self, transaction_id: &Digest) -> Option<Transaction> {
-        if let rv @ Some(_) = self.tx_dictionary.remove(transaction_id) {
-            self.queue.remove(transaction_id);
+    fn remove(&mut self, transaction_id: Digest) -> Option<Transaction> {
+        if let rv @ Some(_) = self.tx_dictionary.remove(&transaction_id) {
+            self.queue.remove(&transaction_id);
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
             return rv;
         }
@@ -342,7 +342,7 @@ impl MempoolInternal {
                 break;
             }
 
-            if let Some(transaction_ptr) = self.get(&transaction_digest.clone()) {
+            if let Some(transaction_ptr) = self.get(transaction_digest) {
                 let transaction_copy = transaction_ptr.to_owned();
                 let transaction_size = transaction_copy.get_size();
 
@@ -393,15 +393,15 @@ impl MempoolInternal {
     {
         let mut victims = vec![];
 
-        for (transaction_id, _fee_density) in self.queue.iter() {
+        for (&transaction_id, _fee_density) in self.queue.iter() {
             let transaction = self.get(transaction_id).unwrap();
-            if !predicate((*transaction_id, transaction)) {
-                victims.push(*transaction_id);
+            if !predicate((transaction_id, transaction)) {
+                victims.push(transaction_id);
             }
         }
 
         for t in victims {
-            self.remove(&t);
+            self.remove(t);
         }
 
         debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -524,7 +524,7 @@ mod tests {
         let wallet_state = get_mock_wallet_state(None, network).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
-        let transaction_digest = &Hash::hash(&transaction);
+        let transaction_digest = Hash::hash(&transaction);
         assert!(!mempool.contains(transaction_digest));
         mempool.insert(&transaction);
         assert!(mempool.contains(transaction_digest));
@@ -845,7 +845,7 @@ mod tests {
             tx_by_preminer_low_fee,
             preminer_state
                 .mempool
-                .get(&Hash::hash(&tx_by_preminer_low_fee))
+                .get(Hash::hash(&tx_by_preminer_low_fee))
                 .unwrap()
         );
 
@@ -860,7 +860,7 @@ mod tests {
             tx_by_preminer_high_fee,
             preminer_state
                 .mempool
-                .get(&Hash::hash(&tx_by_preminer_high_fee))
+                .get(Hash::hash(&tx_by_preminer_high_fee))
                 .unwrap()
         );
 
@@ -875,7 +875,7 @@ mod tests {
             tx_by_preminer_high_fee,
             preminer_state
                 .mempool
-                .get(&Hash::hash(&tx_by_preminer_high_fee))
+                .get(Hash::hash(&tx_by_preminer_high_fee))
                 .unwrap()
         );
 

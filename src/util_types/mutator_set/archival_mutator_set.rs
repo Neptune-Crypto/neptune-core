@@ -39,19 +39,19 @@ where
 {
     fn prove(
         &mut self,
-        item: &Digest,
-        sender_randomness: &Digest,
-        receiver_preimage: &Digest,
+        item: Digest,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
     ) -> MsMembershipProof<H> {
         self.kernel
             .prove(item, sender_randomness, receiver_preimage)
     }
 
-    fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.kernel.verify(item, membership_proof)
     }
 
-    fn drop(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
+    fn drop(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         self.kernel.drop(item, membership_proof)
     }
 
@@ -192,9 +192,9 @@ where
     /// relevant indices.
     pub fn restore_membership_proof(
         &self,
-        item: &Digest,
-        sender_randomness: &Digest,
-        receiver_preimage: &Digest,
+        item: Digest,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
         aocl_index: u64,
     ) -> Result<MsMembershipProof<H>, Box<dyn Error>> {
         if self.kernel.aocl.is_empty() {
@@ -381,9 +381,9 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -394,14 +394,14 @@ mod archival_mutator_set_tests {
             assert!(res.is_ok());
 
             archival_mutator_set.add(&addition_record);
-            assert!(archival_mutator_set.verify(&item, &membership_proof));
+            assert!(archival_mutator_set.verify(item, &membership_proof));
 
             // Verify that we can just read out the same membership proofs from the
             // archival MMR as those we get through the membership proof book keeping.
             let archival_membership_proof = match archival_mutator_set.restore_membership_proof(
-                &item,
-                &sender_randomness,
-                &receiver_preimage,
+                item,
+                sender_randomness,
+                receiver_preimage,
                 i,
             ) {
                 Err(err) => panic!(
@@ -443,11 +443,11 @@ mod archival_mutator_set_tests {
 
             let commitment_before_add = archival_mutator_set.hash();
             archival_mutator_set.add(&addition_record);
-            assert!(archival_mutator_set.verify(&item, &membership_proof));
+            assert!(archival_mutator_set.verify(item, &membership_proof));
 
             archival_mutator_set.revert_add(&addition_record);
             let commitment_after_revert = archival_mutator_set.hash();
-            assert!(!archival_mutator_set.verify(&item, &membership_proof));
+            assert!(!archival_mutator_set.verify(item, &membership_proof));
             assert_eq!(commitment_before_add, commitment_after_revert);
         }
 
@@ -462,7 +462,7 @@ mod archival_mutator_set_tests {
             records.push(record);
             commitments_before.push(archival_mutator_set.hash());
             archival_mutator_set.add(&addition_record);
-            assert!(archival_mutator_set.verify(&item, &membership_proof));
+            assert!(archival_mutator_set.verify(item, &membership_proof));
         }
 
         assert_eq!(n_iterations, records.len());
@@ -473,7 +473,7 @@ mod archival_mutator_set_tests {
         for (item, addition_record, membership_proof) in records.into_iter().rev() {
             archival_mutator_set.revert_add(&addition_record);
             let commitment_after_revert = archival_mutator_set.hash();
-            assert!(!archival_mutator_set.verify(&item, &membership_proof));
+            assert!(!archival_mutator_set.verify(item, &membership_proof));
 
             let commitment_before_add = commitments_before.pop().unwrap();
             assert_eq!(
@@ -528,7 +528,7 @@ mod archival_mutator_set_tests {
             archival_mutator_set.add(&addition_record);
             msa.add(&addition_record);
 
-            let indices = membership_proof.compute_indices(&item).to_vec();
+            let indices = membership_proof.compute_indices(item).to_vec();
 
             for index in indices {
                 let seen_before = all_indices.insert(index, current_item);
@@ -553,14 +553,14 @@ mod archival_mutator_set_tests {
         ] {
             assert!(
                 ms.verify(
-                    &items[saw_collission_at.0 .0],
+                    items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
                 ),
                 "First colliding MS MP must be valid"
             );
             assert!(
                 ms.verify(
-                    &items[saw_collission_at.0 .1],
+                    items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
                 ),
                 "Second colliding MS MP must be valid"
@@ -574,7 +574,7 @@ mod archival_mutator_set_tests {
         );
         let digest_before_removal = archival_mutator_set.hash();
         let rem0 =
-            archival_mutator_set.drop(&items[saw_collission_at.0 .0], &mps[saw_collission_at.0 .0]);
+            archival_mutator_set.drop(items[saw_collission_at.0 .0], &mps[saw_collission_at.0 .0]);
         archival_mutator_set.remove(&rem0);
         msa.remove(&rem0);
         assert!(
@@ -591,7 +591,7 @@ mod archival_mutator_set_tests {
         ] {
             assert!(
                 !ms.verify(
-                    &items[saw_collission_at.0 .0],
+                    items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
                 ),
                 "First colliding MS MP must be invalid after removal"
@@ -600,7 +600,7 @@ mod archival_mutator_set_tests {
 
         // Remove 2nd colliding element
         let rem1 =
-            archival_mutator_set.drop(&items[saw_collission_at.0 .1], &mps[saw_collission_at.0 .1]);
+            archival_mutator_set.drop(items[saw_collission_at.0 .1], &mps[saw_collission_at.0 .1]);
         archival_mutator_set.remove(&rem1);
         msa.remove(&rem1);
         assert!(
@@ -617,7 +617,7 @@ mod archival_mutator_set_tests {
         ] {
             assert!(
                 !ms.verify(
-                    &items[saw_collission_at.0 .1],
+                    items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
                 ),
                 "Second colliding MS MP must be invalid after removal"
@@ -636,7 +636,7 @@ mod archival_mutator_set_tests {
         );
 
         // Update all MPs
-        for (i, (mp, itm)) in mps.iter_mut().zip_eq(items.iter()).enumerate() {
+        for (i, (mp, &itm)) in mps.iter_mut().zip_eq(items.iter()).enumerate() {
             mp.revert_update_from_remove(&rem0).unwrap();
             assert!(
                 i == saw_collission_at.0 .1 || archival_mutator_set.verify(itm, mp),
@@ -652,7 +652,7 @@ mod archival_mutator_set_tests {
         );
 
         // Update all MPs
-        for (mp, itm) in mps.iter_mut().zip_eq(items.iter()) {
+        for (mp, &itm) in mps.iter_mut().zip_eq(items.iter()) {
             mp.revert_update_from_remove(&rem1).unwrap();
             assert!(
                 archival_mutator_set.verify(itm, mp),
@@ -679,7 +679,7 @@ mod archival_mutator_set_tests {
         let (item, addition_record, membership_proof) = record;
         archival_mutator_set.add(&addition_record);
 
-        let removal_record = archival_mutator_set.drop(&item, &membership_proof);
+        let removal_record = archival_mutator_set.drop(item, &membership_proof);
 
         // This next line should panic, as we're attempting to remove an index that is not present
         // in the active window
@@ -728,7 +728,7 @@ mod archival_mutator_set_tests {
             let (item, addition_record, membership_proof) = record.clone();
             records.push(record);
             archival_mutator_set.add(&addition_record);
-            assert!(archival_mutator_set.verify(&item, &membership_proof));
+            assert!(archival_mutator_set.verify(item, &membership_proof));
         }
 
         for (idx, (item, _addition_record, expired_membership_proof)) in
@@ -737,23 +737,23 @@ mod archival_mutator_set_tests {
             println!("revert_remove() #{}", idx);
             let restored_membership_proof = archival_mutator_set
                 .restore_membership_proof(
-                    &item,
-                    &expired_membership_proof.sender_randomness,
-                    &expired_membership_proof.receiver_preimage,
+                    item,
+                    expired_membership_proof.sender_randomness,
+                    expired_membership_proof.receiver_preimage,
                     expired_membership_proof.auth_path_aocl.leaf_index,
                 )
                 .unwrap();
-            assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
+            assert!(archival_mutator_set.verify(item, &restored_membership_proof));
 
-            let removal_record = archival_mutator_set.drop(&item, &restored_membership_proof);
+            let removal_record = archival_mutator_set.drop(item, &restored_membership_proof);
             let commitment_before_remove = archival_mutator_set.hash();
             archival_mutator_set.remove(&removal_record);
-            assert!(!archival_mutator_set.verify(&item, &restored_membership_proof));
+            assert!(!archival_mutator_set.verify(item, &restored_membership_proof));
 
             archival_mutator_set.revert_remove(&removal_record);
             let commitment_after_revert = archival_mutator_set.hash();
             assert_eq!(commitment_before_remove, commitment_after_revert);
-            assert!(archival_mutator_set.verify(&item, &restored_membership_proof));
+            assert!(archival_mutator_set.verify(item, &restored_membership_proof));
         }
     }
 
@@ -772,9 +772,9 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -791,15 +791,15 @@ mod archival_mutator_set_tests {
         }
 
         let mut removal_records: Vec<RemovalRecord<H>> = vec![];
-        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+        for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             removal_records.push(archival_mutator_set.drop(item, mp));
         }
 
-        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+        for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(archival_mutator_set.verify(item, mp));
         }
         archival_mutator_set.batch_remove(removal_records, &mut []);
-        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+        for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(!archival_mutator_set.verify(item, mp));
         }
     }
@@ -819,9 +819,9 @@ mod archival_mutator_set_tests {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
                 let membership_proof =
-                    archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -840,7 +840,7 @@ mod archival_mutator_set_tests {
             let mut rng = rand::thread_rng();
             let mut skipped_removes: Vec<bool> = vec![];
             let mut removal_records: Vec<RemovalRecord<H>> = vec![];
-            for (_, (mp, item)) in membership_proofs.iter().zip_eq(items.iter()).enumerate() {
+            for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
                 let skipped = rng.gen_range(0.0..1.0) < remove_factor;
                 skipped_removes.push(skipped);
                 if !skipped {
@@ -848,7 +848,7 @@ mod archival_mutator_set_tests {
                 }
             }
 
-            for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+            for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
                 assert!(archival_mutator_set.verify(item, mp));
             }
 
@@ -858,13 +858,13 @@ mod archival_mutator_set_tests {
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
             );
 
-            for ((mp, item), skipped) in membership_proofs
+            for ((mp, &item), skipped) in membership_proofs
                 .iter()
                 .zip_eq(items.iter())
                 .zip_eq(skipped_removes.into_iter())
             {
                 // If this removal record was not applied, then the membership proof must verify
-                assert!(skipped == archival_mutator_set.verify(item, mp));
+                assert_eq!(skipped, archival_mutator_set.verify(item, mp));
             }
 
             // Verify that removal record indices were applied. If not, below function call will crash.
@@ -888,10 +888,9 @@ mod archival_mutator_set_tests {
         let item: Digest = rng.gen();
         let sender_randomness: Digest = rng.gen();
         let receiver_preimage: Digest = rng.gen();
-        let addition_record =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+        let addition_record = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
         let membership_proof =
-            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+            archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
 
         (item, addition_record, membership_proof)
     }
@@ -904,10 +903,9 @@ mod archival_mutator_set_tests {
         archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
     ) -> (Digest, AdditionRecord, MsMembershipProof<H>) {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let addition_record =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+        let addition_record = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
         let membership_proof =
-            archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+            archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
 
         (item, addition_record, membership_proof)
     }

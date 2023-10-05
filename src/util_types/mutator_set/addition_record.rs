@@ -40,11 +40,8 @@ mod addition_record_tests {
     fn get_size_test() {
         type H = Tip5;
 
-        let addition_record_0: AdditionRecord = commit::<H>(
-            &H::hash(&1492u128),
-            &H::hash(&1522u128),
-            &H::hash(&1521u128),
-        );
+        let addition_record_0: AdditionRecord =
+            commit::<H>(H::hash(&1492u128), H::hash(&1522u128), H::hash(&1521u128));
 
         assert_eq!(std::mem::size_of::<Digest>(), addition_record_0.get_size());
     }
@@ -53,17 +50,11 @@ mod addition_record_tests {
     fn hash_identity_test() {
         type H = Tip5;
 
-        let addition_record_0: AdditionRecord = commit::<H>(
-            &H::hash(&1492u128),
-            &H::hash(&1522u128),
-            &H::hash(&1521u128),
-        );
+        let addition_record_0: AdditionRecord =
+            commit::<H>(H::hash(&1492u128), H::hash(&1522u128), H::hash(&1521u128));
 
-        let addition_record_1: AdditionRecord = commit::<H>(
-            &H::hash(&1492u128),
-            &H::hash(&1522u128),
-            &H::hash(&1521u128),
-        );
+        let addition_record_1: AdditionRecord =
+            commit::<H>(H::hash(&1492u128), H::hash(&1522u128), H::hash(&1521u128));
 
         assert_eq!(
             H::hash(&addition_record_0),
@@ -71,11 +62,8 @@ mod addition_record_tests {
             "Two addition records with same commitments and same MMR AOCLs must agree."
         );
 
-        let addition_record_2: AdditionRecord = commit::<H>(
-            &H::hash(&1451u128),
-            &H::hash(&1480u128),
-            &H::hash(&1481u128),
-        );
+        let addition_record_2: AdditionRecord =
+            commit::<H>(H::hash(&1451u128), H::hash(&1480u128), H::hash(&1481u128));
 
         // Verify behavior with empty mutator sets. All empty MS' are the same.
         assert_ne!(
@@ -92,8 +80,7 @@ mod addition_record_tests {
         let item = H::hash(&1492u128);
         let sender_randomness = H::hash(&1522u128);
         let receiver_digest = H::hash(&1583u128);
-        let addition_record: AdditionRecord =
-            commit::<H>(&item, &sender_randomness, &receiver_digest);
+        let addition_record: AdditionRecord = commit::<H>(item, sender_randomness, receiver_digest);
         let json = serde_json::to_string(&addition_record).unwrap();
         let s_back = serde_json::from_str::<AdditionRecord>(&json).unwrap();
         assert_eq!(

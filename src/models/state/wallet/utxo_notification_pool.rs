@@ -48,9 +48,9 @@ impl ExpectedUtxo {
     ) -> Self {
         Self {
             addition_record: commit::<Hash>(
-                &Hash::hash(&utxo),
-                &sender_randomness,
-                &receiver_preimage.hash::<Hash>(),
+                Hash::hash(&utxo),
+                sender_randomness,
+                receiver_preimage.hash::<Hash>(),
             ),
             utxo,
             sender_randomness,
@@ -227,9 +227,9 @@ impl UtxoNotificationPool {
         // Also check that receiver preimage belongs to us etc.
         // Or should this be the caller's responsibility?
         let addition_record = commit::<Hash>(
-            &Hash::hash(&utxo),
-            &sender_randomness,
-            &receiver_preimage.hash::<Hash>(),
+            Hash::hash(&utxo),
+            sender_randomness,
+            receiver_preimage.hash::<Hash>(),
         );
 
         // Check that addition record is not already contained in notification set.
@@ -376,9 +376,9 @@ mod wallet_state_tests {
         let receiver_preimage: Digest = random();
         let peer_instance_id: InstanceId = random();
         let expected_addition_record = commit::<Hash>(
-            &Hash::hash(&mock_utxo),
-            &sender_randomness,
-            &receiver_preimage.hash::<Hash>(),
+            Hash::hash(&mock_utxo),
+            sender_randomness,
+            receiver_preimage.hash::<Hash>(),
         );
         notification_pool
             .add_expected_utxo(
@@ -404,9 +404,9 @@ mod wallet_state_tests {
 
         // Call scan but with another input. Verify that it returns the empty list
         let another_addition_record = commit::<Hash>(
-            &Hash::hash(&mock_utxo),
-            &random(),
-            &receiver_preimage.hash::<Hash>(),
+            Hash::hash(&mock_utxo),
+            random(),
+            receiver_preimage.hash::<Hash>(),
         );
         let tx_without_utxo = make_mock_transaction(vec![], vec![another_addition_record]);
         let ret_with_tx_without_utxo = notification_pool.scan_for_expected_utxos(&tx_without_utxo);
@@ -500,9 +500,9 @@ mod wallet_state_tests {
         notification_pool
             .mark_as_received(
                 commit::<Hash>(
-                    &Hash::hash(&mock_utxo),
-                    &first_sender_randomness,
-                    &receiver_preimage.hash::<Hash>(),
+                    Hash::hash(&mock_utxo),
+                    first_sender_randomness,
+                    receiver_preimage.hash::<Hash>(),
                 ),
                 Digest::default(),
             )

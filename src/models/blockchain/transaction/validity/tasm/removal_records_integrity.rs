@@ -13,7 +13,7 @@ use tasm_lib::{
         contiguous_list::get_pointer_list::GetPointerList,
         higher_order::{all::All, inner_function::InnerFunction, map::Map, zip::Zip},
         multiset_equality::MultisetEquality,
-        unsafe_u32::get::UnsafeGet,
+        unsafeimplu32::get::UnsafeGet,
         ListType,
     },
     mmr::bag_peaks::BagPeaks,
@@ -247,8 +247,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // 3. assert that the mutator set's MMRs in the witness match the kernel
         // now we can trust all data in these MMRs as well
         let mutator_set_hash = Hash::hash_pair(
-            &Hash::hash_pair(&witness.aocl.bag_peaks(), &witness.swbfi.bag_peaks()),
-            &Hash::hash_pair(&witness.swbfa_hash, &Digest::default()),
+            Hash::hash_pair(witness.aocl.bag_peaks(), witness.swbfi.bag_peaks()),
+            Hash::hash_pair(witness.swbfa_hash, Digest::default()),
         );
         assert_eq!(witness.kernel.mutator_set_hash, mutator_set_hash);
 
@@ -263,11 +263,11 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let digests_of_derived_index_lists = items
             .iter()
             .zip(witness.membership_proofs.iter())
-            .map(|(item, msmp)| {
+            .map(|(&item, msmp)| {
                 AbsoluteIndexSet::new(&get_swbf_indices::<Hash>(
                     item,
-                    &msmp.sender_randomness,
-                    &msmp.receiver_preimage,
+                    msmp.sender_randomness,
+                    msmp.receiver_preimage,
                     msmp.auth_path_aocl.leaf_index,
                 ))
                 .encode()
@@ -288,14 +288,14 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         // 5. verify that all input utxos (mutator set items) live in the AOCL
         assert!(items
-            .iter()
+            .into_iter()
             .zip(witness.membership_proofs.iter())
             .map(|(item, msmp)| {
                 (
                     commit::<Hash>(
                         item,
-                        &msmp.sender_randomness,
-                        &msmp.receiver_preimage.hash::<Hash>(),
+                        msmp.sender_randomness,
+                        msmp.receiver_preimage.hash::<Hash>(),
                     ),
                     &msmp.auth_path_aocl,
                 )
@@ -303,7 +303,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             .all(|(cc, mp)| {
                 mp.verify(
                     &witness.aocl.get_peaks(),
-                    &cc.canonical_commitment,
+                    cc.canonical_commitment,
                     witness.aocl.count_leaves(),
                 )
                 .0
@@ -557,7 +557,7 @@ mod tests {
                     mp.auth_path_aocl.leaf_index,
                 )
             })
-            .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(&item, &sr, &rp, li))
+            .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(item, sr, rp, li))
             .map(|ais| AbsoluteIndexSet::new(&ais))
             .collect_vec();
         let very_first_index = witness_index_lists[0].to_array()[0];
@@ -627,9 +627,9 @@ mod tests {
             .zip(removal_record_integrity_witness.membership_proofs.iter())
             .map(|(item, mp)| {
                 commit::<Hash>(
-                    &item,
-                    &mp.sender_randomness,
-                    &mp.receiver_preimage.hash::<Hash>(),
+                    item,
+                    mp.sender_randomness,
+                    mp.receiver_preimage.hash::<Hash>(),
                 )
             })
             .collect_vec();
@@ -652,7 +652,7 @@ mod tests {
                     .auth_path_aocl
                     .verify(
                         &removal_record_integrity_witness.aocl.get_peaks(),
-                        &cc.canonical_commitment,
+                        cc.canonical_commitment,
                         removal_record_integrity_witness.aocl.count_leaves()
                     )
                     .0)

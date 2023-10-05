@@ -170,13 +170,13 @@ async fn mine_block(
 /// used for the canonical AOCL commitment.
 fn make_coinbase_transaction(
     coinbase_utxo: &Utxo,
-    receiver_digest: &Digest,
+    receiver_digest: Digest,
     wallet_secret: &WalletSecret,
     block_height: BlockHeight,
     mutator_set_accumulator: MutatorSetAccumulator<Hash>,
 ) -> (Transaction, Digest) {
     let sender_randomness: Digest =
-        wallet_secret.generate_sender_randomness(block_height, *receiver_digest);
+        wallet_secret.generate_sender_randomness(block_height, receiver_digest);
 
     let coinbase_amount = coinbase_utxo
         .coins
@@ -188,8 +188,8 @@ fn make_coinbase_transaction(
         })
         .sum();
     let coinbase_addition_record = commit::<Hash>(
-        &Hash::hash(coinbase_utxo),
-        &sender_randomness,
+        Hash::hash(coinbase_utxo),
+        sender_randomness,
         receiver_digest,
     );
 
@@ -263,7 +263,7 @@ fn create_block_transaction(
 
     let (coinbase_transaction, coinbase_sender_randomness) = make_coinbase_transaction(
         &coinbase_utxo,
-        &receiving_address.privacy_digest,
+        receiving_address.privacy_digest,
         &state.wallet_state.wallet_secret,
         next_block_height,
         latest_block.body.next_mutator_set_accumulator.clone(),

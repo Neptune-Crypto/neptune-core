@@ -23,8 +23,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use strum::{EnumCount, IntoEnumIterator};
-use strum_macros::{EnumCount, EnumIter};
+use strum::{EnumCount, EnumIter, IntoEnumIterator};
 use tokio::{sync::Mutex, time::sleep};
 
 use super::{

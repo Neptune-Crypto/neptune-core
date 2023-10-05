@@ -49,19 +49,19 @@ impl<H: AlgebraicHasher + BFieldCodec> Default for MutatorSetAccumulator<H> {
 impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H> {
     fn prove(
         &mut self,
-        item: &Digest,
-        sender_randomness: &Digest,
-        receiver_preimage: &Digest,
+        item: Digest,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
     ) -> MsMembershipProof<H> {
         self.kernel
             .prove(item, sender_randomness, receiver_preimage)
     }
 
-    fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         self.kernel.verify(item, membership_proof)
     }
 
-    fn drop(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
+    fn drop(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         self.kernel.drop(item, membership_proof)
     }
 
@@ -80,8 +80,8 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
         let default = Digest::default();
 
         H::hash_pair(
-            &H::hash_pair(&aocl_mmr_bagged, &inactive_swbf_bagged),
-            &H::hash_pair(&active_swbf_bagged, &default),
+            H::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged),
+            H::hash_pair(active_swbf_bagged, default),
         )
     }
 
@@ -98,7 +98,7 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
 #[cfg(test)]
 mod ms_accumulator_tests {
     use crate::util_types::test_shared::mutator_set::*;
-    use itertools::Itertools;
+    use itertools::{izip, Itertools};
     use rand::Rng;
     use twenty_first::shared_math::tip5::Tip5;
 
@@ -120,8 +120,8 @@ mod ms_accumulator_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
-            let membership_proof = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -141,7 +141,7 @@ mod ms_accumulator_tests {
         let mut rng = rand::thread_rng();
         let mut skipped_removes: Vec<bool> = vec![];
         let mut removal_records: Vec<RemovalRecord<H>> = vec![];
-        for (_, (mp, item)) in membership_proofs.iter().zip_eq(items.iter()).enumerate() {
+        for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             let skipped = rng.gen_range(0.0..1.0) < 0.5;
             skipped_removes.push(skipped);
             if !skipped {
@@ -149,7 +149,7 @@ mod ms_accumulator_tests {
             }
         }
 
-        for (mp, item) in membership_proofs.iter().zip_eq(items.iter()) {
+        for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             assert!(accumulator.verify(item, mp));
         }
 
@@ -160,13 +160,13 @@ mod ms_accumulator_tests {
         );
 
         // Verify that the expected membership proofs fail/pass
-        for ((mp, item), skipped) in membership_proofs
-            .iter()
-            .zip_eq(items.iter())
-            .zip_eq(skipped_removes.into_iter())
-        {
+        for (mp, &item, skipped) in izip!(
+            membership_proofs.iter(),
+            items.iter(),
+            skipped_removes.into_iter()
+        ) {
             // If this removal record was not applied, then the membership proof must verify
-            assert!(skipped == accumulator.verify(item, mp));
+            assert_eq!(skipped, accumulator.verify(item, mp));
         }
     }
 
@@ -220,9 +220,9 @@ mod ms_accumulator_tests {
                     let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
-                        commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                        commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
                     let membership_proof_acc =
-                        accumulator.prove(&item, &sender_randomness, &receiver_preimage);
+                        accumulator.prove(item, sender_randomness, receiver_preimage);
 
                     // Update all membership proofs
                     // Uppdate membership proofs in batch
@@ -236,7 +236,7 @@ mod ms_accumulator_tests {
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
 
                     // Update membership proofs sequentially
-                    for (mp, own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
+                    for (mp, &own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
                     {
                         let update_res_seq =
                             mp.update_from_addition(own_item, &accumulator, &addition_record);
@@ -252,7 +252,7 @@ mod ms_accumulator_tests {
                     for j in 0..items.len() {
                         if updated_mp_indices.contains(&j) {
                             assert!(
-                                !accumulator.verify(&items[j], &previous_mps[j]),
+                                !accumulator.verify(items[j], &previous_mps[j]),
                                 "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
                                 previous_mps[j].auth_path_aocl.leaf_index,
@@ -261,7 +261,7 @@ mod ms_accumulator_tests {
                             );
                         } else {
                             assert!(
-                                accumulator.verify(&items[j], &previous_mps[j]),
+                                accumulator.verify(items[j], &previous_mps[j]),
                                 "Verify must succeed for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
                                 previous_mps[j].auth_path_aocl.leaf_index,
@@ -293,7 +293,7 @@ mod ms_accumulator_tests {
 
                     // generate removal record
                     let removal_record: RemovalRecord<H> =
-                        accumulator.drop(&removal_item, &removal_mp);
+                        accumulator.drop(removal_item, &removal_mp);
                     assert!(removal_record.validate(&accumulator.kernel));
 
                     // update membership proofs
@@ -316,7 +316,7 @@ mod ms_accumulator_tests {
                     }
 
                     // remove item from set
-                    assert!(accumulator.verify(&removal_item, &removal_mp));
+                    assert!(accumulator.verify(removal_item, &removal_mp));
                     let removal_record_copy = removal_record.clone();
                     accumulator.remove(&removal_record);
                     archival_after_remove.remove(&removal_record);
@@ -327,17 +327,17 @@ mod ms_accumulator_tests {
                     }
 
                     archival_before_remove.remove(&removal_record_copy);
-                    assert!(!accumulator.verify(&removal_item, &removal_mp));
+                    assert!(!accumulator.verify(removal_item, &removal_mp));
 
                     // Verify that the sequential `update_from_remove` return value is correct
                     // The return value from `update_from_remove` shows if the membership proof
                     // was updated or not.
-                    for (j, ((updated, original_mp), item)) in update_by_remove_return_values
-                        .into_iter()
-                        .zip(original_membership_proofs_sequential.iter())
-                        .zip(items.iter())
-                        .enumerate()
-                    {
+                    for (j, updated, original_mp, &item) in izip!(
+                        0..,
+                        update_by_remove_return_values,
+                        original_membership_proofs_sequential.iter(),
+                        items.iter()
+                    ) {
                         if updated {
                             assert!(
                                 !accumulator.verify(item, original_mp),
@@ -360,16 +360,15 @@ mod ms_accumulator_tests {
                     // Verify that `batch_update_from_remove` return value is correct
                     // The return value indicates which membership proofs
                     let updated_indices: Vec<usize> = batch_update_ret.unwrap();
-                    for (j, (original_mp, item)) in original_membership_proofs_batch
+                    for (j, (original_mp, &item)) in original_membership_proofs_batch
                         .iter()
                         .zip(items.iter())
                         .enumerate()
                     {
-                        if updated_indices.contains(&j) {
-                            assert!(!accumulator.verify(item, original_mp));
-                        } else {
-                            assert!(accumulator.verify(item, original_mp));
-                        }
+                        let item_was_updated = updated_indices.contains(&j);
+                        let item_verifies = accumulator.verify(item, original_mp);
+                        let item_verifies_iff_not_updated = item_verifies != item_was_updated;
+                        assert!(item_verifies_iff_not_updated);
                     }
 
                     println!("{}: Removed", i);
@@ -377,13 +376,12 @@ mod ms_accumulator_tests {
 
                 // Verify that all membership proofs are valid after these additions and removals
                 // Also verify that batch-update and sequential update of membership proofs agree.
-                for (((mp_batch, mp_seq), item), (sender_randomness, receiver_preimage)) in
-                    membership_proofs_batch
-                        .iter()
-                        .zip(membership_proofs_sequential.iter())
-                        .zip(items.iter())
-                        .zip(rands.iter())
-                {
+                for (mp_batch, mp_seq, &item, &(sender_randomness, receiver_preimage)) in izip!(
+                    membership_proofs_batch.iter(),
+                    membership_proofs_sequential.iter(),
+                    items.iter(),
+                    rands.iter()
+                ) {
                     assert!(accumulator.verify(item, mp_batch));
 
                     // Verify that the membership proof can be restored from an archival instance

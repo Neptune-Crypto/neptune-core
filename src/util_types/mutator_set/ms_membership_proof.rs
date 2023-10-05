@@ -54,11 +54,11 @@ pub struct MsMembershipProof<H: AlgebraicHasher> {
 
 impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
     /// Compute the indices that will be added to the SWBF if this item is removed.
-    pub fn compute_indices(&self, item: &Digest) -> AbsoluteIndexSet {
+    pub fn compute_indices(&self, item: Digest) -> AbsoluteIndexSet {
         AbsoluteIndexSet::new(&get_swbf_indices::<H>(
             item,
-            &self.sender_randomness,
-            &self.receiver_preimage,
+            self.sender_randomness,
+            self.receiver_preimage,
             self.auth_path_aocl.leaf_index,
         ))
     }
@@ -87,16 +87,15 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
         let new_item_index = mutator_set.aocl.count_leaves();
 
         // Update AOCL MMR membership proofs
-        let indices_for_updated_mps =
-            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_append(
-                &mut membership_proofs
-                    .iter_mut()
-                    .map(|x| &mut x.auth_path_aocl)
-                    .collect::<Vec<_>>(),
-                new_item_index,
-                &addition_record.canonical_commitment,
-                &mutator_set.aocl.get_peaks(),
-            );
+        let indices_for_updated_mps = MmrMembershipProof::batch_update_from_append(
+            &mut membership_proofs
+                .iter_mut()
+                .map(|x| &mut x.auth_path_aocl)
+                .collect::<Vec<_>>(),
+            new_item_index,
+            addition_record.canonical_commitment,
+            &mutator_set.aocl.get_peaks(),
+        );
 
         // if window does not slide, we are done
         if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
@@ -116,8 +115,7 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
         let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
-            mmra.append(new_chunk_digest);
+        let new_swbf_auth_path: MmrMembershipProof<H> = mmra.append(new_chunk_digest);
 
         // Collect all indices for all membership proofs that are being updated
         // Notice that this is a *very* expensive operation if the indices are
@@ -127,11 +125,11 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
             .iter()
             .zip(own_items.iter())
             .enumerate()
-            .for_each(|(i, (mp, item))| {
+            .for_each(|(i, (mp, &item))| {
                 let indices = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
                     item,
-                    &mp.sender_randomness,
-                    &mp.receiver_preimage,
+                    mp.sender_randomness,
+                    mp.receiver_preimage,
                     mp.auth_path_aocl.leaf_index,
                 ));
                 let chunks_set: HashSet<u64> = indices
@@ -210,7 +208,7 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
             mmr::mmr_membership_proof::MmrMembershipProof::<H>::batch_update_from_append(
                 &mut mmr_membership_proofs_for_append,
                 mutator_set.swbf_inactive.count_leaves(),
-                &new_chunk_digest,
+                new_chunk_digest,
                 &mutator_set.swbf_inactive.get_peaks(),
             );
         let mut swbf_mutated_indices: Vec<usize> = vec![];
@@ -238,7 +236,7 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
      */
     pub fn update_from_addition(
         &mut self,
-        own_item: &Digest,
+        own_item: Digest,
         mutator_set: &MutatorSetAccumulator<H>,
         addition_record: &AdditionRecord,
     ) -> Result<bool, Box<dyn Error>> {
@@ -248,7 +246,7 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
         // Update AOCL MMR membership proof
         let aocl_mp_updated = self.auth_path_aocl.update_from_append(
             mutator_set.kernel.aocl.count_leaves(),
-            &addition_record.canonical_commitment,
+            addition_record.canonical_commitment,
             &mutator_set.kernel.aocl.get_peaks(),
         );
 
@@ -264,8 +262,8 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
         // Get indices by recalculating them. (We do not cache indices any more.)
         let all_indices = get_swbf_indices::<H>(
             own_item,
-            &self.sender_randomness,
-            &self.receiver_preimage,
+            self.sender_randomness,
+            self.receiver_preimage,
             self.auth_path_aocl.leaf_index,
         );
         let chunk_indices_set: HashSet<u64> = all_indices
@@ -304,7 +302,7 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
                 };
                 let swbf_chunk_dict_updated_local: bool = mp.update_from_append(
                     mutator_set.kernel.swbf_inactive.count_leaves(),
-                    &new_chunk_digest,
+                    new_chunk_digest,
                     &mutator_set.kernel.swbf_inactive.get_peaks(),
                 );
                 swbf_chunk_dictionary_updated =
@@ -634,7 +632,7 @@ mod ms_proof_tests {
 
             let mp = accumulator
                 .kernel
-                .prove(&item, &sender_randomness, &receiver_preimage);
+                .prove(item, sender_randomness, receiver_preimage);
 
             let json: String = serde_json::to_string(&mp).unwrap();
             let mp_again = serde_json::from_str::<MsMembershipProof<H>>(&json).unwrap();
@@ -665,15 +663,15 @@ mod ms_proof_tests {
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
 
             for (oi, mp) in membership_proofs.iter_mut() {
-                mp.update_from_addition(oi, &archival_mutator_set.accumulator(), &addition_record)
+                mp.update_from_addition(*oi, &archival_mutator_set.accumulator(), &addition_record)
                     .expect("Could not update membership proof from addition.");
             }
 
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
             if i == own_index {
                 own_membership_proof = Some(membership_proof);
                 own_item = Some(item);
@@ -684,7 +682,7 @@ mod ms_proof_tests {
                         .as_mut()
                         .unwrap()
                         .update_from_addition(
-                            own_item.as_ref().unwrap(),
+                            own_item.unwrap(),
                             &archival_mutator_set.accumulator(),
                             &addition_record,
                         )
@@ -698,19 +696,19 @@ mod ms_proof_tests {
 
         // assert that own mp is valid
         assert!(
-            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
         );
 
         // Assert that all other mps are valid
         for (itm, mp) in membership_proofs.iter() {
-            assert!(archival_mutator_set.verify(itm, mp));
+            assert!(archival_mutator_set.verify(*itm, mp));
         }
 
         // generate some removal records
         let mut removal_records = vec![];
         for (item, membership_proof) in membership_proofs.into_iter() {
             if rng.next_u32() % 2 == 1 {
-                let removal_record = archival_mutator_set.drop(&item, &membership_proof);
+                let removal_record = archival_mutator_set.drop(item, &membership_proof);
                 removal_records.push(removal_record);
             }
         }
@@ -745,7 +743,7 @@ mod ms_proof_tests {
 
         // assert valid
         assert!(
-            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
         );
 
         // revert some removal records
@@ -768,7 +766,7 @@ mod ms_proof_tests {
 
         // assert valid
         assert!(
-            archival_mutator_set.verify(&own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
         );
 
         // assert same as snapshot before application-and-reversion
@@ -791,7 +789,7 @@ mod ms_proof_tests {
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
@@ -799,7 +797,7 @@ mod ms_proof_tests {
                 &addition_record,
             )
             .unwrap();
-            mps.push(ams.prove(&item, &sender_randomness, &receiver_preimage));
+            mps.push(ams.prove(item, sender_randomness, receiver_preimage));
             items.push(item);
             ams.add(&addition_record);
             addition_records.push(addition_record);
@@ -807,13 +805,13 @@ mod ms_proof_tests {
 
         // Verify that all MPs are valid
         for i in 0..ms_size {
-            assert!(ams.verify(&items[i], &mps[i]));
+            assert!(ams.verify(items[i], &mps[i]));
         }
 
         // Remove all `ms_size` elements from the MS
         let mut removal_records = vec![];
         for i in 0..ms_size {
-            let removal_record = ams.drop(&items[i], &mps[i]);
+            let removal_record = ams.drop(items[i], &mps[i]);
             ams.remove(&removal_record);
             MsMembershipProof::batch_update_from_remove(
                 &mut mps.iter_mut().collect_vec(),
@@ -825,16 +823,16 @@ mod ms_proof_tests {
             // Verify that the rest of the MPs are still valid
             for j in 0..ms_size {
                 if j > i {
-                    assert!(ams.verify(&items[j], &mps[j]));
+                    assert!(ams.verify(items[j], &mps[j]));
                 } else {
-                    assert!(!ams.verify(&items[j], &mps[j]));
+                    assert!(!ams.verify(items[j], &mps[j]));
                 }
             }
         }
 
         // Verify that all MPs are invalid since their items were removed
         for i in 0..ms_size {
-            assert!(!ams.verify(&items[i], &mps[i]));
+            assert!(!ams.verify(items[i], &mps[i]));
         }
 
         // Revert all removals in opposite order and verify that the MPs become valid again
@@ -845,16 +843,16 @@ mod ms_proof_tests {
             }
             for j in 0..ms_size {
                 if j < i {
-                    assert!(!ams.verify(&items[j], &mps[j]));
+                    assert!(!ams.verify(items[j], &mps[j]));
                 } else {
-                    assert!(ams.verify(&items[j], &mps[j]));
+                    assert!(ams.verify(items[j], &mps[j]));
                 }
             }
         }
 
         // Verify all MPs after reverting all removals
         for i in 0..ms_size {
-            ams.verify(&items[i], &mps[i]);
+            ams.verify(items[i], &mps[i]);
         }
     }
 
@@ -874,7 +872,7 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
                 MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect_vec(),
                     &items,
@@ -882,7 +880,7 @@ mod ms_proof_tests {
                     &addition_record,
                 )
                 .unwrap();
-                mps.push(ams.prove(&item, &sender_randomness, &receiver_preimage));
+                mps.push(ams.prove(item, sender_randomness, receiver_preimage));
                 items.push(item);
                 ams.add(&addition_record);
                 addition_records.push(addition_record);
@@ -893,14 +891,14 @@ mod ms_proof_tests {
                 ams.revert_add(&addition_records[i]);
                 mps[0].revert_update_from_batch_addition(&ams.accumulator());
                 assert!(
-                    ams.verify(&items[0], &mps[0]),
+                    ams.verify(items[0], &mps[0]),
                     "MP should be valid after reversion"
                 );
                 if i != 1 {
                     // We also check the 2nd MP for good measure, as long as its item is still in the MS
                     mps[1].revert_update_from_batch_addition(&ams.accumulator());
                     assert!(
-                        ams.verify(&items[1], &mps[1]),
+                        ams.verify(items[1], &mps[1]),
                         "MP should be valid after reversion"
                     );
                 }
@@ -926,7 +924,7 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
                 msa.add(&addition_record);
             }
 
@@ -935,11 +933,11 @@ mod ms_proof_tests {
             let own_sender_randomness: Digest = random();
             let own_receiver_preimage: Digest = random();
             let own_addition_record = commit::<H>(
-                &own_item,
-                &own_sender_randomness,
-                &own_receiver_preimage.hash::<H>(),
+                own_item,
+                own_sender_randomness,
+                own_receiver_preimage.hash::<H>(),
             );
-            let mut own_mp = msa.prove(&own_item, &own_sender_randomness, &own_receiver_preimage);
+            let mut own_mp = msa.prove(own_item, own_sender_randomness, own_receiver_preimage);
             msa.add(&own_addition_record);
             let msa_after_own_add = msa.clone();
 
@@ -949,13 +947,13 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
                 own_mp
-                    .update_from_addition(&own_item, &msa, &addition_record)
+                    .update_from_addition(own_item, &msa, &addition_record)
                     .unwrap();
                 msa.add(&addition_record);
                 assert!(
-                    msa.verify(&own_item, &own_mp),
+                    msa.verify(own_item, &own_mp),
                     "Own mp must be valid after update"
                 );
             }
@@ -968,24 +966,24 @@ mod ms_proof_tests {
                 let sender_randomness: Digest = random();
                 let receiver_preimage: Digest = random();
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
                 own_mp
-                    .update_from_addition(&own_item, &msa, &addition_record)
+                    .update_from_addition(own_item, &msa, &addition_record)
                     .unwrap();
                 msa.add(&addition_record);
                 assert!(
-                    msa.verify(&own_item, &own_mp),
+                    msa.verify(own_item, &own_mp),
                     "Own mp must be valid after update"
                 );
             }
 
             // revert last batch
             own_mp.revert_update_from_batch_addition(&msa_after_first_batch);
-            assert!(msa_after_first_batch.verify(&own_item, &own_mp));
+            assert!(msa_after_first_batch.verify(own_item, &own_mp));
 
             // revert first batch
             own_mp.revert_update_from_batch_addition(&msa_after_own_add);
-            assert!(msa_after_own_add.verify(&own_item, &own_mp));
+            assert!(msa_after_own_add.verify(own_item, &own_mp));
         }
     }
 
@@ -1012,11 +1010,11 @@ mod ms_proof_tests {
             let sender_randomness: Digest = random();
             let receiver_preimage: Digest = random();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
             addition_records.push(addition_record);
 
             let membership_proof =
-                archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
             match i.cmp(&own_index) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
@@ -1024,19 +1022,16 @@ mod ms_proof_tests {
                     own_item = Some(item);
                 }
                 std::cmp::Ordering::Greater => {
-                    assert!(archival_mutator_set.verify(
-                        own_item.as_ref().unwrap(),
-                        own_membership_proof.as_ref().unwrap()
-                    ));
-                    assert!(archival_mutator_set.accumulator().verify(
-                        own_item.as_ref().unwrap(),
-                        own_membership_proof.as_ref().unwrap()
-                    ));
+                    assert!(archival_mutator_set
+                        .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
+                    assert!(archival_mutator_set
+                        .accumulator()
+                        .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
                     own_membership_proof
                         .as_mut()
                         .unwrap()
                         .update_from_addition(
-                            own_item.as_ref().unwrap(),
+                            own_item.unwrap(),
                             &archival_mutator_set.accumulator(),
                             &addition_record,
                         )
@@ -1051,15 +1046,15 @@ mod ms_proof_tests {
                 let own_item = own_item.as_ref().unwrap().to_owned();
                 assert!(archival_mutator_set
                     .kernel
-                    .verify(&own_item, own_membership_proof.as_ref().unwrap(),));
+                    .verify(own_item, own_membership_proof.as_ref().unwrap(),));
 
                 let mut memproof = own_membership_proof.as_ref().unwrap().clone();
 
-                assert!(archival_mutator_set.kernel.verify(&own_item, &memproof,));
+                assert!(archival_mutator_set.kernel.verify(own_item, &memproof,));
 
                 memproof.revert_update_from_batch_addition(&mutator_set_before);
 
-                assert!(mutator_set_before.verify(&own_item, &memproof));
+                assert!(mutator_set_before.verify(own_item, &memproof));
                 // assert!(previous_mutator_set.set_commitment.verify(own_item, self));
             }
         }
@@ -1074,10 +1069,8 @@ mod ms_proof_tests {
                 .unwrap()
                 .revert_update_from_batch_addition(&archival_mutator_set.accumulator());
 
-            assert!(archival_mutator_set.verify(
-                own_item.as_ref().unwrap(),
-                own_membership_proof.as_ref().unwrap()
-            ));
+            assert!(archival_mutator_set
+                .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
         }
     }
 
@@ -1135,16 +1128,16 @@ mod ms_proof_tests {
 
                 // generate addition record
                 let addition_record =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
 
                 // record membership proof
                 let membership_proof =
-                    archival_mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
 
                 // update existing membership proof
                 for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {
                     mp.update_from_addition(
-                        it,
+                        *it,
                         &archival_mutator_set.accumulator(),
                         &addition_record,
                     )
@@ -1197,7 +1190,7 @@ mod ms_proof_tests {
                 }
 
                 // generate a removal record
-                let removal_record = archival_mutator_set.drop(&item, &membership_proof);
+                let removal_record = archival_mutator_set.drop(item, &membership_proof);
 
                 // update the other membership proofs with the removal record
                 for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
@@ -1207,7 +1200,7 @@ mod ms_proof_tests {
 
                 // don't lose track of the removed item
                 assert!(
-                    archival_mutator_set.verify(&item, &membership_proof),
+                    archival_mutator_set.verify(item, &membership_proof),
                     "track index: {track_index}\nitem index: {index}",
                 );
                 removed_items_and_membership_proofs.push((item, membership_proof.clone(), index));
@@ -1303,7 +1296,7 @@ mod ms_proof_tests {
                                             match removed_items_and_membership_proofs.pop() {
                                                 Some((item, membership_proof, index)) => {
                                                     assert!(archival_mutator_set
-                                                        .verify(&item, &membership_proof));
+                                                        .verify(item, &membership_proof));
                                                     tracked_items_and_membership_proofs
                                                         .insert(index, (item, membership_proof));
                                                     _report_index = index;
@@ -1332,7 +1325,7 @@ mod ms_proof_tests {
                 assert_eq!(own_item, tracked_items_and_membership_proofs[track_index].0);
                 assert!(
                     archival_mutator_set.verify(
-                        &own_item,
+                        own_item,
                         &tracked_items_and_membership_proofs[track_index].1
                     ),
                     "seed: {seed_integer} / n: {n}",

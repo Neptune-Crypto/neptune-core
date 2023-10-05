@@ -193,7 +193,7 @@ impl SpendingKey {
             let receiver_preimage = self.privacy_preimage;
             let receiver_digest = receiver_preimage.hash::<Hash>();
             let addition_record =
-                commit::<Hash>(&Hash::hash(&utxo), &sender_randomness, &receiver_digest);
+                commit::<Hash>(Hash::hash(&utxo), sender_randomness, receiver_digest);
 
             // push to list
             received_utxos_with_randomnesses.push((
@@ -277,7 +277,7 @@ impl SpendingKey {
 
     /// Unlock the UTXO binding it to some transaction by its kernel hash.
     /// This function mocks proof generation.
-    pub fn binding_unlock(&self, _bind_to: &Digest) -> [BFieldElement; DIGEST_LENGTH] {
+    pub fn binding_unlock(&self, _bind_to: Digest) -> [BFieldElement; DIGEST_LENGTH] {
         let witness_data = self.unlock_key;
         witness_data.values()
     }
@@ -530,7 +530,7 @@ mod test_generation_addresses {
         let receiving_address = ReceivingAddress::derive_from_seed(seed);
 
         let msg: Digest = rng.gen();
-        let witness_data = spending_key.binding_unlock(&msg);
+        let witness_data = spending_key.binding_unlock(msg);
         assert!(receiving_address._reference_verify_unlock(msg, witness_data));
 
         let receiving_address_again = spending_key.to_address();
@@ -613,9 +613,9 @@ mod test_generation_addresses {
         assert_eq!(utxo, read_utxo);
 
         let expected_addition_record = commit::<Hash>(
-            &Hash::hash(&utxo),
-            &sender_randomness,
-            &receiving_address.privacy_digest,
+            Hash::hash(&utxo),
+            sender_randomness,
+            receiving_address.privacy_digest,
         );
         assert_eq!(expected_addition_record, read_ar);
         assert_eq!(sender_randomness, read_sender_randomness);

@@ -43,7 +43,7 @@ impl MonitoredUtxo {
     }
 
     // determine whether the attached membership proof is synced to the given block
-    pub fn is_synced_to(&self, block_hash: &Digest) -> bool {
+    pub fn is_synced_to(&self, block_hash: Digest) -> bool {
         self.get_membership_proof_for_block(block_hash).is_some()
     }
 
@@ -62,11 +62,11 @@ impl MonitoredUtxo {
 
     pub fn get_membership_proof_for_block(
         &self,
-        block_digest: &Digest,
+        block_digest: Digest,
     ) -> Option<MsMembershipProof<Hash>> {
         self.blockhash_to_membership_proof
             .iter()
-            .find(|x| x.0 == *block_digest)
+            .find(|x| x.0 == block_digest)
             .map(|x| x.1.clone())
     }
 
@@ -75,18 +75,14 @@ impl MonitoredUtxo {
     }
 
     /// Returns true if the MUTXO was abandoned
-    pub async fn was_abandoned(
-        &self,
-        current_tip: &Digest,
-        archival_state: &ArchivalState,
-    ) -> bool {
+    pub async fn was_abandoned(&self, current_tip: Digest, archival_state: &ArchivalState) -> bool {
         match self.confirmed_in_block {
             Some((confirm_block, _, _)) => {
                 let confirm_block_header = archival_state
                     .get_block_header(confirm_block)
                     .await
                     .unwrap();
-                let tip_header = archival_state.get_block_header(*current_tip).await.unwrap();
+                let tip_header = archival_state.get_block_header(current_tip).await.unwrap();
                 !archival_state
                     .block_belongs_to_canonical_chain(&confirm_block_header, &tip_header)
                     .await

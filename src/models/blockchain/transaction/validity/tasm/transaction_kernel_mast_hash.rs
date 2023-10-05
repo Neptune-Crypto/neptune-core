@@ -13,7 +13,7 @@ use tasm_lib::snippet::BasicSnippet;
 use tasm_lib::snippet_bencher::BenchmarkCase;
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
-    list::unsafe_u32::{
+    list::unsafeimplu32::{
         get::UnsafeGet, new::UnsafeNew, set::UnsafeSet, set_length::UnsafeSetLength,
     },
     rust_shadowing_helper_functions,
@@ -40,8 +40,7 @@ impl TransactionKernelMastHash {
 
         assert!(address.value() > 1);
         // populate memory
-        let mut memory: std::collections::HashMap<BFieldElement, BFieldElement> =
-            std::collections::HashMap::new();
+        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         for (i, t) in transaction_kernel_encoded.iter().enumerate() {
             memory.insert(address + BFieldElement::new(i as u64), *t);
         }
@@ -389,7 +388,7 @@ impl Function for TransactionKernelMastHash {
         ];
         let mut nodes = [[zero; 8], leafs].concat();
         for i in (1..=7).rev() {
-            nodes[i] = Hash::hash_pair(&nodes[2 * i], &nodes[2 * i + 1]);
+            nodes[i] = Hash::hash_pair(nodes[2 * i], nodes[2 * i + 1]);
         }
         let root = nodes[1].to_owned();
 
@@ -447,6 +446,8 @@ mod tests {
         test_helpers::test_rust_equivalence_given_complete_state,
     };
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
+    use twenty_first::shared_math::tip5::Tip5State;
+    use twenty_first::util_types::algebraic_hasher::Domain;
 
     use super::*;
 
@@ -468,6 +469,7 @@ mod tests {
             &execution_state.std_in,
             &nondeterminism,
             &execution_state.memory,
+            &Tip5State::new(Domain::FixedLength),
             execution_state.words_allocated,
             None,
         );

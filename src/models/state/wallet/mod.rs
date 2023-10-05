@@ -378,13 +378,13 @@ mod wallet_tests {
 
         let genesis_block_output_utxo = monitored_utxos[0].utxo.clone();
         let ms_membership_proof = monitored_utxos[0]
-            .get_membership_proof_for_block(&next_block.hash)
+            .get_membership_proof_for_block(next_block.hash)
             .unwrap();
         assert!(
-            next_block.body.next_mutator_set_accumulator.verify(
-                &Hash::hash(&genesis_block_output_utxo),
-                &ms_membership_proof
-            ),
+            next_block
+                .body
+                .next_mutator_set_accumulator
+                .verify(Hash::hash(&genesis_block_output_utxo), &ms_membership_proof),
             "Membership proof must be valid after updating wallet state with generated blocks"
         );
 
@@ -460,12 +460,12 @@ mod wallet_tests {
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
-                .get_membership_proof_for_block(&block_1.hash)
+                .get_membership_proof_for_block(block_1.hash)
                 .unwrap();
             let membership_proof_is_valid = block_1
                 .body
                 .next_mutator_set_accumulator
-                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+                .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(membership_proof_is_valid);
         }
 
@@ -477,12 +477,12 @@ mod wallet_tests {
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
-                .get_membership_proof_for_block(&block_1.hash)
+                .get_membership_proof_for_block(block_1.hash)
                 .unwrap();
             let membership_proof_is_valid = block_3
                 .body
                 .next_mutator_set_accumulator
-                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+                .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(
                 !membership_proof_is_valid,
                 "membership proof must be invalid before updating wallet state"
@@ -502,12 +502,12 @@ mod wallet_tests {
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
-                .get_membership_proof_for_block(&block_3.hash)
+                .get_membership_proof_for_block(block_3.hash)
                 .unwrap();
             let membership_proof_is_valid = block_3
                 .body
                 .next_mutator_set_accumulator
-                .verify(&block_1_tx_output_digest, &ms_membership_proof);
+                .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(
                 membership_proof_is_valid,
                 "Membership proof must be valid after updating wallet state with generated blocks"
@@ -851,9 +851,9 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos {
             assert!(
                 block_1.body.next_mutator_set_accumulator.verify(
-                    &Hash::hash(&monitored_utxo.utxo),
+                    Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(&block_1.hash)
+                        .get_membership_proof_for_block(block_1.hash)
                         .unwrap()
                 ),
                 "All membership proofs must be valid after block 1"
@@ -907,9 +907,9 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos {
             assert!(
                 block_18.body.next_mutator_set_accumulator.verify(
-                    &Hash::hash(&monitored_utxo.utxo),
+                    Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(&block_18.hash)
+                        .get_membership_proof_for_block(block_18.hash)
                         .unwrap()
                 ),
                 "All membership proofs must be valid after block 18"
@@ -974,7 +974,7 @@ mod wallet_tests {
         let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|x| x.is_synced_to(&block_2_b.hash))
+            .filter(|x| x.is_synced_to(block_2_b.hash))
             .collect();
         assert_eq!(
             2,
@@ -986,9 +986,9 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_at_2b.iter() {
             assert!(
                 block_2_b.body.next_mutator_set_accumulator.verify(
-                    &Hash::hash(&monitored_utxo.utxo),
+                    Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(&block_2_b.hash)
+                        .get_membership_proof_for_block(block_2_b.hash)
                         .unwrap()
                 ),
                 "All synced membership proofs must be valid after block 2b fork"
@@ -1006,7 +1006,7 @@ mod wallet_tests {
         let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|monitored_utxo| monitored_utxo.is_synced_to(&block_19.hash))
+            .filter(|monitored_utxo| monitored_utxo.is_synced_to(block_19.hash))
             .collect();
         assert_eq!(
             2 + 17,
@@ -1018,9 +1018,9 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_block_19.iter() {
             assert!(
                 block_19.body.next_mutator_set_accumulator.verify(
-                    &Hash::hash(&monitored_utxo.utxo),
+                    Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(&block_19.hash)
+                        .get_membership_proof_for_block(block_19.hash)
                         .unwrap()
                 ),
                 "All membership proofs must be valid after block 19"
@@ -1085,7 +1085,7 @@ mod wallet_tests {
         let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|x| x.is_synced_to(&block_3_b.hash))
+            .filter(|x| x.is_synced_to(block_3_b.hash))
             .collect();
         assert_eq!(
             4,
@@ -1106,9 +1106,9 @@ mod wallet_tests {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
                     || block_3_b.body.next_mutator_set_accumulator.verify(
-                        &Hash::hash(&monitored_utxo.utxo),
+                        Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
-                            .get_membership_proof_for_block(&block_3_b.hash)
+                            .get_membership_proof_for_block(block_3_b.hash)
                             .unwrap()
                     ),
                 "All membership proofs of unspent UTXOs must be valid after block 3b"
@@ -1127,7 +1127,7 @@ mod wallet_tests {
         let monitored_utxos_20: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|x| x.is_synced_to(&block_20.hash))
+            .filter(|x| x.is_synced_to(block_20.hash))
             .collect();
         assert_eq!(
                 19,
@@ -1138,9 +1138,9 @@ mod wallet_tests {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
                     || block_20.body.next_mutator_set_accumulator.verify(
-                        &Hash::hash(&monitored_utxo.utxo),
+                        Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
-                            .get_membership_proof_for_block(&block_20.hash)
+                            .get_membership_proof_for_block(block_20.hash)
                             .unwrap()
                     ),
                 "All membership proofs of unspent UTXOs must be valid after block 20"

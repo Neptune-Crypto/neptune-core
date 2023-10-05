@@ -222,7 +222,7 @@ mod tests {
             &ShadowedFunction::new(map_hash_removal_record_indices),
             &mut stack,
             vec![],
-            &NonDeterminism::new(vec![]),
+            &mut NonDeterminism::new(vec![]),
             &mut memory,
             new_malloc,
         );

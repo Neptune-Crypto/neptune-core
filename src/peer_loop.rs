@@ -786,7 +786,7 @@ impl PeerLoopHandler {
                 let transaction_is_known = self
                     .state
                     .mempool
-                    .contains(&transaction_notification.transaction_digest);
+                    .contains(transaction_notification.transaction_digest);
                 if transaction_is_known {
                     debug!("transaction was already known");
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -804,7 +804,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
-                if let Some(transaction) = self.state.mempool.get(&transaction_identifier) {
+                if let Some(transaction) = self.state.mempool.get(transaction_identifier) {
                     peer.send(PeerMessage::Transaction(Box::new(transaction)))
                         .await?;
                 }

@@ -401,10 +401,7 @@ impl Transaction {
         {
             let item = Hash::hash(input_utxo);
             // TODO: write these functions in tasm
-            if !primitive_witness
-                .mutator_set_accumulator
-                .verify(&item, msmp)
-            {
+            if !primitive_witness.mutator_set_accumulator.verify(item, msmp) {
                 warn!(
                     "Cannot generate removal record for an item with an invalid membership proof."
                 );
@@ -418,7 +415,7 @@ impl Transaction {
                 );
                 return false;
             }
-            let removal_record = primitive_witness.mutator_set_accumulator.drop(&item, msmp);
+            let removal_record = primitive_witness.mutator_set_accumulator.drop(item, msmp);
             witnessed_removal_records.push(removal_record);
         }
 
@@ -596,7 +593,7 @@ mod transaction_tests {
             coins: Into::<Amount>::into(42).to_native_coins(),
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
-        let ar = commit::<Hash>(&Hash::hash(&output_1), &random(), &random());
+        let ar = commit::<Hash>(Hash::hash(&output_1), random(), random());
 
         // Verify that a sane timestamp is returned. `make_mock_transaction` must follow
         // the correct time convention for this test to work.
