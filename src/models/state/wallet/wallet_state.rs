@@ -30,7 +30,6 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
@@ -428,7 +427,7 @@ impl WalletState {
                         debug!("Monitored UTXO with digest {utxo_digest} was marked as abandoned. Skipping.");
                     } else {
                         warn!(
-                        "Unable to find valid membership proof for UTXO with digest {utxo_digest}"
+                        "Unable to find valid membership proof for UTXO with digest {utxo_digest} at block height {}", block.header.height
                     );
                     }
                 }
@@ -818,44 +817,6 @@ impl WalletState {
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         let mut lock = self.wallet_db.lock().await;
         self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, block)
-    }
-
-    /// Retrieve wallet balance history
-    ///
-    /// todo: ignore abandoned/unsynced utxo.
-    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
-    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
-        let db_lock = self.wallet_db.lock().await;
-        let monitored_utxos = db_lock.monitored_utxos.clone();
-        let num_monitored_utxos = monitored_utxos.len();
-        let mut history = vec![];
-        for i in 0..num_monitored_utxos {
-            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
-            if let Some((confirming_block, confirmation_timestamp, confirmation_height)) =
-                monitored_utxo.confirmed_in_block
-            {
-                let amount = monitored_utxo.utxo.get_native_coin_amount();
-                history.push((
-                    confirming_block,
-                    confirmation_timestamp,
-                    confirmation_height,
-                    amount,
-                    Sign::NonNegative,
-                ));
-                if let Some((spending_block, spending_timestamp, spending_height)) =
-                    monitored_utxo.spent_in_block
-                {
-                    history.push((
-                        spending_block,
-                        spending_timestamp,
-                        spending_height,
-                        amount,
-                        Sign::Negative,
-                    ));
-                }
-            }
-        }
-        history
     }
 }
 

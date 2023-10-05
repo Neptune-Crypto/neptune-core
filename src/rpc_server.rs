@@ -343,7 +343,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn get_history(self, _context: tarpc::context::Context) -> Self::GetHistoryFut {
-        let history = executor::block_on(self.state.wallet_state.get_balance_history());
+        let history = executor::block_on(self.state.get_balance_history());
 
         // sort
         let mut display_history: Vec<(Duration, Amount, Sign)> = history

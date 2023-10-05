@@ -1,8 +1,9 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::{CheckedSub, Zero};
+use std::cmp::max;
 use std::net::IpAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::emojihash_trait::Emojihash;
@@ -26,13 +27,17 @@ use super::blockchain::transaction::transaction_kernel::{
 };
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
 use super::blockchain::transaction::validity::{TransactionValidityLogic, ValidationLogic};
-use super::blockchain::transaction::{amount::Amount, Transaction};
+use super::blockchain::transaction::{
+    amount::{Amount, Sign},
+    Transaction,
+};
 use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
 use crate::database::rusty::RustyLevelDBIterator;
 use crate::models::peer::{HandshakeData, PeerStanding};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
@@ -89,6 +94,19 @@ impl GlobalState {
             .get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
     }
 
+    pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
+        let (height, time_secs) =
+            time_fn_call_async(self.get_latest_balance_height_internal()).await;
+
+        #[cfg(not(test))]
+        debug!("call to get_latest_balance_height() took {time_secs} seconds");
+
+        #[cfg(test)]
+        println!("call to get_latest_balance_height() took {time_secs} seconds");
+
+        height
+    }
+
     /// Retrieve block height of last change to wallet balance.
     ///
     /// note: this fn could be implemented as:
@@ -101,13 +119,9 @@ impl GlobalState {
     ///   height of each utxo.
     ///
     /// Presently this is o(n) with the number of monitored utxos.
-    /// if storage could keep track of latest spend utxo, then this could
-    /// be o(1).
-    ///
-    /// todo: ignore abandoned/unsynced utxo.
-    ///       also an issue for get_balance_history().
-    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
-    pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
+    /// if storage could keep track of latest spend utxo for the active
+    /// tip, then this could be o(1).
+    async fn get_latest_balance_height_internal(&self) -> Option<BlockHeight> {
         let current_tip_digest = self.chain.light_state.get_latest_block().await.hash;
         let monitored_utxos = self
             .wallet_state
@@ -116,42 +130,96 @@ impl GlobalState {
             .await
             .monitored_utxos
             .clone();
-        let len = monitored_utxos.len();
 
-        let mut latest: Option<BlockHeight> = None;
-        // note: would be nicer to use an iterator to find max spending_height.
-        // perhaps someday: https://github.com/Neptune-Crypto/twenty-first/issues/139
-        for i in 0..len {
-            // latest change to balance could be a spent utxo, and it could be anywhere
-            // in the monitored_utxos list, so we must check each entry in list.
+        if monitored_utxos.is_empty() {
+            return None;
+        }
+
+        let mut max_spent_in_block: Option<BlockHeight> = None;
+        let mut max_confirmed_in_block: Option<BlockHeight> = None;
+
+        // monitored_utxos are ordered by confirmed_in_block ascending.
+        // To efficiently find max(confirmed_in_block) we can start at the end
+        // and work backward until we find the first utxo with a valid
+        // membership proof for current tip.
+        //
+        // We then continue working backward through all entries to
+        // determine max(spent_in_block)
+        for i in (0..monitored_utxos.len()).rev() {
             let utxo = monitored_utxos.get(i);
-            if let Some((.., spending_height)) = utxo.spent_in_block {
-                if utxo
-                    .get_membership_proof_for_block(&current_tip_digest)
-                    .is_some()
-                    && (latest.is_none() || latest.is_some_and(|x| x < spending_height))
-                {
-                    latest = Some(spending_height);
-                }
-            }
 
-            // if latest change is an incoming utxo, we can save some work by checking only
-            // the last entry because monitored_utxos is already ordered by
-            // confirmation_height ascending
-            if i == len - 1 {
-                if let Some((.., confirmation_height)) = utxo.confirmed_in_block {
+            if max_confirmed_in_block.is_none() {
+                if let Some((.., confirmed_in_block)) = utxo.confirmed_in_block {
                     if utxo
                         .get_membership_proof_for_block(&current_tip_digest)
                         .is_some()
-                        && (latest.is_none() || latest.is_some_and(|x| x < confirmation_height))
                     {
-                        latest = Some(confirmation_height);
+                        max_confirmed_in_block = Some(confirmed_in_block);
                     }
+                }
+            }
+
+            if let Some((.., spent_in_block)) = utxo.spent_in_block {
+                if utxo
+                    .get_membership_proof_for_block(&current_tip_digest)
+                    .is_some()
+                    && (max_spent_in_block.is_none()
+                        || max_spent_in_block.is_some_and(|x| x < spent_in_block))
+                {
+                    max_spent_in_block = Some(spent_in_block);
                 }
             }
         }
 
-        latest
+        max(max_confirmed_in_block, max_spent_in_block)
+    }
+
+    /// Retrieve wallet balance history
+    ///
+    /// todo: ignore abandoned/unsynced utxo.
+    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
+    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
+        let current_tip_digest = self.chain.light_state.get_latest_block().await.hash;
+
+        let db_lock = self.wallet_state.wallet_db.lock().await;
+        let monitored_utxos = db_lock.monitored_utxos.clone();
+        let num_monitored_utxos = monitored_utxos.len();
+        let mut history = vec![];
+        for i in 0..num_monitored_utxos {
+            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
+
+            if monitored_utxo
+                .get_membership_proof_for_block(&current_tip_digest)
+                .is_none()
+            {
+                continue;
+            }
+
+            if let Some((confirming_block, confirmation_timestamp, confirmation_height)) =
+                monitored_utxo.confirmed_in_block
+            {
+                let amount = monitored_utxo.utxo.get_native_coin_amount();
+                history.push((
+                    confirming_block,
+                    confirmation_timestamp,
+                    confirmation_height,
+                    amount,
+                    Sign::NonNegative,
+                ));
+                if let Some((spending_block, spending_timestamp, spending_height)) =
+                    monitored_utxo.spent_in_block
+                {
+                    history.push((
+                        spending_block,
+                        spending_timestamp,
+                        spending_height,
+                        amount,
+                        Sign::Negative,
+                    ));
+                }
+            }
+        }
+        history
     }
 
     /// Create a transaction that sends coins to the given

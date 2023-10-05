@@ -47,6 +47,7 @@ use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
+use tokio::time::Instant;
 use tokio_serde::formats::*;
 use tracing::info;
 
@@ -229,4 +230,25 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             thread_join_handles,
         )
         .await
+}
+
+/// Time a fn call.  Duration is returned as a float in seconds.
+pub fn time_fn_call<O>(f: impl FnOnce() -> O) -> (O, f64) {
+    let start = Instant::now();
+    let output = f();
+    let elapsed = start.elapsed();
+    let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
+    (output, total_time)
+}
+
+/// Time an async fn call.  Duration is returned as a float in seconds.
+pub async fn time_fn_call_async<F, O>(f: F) -> (O, f64)
+where
+    F: std::future::Future<Output = O>,
+{
+    let start = Instant::now();
+    let output = f.await;
+    let elapsed = start.elapsed();
+    let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
+    (output, total_time)
 }

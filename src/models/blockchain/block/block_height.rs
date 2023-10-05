@@ -90,7 +90,7 @@ impl PartialOrd for BlockHeight {
 
 impl Display for BlockHeight {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", u64::from(self.0))
     }
 }
 
