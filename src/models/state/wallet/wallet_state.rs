@@ -243,7 +243,7 @@ impl WalletState {
             let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
             let utxo = monitored_utxo.utxo.clone();
             let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(&Hash::hash(&utxo)),
+                Some(msmp) => msmp.1.compute_indices(Hash::hash(&utxo)),
                 None => continue,
             };
 
@@ -321,7 +321,7 @@ impl WalletState {
             }
 
             // If synced to current tip, there is nothing more to do with this MUTXO
-            if monitored_utxo.is_synced_to(&current_tip_info.0) {
+            if monitored_utxo.is_synced_to(current_tip_info.0) {
                 continue;
             }
 
@@ -336,7 +336,7 @@ impl WalletState {
                     let depth = current_tip.height - block_height_confirmed + 1;
                     depth >= block_depth_threshhold as i128
                         && monitored_utxo
-                            .was_abandoned(&current_tip_info.0, archival_state)
+                            .was_abandoned(current_tip_info.0, archival_state)
                             .await
                 }
                 None => false,
@@ -409,7 +409,7 @@ impl WalletState {
             let monitored_utxo: MonitoredUtxo = wallet_db_lock.monitored_utxos.get(i);
             let utxo_digest = Hash::hash(&monitored_utxo.utxo);
 
-            match monitored_utxo.get_membership_proof_for_block(&block.header.prev_block_digest) {
+            match monitored_utxo.get_membership_proof_for_block(block.header.prev_block_digest) {
                 Some(ms_mp) => {
                     debug!("Found valid mp for UTXO");
                     let insert_ret = valid_membership_proofs_and_own_utxo_count.insert(
@@ -498,7 +498,7 @@ impl WalletState {
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =
-                    msa_state.prove(&utxo_digest, &sender_randomness, &receiver_preimage);
+                    msa_state.prove(utxo_digest, sender_randomness, receiver_preimage);
 
                 // Add the data required to restore the UTXOs membership proof from public
                 // data to the secret's file.
@@ -539,7 +539,7 @@ impl WalletState {
         let mut mutxo_with_valid_mps = 0;
         for i in 0..wallet_db_lock.monitored_utxos.len() {
             let mutxo = wallet_db_lock.monitored_utxos.get(i);
-            if mutxo.is_synced_to(&block.header.prev_block_digest)
+            if mutxo.is_synced_to(block.header.prev_block_digest)
                 || mutxo.blockhash_to_membership_proof.is_empty()
             {
                 mutxo_with_valid_mps += 1;
@@ -633,14 +633,10 @@ impl WalletState {
         }
         debug!("Number of unspent UTXOs: {}", num_unspent_utxos);
 
-        for (
-            StrongUtxoKey {
-                utxo_digest,
-                aocl_index: _,
-            },
-            (updated_ms_mp, own_utxo_index),
-        ) in valid_membership_proofs_and_own_utxo_count.iter()
+        for (&strong_utxo_key, (updated_ms_mp, own_utxo_index)) in
+            valid_membership_proofs_and_own_utxo_count.iter()
         {
+            let StrongUtxoKey { utxo_digest, .. } = strong_utxo_key;
             let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(*own_utxo_index);
             monitored_utxo.add_membership_proof_for_tip(block.hash, updated_ms_mp.to_owned());
 
@@ -688,7 +684,7 @@ impl WalletState {
         for i in 0..monitored_utxos.len() {
             let monitored_utxo = monitored_utxos.get(i);
             let has_current_mp = monitored_utxo
-                .get_membership_proof_for_block(&tip_hash)
+                .get_membership_proof_for_block(tip_hash)
                 .is_some();
             // We assume that the membership proof can only be stored
             // if it is valid for the given block hash, so there is
@@ -723,7 +719,7 @@ impl WalletState {
             );
             let utxo = mutxo.utxo.clone();
             let spent = mutxo.spent_in_block.is_some();
-            if let Some(mp) = mutxo.get_membership_proof_for_block(&block.hash) {
+            if let Some(mp) = mutxo.get_membership_proof_for_block(block.hash) {
                 if spent {
                     synced_spent.push(WalletStatusElement(mp.auth_path_aocl.leaf_index, utxo));
                 } else {

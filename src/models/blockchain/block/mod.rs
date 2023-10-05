@@ -109,7 +109,7 @@ impl Block {
             let receiver_digest = receiving_address.privacy_digest;
 
             // Add pre-mine UTXO to MutatorSet
-            let addition_record = commit::<Hash>(&utxo_digest, &bad_randomness, &receiver_digest);
+            let addition_record = commit::<Hash>(utxo_digest, bad_randomness, receiver_digest);
             ms_update.additions.push(addition_record);
             genesis_mutator_set.add(&addition_record);
 

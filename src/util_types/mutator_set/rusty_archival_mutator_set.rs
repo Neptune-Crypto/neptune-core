@@ -24,6 +24,13 @@ struct RamsReader {
 }
 
 impl StorageReader<RustyKey, RustyMSValue> for RamsReader {
+    fn get_many(&mut self, keys: &[RustyKey]) -> Vec<Option<RustyMSValue>> {
+        let mut lock = self.db.lock().unwrap();
+        keys.iter()
+            .map(|key| lock.get(&key.0).map(RustyMSValue))
+            .collect_vec()
+    }
+
     fn get(&mut self, key: RustyKey) -> Option<RustyMSValue> {
         self.db.lock().expect("StorageReader for RustyArchivalMutatorSet: could not get database lock for reading (get)").get(&key.0).map(RustyMSValue)
     }
@@ -260,12 +267,11 @@ mod tests {
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
-            let mp =
-                rusty_mutator_set
-                    .ams
-                    .kernel
-                    .prove(&item, &sender_randomness, &receiver_preimage);
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let mp = rusty_mutator_set
+                .ams
+                .kernel
+                .prove(item, sender_randomness, receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
@@ -286,7 +292,7 @@ mod tests {
         );
 
         // Verify membership
-        for (mp, item) in mps.iter().zip(items.iter()) {
+        for (mp, &item) in mps.iter().zip(items.iter()) {
             assert!(rusty_mutator_set.ams.verify(item, mp));
         }
 
@@ -297,7 +303,7 @@ mod tests {
             let index = rng.next_u64() as usize % items.len();
             let item = items[index];
             let membership_proof = mps[index].clone();
-            let removal_record = rusty_mutator_set.ams.kernel.drop(&item, &membership_proof);
+            let removal_record = rusty_mutator_set.ams.kernel.drop(item, &membership_proof);
             MsMembershipProof::batch_update_from_remove(
                 &mut mps.iter_mut().collect_vec(),
                 &removal_record,
@@ -344,7 +350,7 @@ mod tests {
             "restored mutator set contains {} elements",
             new_rusty_mutator_set.ams.kernel.aocl.count_leaves()
         );
-        for (index, (mp, item)) in mps.iter().zip(items.iter()).enumerate() {
+        for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
                 new_rusty_mutator_set.ams.verify(item, mp),
                 "membership proof {index} does not verify"
@@ -352,7 +358,7 @@ mod tests {
         }
 
         // Verify non-membership
-        for (index, (mp, item)) in removed_mps.iter().zip(removed_items.iter()).enumerate() {
+        for (index, (mp, &item)) in removed_mps.iter().zip(removed_items.iter()).enumerate() {
             assert!(
                 !new_rusty_mutator_set.ams.verify(item, mp),
                 "membership proof of non-member {index} still valid"

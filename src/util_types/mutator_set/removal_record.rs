@@ -234,7 +234,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
         mmr::mmr_membership_proof::MmrMembershipProof::<H>::batch_update_from_append(
             &mut mmr_membership_proofs_for_append,
             mutator_set.swbf_inactive.count_leaves(),
-            &new_chunk_digest,
+            new_chunk_digest,
             &mutator_set.swbf_inactive.get_peaks(),
         );
 
@@ -286,7 +286,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
             .all(|(_i, (proof, chunk))| {
                 let leaf_digest = H::hash(chunk);
                 let leaf_count = mutator_set.swbf_inactive.count_leaves();
-                let (verified, _final_state) = proof.verify(&peaks, &leaf_digest, leaf_count);
+                let (verified, _final_state) = proof.verify(&peaks, leaf_digest, leaf_count);
 
                 verified
             })
@@ -337,8 +337,8 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let mp: MsMembershipProof<H> =
-            accumulator.prove(&item, &sender_randomness, &receiver_preimage);
-        let removal_record: RemovalRecord<H> = accumulator.drop(&item, &mp);
+            accumulator.prove(item, sender_randomness, receiver_preimage);
+        let removal_record: RemovalRecord<H> = accumulator.drop(item, &mp);
         (item, mp, removal_record)
     }
 
@@ -359,7 +359,7 @@ mod removal_record_tests {
     fn verify_that_removal_records_and_mp_indices_agree() {
         let (item, mp, removal_record) = get_item_mp_and_removal_record();
 
-        let mut mp_indices = mp.compute_indices(&item).0;
+        let mut mp_indices = mp.compute_indices(item).0;
         mp_indices.sort_unstable();
         let mut removal_rec_indices = removal_record.absolute_indices.0;
         removal_rec_indices.sort_unstable();
@@ -401,7 +401,7 @@ mod removal_record_tests {
         // Verify that indices from membership proof and remove records agree
         let mut rr_indices: Vec<u128> = chunks2indices.clone().into_values().concat();
         rr_indices.sort_unstable();
-        let mut mp_indices = mp.compute_indices(&item).0;
+        let mut mp_indices = mp.compute_indices(item).0;
         mp_indices.sort_unstable();
         assert_eq!(mp_indices.to_vec(), rr_indices);
         assert_eq!(NUM_TRIALS as usize, rr_indices.len());
@@ -436,22 +436,22 @@ mod removal_record_tests {
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
-        let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
+            commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+        let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
         assert!(
-            !accumulator.verify(&item, &mp),
+            !accumulator.verify(item, &mp),
             "Item must fail to verify before it is added"
         );
         accumulator.add(&addition_record);
-        let rr = accumulator.drop(&item, &mp);
+        let rr = accumulator.drop(item, &mp);
         assert!(
-            accumulator.verify(&item, &mp),
+            accumulator.verify(item, &mp),
             "Item must succeed in verification after it is added"
         );
         accumulator.remove(&rr);
         assert!(
-            !accumulator.verify(&item, &mp),
+            !accumulator.verify(item, &mp),
             "Item must fail to verify after it is removed"
         );
     }
@@ -471,8 +471,8 @@ mod removal_record_tests {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
-                    commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
-                let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
+                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+                let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
                 // Update all removal records from addition, then add the element
                 let update_res_rr = RemovalRecord::batch_update_from_addition(
@@ -515,7 +515,7 @@ mod removal_record_tests {
                     );
                 }
 
-                let rr = accumulator.drop(&item, &mp);
+                let rr = accumulator.drop(item, &mp);
                 removal_records.push((i as usize, rr));
             }
 
@@ -527,7 +527,7 @@ mod removal_record_tests {
             // this function, so we only test one of the removal records here.
             let (chosen_index, random_removal_record) =
                 removal_records.choose(&mut rand::thread_rng()).unwrap();
-            assert!(accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
+            assert!(accumulator.verify(items[*chosen_index], &mps[*chosen_index]));
             assert!(
                 accumulator.kernel.can_remove(random_removal_record),
                 "removal records must return true on `can_remove`",
@@ -537,7 +537,7 @@ mod removal_record_tests {
                 "removal record must have valid MMR MPs"
             );
             accumulator.remove(random_removal_record);
-            assert!(!accumulator.verify(&items[*chosen_index], &mps[*chosen_index]));
+            assert!(!accumulator.verify(items[*chosen_index], &mps[*chosen_index]));
 
             assert!(
                 !accumulator.kernel.can_remove(random_removal_record),
@@ -560,8 +560,8 @@ mod removal_record_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
-            let mp = accumulator.prove(&item, &sender_randomness, &receiver_preimage);
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             // Update all removal records from addition, then add the element
             let update_res_rr = RemovalRecord::batch_update_from_addition(
@@ -604,7 +604,7 @@ mod removal_record_tests {
                 );
             }
 
-            let rr = accumulator.drop(&item, &mp);
+            let rr = accumulator.drop(item, &mp);
             if original_first_removal_record.is_none() {
                 original_first_removal_record = Some(rr.clone());
             };

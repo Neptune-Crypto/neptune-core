@@ -124,7 +124,7 @@ impl GlobalState {
         let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
-            let removal_record = msa_tip.kernel.drop(&Hash::hash(spendable_utxo), mp);
+            let removal_record = msa_tip.kernel.drop(Hash::hash(spendable_utxo), mp);
             inputs.push(removal_record);
 
             input_amount = input_amount + spendable_utxo.get_native_coin_amount();
@@ -134,9 +134,9 @@ impl GlobalState {
         let mut output_utxos: Vec<Utxo> = vec![];
         for rd in receiver_data.iter() {
             let addition_record = commit::<Hash>(
-                &Hash::hash(&rd.utxo),
-                &rd.sender_randomness,
-                &rd.receiver_privacy_digest,
+                Hash::hash(&rd.utxo),
+                rd.sender_randomness,
+                rd.receiver_privacy_digest,
             );
             transaction_outputs.push(addition_record);
             output_utxos.push(rd.utxo.to_owned());
@@ -169,9 +169,9 @@ impl GlobalState {
                 .wallet_secret
                 .generate_sender_randomness(bc_tip.header.height, receiver_digest);
             let change_addition_record = commit::<Hash>(
-                &Hash::hash(&change_utxo),
-                &change_sender_randomness,
-                &receiver_digest,
+                Hash::hash(&change_utxo),
+                change_sender_randomness,
+                receiver_digest,
             );
             transaction_outputs.push(change_addition_record);
             output_utxos.push(change_utxo.clone());
@@ -237,7 +237,7 @@ impl GlobalState {
         // sanity check: test membership proofs
         for (utxo, membership_proof) in input_utxos.iter().zip(input_membership_proofs.iter()) {
             let item = Hash::hash(utxo);
-            assert!(self.chain.light_state.get_latest_block().await.body.next_mutator_set_accumulator.verify(&item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
+            assert!(self.chain.light_state.get_latest_block().await.body.next_mutator_set_accumulator.verify(item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
             debug!(
                 "Have valid membership proofs relative to {}",
                 self.chain
@@ -449,11 +449,11 @@ impl GlobalState {
                 warn!("Cannot restore UTXO with AOCL index {} because it is in the future from our tip. Current AOCL leaf count is {current_aocl_leaf_count}. Maybe this UTXO can be recovered once more blocks are downloaded from peers?", incoming_utxo.aocl_index);
                 continue;
             }
-            let ms_item = &Hash::hash(&incoming_utxo.utxo);
+            let ms_item = Hash::hash(&incoming_utxo.utxo);
             let restored_msmp_res = ams_lock.ams.restore_membership_proof(
                 ms_item,
-                &incoming_utxo.sender_randomness,
-                &incoming_utxo.receiver_preimage,
+                incoming_utxo.sender_randomness,
+                incoming_utxo.receiver_preimage,
                 incoming_utxo.aocl_index,
             );
             let restored_msmp = match restored_msmp_res {
@@ -505,7 +505,7 @@ impl GlobalState {
             }
 
             // ignore synced ones
-            if monitored_utxo.is_synced_to(&tip_hash) {
+            if monitored_utxo.is_synced_to(tip_hash) {
                 continue;
             }
 
@@ -537,7 +537,7 @@ impl GlobalState {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .find_path(&block_hash, &tip_hash)
+                .find_path(block_hash, tip_hash)
                 .await;
 
             // walk backwards, reverting
@@ -589,7 +589,7 @@ impl GlobalState {
 
                 // assert valid (if unspent)
                 assert!(monitored_utxo.spent_in_block.is_some() || previous_mutator_set
-                    .verify(&Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
+                    .verify(Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
             }
 
             // walk forwards, applying
@@ -618,7 +618,7 @@ impl GlobalState {
                 for addition_record in addition_records.iter() {
                     membership_proof
                         .update_from_addition(
-                            &Hash::hash(&monitored_utxo.utxo),
+                            Hash::hash(&monitored_utxo.utxo),
                             &block_msa,
                             addition_record,
                         )
@@ -675,14 +675,14 @@ mod global_state_tests {
         let monitored_utxos = &wallet_db_lock.monitored_utxos;
         for i in 0..monitored_utxos.len() {
             let monitored_utxo = monitored_utxos.get(i);
-            let current_mp = monitored_utxo.get_membership_proof_for_block(&tip_block.hash);
+            let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash);
 
             match current_mp {
                 Some(mp) => {
                     if !tip_block
                         .body
                         .next_mutator_set_accumulator
-                        .verify(&Hash::hash(&monitored_utxo.utxo), &mp)
+                        .verify(Hash::hash(&monitored_utxo.utxo), &mp)
                     {
                         return false;
                     }
@@ -839,7 +839,7 @@ mod global_state_tests {
                 .body
                 .next_mutator_set_accumulator
                 .verify(
-                    &ms_item,
+                    ms_item,
                     &own_premine_mutxo
                         .get_latest_membership_proof_entry()
                         .unwrap()
@@ -1053,7 +1053,7 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .was_abandoned(
-                    &parent_block.hash,
+                    parent_block.hash,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await
@@ -1062,7 +1062,7 @@ mod global_state_tests {
             monitored_utxos
                 .get(1)
                 .was_abandoned(
-                    &parent_block.hash,
+                    parent_block.hash,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await
@@ -1312,7 +1312,7 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .was_abandoned(
-                    &fork_c_block.hash,
+                    fork_c_block.hash,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await
@@ -1321,7 +1321,7 @@ mod global_state_tests {
             monitored_utxos
                 .get(1)
                 .was_abandoned(
-                    &fork_c_block.hash,
+                    fork_c_block.hash,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await

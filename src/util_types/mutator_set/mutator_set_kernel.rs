@@ -45,9 +45,9 @@ pub struct MutatorSetKernel<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H>> {
 
 // FIXME: Apply over-sampling to circumvent risk of duplicates.
 pub fn get_swbf_indices<H: AlgebraicHasher>(
-    item: &Digest,
-    sender_randomness: &Digest,
-    receiver_preimage: &Digest,
+    item: Digest,
+    sender_randomness: Digest,
+    receiver_preimage: Digest,
     aocl_leaf_index: u64,
 ) -> [u128; NUM_TRIALS as usize] {
     let batch_index: u128 = aocl_leaf_index as u128 / BATCH_SIZE as u128;
@@ -84,11 +84,11 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
 
 impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
     /// Generates a removal record with which to update the set commitment.
-    pub fn drop(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
+    pub fn drop(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
         let indices: AbsoluteIndexSet = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
             item,
-            &membership_proof.sender_randomness,
-            &membership_proof.receiver_preimage,
+            membership_proof.sender_randomness,
+            membership_proof.receiver_preimage,
             membership_proof.auth_path_aocl.leaf_index,
         ));
 
@@ -217,9 +217,9 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
     /// is added to the mutator set.
     pub fn prove(
         &self,
-        item: &Digest,
-        sender_randomness: &Digest,
-        receiver_preimage: &Digest,
+        item: Digest,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
     ) -> MsMembershipProof<H> {
         // compute commitment
         let item_commitment = H::hash_pair(item, sender_randomness);
@@ -237,7 +237,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         }
     }
 
-    pub fn verify(&self, item: &Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    pub fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
         // If data index does not exist in AOCL, return false
         // This also ensures that no "future" indices will be
         // returned from `get_indices`, so we don't have to check for
@@ -248,15 +248,15 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
 
         // verify that a commitment to the item lives in the aocl mmr
         let leaf = H::hash_pair(
-            &H::hash_pair(item, &membership_proof.sender_randomness),
-            &H::hash_pair(
-                &membership_proof.receiver_preimage,
-                &Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
+            H::hash_pair(item, membership_proof.sender_randomness),
+            H::hash_pair(
+                membership_proof.receiver_preimage,
+                Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
             ),
         );
         let (is_aocl_member, _) = membership_proof.auth_path_aocl.verify(
             &self.aocl.get_peaks(),
-            &leaf,
+            leaf,
             self.aocl.count_leaves(),
         );
         if !is_aocl_member {
@@ -275,8 +275,8 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         // Get all bloom filter indices
         let all_indices = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
             item,
-            &membership_proof.sender_randomness,
-            &membership_proof.receiver_preimage,
+            membership_proof.sender_randomness,
+            membership_proof.receiver_preimage,
             membership_proof.auth_path_aocl.leaf_index,
         ));
 
@@ -301,7 +301,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
                         .unwrap();
                 let (valid_auth_path, _) = mp_and_chunk.0.verify(
                     &self.swbf_inactive.get_peaks(),
-                    &H::hash(&mp_and_chunk.1),
+                    H::hash(&mp_and_chunk.1),
                     self.swbf_inactive.count_leaves(),
                 );
 
@@ -570,7 +570,7 @@ mod accumulation_scheme_tests {
         for i in 0..BATCH_SIZE {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
             mutator_set.add(&addition_record);
             assert_eq!(
                 0,
@@ -581,8 +581,7 @@ mod accumulation_scheme_tests {
         }
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let addition_record =
-            commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+        let addition_record = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
         mutator_set.add(&addition_record);
         assert_eq!(
             1,
@@ -654,7 +653,7 @@ mod accumulation_scheme_tests {
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let ret: [u128; NUM_TRIALS as usize] =
-            get_swbf_indices::<H>(&item, &sender_randomness, &receiver_preimage, 0);
+            get_swbf_indices::<H>(item, sender_randomness, receiver_preimage, 0);
         assert_eq!(NUM_TRIALS as usize, ret.len());
         assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
     }
@@ -667,7 +666,7 @@ mod accumulation_scheme_tests {
         for _ in 0..1000 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let ret: [u128; NUM_TRIALS as usize] =
-                get_swbf_indices::<H>(&item, &sender_randomness, &receiver_preimage, 0);
+                get_swbf_indices::<H>(item, sender_randomness, receiver_preimage, 0);
             assert_eq!(NUM_TRIALS as usize, ret.len());
             assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
         }
@@ -675,9 +674,9 @@ mod accumulation_scheme_tests {
         for _ in 0..1000 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices::<H>(
-                &item,
-                &sender_randomness,
-                &receiver_preimage,
+                item,
+                sender_randomness,
+                receiver_preimage,
                 (17 * BATCH_SIZE) as u64,
             );
             assert_eq!(NUM_TRIALS as usize, ret.len());
@@ -723,14 +722,14 @@ mod accumulation_scheme_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
             let membership_proof: MsMembershipProof<H> =
-                mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                mutator_set.prove(item, sender_randomness, receiver_preimage);
             mutator_set.add_helper(&addition_record);
-            assert!(mutator_set.verify(&item, &membership_proof));
+            assert!(mutator_set.verify(item, &membership_proof));
 
             // Verify that a future membership proof returns false and does not crash
-            assert!(!empty_mutator_set.verify(&item, &membership_proof));
+            assert!(!empty_mutator_set.verify(item, &membership_proof));
         }
     }
 
@@ -741,25 +740,22 @@ mod accumulation_scheme_tests {
         let mut mutator_set = MutatorSetAccumulator::<H>::default();
         let (own_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-        let addition_record = commit::<H>(
-            &own_item,
-            &sender_randomness,
-            &receiver_preimage.hash::<H>(),
-        );
+        let addition_record =
+            commit::<H>(own_item, sender_randomness, receiver_preimage.hash::<H>());
         let mut membership_proof =
-            mutator_set.prove(&own_item, &sender_randomness, &receiver_preimage);
+            mutator_set.prove(own_item, sender_randomness, receiver_preimage);
         mutator_set.kernel.add_helper(&addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
         let (new_item, new_sender_randomness, new_receiver_preimage) = make_item_and_randomnesses();
         let new_addition_record = commit::<H>(
-            &new_item,
-            &new_sender_randomness,
-            &new_receiver_preimage.hash::<H>(),
+            new_item,
+            new_sender_randomness,
+            new_receiver_preimage.hash::<H>(),
         );
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
-            &own_item,
+            own_item,
             &mutator_set,
             &new_addition_record,
         ) {
@@ -775,11 +771,11 @@ mod accumulation_scheme_tests {
             membership_proof.auth_path_aocl
         );
         assert!(
-            mutator_set.verify(&own_item, &original_membership_proof),
+            mutator_set.verify(own_item, &original_membership_proof),
             "Original membership proof must verify prior to addition"
         );
         assert!(
-            !mutator_set.verify(&own_item, &membership_proof),
+            !mutator_set.verify(own_item, &membership_proof),
             "New membership proof must fail to verify prior to addition"
         );
 
@@ -787,11 +783,11 @@ mod accumulation_scheme_tests {
         // that the original membership proof is invalid.
         mutator_set.kernel.add_helper(&new_addition_record);
         assert!(
-            !mutator_set.verify(&own_item, &original_membership_proof),
+            !mutator_set.verify(own_item, &original_membership_proof),
             "Original membership proof must fail to verify after addition"
         );
         assert!(
-            mutator_set.verify(&own_item, &membership_proof),
+            mutator_set.verify(own_item, &membership_proof),
             "New membership proof must verify after addition"
         );
     }
@@ -816,13 +812,13 @@ mod accumulation_scheme_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record =
-                commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
-            let membership_proof = mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
+                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
 
             // Update all membership proofs
             for (mp, itm) in membership_proofs_and_items.iter_mut() {
                 let original_mp = mp.clone();
-                let changed_res = mp.update_from_addition(itm, &mutator_set, &addition_record);
+                let changed_res = mp.update_from_addition(*itm, &mutator_set, &addition_record);
                 assert!(changed_res.is_ok());
 
                 // verify that the boolean returned value from the updater method is set correctly
@@ -830,16 +826,16 @@ mod accumulation_scheme_tests {
             }
 
             // Add the element
-            assert!(!mutator_set.verify(&item, &membership_proof));
+            assert!(!mutator_set.verify(item, &membership_proof));
             mutator_set.kernel.add_helper(&addition_record);
-            assert!(mutator_set.verify(&item, &membership_proof));
+            assert!(mutator_set.verify(item, &membership_proof));
             membership_proofs_and_items.push((membership_proof, item));
 
             // Verify that all membership proofs work
             assert!(membership_proofs_and_items
                 .clone()
                 .into_iter()
-                .all(|(mp, itm)| mutator_set.verify(&itm, &mp)));
+                .all(|(mp, itm)| mutator_set.verify(itm, &mp)));
         }
     }
 
@@ -851,23 +847,23 @@ mod accumulation_scheme_tests {
         let (item0, sender_randomness0, receiver_preimage0) = make_item_and_randomnesses();
 
         let addition_record =
-            commit::<H>(&item0, &sender_randomness0, &receiver_preimage0.hash::<H>());
-        let membership_proof = mutator_set.prove(&item0, &sender_randomness0, &receiver_preimage0);
+            commit::<H>(item0, sender_randomness0, receiver_preimage0.hash::<H>());
+        let membership_proof = mutator_set.prove(item0, sender_randomness0, receiver_preimage0);
 
-        assert!(!mutator_set.verify(&item0, &membership_proof));
+        assert!(!mutator_set.verify(item0, &membership_proof));
 
         mutator_set.kernel.add_helper(&addition_record);
 
-        assert!(mutator_set.verify(&item0, &membership_proof));
+        assert!(mutator_set.verify(item0, &membership_proof));
 
         // Insert a new item and verify that this still works
         let (item1, sender_randomness1, receiver_preimage1) = make_item_and_randomnesses();
-        let new_ar = commit::<H>(&item1, &sender_randomness1, &receiver_preimage1.hash::<H>());
-        let new_mp = mutator_set.prove(&item1, &sender_randomness1, &receiver_preimage1);
-        assert!(!mutator_set.verify(&item1, &new_mp));
+        let new_ar = commit::<H>(item1, sender_randomness1, receiver_preimage1.hash::<H>());
+        let new_mp = mutator_set.prove(item1, sender_randomness1, receiver_preimage1);
+        assert!(!mutator_set.verify(item1, &new_mp));
 
         mutator_set.kernel.add_helper(&new_ar);
-        assert!(mutator_set.verify(&item1, &new_mp));
+        assert!(mutator_set.verify(item1, &new_mp));
 
         // Insert ~2*BATCH_SIZE  more elements and
         // verify that it works throughout. The reason we insert this many
@@ -875,12 +871,12 @@ mod accumulation_scheme_tests {
         // position.
         for _ in 0..2 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let other_ar = commit::<H>(&item, &sender_randomness, &receiver_preimage.hash::<H>());
-            let other_mp = mutator_set.prove(&item, &sender_randomness, &receiver_preimage);
-            assert!(!mutator_set.verify(&item, &other_mp));
+            let other_ar = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let other_mp = mutator_set.prove(item, sender_randomness, receiver_preimage);
+            assert!(!mutator_set.verify(item, &other_mp));
 
             mutator_set.kernel.add_helper(&other_ar);
-            assert!(mutator_set.verify(&item, &other_mp));
+            assert!(mutator_set.verify(item, &other_mp));
         }
     }
 
@@ -909,13 +905,10 @@ mod accumulation_scheme_tests {
             for _ in 0..num_additions {
                 let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                let addition_record = commit::<H>(
-                    &new_item,
-                    &sender_randomness,
-                    &receiver_preimage.hash::<H>(),
-                );
+                let addition_record =
+                    commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
                 let membership_proof =
-                    mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);
+                    mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 
                 // Update *all* membership proofs with newly added item
                 let batch_update_res = MsMembershipProof::<H>::batch_update_from_addition(
@@ -927,9 +920,9 @@ mod accumulation_scheme_tests {
                 assert!(batch_update_res.is_ok());
 
                 mutator_set.kernel.add_helper(&addition_record);
-                assert!(mutator_set.verify(&new_item, &membership_proof));
+                assert!(mutator_set.verify(new_item, &membership_proof));
 
-                for (_, (mp, item)) in membership_proofs.iter().zip(items.iter()).enumerate() {
+                for (mp, &item) in membership_proofs.iter().zip(items.iter()) {
                     assert!(mutator_set.verify(item, mp));
                 }
 
@@ -941,10 +934,10 @@ mod accumulation_scheme_tests {
             for _ in 0..num_additions {
                 let item = items.pop().unwrap();
                 let mp = membership_proofs.pop().unwrap();
-                assert!(mutator_set.verify(&item, &mp));
+                assert!(mutator_set.verify(item, &mp));
 
                 // generate removal record
-                let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
+                let removal_record: RemovalRecord<H> = mutator_set.drop(item, &mp);
                 assert!(removal_record.validate(&mutator_set.kernel));
                 assert!(mutator_set.kernel.can_remove(&removal_record));
 
@@ -957,9 +950,9 @@ mod accumulation_scheme_tests {
 
                 // remove item from set
                 mutator_set.kernel.remove_helper(&removal_record);
-                assert!(!mutator_set.verify(&item, &mp));
+                assert!(!mutator_set.verify(item, &mp));
 
-                for (itm, membp) in items.iter().zip(membership_proofs.iter()) {
+                for (&itm, membp) in items.iter().zip(membership_proofs.iter()) {
                     assert!(mutator_set.verify(itm, membp));
                 }
             }
@@ -979,20 +972,17 @@ mod accumulation_scheme_tests {
         for _ in 0..num_additions {
             let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record = commit::<H>(
-                &new_item,
-                &sender_randomness,
-                &receiver_preimage.hash::<H>(),
-            );
+            let addition_record =
+                commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
             let membership_proof =
-                mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);
+                mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 
             // Update *all* membership proofs with newly added item
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
                 let original_mp = mp.clone();
-                assert!(mutator_set.verify(updatee_item, mp));
+                assert!(mutator_set.verify(*updatee_item, mp));
                 let changed_res =
-                    mp.update_from_addition(updatee_item, &mutator_set, &addition_record);
+                    mp.update_from_addition(*updatee_item, &mutator_set, &addition_record);
                 assert!(changed_res.is_ok());
 
                 // verify that the boolean returned value from the updater method is set correctly
@@ -1000,11 +990,11 @@ mod accumulation_scheme_tests {
             }
 
             mutator_set.kernel.add_helper(&addition_record);
-            assert!(mutator_set.verify(&new_item, &membership_proof));
+            assert!(mutator_set.verify(new_item, &membership_proof));
 
             (0..items_and_membership_proofs.len()).for_each(|j| {
                 let (old_item, mp) = &items_and_membership_proofs[j];
-                assert!(mutator_set.verify(old_item, mp))
+                assert!(mutator_set.verify(*old_item, mp))
             });
 
             items_and_membership_proofs.push((new_item, membership_proof));
@@ -1013,7 +1003,7 @@ mod accumulation_scheme_tests {
         // Verify all membership proofs
         (0..items_and_membership_proofs.len()).for_each(|k| {
             assert!(mutator_set.verify(
-                &items_and_membership_proofs[k].0,
+                items_and_membership_proofs[k].0,
                 &items_and_membership_proofs[k].1,
             ));
         });
@@ -1022,21 +1012,21 @@ mod accumulation_scheme_tests {
         (0..num_additions).for_each(|i| {
             (i..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
-                    &items_and_membership_proofs[k].0,
+                    items_and_membership_proofs[k].0,
                     &items_and_membership_proofs[k].1,
                 ));
             });
             let (item, mp) = items_and_membership_proofs[i].clone();
 
-            assert!(mutator_set.verify(&item, &mp));
+            assert!(mutator_set.verify(item, &mp));
 
             // generate removal record
-            let removal_record: RemovalRecord<H> = mutator_set.drop(&item, &mp);
+            let removal_record: RemovalRecord<H> = mutator_set.drop(item, &mp);
             assert!(removal_record.validate(&mutator_set.kernel));
             assert!(mutator_set.kernel.can_remove(&removal_record));
             (i..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
-                    &items_and_membership_proofs[k].0,
+                    items_and_membership_proofs[k].0,
                     &items_and_membership_proofs[k].1,
                 ));
             });
@@ -1044,7 +1034,7 @@ mod accumulation_scheme_tests {
             // update membership proofs
             ((i + 1)..num_additions).for_each(|j| {
                 assert!(mutator_set.verify(
-                    &items_and_membership_proofs[j].0,
+                    items_and_membership_proofs[j].0,
                     &items_and_membership_proofs[j].1
                 ));
                 let update_res = items_and_membership_proofs[j]
@@ -1055,11 +1045,11 @@ mod accumulation_scheme_tests {
 
             // remove item from set
             mutator_set.kernel.remove_helper(&removal_record);
-            assert!(!mutator_set.verify(&item, &mp));
+            assert!(!mutator_set.verify(item, &mp));
 
             ((i + 1)..items_and_membership_proofs.len()).for_each(|k| {
                 assert!(mutator_set.verify(
-                    &items_and_membership_proofs[k].0,
+                    items_and_membership_proofs[k].0,
                     &items_and_membership_proofs[k].1,
                 ));
             });
@@ -1094,10 +1084,10 @@ mod accumulation_scheme_tests {
         assert_eq!(1, s_back_one_add.aocl.count_leaves());
         assert!(s_back_one_add.swbf_inactive.is_empty());
         assert!(s_back_one_add.swbf_active.sbf.is_empty());
-        assert!(s_back_one_add.verify(&item, &mp));
+        assert!(s_back_one_add.verify(item, &mp));
 
         // Remove an item, verify correct serialization
-        remove_mock_item(&mut mutator_set, &item, &mp);
+        remove_mock_item(&mut mutator_set, item, &mp);
         let json_one_add_one_remove = serde_json::to_string(&mutator_set).unwrap();
         println!("json_one_add = \n{}", json_one_add_one_remove);
         let s_back_one_add_one_remove =
@@ -1116,7 +1106,7 @@ mod accumulation_scheme_tests {
             "Some of the indices in the active window must now be set"
         );
         assert!(
-            !s_back_one_add_one_remove.verify(&item, &mp),
+            !s_back_one_add_one_remove.verify(item, &mp),
             "Membership proof must fail after removal"
         );
     }

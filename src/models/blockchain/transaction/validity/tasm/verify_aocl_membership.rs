@@ -171,7 +171,7 @@ impl Function for VerifyAoclMembership {
         );
 
         // verify
-        let validation_result = memproof.auth_path_aocl.verify(&peaks, &leaf, leaf_count).0;
+        let validation_result = memproof.auth_path_aocl.verify(&peaks, leaf, leaf_count).0;
         println!("RS validation_result: {validation_result}");
 
         // repopulate stack

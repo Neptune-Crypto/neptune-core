@@ -135,7 +135,7 @@ impl Function for ComputeIndices {
     fn rust_shadow(
         &self,
         stack: &mut Vec<BFieldElement>,
-        memory: &mut std::collections::HashMap<BFieldElement, BFieldElement>,
+        memory: &mut HashMap<BFieldElement, BFieldElement>,
     ) {
         // read address of membership proof
         let _address = stack.pop().unwrap();
@@ -354,7 +354,7 @@ mod tests {
             &ShadowedFunction::new(map_compute_indices),
             &mut stack,
             vec![],
-            &NonDeterminism::new(vec![]),
+            &mut NonDeterminism::new(vec![]),
             &mut memory,
             mallocked,
         );
@@ -397,9 +397,9 @@ mod tests {
             .zip(membership_proofs)
             .map(|(item, mp)| {
                 get_swbf_indices::<Hash>(
-                    &item,
-                    &mp.sender_randomness,
-                    &mp.receiver_preimage,
+                    item,
+                    mp.sender_randomness,
+                    mp.receiver_preimage,
                     mp.auth_path_aocl.leaf_index,
                 )
                 .to_vec()

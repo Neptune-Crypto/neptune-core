@@ -97,12 +97,8 @@ pub fn insert_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
 ) -> (MsMembershipProof<H>, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-    let addition_record = commit::<H>(
-        &new_item,
-        &sender_randomness,
-        &receiver_preimage.hash::<H>(),
-    );
-    let membership_proof = mutator_set.prove(&new_item, &sender_randomness, &receiver_preimage);
+    let addition_record = commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
+    let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage);
     mutator_set.add_helper(&addition_record);
 
     (membership_proof, new_item)
@@ -110,7 +106,7 @@ pub fn insert_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
 
 pub fn remove_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
     mutator_set: &mut MutatorSetKernel<H, M>,
-    item: &Digest,
+    item: Digest,
     mp: &MsMembershipProof<H>,
 ) {
     let removal_record: RemovalRecord<H> = mutator_set.drop(item, mp);
@@ -284,7 +280,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
             .map(|_| rng.gen())
             .collect_vec();
         let dummy_peaks = [peaks.clone(), dummy_remainder].concat();
-        for ((leaf, _mt_index, _original_index), mp) in
+        for (&(leaf, _mt_index, _original_index), mp) in
             leafs_and_mt_indices.iter().zip(membership_proofs.iter())
         {
             assert!(mp.verify(&dummy_peaks, leaf, leaf_count).0);
@@ -301,7 +297,7 @@ pub fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
     let mmra = MmrAccumulator::<H>::init(peaks, leaf_count);
 
     // sanity check
-    for (leaf, mp) in leafs.iter().zip(mps.iter()) {
+    for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
         assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
     }
 
@@ -341,7 +337,7 @@ pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
             if nodes.get(&wi_even).is_none() {
                 nodes.insert(wi_even, rng.gen::<Digest>());
             }
-            let hash = H::hash_pair(nodes.get(&wi_even).unwrap(), nodes.get(&wi_odd).unwrap());
+            let hash = H::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
             nodes.insert(wi >> 1, hash);
         }
         depth -= 1;
@@ -396,11 +392,11 @@ fn merkle_verify_tester_helper<H: AlgebraicHasher>(
     leaf: Digest,
 ) -> bool {
     let mut acc = leaf;
-    for (shift, p) in path.iter().enumerate() {
+    for (shift, &p) in path.iter().enumerate() {
         if (index >> shift) & 1 == 1 {
-            acc = H::hash_pair(p, &acc);
+            acc = H::hash_pair(p, acc);
         } else {
-            acc = H::hash_pair(&acc, p);
+            acc = H::hash_pair(acc, p);
         }
     }
     acc == root
@@ -431,7 +427,7 @@ mod shared_tests_test {
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
         let (mmra, mp) = pseudorandom_mmra_with_mp::<H>(rng.gen(), leaf);
-        assert!(mp.verify(&mmra.get_peaks(), &leaf, mmra.count_leaves()).0);
+        assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
     }
 
     #[test]
@@ -480,7 +476,7 @@ mod shared_tests_test {
 
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
             let (mmra, mps) = pseudorandom_mmra_with_mps::<H>(inner_rng.gen(), &leafs);
-            for (leaf, mp) in leafs.iter().zip(mps.iter()) {
+            for (leaf, mp) in leafs.into_iter().zip(mps) {
                 assert!(
                     mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0,
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"

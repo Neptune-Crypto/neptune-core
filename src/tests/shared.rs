@@ -461,9 +461,9 @@ pub fn pseudorandom_removal_record_integrity_witness(
         .zip(membership_proofs.iter())
         .map(|(utxo, msmp)| {
             commit::<Hash>(
-                &Hash::hash(utxo),
-                &msmp.sender_randomness,
-                &msmp.receiver_preimage.hash::<Hash>(),
+                Hash::hash(utxo),
+                msmp.sender_randomness,
+                msmp.receiver_preimage.hash::<Hash>(),
             )
         })
         .collect_vec();
@@ -475,7 +475,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
     assert_eq!(num_inputs, mmr_mps.len());
     assert_eq!(num_inputs, canonical_commitments.len());
 
-    for (mp, cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
+    for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
         assert!(
             mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
             "Returned MPs must be valid for returned AOCL"
@@ -490,8 +490,8 @@ pub fn pseudorandom_removal_record_integrity_witness(
     let mut kernel =
         pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts);
     kernel.mutator_set_hash = Hash::hash_pair(
-        &Hash::hash_pair(&aocl.bag_peaks(), &swbfi.bag_peaks()),
-        &Hash::hash_pair(&swbfa_hash, &Digest::default()),
+        Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+        Hash::hash_pair(swbfa_hash, Digest::default()),
     );
     kernel.inputs = input_utxos
         .iter()
@@ -504,7 +504,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
                 msmp.auth_path_aocl.leaf_index,
             )
         })
-        .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(&item, &sr, &rp, li))
+        .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(item, sr, rp, li))
         .map(|ais| RemovalRecord {
             absolute_indices: AbsoluteIndexSet::new(&ais),
             target_chunks: pseudorandom_chunk_dictionary(rng.gen()),
@@ -635,7 +635,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 //     let input_removal_record = block
 //         .body
 //         .previous_mutator_set_accumulator
-//         .drop(&item, &membership_proof);
+//         .drop(item, membership_proof);
 //     add_unsigned_dev_net_input_to_block_transaction(
 //         block,
 //         consumed_utxo,
@@ -662,7 +662,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 
 //     // Sanity check that restored membership proof agrees with AMS
 //     assert!(
-//         ams.lock().await.ams.verify(&item, &input_membership_proof),
+//         ams.lock().await.ams.verify(item, &input_membership_proof),
 //         "Restored MS membership proof must validate against own AMS"
 //     );
 
@@ -671,7 +671,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 //         block
 //             .body
 //             .previous_mutator_set_accumulator
-//             .verify(&item, &input_membership_proof),
+//             .verify(item, &input_membership_proof),
 //         "Restored MS membership proof must validate against input block"
 //     );
 
@@ -680,7 +680,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 //         .await
 //         .ams
 //         .kernel
-//         .drop(&item, &input_membership_proof);
+//         .drop(item, &input_membership_proof);
 //     add_unsigned_dev_net_input_to_block_transaction(
 //         block,
 //         consumed_utxo,
@@ -704,7 +704,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 //         target_chunks: ChunkDictionary::default(),
 //     };
 //     let mut mock_ms_acc = MutatorSetAccumulator::default();
-//     let mock_removal_record = mock_ms_acc.drop(&sender_randomness, &mock_ms_membership_proof);
+//     let mock_removal_record = mock_ms_acc.drop(sender_randomness, &mock_ms_membership_proof);
 
 //     let utxo = Utxo {
 //         amount,
@@ -752,16 +752,16 @@ pub fn make_mock_transaction_with_generation_key(
     // Generate removal records
     let mut inputs = vec![];
     for (input_utxo, input_mp, _) in input_utxos_mps_keys.iter() {
-        let removal_record = tip_msa.kernel.drop(&Hash::hash(input_utxo), input_mp);
+        let removal_record = tip_msa.kernel.drop(Hash::hash(input_utxo), input_mp);
         inputs.push(removal_record);
     }
 
     let mut outputs = vec![];
     for rd in receiver_data.iter() {
         let addition_record = commit::<Hash>(
-            &Hash::hash(&rd.utxo),
-            &rd.sender_randomness,
-            &rd.receiver_privacy_digest,
+            Hash::hash(&rd.utxo),
+            rd.sender_randomness,
+            rd.receiver_privacy_digest,
         );
         outputs.push(addition_record);
     }
@@ -917,11 +917,8 @@ pub fn make_mock_block(
     let previous_mutator_set = next_mutator_set.clone();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
-    let coinbase_addition_record: AdditionRecord = commit::<Hash>(
-        &coinbase_digest,
-        &coinbase_output_randomness,
-        &receiver_digest,
-    );
+    let coinbase_addition_record: AdditionRecord =
+        commit::<Hash>(coinbase_digest, coinbase_output_randomness, receiver_digest);
     next_mutator_set.add(&coinbase_addition_record);
 
     let block_timestamp = match block_timestamp {
