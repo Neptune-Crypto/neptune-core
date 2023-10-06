@@ -21,7 +21,7 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
         .for_each(|(chunk_index, index)| {
             chunkidx_to_indices_dict
                 .entry(chunk_index)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(*index);
         });
 
