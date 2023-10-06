@@ -2,173 +2,173 @@ tasm_neptune_transaction_removal_records_integrity:
 
 # call graph
  tasm_neptune_transaction_transaction_kernel_mast_hash: 21792
-   tasm_list_unsafe_u32_new_digest: 33
+   tasm_list_unsafeimplu32_new___digest: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_digest: 2
+   tasm_list_unsafeimplu32_set_length___digest: 2
    tasm_hashing_hash_varlen: 19354
      tasm_hashing_hash_varlen_loop: 19201
        tasm_hashing_hash_varlen_if_branch: 4
      tasm_hashing_hash_varlen_pad_varnum_zeros: 93
      tasm_hashing_hash_varlen_read_remaining_elements: 22
-   tasm_list_unsafe_u32_set_element_digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
    tasm_hashing_hash_varlen: 244
      tasm_hashing_hash_varlen_loop: 91
        tasm_hashing_hash_varlen_if_branch: 4
      tasm_hashing_hash_varlen_pad_varnum_zeros: 93
      tasm_hashing_hash_varlen_read_remaining_elements: 22
-   tasm_list_unsafe_u32_set_element_digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
    tasm_hashing_hash_varlen: 406
      tasm_hashing_hash_varlen_loop: 247
        tasm_hashing_hash_varlen_if_branch: 4
      tasm_hashing_hash_varlen_pad_varnum_zeros: 82
      tasm_hashing_hash_varlen_read_remaining_elements: 39
-   tasm_list_unsafe_u32_set_element_digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
    tasm_hashing_hash_varlen: 184
      tasm_hashing_hash_varlen_loop: 9
      tasm_hashing_hash_varlen_pad_varnum_zeros: 60
      tasm_hashing_hash_varlen_read_remaining_elements: 73
      tasm_hashing_hash_varlen_if_first_time_absob_init: 4
-   tasm_list_unsafe_u32_set_element_digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
    tasm_hashing_hash_varlen: 190
      tasm_hashing_hash_varlen_loop: 9
      tasm_hashing_hash_varlen_pad_varnum_zeros: 49
      tasm_hashing_hash_varlen_read_remaining_elements: 90
      tasm_hashing_hash_varlen_if_first_time_absob_init: 4
-   tasm_list_unsafe_u32_set_element_digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
    tasm_hashing_hash_varlen: 166
      tasm_hashing_hash_varlen_loop: 9
      tasm_hashing_hash_varlen_pad_varnum_zeros: 93
      tasm_hashing_hash_varlen_read_remaining_elements: 22
      tasm_hashing_hash_varlen_if_first_time_absob_init: 4
-   tasm_list_unsafe_u32_set_element_digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
    tasm_hashing_hash_varlen: 190
      tasm_hashing_hash_varlen_loop: 9
      tasm_hashing_hash_varlen_pad_varnum_zeros: 49
      tasm_hashing_hash_varlen_read_remaining_elements: 90
      tasm_hashing_hash_varlen_if_first_time_absob_init: 4
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
-   tasm_list_unsafe_u32_set_element_digest: 25
-   tasm_list_unsafe_u32_get_element_digest: 25
- tasm_memory_push_ram_to_stack_digest: 22
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+   tasm_list_unsafeimplu32_set_element___digest: 25
+   tasm_list_unsafeimplu32_get_element___digest: 25
+ tasm_memory_push_ram_to_stack___digest: 22
  tasm_mmr_bag_peaks: 149
-   tasm_list_unsafe_u32_length_long_digest: 4
+   tasm_list_unsafeimplu32_length___digest: 4
    tasm_mmr_bag_peaks_length_is_not_zero: 135
      tasm_mmr_bag_peaks_length_is_not_one: 127
-       tasm_list_unsafe_u32_get_element_digest: 25
-       tasm_list_unsafe_u32_get_element_digest: 25
+       tasm_list_unsafeimplu32_get_element___digest: 25
+       tasm_list_unsafeimplu32_get_element___digest: 25
        tasm_mmr_bag_peaks_loop: 48
-         tasm_list_unsafe_u32_get_element_digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
  tasm_mmr_bag_peaks: 1697
-   tasm_list_unsafe_u32_length_long_digest: 4
+   tasm_list_unsafeimplu32_length___digest: 4
    tasm_mmr_bag_peaks_length_is_not_zero: 1683
      tasm_mmr_bag_peaks_length_is_not_one: 1675
-       tasm_list_unsafe_u32_get_element_digest: 25
-       tasm_list_unsafe_u32_get_element_digest: 25
+       tasm_list_unsafeimplu32_get_element___digest: 25
+       tasm_list_unsafeimplu32_get_element___digest: 25
        tasm_mmr_bag_peaks_loop: 1596
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
-         tasm_list_unsafe_u32_get_element_digest: 25
- tasm_memory_push_ram_to_stack_digest: 22
- tasm_list_contiguous_list_get_pointer_list_unsafe: 111
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+         tasm_list_unsafeimplu32_get_element___digest: 25
+ tasm_memory_push_ram_to_stack___digest: 22
+ tasm_list_contiguous_list_get_pointer_list_unsafeimplu32: 111
    tasm_list_contiguous_list_get_length: 4
-   tasm_list_unsafe_u32_new_void_pointer: 31
+   tasm_list_unsafeimplu32_new___void_pointer: 31
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 57
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo: 750
-   tasm_list_unsafe_u32_length_long_void_pointer: 4
-   tasm_list_unsafe_u32_new_digest: 33
+   tasm_list_unsafeimplu32_set_length___void_pointer: 2
+   tasm_list_contiguous_list_get_pointer_list_unsafeimplu32_loop: 57
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_utxo: 750
+   tasm_list_unsafeimplu32_length___void_pointer: 4
+   tasm_list_unsafeimplu32_new___digest: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo_loop: 699
-     tasm_list_unsafe_u32_get_element_void_pointer: 7
+   tasm_list_unsafeimplu32_set_length___void_pointer: 2
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_utxo_loop: 699
+     tasm_list_unsafeimplu32_get_element___void_pointer: 7
      tasm_neptune_transaction_hash_utxo: 301
        tasm_hashing_hash_varlen: 292
          tasm_hashing_hash_varlen_loop: 91
            tasm_hashing_hash_varlen_if_branch: 4
          tasm_hashing_hash_varlen_pad_varnum_zeros: 5
          tasm_hashing_hash_varlen_read_remaining_elements: 158
-     tasm_list_unsafe_u32_set_element_digest: 25
-     tasm_list_unsafe_u32_get_element_void_pointer: 7
+     tasm_list_unsafeimplu32_set_element___digest: 25
+     tasm_list_unsafeimplu32_get_element___void_pointer: 7
      tasm_neptune_transaction_hash_utxo: 301
        tasm_hashing_hash_varlen: 292
          tasm_hashing_hash_varlen_loop: 91
            tasm_hashing_hash_varlen_if_branch: 4
          tasm_hashing_hash_varlen_pad_varnum_zeros: 5
          tasm_hashing_hash_varlen_read_remaining_elements: 158
-     tasm_list_unsafe_u32_set_element_digest: 25
- tasm_list_contiguous_list_get_pointer_list_unsafe: 111
+     tasm_list_unsafeimplu32_set_element___digest: 25
+ tasm_list_contiguous_list_get_pointer_list_unsafeimplu32: 111
    tasm_list_contiguous_list_get_length: 4
-   tasm_list_unsafe_u32_new_void_pointer: 31
+   tasm_list_unsafeimplu32_new___void_pointer: 31
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 57
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
- tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest: 406
-   tasm_list_unsafe_u32_length_long_void_pointer: 4
-   tasm_list_unsafe_u32_length_long_digest: 4
-   tasm_list_unsafe_u32_new_tuple_ofstart_void-pointer_digest_ofend_: 33
+   tasm_list_unsafeimplu32_set_length___void_pointer: 2
+   tasm_list_contiguous_list_get_pointer_list_unsafeimplu32_loop: 57
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+ tasm_list_higher_order_unsafeimplu32_u32_zip_void_pointer_with_digest: 406
+   tasm_list_unsafeimplu32_length___void_pointer: 4
+   tasm_list_unsafeimplu32_length___digest: 4
+   tasm_list_unsafeimplu32_new___tuple_Lvoid_pointer___digestR: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_tuple_ofstart_void-pointer_digest_ofend_: 2
-   tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest_loop: 345
+   tasm_list_unsafeimplu32_set_length___tuple_Lvoid_pointer___digestR: 2
+   tasm_list_higher_order_unsafeimplu32_u32_zip_void_pointer_with_digest_loop: 345
      tasm_memory_memcpy: 29
        tasm_memory_memcpy_loop: 24
      tasm_memory_memcpy: 105
@@ -177,466 +177,466 @@ tasm_neptune_transaction_removal_records_integrity:
        tasm_memory_memcpy_loop: 24
      tasm_memory_memcpy: 105
        tasm_memory_memcpy_loop: 100
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10312
-   tasm_list_unsafe_u32_length_long_tuple_ofstart_digest_void-pointer_ofend_: 4
-   tasm_list_unsafe_u32_new_void_pointer: 31
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices: 10312
+   tasm_list_unsafeimplu32_length___tuple_Ldigest___void_pointerR: 4
+   tasm_list_unsafeimplu32_new___void_pointer: 31
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_tuple_ofstart_digest_void-pointer_ofend_: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
+   tasm_list_unsafeimplu32_set_length___tuple_Ldigest___void_pointerR: 2
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
+     tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 29
      tasm_neptune_transaction_compute_indices: 5079
-       tasm_memory_push_ram_to_stack_digest: 22
-       tasm_memory_push_ram_to_stack_digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
        tasm_neptune_mutator_get_swbf_indices_1048576_45: 4976
          tasm_arithmetic_u128_shift_right_static_3: 24
          tasm_arithmetic_u128_shift_left_static_12: 22
-         tasm_hashing_sample_indices_to_unsafe_list: 1859
-           tasm_list_unsafe_u32_new_u32: 31
+         tasm_hashing_sample_indices_to_unsafeimplu32_list: 1859
+           tasm_list_unsafeimplu32_new___u32: 31
              tasm_memory_dyn_malloc: 25
-           tasm_list_unsafe_u32_set_length_u32: 2
-           tasm_hashing_sample_indices_to_unsafe_list_loop: 1780
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 3026
-           tasm_list_unsafe_u32_length_long_u32: 4
-           tasm_list_unsafe_u32_new_u128: 33
+           tasm_list_unsafeimplu32_set_length___u32: 2
+           tasm_hashing_sample_indices_to_unsafeimplu32_list_loop: 1780
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+         tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128: 3026
+           tasm_list_unsafeimplu32_length___u32: 4
+           tasm_list_unsafeimplu32_new___u128: 33
              tasm_memory_dyn_malloc: 25
-           tasm_list_unsafe_u32_set_length_u32: 2
-           tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128_loop: 2975
-             tasm_list_unsafe_u32_get_element_u32: 7
+           tasm_list_unsafeimplu32_set_length___u32: 2
+           tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128_loop: 2975
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
+             tasm_list_unsafeimplu32_set_element___u128: 21
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+     tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 29
      tasm_neptune_transaction_compute_indices: 5079
-       tasm_memory_push_ram_to_stack_digest: 22
-       tasm_memory_push_ram_to_stack_digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
        tasm_neptune_mutator_get_swbf_indices_1048576_45: 4976
          tasm_arithmetic_u128_shift_right_static_3: 24
          tasm_arithmetic_u128_shift_left_static_12: 22
-         tasm_hashing_sample_indices_to_unsafe_list: 1859
-           tasm_list_unsafe_u32_new_u32: 31
+         tasm_hashing_sample_indices_to_unsafeimplu32_list: 1859
+           tasm_list_unsafeimplu32_new___u32: 31
              tasm_memory_dyn_malloc: 25
-           tasm_list_unsafe_u32_set_length_u32: 2
-           tasm_hashing_sample_indices_to_unsafe_list_loop: 1780
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 16
-         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 3026
-           tasm_list_unsafe_u32_length_long_u32: 4
-           tasm_list_unsafe_u32_new_u128: 33
+           tasm_list_unsafeimplu32_set_length___u32: 2
+           tasm_hashing_sample_indices_to_unsafeimplu32_list_loop: 1780
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+         tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128: 3026
+           tasm_list_unsafeimplu32_length___u32: 4
+           tasm_list_unsafeimplu32_new___u128: 33
              tasm_memory_dyn_malloc: 25
-           tasm_list_unsafe_u32_set_length_u32: 2
-           tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128_loop: 2975
-             tasm_list_unsafe_u32_get_element_u32: 7
+           tasm_list_unsafeimplu32_set_length___u32: 2
+           tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128_loop: 2975
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-             tasm_list_unsafe_u32_get_element_u32: 7
+             tasm_list_unsafeimplu32_set_element___u128: 21
+             tasm_list_unsafeimplu32_get_element___u32: 7
              u32_to_u128_add_another_u128: 24
-             tasm_list_unsafe_u32_set_element_u128: 21
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list: 3294
-   tasm_list_unsafe_u32_length_long_void_pointer: 4
-   tasm_list_unsafe_u32_new_digest: 33
+             tasm_list_unsafeimplu32_set_element___u128: 21
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_index_list: 3294
+   tasm_list_unsafeimplu32_length___void_pointer: 4
+   tasm_list_unsafeimplu32_new___digest: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list_loop: 3243
-     tasm_list_unsafe_u32_get_element_void_pointer: 7
+   tasm_list_unsafeimplu32_set_length___void_pointer: 2
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_index_list_loop: 3243
+     tasm_list_unsafeimplu32_get_element___void_pointer: 7
      tasm_neptune_transaction_hash_index_list: 1573
        tasm_hashing_hash_varlen: 1564
          tasm_hashing_hash_varlen_loop: 1417
            tasm_hashing_hash_varlen_if_branch: 4
          tasm_hashing_hash_varlen_pad_varnum_zeros: 104
          tasm_hashing_hash_varlen_read_remaining_elements: 5
-     tasm_list_unsafe_u32_set_element_digest: 25
-     tasm_list_unsafe_u32_get_element_void_pointer: 7
+     tasm_list_unsafeimplu32_set_element___digest: 25
+     tasm_list_unsafeimplu32_get_element___void_pointer: 7
      tasm_neptune_transaction_hash_index_list: 1573
        tasm_hashing_hash_varlen: 1564
          tasm_hashing_hash_varlen_loop: 1417
            tasm_hashing_hash_varlen_if_branch: 4
          tasm_hashing_hash_varlen_pad_varnum_zeros: 104
          tasm_hashing_hash_varlen_read_remaining_elements: 5
-     tasm_list_unsafe_u32_set_element_digest: 25
- tasm_list_contiguous_list_get_pointer_list_unsafe: 111
+     tasm_list_unsafeimplu32_set_element___digest: 25
+ tasm_list_contiguous_list_get_pointer_list_unsafeimplu32: 111
    tasm_list_contiguous_list_get_length: 4
-   tasm_list_unsafe_u32_new_void_pointer: 31
+   tasm_list_unsafeimplu32_new___void_pointer: 31
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 57
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
-     tasm_list_unsafe_u32_set_element_void_pointer: 7
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3282
-   tasm_list_unsafe_u32_length_long_void_pointer: 4
-   tasm_list_unsafe_u32_new_digest: 33
+   tasm_list_unsafeimplu32_set_length___void_pointer: 2
+   tasm_list_contiguous_list_get_pointer_list_unsafeimplu32_loop: 57
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+     tasm_list_unsafeimplu32_set_element___void_pointer: 7
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3282
+   tasm_list_unsafeimplu32_length___void_pointer: 4
+   tasm_list_unsafeimplu32_new___digest: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_void_pointer: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3231
-     tasm_list_unsafe_u32_get_element_void_pointer: 7
+   tasm_list_unsafeimplu32_set_length___void_pointer: 2
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3231
+     tasm_list_unsafeimplu32_get_element___void_pointer: 7
      tasm_neptune_transaction_hash_removal_record_indices: 1567
        tasm_hashing_hash_varlen: 1564
          tasm_hashing_hash_varlen_loop: 1417
            tasm_hashing_hash_varlen_if_branch: 4
          tasm_hashing_hash_varlen_pad_varnum_zeros: 104
          tasm_hashing_hash_varlen_read_remaining_elements: 5
-     tasm_list_unsafe_u32_set_element_digest: 25
-     tasm_list_unsafe_u32_get_element_void_pointer: 7
+     tasm_list_unsafeimplu32_set_element___digest: 25
+     tasm_list_unsafeimplu32_get_element___void_pointer: 7
      tasm_neptune_transaction_hash_removal_record_indices: 1567
        tasm_hashing_hash_varlen: 1564
          tasm_hashing_hash_varlen_loop: 1417
            tasm_hashing_hash_varlen_if_branch: 4
          tasm_hashing_hash_varlen_pad_varnum_zeros: 104
          tasm_hashing_hash_varlen_read_remaining_elements: 5
-     tasm_list_unsafe_u32_set_element_digest: 25
- tasm_list_unsafe_u32_multiset_equality: 780
-   tasm_list_unsafe_u32_length_long_digest: 4
-   tasm_list_unsafe_u32_length_long_digest: 4
-   tasm_list_unsafe_u32_multiset_equality_continue: 757
+     tasm_list_unsafeimplu32_set_element___digest: 25
+ tasm_list_unsafeimplu32_multiset_equality: 780
+   tasm_list_unsafeimplu32_length___digest: 4
+   tasm_list_unsafeimplu32_length___digest: 4
+   tasm_list_unsafeimplu32_multiset_equality_continue: 757
      tasm_hashing_hash_varlen: 238
        tasm_hashing_hash_varlen_loop: 91
          tasm_hashing_hash_varlen_if_branch: 4
@@ -647,34 +647,34 @@ tasm_neptune_transaction_removal_records_integrity:
          tasm_hashing_hash_varlen_if_branch: 4
        tasm_hashing_hash_varlen_pad_varnum_zeros: 104
        tasm_hashing_hash_varlen_read_remaining_elements: 5
-     tasm_list_unsafe_u32_multiset_equality_running_product: 113
-       tasm_list_unsafe_u32_multiset_equality_running_product_loop: 99
-     tasm_list_unsafe_u32_multiset_equality_running_product: 113
-       tasm_list_unsafe_u32_multiset_equality_running_product_loop: 99
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 428
-   tasm_list_unsafe_u32_length_long_tuple_ofstart_digest_void-pointer_ofend_: 4
-   tasm_list_unsafe_u32_new_tuple_ofstart_void-pointer_digest_ofend_: 33
+     tasm_list_unsafeimplu32_multiset_equality_running_product: 113
+       tasm_list_unsafeimplu32_multiset_equality_running_product_loop: 99
+     tasm_list_unsafeimplu32_multiset_equality_running_product: 113
+       tasm_list_unsafeimplu32_multiset_equality_running_product_loop: 99
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_commitment: 428
+   tasm_list_unsafeimplu32_length___tuple_Ldigest___void_pointerR: 4
+   tasm_list_unsafeimplu32_new___tuple_Lvoid_pointer___digestR: 33
      tasm_memory_dyn_malloc: 25
-   tasm_list_unsafe_u32_set_length_tuple_ofstart_digest_void-pointer_ofend_: 2
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
+   tasm_list_unsafeimplu32_set_length___tuple_Ldigest___void_pointerR: 2
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
+     tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 29
      tasm_neptune_transaction_compute_commitment: 114
-       tasm_memory_push_ram_to_stack_digest: 22
-       tasm_memory_push_ram_to_stack_digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
        tasm_neptune_mutator_set_commit: 13
-     tasm_list_unsafe_u32_set_element_tuple_ofstart_void-pointer_digest_ofend_: 29
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 29
+     tasm_list_unsafeimplu32_set_element___tuple_Lvoid_pointer___digestR: 29
+     tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 29
      tasm_neptune_transaction_compute_commitment: 114
-       tasm_memory_push_ram_to_stack_digest: 22
-       tasm_memory_push_ram_to_stack_digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
+       tasm_memory_push_ram_to_stack___digest: 22
        tasm_neptune_mutator_set_commit: 13
-     tasm_list_unsafe_u32_set_element_tuple_ofstart_void-pointer_digest_ofend_: 29
- tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
-   tasm_list_unsafe_u32_length_long_tuple_ofstart_void-pointer_digest_ofend_: 4
-   tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_void-pointer_digest_ofend_: 29
+     tasm_list_unsafeimplu32_set_element___tuple_Lvoid_pointer___digestR: 29
+ tasm_list_higher_order_unsafeimplu32_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
+   tasm_list_unsafeimplu32_length___tuple_Lvoid_pointer___digestR: 4
+   tasm_list_higher_order_unsafeimplu32_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
+     tasm_list_unsafeimplu32_get_element___tuple_Lvoid_pointer___digestR: 29
      tasm_neptune_transaction_verify_aocl_membership: 6160
-       tasm_mmr_verify_from_memory_unsafe: 6101
+       tasm_mmr_verify_from_memory_unsafeimplu32: 6101
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 128
            tasm_arithmetic_u64_lt: 6
            tasm_arithmetic_u64_xor: 5
@@ -688,355 +688,355 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_popcount: 5
            tasm_arithmetic_u64_and: 5
            tasm_arithmetic_u64_popcount: 5
-         tasm_mmr_verify_from_memory_unsafe_while: 5901
+         tasm_mmr_verify_from_memory_unsafeimplu32_while: 5901
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-         tasm_list_unsafe_u32_get_element_digest: 25
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+         tasm_list_unsafeimplu32_get_element___digest: 25
          tasm_hashing_eq_digest: 15
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_void-pointer_digest_ofend_: 29
+     tasm_list_unsafeimplu32_get_element___tuple_Lvoid_pointer___digestR: 29
      tasm_neptune_transaction_verify_aocl_membership: 6190
-       tasm_mmr_verify_from_memory_unsafe: 6131
+       tasm_mmr_verify_from_memory_unsafeimplu32: 6131
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 128
            tasm_arithmetic_u64_lt: 6
            tasm_arithmetic_u64_xor: 5
@@ -1050,434 +1050,434 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_popcount: 5
            tasm_arithmetic_u64_and: 5
            tasm_arithmetic_u64_popcount: 5
-         tasm_mmr_verify_from_memory_unsafe_while: 5931
+         tasm_mmr_verify_from_memory_unsafeimplu32_while: 5931
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
-           tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
-             tasm_pseudo_lsb: 4
-           tasm_arithmetic_u64_div2: 14
-           tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-           tasm_list_unsafe_u32_get_element_digest: 25
-           tasm_arithmetic_u32_is_odd: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
              tasm_pseudo_lsb: 4
            tasm_hashing_swap_digest: 14
            tasm_arithmetic_u64_div2: 14
            tasm_arithmetic_u64_eq: 8
-         tasm_list_unsafe_u32_get_element_digest: 25
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+           tasm_list_unsafeimplu32_get_element___digest: 25
+           tasm_arithmetic_u32_isodd: 8
+             tasm_pseudo_lsb: 4
+           tasm_hashing_swap_digest: 14
+           tasm_arithmetic_u64_div2: 14
+           tasm_arithmetic_u64_eq: 8
+         tasm_list_unsafeimplu32_get_element___digest: 25
          tasm_hashing_eq_digest: 15
  total: 55964
 
 # aggregated
  tasm_neptune_transaction_transaction_kernel_mast_hash: 21792
-   tasm_list_unsafe_u32_new_digest: 132
+   tasm_list_unsafeimplu32_new___digest: 132
      tasm_memory_dyn_malloc: 350
-   tasm_list_unsafe_u32_set_length_digest: 2
+   tasm_list_unsafeimplu32_set_length___digest: 2
    tasm_hashing_hash_varlen: 28050
      tasm_hashing_hash_varlen_loop: 25607
        tasm_hashing_hash_varlen_if_branch: 44
      tasm_hashing_hash_varlen_pad_varnum_zeros: 1153
      tasm_hashing_hash_varlen_read_remaining_elements: 704
-   tasm_list_unsafe_u32_set_element_digest: 525
+   tasm_list_unsafeimplu32_set_element___digest: 525
      tasm_hashing_hash_varlen_if_first_time_absob_init: 16
-   tasm_list_unsafe_u32_get_element_digest: 4625
- tasm_memory_push_ram_to_stack_digest: 220
+   tasm_list_unsafeimplu32_get_element___digest: 4625
+ tasm_memory_push_ram_to_stack___digest: 220
  tasm_mmr_bag_peaks: 1846
-   tasm_list_unsafe_u32_length_long_digest: 20
+   tasm_list_unsafeimplu32_length___digest: 20
    tasm_mmr_bag_peaks_length_is_not_zero: 1818
      tasm_mmr_bag_peaks_length_is_not_one: 1802
        tasm_mmr_bag_peaks_loop: 1644
- tasm_list_contiguous_list_get_pointer_list_unsafe: 333
+ tasm_list_contiguous_list_get_pointer_list_unsafeimplu32: 333
    tasm_list_contiguous_list_get_length: 12
-   tasm_list_unsafe_u32_new_void_pointer: 124
-   tasm_list_unsafe_u32_set_length_void_pointer: 12
-   tasm_list_contiguous_list_get_pointer_list_unsafe_loop: 171
-     tasm_list_unsafe_u32_set_element_void_pointer: 56
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo: 750
-   tasm_list_unsafe_u32_length_long_void_pointer: 16
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_utxo_loop: 699
-     tasm_list_unsafe_u32_get_element_void_pointer: 42
+   tasm_list_unsafeimplu32_new___void_pointer: 124
+   tasm_list_unsafeimplu32_set_length___void_pointer: 12
+   tasm_list_contiguous_list_get_pointer_list_unsafeimplu32_loop: 171
+     tasm_list_unsafeimplu32_set_element___void_pointer: 56
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_utxo: 750
+   tasm_list_unsafeimplu32_length___void_pointer: 16
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_utxo_loop: 699
+     tasm_list_unsafeimplu32_get_element___void_pointer: 42
      tasm_neptune_transaction_hash_utxo: 602
- tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest: 406
-   tasm_list_unsafe_u32_new_tuple_ofstart_void-pointer_digest_ofend_: 66
-   tasm_list_unsafe_u32_set_length_tuple_ofstart_void-pointer_digest_ofend_: 2
-   tasm_list_higher_order_unsafe_u32_zip_void_pointer_with_digest_loop: 345
+ tasm_list_higher_order_unsafeimplu32_u32_zip_void_pointer_with_digest: 406
+   tasm_list_unsafeimplu32_new___tuple_Lvoid_pointer___digestR: 66
+   tasm_list_unsafeimplu32_set_length___tuple_Lvoid_pointer___digestR: 2
+   tasm_list_higher_order_unsafeimplu32_u32_zip_void_pointer_with_digest_loop: 345
      tasm_memory_memcpy: 268
        tasm_memory_memcpy_loop: 248
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices: 10312
-   tasm_list_unsafe_u32_length_long_tuple_ofstart_digest_void-pointer_ofend_: 8
-   tasm_list_unsafe_u32_set_length_tuple_ofstart_digest_void-pointer_ofend_: 4
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_digest_void-pointer_ofend_: 116
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices: 10312
+   tasm_list_unsafeimplu32_length___tuple_Ldigest___void_pointerR: 8
+   tasm_list_unsafeimplu32_set_length___tuple_Ldigest___void_pointerR: 4
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices_loop: 10263
+     tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 116
      tasm_neptune_transaction_compute_indices: 10158
        tasm_neptune_mutator_get_swbf_indices_1048576_45: 9952
          tasm_arithmetic_u128_shift_right_static_3: 48
          tasm_arithmetic_u128_shift_left_static_12: 44
-         tasm_hashing_sample_indices_to_unsafe_list: 3718
-           tasm_list_unsafe_u32_new_u32: 62
-           tasm_list_unsafe_u32_set_length_u32: 8
-           tasm_hashing_sample_indices_to_unsafe_list_loop: 3560
-             tasm_hashing_sample_indices_to_unsafe_list_process_top_function_body: 1440
-         tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128: 6052
-           tasm_list_unsafe_u32_length_long_u32: 8
-           tasm_list_unsafe_u32_new_u128: 66
-           tasm_list_higher_order_unsafe_u32_map_u32_to_u128_add_another_u128_loop: 5950
-             tasm_list_unsafe_u32_get_element_u32: 630
+         tasm_hashing_sample_indices_to_unsafeimplu32_list: 3718
+           tasm_list_unsafeimplu32_new___u32: 62
+           tasm_list_unsafeimplu32_set_length___u32: 8
+           tasm_hashing_sample_indices_to_unsafeimplu32_list_loop: 3560
+             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 1440
+         tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128: 6052
+           tasm_list_unsafeimplu32_length___u32: 8
+           tasm_list_unsafeimplu32_new___u128: 66
+           tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128_loop: 5950
+             tasm_list_unsafeimplu32_get_element___u32: 630
              u32_to_u128_add_another_u128: 2160
-             tasm_list_unsafe_u32_set_element_u128: 1890
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list: 3294
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_index_list_loop: 3243
+             tasm_list_unsafeimplu32_set_element___u128: 1890
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_index_list: 3294
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_index_list_loop: 3243
      tasm_neptune_transaction_hash_index_list: 3146
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3282
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3231
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_removal_record_indices: 3282
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_hash_removal_record_indices_loop: 3231
      tasm_neptune_transaction_hash_removal_record_indices: 3134
- tasm_list_unsafe_u32_multiset_equality: 780
-   tasm_list_unsafe_u32_multiset_equality_continue: 757
-     tasm_list_unsafe_u32_multiset_equality_running_product: 226
-       tasm_list_unsafe_u32_multiset_equality_running_product_loop: 198
- tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment: 428
-   tasm_list_higher_order_unsafe_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
+ tasm_list_unsafeimplu32_multiset_equality: 780
+   tasm_list_unsafeimplu32_multiset_equality_continue: 757
+     tasm_list_unsafeimplu32_multiset_equality_running_product: 226
+       tasm_list_unsafeimplu32_multiset_equality_running_product_loop: 198
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_commitment: 428
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_commitment_loop: 377
      tasm_neptune_transaction_compute_commitment: 228
        tasm_neptune_mutator_set_commit: 26
-     tasm_list_unsafe_u32_set_element_tuple_ofstart_void-pointer_digest_ofend_: 58
- tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
-   tasm_list_unsafe_u32_length_long_tuple_ofstart_void-pointer_digest_ofend_: 4
-   tasm_list_higher_order_unsafe_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
-     tasm_list_unsafe_u32_get_element_tuple_ofstart_void-pointer_digest_ofend_: 58
+     tasm_list_unsafeimplu32_set_element___tuple_Lvoid_pointer___digestR: 58
+ tasm_list_higher_order_unsafeimplu32_u32_all_tasm_neptune_transaction_verify_aocl_membership: 12455
+   tasm_list_unsafeimplu32_length___tuple_Lvoid_pointer___digestR: 4
+   tasm_list_higher_order_unsafeimplu32_u32_all_tasm_neptune_transaction_verify_aocl_membership_loop: 12443
+     tasm_list_unsafeimplu32_get_element___tuple_Lvoid_pointer___digestR: 58
      tasm_neptune_transaction_verify_aocl_membership: 12350
-       tasm_mmr_verify_from_memory_unsafe: 12232
+       tasm_mmr_verify_from_memory_unsafeimplu32: 12232
          tasm_mmr_leaf_index_to_mt_index_and_peak_index: 256
            tasm_arithmetic_u64_lt: 12
            tasm_arithmetic_u64_xor: 10
@@ -1489,9 +1489,9 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_and: 20
            tasm_arithmetic_u64_add: 28
            tasm_arithmetic_u64_popcount: 20
-         tasm_mmr_verify_from_memory_unsafe_while: 11832
+         tasm_mmr_verify_from_memory_unsafeimplu32_while: 11832
            tasm_arithmetic_u64_eq: 1024
-           tasm_arithmetic_u32_is_odd: 1008
+           tasm_arithmetic_u32_isodd: 1008
              tasm_pseudo_lsb: 504
            tasm_arithmetic_u64_div2: 1764
            tasm_hashing_swap_digest: 784
