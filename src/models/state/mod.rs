@@ -98,11 +98,7 @@ impl GlobalState {
         let (height, time_secs) =
             time_fn_call_async(self.get_latest_balance_height_internal()).await;
 
-        #[cfg(not(test))]
         debug!("call to get_latest_balance_height() took {time_secs} seconds");
-
-        #[cfg(test)]
-        println!("call to get_latest_balance_height() took {time_secs} seconds");
 
         height
     }

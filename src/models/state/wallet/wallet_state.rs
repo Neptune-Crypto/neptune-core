@@ -823,6 +823,7 @@ impl WalletState {
 #[cfg(test)]
 mod tests {
     use num_traits::One;
+    use tracing_test::traced_test;
 
     use crate::{
         config_models::network::Network,
@@ -833,6 +834,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[traced_test]
     async fn wallet_state_prune_abandoned_mutxos() {
         // Get genesis block. Verify wallet is empty
         // Add two blocks to state containing no UTXOs for own wallet
