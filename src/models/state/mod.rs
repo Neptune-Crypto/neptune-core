@@ -175,9 +175,6 @@ impl GlobalState {
     }
 
     /// Retrieve wallet balance history
-    ///
-    /// todo: ignore abandoned/unsynced utxo.
-    /// see: https://github.com/Neptune-Crypto/neptune-core/issues/28
     pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
         let current_tip_digest = self.chain.light_state.get_latest_block().await.hash;
 
