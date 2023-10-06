@@ -9,7 +9,7 @@ use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
@@ -411,7 +411,7 @@ impl DashboardApp {
         // render title
         let network = self.network;
         let title = format!("♆ neptune-dashboard — {network}");
-        let title = Span::raw(&title);
+        let title = Line::from(title);
         let title_style = Style::default()
             .add_modifier(Modifier::BOLD)
             .bg(Color::Black)
@@ -478,10 +478,8 @@ impl DashboardApp {
             }
             // MenuItem::Quit => todo!(),
             _ => {
-                let messages: Vec<ListItem> = [ListItem::new(Spans::from(Span::raw(
-                    "-placeholder-".to_string(),
-                )))]
-                .to_vec();
+                let messages: Vec<ListItem> =
+                    [ListItem::new(Line::from(Span::raw("-placeholder-")))].to_vec();
                 let messages = List::new(messages)
                     .style(match self.menu_in_focus {
                         true => default_style,

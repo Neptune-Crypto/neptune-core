@@ -14,7 +14,7 @@ use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
 use ratatui::{
     layout::{Alignment, Margin},
     style::{Color, Style},
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use tarpc::context;
@@ -211,7 +211,7 @@ impl Widget for ReceiveScreen {
                 } else {
                     "focus"
                 };
-                let instructions = Spans::from(vec![
+                let instructions = Line::from(vec![
                     Span::from("Press "),
                     Span::styled("Enter ↵", Style::default().fg(Color::LightCyan)),
                     Span::from(" to "),
@@ -226,7 +226,7 @@ impl Widget for ReceiveScreen {
             // display copy instructions
             if self.in_focus {
                 let style = Style::default().fg(self.fg);
-                let instructions = Spans::from(vec![
+                let instructions = Line::from(vec![
                     Span::from("Press "),
                     Span::styled(
                         "C",

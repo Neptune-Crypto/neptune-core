@@ -21,7 +21,7 @@ use num_traits::Zero;
 use ratatui::{
     layout::{Alignment, Margin},
     style::{Color, Modifier, Style},
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Widget},
 };
 use tarpc::context;
@@ -369,13 +369,13 @@ impl Widget for SendScreen {
             let instruction_rect = vrecter.next(1);
             if instruction_rect.height > 0 {
                 let instructions = if self.in_focus && own_focus == SendScreenWidget::Address {
-                    Spans::from(vec![
+                    Line::from(vec![
                         Span::from("Press "),
                         Span::styled("Enter ↵", Style::default().fg(Color::LightCyan)),
                         Span::from(" to enter address via console mode."),
                     ])
                 } else {
-                    Spans::from(vec![])
+                    Line::from(vec![])
                 };
                 let instructions_widget = Paragraph::new(instructions).style(style);
                 instructions_widget.render(instruction_rect, buf);
@@ -392,7 +392,7 @@ impl Widget for SendScreen {
                 self.amount
             };
             let amount_rect = vrecter.next(3);
-            let amount_widget = Paragraph::new(Spans::from(vec![
+            let amount_widget = Paragraph::new(Line::from(vec![
                 Span::from(amount),
                 if own_focus == SendScreenWidget::Amount {
                     Span::styled(
