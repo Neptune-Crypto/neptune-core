@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use itertools::Itertools;
 use neptune_core::{
+    models::blockchain::block::block_height::BlockHeight,
     models::blockchain::transaction::amount::{Amount, Sign},
     rpc_server::RPCClient,
 };
@@ -23,7 +24,7 @@ use tokio::time::sleep;
 use tokio::{select, task::JoinHandle};
 use unicode_width::UnicodeWidthStr;
 
-type BalanceUpdate = (Duration, Amount, Sign, Amount);
+type BalanceUpdate = (BlockHeight, Duration, Amount, Sign, Amount);
 type BalanceUpdateArc = Arc<std::sync::Mutex<Vec<BalanceUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
@@ -148,7 +149,7 @@ impl HistoryScreen {
                     let bh = rpc_client.get_history(context::current()).await.unwrap();
                     let mut history_builder = Vec::with_capacity(bh.len());
                     let mut balance = Amount::zero();
-                    for (timestamp, amount, sign) in bh.iter() {
+                    for (block_height, timestamp, amount, sign) in bh.iter() {
                         match sign {
                             Sign::NonNegative => { balance = balance + *amount; }
                             Sign::Negative => {
@@ -158,7 +159,7 @@ impl HistoryScreen {
                                 };
                             }
                         }
-                        history_builder.push((*timestamp, *amount, *sign, balance));
+                        history_builder.push((*block_height, *timestamp, *amount, *sign, balance));
                     }
                     *balance_updates.lock().unwrap() = history_builder;
                     reset_poller!(balance_history, Duration::from_secs(10));
@@ -255,7 +256,8 @@ impl Widget for HistoryScreen {
         // table
         let style = Style::default().fg(self.fg).bg(self.bg);
         let selected_style = style.add_modifier(Modifier::REVERSED);
-        let header = vec!["date", " ", "amount", "balance after"];
+        let header = vec!["height", "date", " ", "amount", "balance after"];
+
         let matrix = self
             .data
             .lock()
@@ -263,15 +265,17 @@ impl Widget for HistoryScreen {
             .iter()
             .rev()
             .map(|bu| {
+                let (height, duration, amount, sign, balance) = *bu;
                 vec![
-                    DateTime::<Utc>::from(UNIX_EPOCH + bu.0).to_string(),
-                    if bu.2 == Sign::NonNegative {
+                    height.to_string(),
+                    DateTime::<Utc>::from(UNIX_EPOCH + duration).to_string(),
+                    if sign == Sign::NonNegative {
                         "↘".to_string()
                     } else {
                         "↗".to_string()
                     },
-                    bu.1.to_string(),
-                    bu.3.to_string(),
+                    amount.to_string(),
+                    balance.to_string(),
                 ]
             })
             .collect_vec();
