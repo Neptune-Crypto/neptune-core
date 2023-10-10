@@ -358,7 +358,7 @@ pub async fn mine(
                             mt.abort();
                         }
                         latest_block = *block;
-                        info!("Miner thread received regtest block height {}", latest_block.header.height);
+                        info!("Miner thread received {} block height {}", state.cli.network, latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
                     MainToMiner::ReadyToMineNextBlock => {
@@ -402,7 +402,7 @@ pub async fn mine(
                 // if it is not.
                 assert!(new_block_info.block.is_valid(&latest_block), "Own mined block must be valid. Failed validity check after successful PoW check.");
 
-                info!("Found new regtest block with block height {}. Hash: {}", new_block_info.block.header.height, new_block_info.block.hash.emojihash());
+                info!("Found new {} block with block height {}. Hash: {}", state.cli.network, new_block_info.block.header.height, new_block_info.block.hash.emojihash());
 
                 latest_block = *new_block_info.block.to_owned();
                 to_main.send(MinerToMain::NewBlockFound(new_block_info)).await?;
