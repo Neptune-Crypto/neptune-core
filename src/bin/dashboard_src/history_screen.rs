@@ -149,7 +149,7 @@ impl HistoryScreen {
                     let bh = rpc_client.get_history(context::current()).await.unwrap();
                     let mut history_builder = Vec::with_capacity(bh.len());
                     let mut balance = Amount::zero();
-                    for (block_height, timestamp, amount, sign) in bh.iter() {
+                    for (_, block_height, timestamp, amount, sign) in bh.iter() {
                         match sign {
                             Sign::NonNegative => { balance = balance + *amount; }
                             Sign::Negative => {
