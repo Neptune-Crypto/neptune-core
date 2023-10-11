@@ -79,7 +79,7 @@ pub trait RPC {
     // Get sum of unspent UTXOs.
     async fn get_synced_balance() -> Amount;
 
-    async fn get_history() -> Vec<(BlockHeight, Duration, Amount, Sign)>;
+    async fn get_history() -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)>;
 
     async fn get_wallet_status() -> WalletStatus;
 
@@ -161,7 +161,7 @@ impl RPC for NeptuneRPCServer {
     type GetReceivingAddressFut = Ready<generation_address::ReceivingAddress>;
     type GetMempoolTxCountFut = Ready<usize>;
     type GetMempoolSizeFut = Ready<usize>;
-    type GetHistoryFut = Ready<Vec<(BlockHeight, Duration, Amount, Sign)>>;
+    type GetHistoryFut = Ready<Vec<(Digest, BlockHeight, Duration, Amount, Sign)>>;
     type GetDashboardOverviewDataFut = Ready<DashBoardOverviewDataFromClient>;
     type PauseMinerFut = Ready<()>;
     type RestartMinerFut = Ready<()>;
@@ -346,11 +346,11 @@ impl RPC for NeptuneRPCServer {
         let history = executor::block_on(self.state.get_balance_history());
 
         // sort
-        let mut display_history: Vec<(BlockHeight, Duration, Amount, Sign)> = history
+        let mut display_history: Vec<(Digest, BlockHeight, Duration, Amount, Sign)> = history
             .iter()
-            .map(|(_h, t, bh, a, s)| (*bh, *t, *a, *s))
+            .map(|(h, t, bh, a, s)| (*h, *bh, *t, *a, *s))
             .collect::<Vec<_>>();
-        display_history.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        display_history.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
         // return
         future::ready(display_history)
