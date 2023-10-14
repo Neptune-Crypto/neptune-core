@@ -147,7 +147,7 @@ impl GlobalState {
             if max_confirmed_in_block.is_none() {
                 if let Some((.., confirmed_in_block)) = utxo.confirmed_in_block {
                     if utxo
-                        .get_membership_proof_for_block(&current_tip_digest)
+                        .get_membership_proof_for_block(current_tip_digest)
                         .is_some()
                     {
                         max_confirmed_in_block = Some(confirmed_in_block);
@@ -157,7 +157,7 @@ impl GlobalState {
 
             if let Some((.., spent_in_block)) = utxo.spent_in_block {
                 if utxo
-                    .get_membership_proof_for_block(&current_tip_digest)
+                    .get_membership_proof_for_block(current_tip_digest)
                     .is_some()
                     && (max_spent_in_block.is_none()
                         || max_spent_in_block.is_some_and(|x| x < spent_in_block))
@@ -182,7 +182,7 @@ impl GlobalState {
             let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
 
             if monitored_utxo
-                .get_membership_proof_for_block(&current_tip_digest)
+                .get_membership_proof_for_block(current_tip_digest)
                 .is_none()
             {
                 continue;
