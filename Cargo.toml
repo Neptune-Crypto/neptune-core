@@ -14,16 +14,16 @@ bech32 = "0"
 bincode = "1"
 bytes = "1"
 bytesize = "1"
-chrono = "^0.4.30"
+chrono = "^0.4.31"
 clap = { version = "4", features = ["derive"] }
-clap_complete = "4.4.1"
+clap_complete = "4.4.3"
 crossterm = "0"
 directories = "5"
 field_count = "0.1.1"
 futures = "0"
 get-size = { version = "0", features = ["derive"] }
 itertools = "0.11"
-memmap2 = "0.8"
+memmap2 = "0.9"
 num-bigint = { version = "0", features = ["serde"] }
 num-rational = "0"
 num-traits = "0"
@@ -31,7 +31,7 @@ priority-queue = "1"
 rand = "0.8"
 ratatui = "0.23"
 rusty-leveldb = "3"
-semver = "^1.0.18"
+semver = "^1.0.20"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
@@ -54,7 +54,7 @@ twenty-first = "0.34"
 unicode-width = "0"
 
 [dev-dependencies]
-pin-project-lite = "0.2.12"
+pin-project-lite = "0.2.13"
 tokio-test = "0"
 
 [dev-dependencies.cargo-husky]
