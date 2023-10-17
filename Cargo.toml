@@ -49,7 +49,7 @@ tracing-subscriber = { version = "0", features = [
     "fmt",
 ] }
 tracing-test = "0"
-triton-vm = "0.34"
+triton-vm = "0.35"
 twenty-first = "0.34"
 unicode-width = "0"
 

@@ -55,7 +55,7 @@ impl TransactionKernelMastHash {
             BFieldElement::new(transaction_kernel_encoded.len() as u64) + address,
         );
 
-        let mut stack = tasm_lib::get_init_tvm_stack();
+        let mut stack = tasm_lib::empty_stack();
         stack.push(address);
         ExecutionState {
             stack,

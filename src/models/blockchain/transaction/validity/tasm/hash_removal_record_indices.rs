@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use tasm_lib::{
+    empty_stack,
     function::Function,
-    get_init_tvm_stack,
     hashing::hash_varlen::HashVarlen,
     snippet::{BasicSnippet, DataType},
     snippet_bencher::BenchmarkCase,
@@ -107,7 +107,7 @@ impl Function for HashRemovalRecordIndices {
             BFieldElement::new(removal_record.encode().len() as u64),
         );
 
-        let mut stack = get_init_tvm_stack();
+        let mut stack = empty_stack();
         stack.push(address);
 
         (stack, memory)
@@ -125,8 +125,8 @@ mod tests {
         link_and_run_tasm_for_test, link_and_run_tasm_for_test_deprecated,
     };
     use tasm_lib::{
+        empty_stack,
         function::ShadowedFunction,
-        get_init_tvm_stack,
         list::{
             contiguous_list::get_pointer_list::GetPointerList,
             higher_order::{inner_function::InnerFunction, map::Map},
@@ -183,7 +183,7 @@ mod tests {
         );
 
         // populate stack
-        let mut stack = get_init_tvm_stack();
+        let mut stack = empty_stack();
         stack.push(address);
         // STACK: 0^16 *removal_record_list_encoding_address
 
@@ -260,6 +260,7 @@ mod tests {
             vec![],
             &mut NonDeterminism::new(vec![]),
             &mut memory,
+            None,
             new_dyn_malloc_value,
         );
         // STACK: 0^16 *[digest]

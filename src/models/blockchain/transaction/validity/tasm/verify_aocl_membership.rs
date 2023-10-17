@@ -8,8 +8,8 @@ use crate::{
 use itertools::Itertools;
 use rand::RngCore;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::empty_stack;
 use tasm_lib::function::Function;
-use tasm_lib::get_init_tvm_stack;
 use tasm_lib::library::Library;
 use tasm_lib::snippet::BasicSnippet;
 use tasm_lib::{list::ListType, mmr::verify_from_memory::MmrVerifyFromMemory, snippet::DataType};
@@ -226,7 +226,7 @@ impl Function for VerifyAoclMembership {
 
         // populate stack
         // *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
-        let mut stack = get_init_tvm_stack();
+        let mut stack = empty_stack();
         stack.push(peaks_si_ptr + BFieldElement::new(1));
         stack.push(BFieldElement::new(num_leafs >> 32));
         stack.push(BFieldElement::new(num_leafs & u32::MAX as u64));

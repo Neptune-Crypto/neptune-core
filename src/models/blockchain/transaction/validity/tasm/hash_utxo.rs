@@ -99,7 +99,7 @@ impl Function for HashUtxo {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let utxo = pseudorandom_utxo(seed);
         let address = triton_vm::BFieldElement::new(rng.next_u64() % (1 << 20));
-        let mut stack = tasm_lib::get_init_tvm_stack();
+        let mut stack = tasm_lib::empty_stack();
         stack.push(address);
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let encoded_utxo = BFieldCodec::encode(&utxo);

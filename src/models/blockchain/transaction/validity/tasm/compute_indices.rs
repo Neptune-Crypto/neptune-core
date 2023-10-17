@@ -236,7 +236,7 @@ impl Function for ComputeIndices {
             BFieldElement::new(2u64 + msmp_encoded.len() as u64),
         );
 
-        let mut stack = tasm_lib::get_init_tvm_stack();
+        let mut stack = tasm_lib::empty_stack();
         stack.push(item.values()[4]);
         stack.push(item.values()[3]);
         stack.push(item.values()[2]);
@@ -255,8 +255,8 @@ mod tests {
     use itertools::Itertools;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
     use tasm_lib::{
+        empty_stack,
         function::ShadowedFunction,
-        get_init_tvm_stack,
         list::{
             higher_order::{inner_function::InnerFunction, map::Map},
             ListType,
@@ -341,7 +341,7 @@ mod tests {
         }
 
         // populate stack
-        let mut stack = get_init_tvm_stack();
+        let mut stack = empty_stack();
         stack.push(main_list_address);
 
         // run map snippet
@@ -356,6 +356,7 @@ mod tests {
             vec![],
             &mut NonDeterminism::new(vec![]),
             &mut memory,
+            None,
             mallocked,
         );
 

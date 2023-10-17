@@ -141,7 +141,7 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                 let _pointer = ram_builder.load(witness);
                 let nondeterminism = NonDeterminism::new(vec![]).with_ram(ram_builder.finish());
                 let proof = triton_vm::prove(
-                    &StarkParameters::default(),
+                    StarkParameters::default(),
                     &self.supported_claim.claim,
                     &Self::program(),
                     nondeterminism,
@@ -163,7 +163,7 @@ impl ValidationLogic for RemovalRecordsIntegrity {
     fn verify(&self) -> bool {
         match &self.supported_claim.support {
             ClaimSupport::Proof(proof) => triton_vm::verify(
-                &StarkParameters::default(),
+                StarkParameters::default(),
                 &self.supported_claim.claim,
                 proof,
             ),
@@ -702,16 +702,12 @@ mod tests {
                 input: stdin,
                 output: vec![],
             };
-            let maybe_proof = triton_vm::prove(
-                &StarkParameters::default(),
-                &claim,
-                &program,
-                nondeterminism,
-            );
+            let maybe_proof =
+                triton_vm::prove(StarkParameters::default(), &claim, &program, nondeterminism);
             assert!(maybe_proof.is_ok());
 
             assert!(triton_vm::verify(
-                &StarkParameters::default(),
+                StarkParameters::default(),
                 &claim,
                 &maybe_proof.unwrap()
             ));

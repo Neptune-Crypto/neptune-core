@@ -82,7 +82,7 @@ impl ValidationLogic for LockScriptsHalt {
                     debug!("Claimed program ({})", supported_claim.claim.program_digest);
                     let tick = SystemTime::now();
                     let proof = triton_vm::prove(
-                        &StarkParameters::default(),
+                        StarkParameters::default(),
                         &supported_claim.claim,
                         program,
                         NonDeterminism::new(secret_witness.clone()),
@@ -123,7 +123,7 @@ impl ValidationLogic for LockScriptsHalt {
                     debug!("claim is:\n {:?}", claim);
                     let tick = SystemTime::now();
 
-                    if !triton_vm::verify(&StarkParameters::default(), &claim, proof) {
+                    if !triton_vm::verify(StarkParameters::default(), &claim, proof) {
                         warn!("Verification of lockscript failed.");
                         return false;
                     }

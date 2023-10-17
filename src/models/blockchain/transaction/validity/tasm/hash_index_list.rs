@@ -118,7 +118,7 @@ impl Function for HashIndexList {
         }
         memory.insert(address, BFieldElement::new(length as u64));
 
-        let mut stack = tasm_lib::get_init_tvm_stack();
+        let mut stack = tasm_lib::empty_stack();
         stack.push(address);
 
         (stack, memory)
@@ -136,8 +136,8 @@ mod tests {
         link_and_run_tasm_for_test, link_and_run_tasm_for_test_deprecated,
     };
     use tasm_lib::{
+        empty_stack,
         function::ShadowedFunction,
-        get_init_tvm_stack,
         list::{
             contiguous_list::get_pointer_list::GetPointerList,
             higher_order::{inner_function::InnerFunction, map::Map},
@@ -190,7 +190,7 @@ mod tests {
         }
 
         // populate stack
-        let mut stack = get_init_tvm_stack();
+        let mut stack = empty_stack();
         stack.push(address);
 
         // transform contiguous list to list of pointers
@@ -224,6 +224,7 @@ mod tests {
             vec![],
             &mut NonDeterminism::new(vec![]),
             &mut memory,
+            None,
             new_malloc,
         );
 
