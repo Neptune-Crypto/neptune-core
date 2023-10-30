@@ -1,6 +1,6 @@
 use core::fmt;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -311,43 +311,45 @@ impl DashboardApp {
             self.output = error_message + "\n";
         } else if self.menu_in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        if self.current_menu_item != MenuItem::Quit {
-                            self.current_menu_item = MenuItem::Quit;
-                        } else {
-                            self.running = false;
-                        }
-                    }
-                    KeyCode::Enter => {
-                        if self.current_menu_item == MenuItem::Quit {
-                            self.running = false;
-                        } else {
-                            self.menu_in_focus = false;
-                            if self.have_current_screen() {
-                                self.current_screen().focus();
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            if self.current_menu_item != MenuItem::Quit {
+                                self.current_menu_item = MenuItem::Quit;
+                            } else {
+                                self.running = false;
                             }
                         }
+                        KeyCode::Enter => {
+                            if self.current_menu_item == MenuItem::Quit {
+                                self.running = false;
+                            } else {
+                                self.menu_in_focus = false;
+                                if self.have_current_screen() {
+                                    self.current_screen().focus();
+                                }
+                            }
+                        }
+                        KeyCode::Up => {
+                            if self.have_current_screen() {
+                                self.current_screen().deactivate();
+                            }
+                            self.current_menu_item = self.current_menu_item.previous();
+                            if self.have_current_screen() {
+                                self.current_screen().activate();
+                            }
+                        }
+                        KeyCode::Down => {
+                            if self.have_current_screen() {
+                                self.current_screen().deactivate();
+                            }
+                            self.current_menu_item = self.current_menu_item.next();
+                            if self.have_current_screen() {
+                                self.current_screen().activate();
+                            }
+                        }
+                        _ => {}
                     }
-                    KeyCode::Up => {
-                        if self.have_current_screen() {
-                            self.current_screen().deactivate();
-                        }
-                        self.current_menu_item = self.current_menu_item.previous();
-                        if self.have_current_screen() {
-                            self.current_screen().activate();
-                        }
-                    }
-                    KeyCode::Down => {
-                        if self.have_current_screen() {
-                            self.current_screen().deactivate();
-                        }
-                        self.current_menu_item = self.current_menu_item.next();
-                        if self.have_current_screen() {
-                            self.current_screen().activate();
-                        }
-                    }
-                    _ => {}
                 }
             }
         }
@@ -374,15 +376,19 @@ impl DashboardApp {
             };
 
             match escalated {
-                Some(DashboardEvent::ConsoleEvent(Event::Key(key))) => match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        if self.have_current_screen() {
-                            self.current_screen().unfocus();
+                Some(DashboardEvent::ConsoleEvent(Event::Key(key)))
+                    if key.kind == KeyEventKind::Press =>
+                {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            if self.have_current_screen() {
+                                self.current_screen().unfocus();
+                            }
+                            self.menu_in_focus = true;
                         }
-                        self.menu_in_focus = true;
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 Some(DashboardEvent::ConsoleEvent(_non_key_event)) => {}
                 Some(DashboardEvent::ConsoleMode(console_io)) => {
                     let mut console_io_mut = self.console_io.lock().await;

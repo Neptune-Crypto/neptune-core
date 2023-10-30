@@ -10,7 +10,7 @@ use super::{
     overview_screen::VerticalRectifier,
     screen::Screen,
 };
-use crossterm::event::{Event, KeyCode};
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 use neptune_core::{
     config_models::network::Network,
     models::{blockchain::transaction::amount::Amount, state::wallet::address::generation_address},
@@ -163,100 +163,104 @@ impl SendScreen {
         let mut escalate_event = None;
         if self.in_focus {
             match event {
-                DashboardEvent::ConsoleEvent(Event::Key(key)) => match key.code {
-                    KeyCode::Enter => {
-                        if let Ok(mut own_focus) = self.focus.try_lock() {
-                            match own_focus.to_owned() {
-                                SendScreenWidget::Address => {
-                                    return Ok(Some(DashboardEvent::ConsoleMode(
-                                        ConsoleIO::InputRequested(
-                                            "Please enter recipient address:\n".to_string(),
-                                        ),
-                                    )));
-                                }
-                                SendScreenWidget::Amount => {
-                                    *own_focus = SendScreenWidget::Ok;
-                                    escalate_event = None;
-                                }
-                                SendScreenWidget::Ok => {
-                                    // clone outside of async section
-                                    let rpc_client = self.rpc_client.clone();
-                                    let address = self.address.clone();
-                                    let amount = self.amount.clone();
-                                    let notice = self.notice.clone();
-                                    let focus = self.focus.clone();
-                                    let reset_me = self.reset_me.clone();
-                                    let network = self.network;
+                DashboardEvent::ConsoleEvent(Event::Key(key))
+                    if key.kind == KeyEventKind::Press =>
+                {
+                    match key.code {
+                        KeyCode::Enter => {
+                            if let Ok(mut own_focus) = self.focus.try_lock() {
+                                match own_focus.to_owned() {
+                                    SendScreenWidget::Address => {
+                                        return Ok(Some(DashboardEvent::ConsoleMode(
+                                            ConsoleIO::InputRequested(
+                                                "Please enter recipient address:\n".to_string(),
+                                            ),
+                                        )));
+                                    }
+                                    SendScreenWidget::Amount => {
+                                        *own_focus = SendScreenWidget::Ok;
+                                        escalate_event = None;
+                                    }
+                                    SendScreenWidget::Ok => {
+                                        // clone outside of async section
+                                        let rpc_client = self.rpc_client.clone();
+                                        let address = self.address.clone();
+                                        let amount = self.amount.clone();
+                                        let notice = self.notice.clone();
+                                        let focus = self.focus.clone();
+                                        let reset_me = self.reset_me.clone();
+                                        let network = self.network;
 
-                                    tokio::spawn(async move {
-                                        Self::check_and_pay_sequence(
-                                            rpc_client, address, amount, notice, focus, reset_me,
-                                            network,
-                                        )
-                                        .await;
-                                    });
-                                    escalate_event = None;
-                                }
-                                _ => {
-                                    escalate_event = None;
+                                        tokio::spawn(async move {
+                                            Self::check_and_pay_sequence(
+                                                rpc_client, address, amount, notice, focus,
+                                                reset_me, network,
+                                            )
+                                            .await;
+                                        });
+                                        escalate_event = None;
+                                    }
+                                    _ => {
+                                        escalate_event = None;
+                                    }
                                 }
                             }
                         }
-                    }
-                    KeyCode::Up => {
-                        if let Ok(mut own_focus) = self.focus.try_lock() {
-                            *own_focus = match own_focus.to_owned() {
-                                SendScreenWidget::Address => SendScreenWidget::Ok,
-                                SendScreenWidget::Amount => SendScreenWidget::Address,
-                                SendScreenWidget::Ok => SendScreenWidget::Amount,
-                                SendScreenWidget::Notice => SendScreenWidget::Notice,
-                            };
-                            escalate_event = None;
-                        } else {
-                            escalate_event = Some(event);
-                        }
-                    }
-                    KeyCode::Down => {
-                        if let Ok(mut own_focus) = self.focus.try_lock() {
-                            *own_focus = match own_focus.to_owned() {
-                                SendScreenWidget::Address => SendScreenWidget::Amount,
-                                SendScreenWidget::Amount => SendScreenWidget::Ok,
-                                SendScreenWidget::Ok => SendScreenWidget::Address,
-                                SendScreenWidget::Notice => SendScreenWidget::Notice,
-                            };
-                            escalate_event = None;
-                        } else {
-                            escalate_event = Some(event);
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        if let Ok(own_focus) = self.focus.try_lock() {
-                            if own_focus.to_owned() == SendScreenWidget::Amount {
-                                self.amount = format!("{}{}", self.amount, c);
+                        KeyCode::Up => {
+                            if let Ok(mut own_focus) = self.focus.try_lock() {
+                                *own_focus = match own_focus.to_owned() {
+                                    SendScreenWidget::Address => SendScreenWidget::Ok,
+                                    SendScreenWidget::Amount => SendScreenWidget::Address,
+                                    SendScreenWidget::Ok => SendScreenWidget::Amount,
+                                    SendScreenWidget::Notice => SendScreenWidget::Notice,
+                                };
                                 escalate_event = None;
                             } else {
                                 escalate_event = Some(event);
                             }
-                        } else {
-                            escalate_event = Some(event);
                         }
-                    }
-                    KeyCode::Backspace => {
-                        if let Ok(own_focus) = self.focus.try_lock() {
-                            if own_focus.to_owned() == SendScreenWidget::Amount {
-                                if !self.amount.is_empty() {
-                                    self.amount.drain(self.amount.len() - 1..);
-                                }
+                        KeyCode::Down => {
+                            if let Ok(mut own_focus) = self.focus.try_lock() {
+                                *own_focus = match own_focus.to_owned() {
+                                    SendScreenWidget::Address => SendScreenWidget::Amount,
+                                    SendScreenWidget::Amount => SendScreenWidget::Ok,
+                                    SendScreenWidget::Ok => SendScreenWidget::Address,
+                                    SendScreenWidget::Notice => SendScreenWidget::Notice,
+                                };
                                 escalate_event = None;
+                            } else {
+                                escalate_event = Some(event);
                             }
-                        } else {
+                        }
+                        KeyCode::Char(c) => {
+                            if let Ok(own_focus) = self.focus.try_lock() {
+                                if own_focus.to_owned() == SendScreenWidget::Amount {
+                                    self.amount = format!("{}{}", self.amount, c);
+                                    escalate_event = None;
+                                } else {
+                                    escalate_event = Some(event);
+                                }
+                            } else {
+                                escalate_event = Some(event);
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if let Ok(own_focus) = self.focus.try_lock() {
+                                if own_focus.to_owned() == SendScreenWidget::Amount {
+                                    if !self.amount.is_empty() {
+                                        self.amount.drain(self.amount.len() - 1..);
+                                    }
+                                    escalate_event = None;
+                                }
+                            } else {
+                                escalate_event = Some(event);
+                            }
+                        }
+                        _ => {
                             escalate_event = Some(event);
                         }
                     }
-                    _ => {
-                        escalate_event = Some(event);
-                    }
-                },
+                }
                 DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(string)) => {
                     if let Ok(mut own_focus) = self.focus.try_lock() {
                         self.address = string.trim().to_owned();
