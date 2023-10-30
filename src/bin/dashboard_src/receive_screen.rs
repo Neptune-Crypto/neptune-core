@@ -9,7 +9,7 @@ use super::{
     overview_screen::VerticalRectifier,
     screen::Screen,
 };
-use crossterm::event::{Event, KeyCode};
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 use neptune_core::{config_models::network::Network, rpc_server::RPCClient};
 use ratatui::{
     layout::{Alignment, Margin},
@@ -96,24 +96,26 @@ impl ReceiveScreen {
         let mut escalate_event = None;
         if self.in_focus {
             if let DashboardEvent::ConsoleEvent(Event::Key(key)) = event {
-                match key.code {
-                    KeyCode::Enter => {
-                        self.generate_new_receiving_address_async(
-                            self.server.clone(),
-                            self.data.clone(),
-                            self.generating.clone(),
-                        );
-                        escalate_event = None;
-                    }
-                    KeyCode::Char('c') => {
-                        if let Some(address) = self.data.lock().unwrap().as_ref() {
-                            return Ok(Some(DashboardEvent::ConsoleMode(
-                                ConsoleIO::InputRequested(format!("{}\n\n", address)),
-                            )));
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Enter => {
+                            self.generate_new_receiving_address_async(
+                                self.server.clone(),
+                                self.data.clone(),
+                                self.generating.clone(),
+                            );
+                            escalate_event = None;
                         }
-                    }
-                    _ => {
-                        escalate_event = Some(event);
+                        KeyCode::Char('c') => {
+                            if let Some(address) = self.data.lock().unwrap().as_ref() {
+                                return Ok(Some(DashboardEvent::ConsoleMode(
+                                    ConsoleIO::InputRequested(format!("{}\n\n", address)),
+                                )));
+                            }
+                        }
+                        _ => {
+                            escalate_event = Some(event);
+                        }
                     }
                 }
             }
