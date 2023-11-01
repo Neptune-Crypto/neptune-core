@@ -1033,11 +1033,10 @@ impl MainLoopHandler {
                 }
 
                 // Handle incoming connections from peer
-                Ok((stream, _)) = self.incoming_peer_listener.accept() => {
+                Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
                     let state = self.global_state.clone();
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
-                    let peer_address = stream.peer_addr().unwrap();
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
                     let incoming_peer_thread_handle = tokio::spawn(async move {
                         match answer_peer_wrapper(
