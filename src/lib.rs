@@ -82,13 +82,16 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let block_index_db = ArchivalState::initialize_block_index_database(&data_dir)?;
     let block_index_db: Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>> =
         Arc::new(tokio::sync::Mutex::new(block_index_db));
+    info!("Got block index database");
 
     let peer_databases = NetworkingState::initialize_peer_databases(&data_dir)?;
     let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
         Arc::new(tokio::sync::Mutex::new(peer_databases));
+    info!("Got peer database");
 
     let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)?;
     let archival_mutator_set = Arc::new(tokio::sync::Mutex::new(archival_mutator_set));
+    info!("Got archival mutator set");
 
     let archival_state = ArchivalState::new(data_dir, block_index_db, archival_mutator_set).await;
 
@@ -97,8 +100,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Bind socket to port on this machine, to handle incoming connections from peers
     let incoming_peer_listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))
-        .await
-        .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
+    .await
+    .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
+    info!("Now listening for incoming transactions");
 
     let peer_map: Arc<Mutex<HashMap<SocketAddr, PeerInfo>>> =
         Arc::new(std::sync::Mutex::new(HashMap::new()));
@@ -137,7 +141,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     );
 
     // Check if we need to restore the wallet database, and if so, do it.
+    info!("Checking if we need to restore UTXOs");
     state.restore_monitored_utxos_from_recovery_data().await?;
+    info!("UTXO restoration check complete");
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];
@@ -161,6 +167,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         });
         thread_join_handles.push(peer_join_handle);
     }
+    info!("Made outgoing connections to peers");
 
     // Start handling of mining. So far we can only mine on the `RegTest` network.
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
@@ -178,6 +185,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             .expect("Error in mining thread");
         });
         thread_join_handles.push(miner_join_handle);
+        info!("Started mining thread");
     }
 
     // Start RPC server for CLI request and more
@@ -213,8 +221,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
             .await;
     });
     thread_join_handles.push(rpc_join_handle);
+    info!("Started RPC server");
 
     // Handle incoming connections, messages from peer threads, and messages from the mining thread
+    info!("Starting main loop");
     let main_loop_handler = MainLoopHandler::new(
         incoming_peer_listener,
         state,
