@@ -309,10 +309,12 @@ impl WalletState {
             current_tip.height,
         );
         let mutxo_count = wallet_db_lock.monitored_utxos.len();
+        let mut monitored_utxos = wallet_db_lock
+            .monitored_utxos
+            .get_many(&(0..mutxo_count).collect_vec());
         let mut removed_count = 0;
-        for i in 0..mutxo_count {
-            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
-
+        let mut block_index_db_lock = archival_state.block_index_db.lock().await;
+        for (i, monitored_utxo) in monitored_utxos.iter_mut().enumerate() {
             // Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
             // once the spending block is buried sufficiently deep
             if monitored_utxo.spent_in_block.is_some() {
@@ -335,7 +337,11 @@ impl WalletState {
                     let depth = current_tip.height - block_height_confirmed + 1;
                     depth >= block_depth_threshhold as i128
                         && monitored_utxo
-                            .was_abandoned(current_tip_info.0, archival_state)
+                            .was_abandoned_with_lock(
+                                current_tip_info.0,
+                                archival_state,
+                                &mut block_index_db_lock,
+                            )
                             .await
                 }
                 None => false,
@@ -343,7 +349,9 @@ impl WalletState {
 
             if mark_as_abandoned {
                 monitored_utxo.abandoned_at = Some(current_tip_info);
-                wallet_db_lock.monitored_utxos.set(i, monitored_utxo);
+                wallet_db_lock
+                    .monitored_utxos
+                    .set(i as u64, monitored_utxo.to_owned());
                 removed_count += 1;
             }
         }

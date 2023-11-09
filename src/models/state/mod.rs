@@ -1175,22 +1175,32 @@ mod global_state_tests {
         // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
         // genesis block is not.
         let wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+        let mut block_index_db_lock = global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .block_index_db
+            .lock()
+            .await;
         let monitored_utxos = &wallet_db_lock.monitored_utxos;
         assert!(
             !monitored_utxos
                 .get(0)
-                .was_abandoned(
+                .was_abandoned_with_lock(
                     parent_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
+                    global_state.chain.archival_state.as_ref().unwrap(),
+                    &mut block_index_db_lock
                 )
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
-                .was_abandoned(
+                .was_abandoned_with_lock(
                     parent_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
+                    global_state.chain.archival_state.as_ref().unwrap(),
+                    &mut block_index_db_lock
                 )
                 .await
         );
@@ -1434,22 +1444,32 @@ mod global_state_tests {
 
         // Also check that UTXO from 1a is considered abandoned
         let wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+        let mut block_index_db_lock = global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .block_index_db
+            .lock()
+            .await;
         let monitored_utxos = &wallet_db_lock.monitored_utxos;
         assert!(
             !monitored_utxos
                 .get(0)
-                .was_abandoned(
+                .was_abandoned_with_lock(
                     fork_c_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
+                    global_state.chain.archival_state.as_ref().unwrap(),
+                    &mut block_index_db_lock,
                 )
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
-                .was_abandoned(
+                .was_abandoned_with_lock(
                     fork_c_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
+                    global_state.chain.archival_state.as_ref().unwrap(),
+                    &mut block_index_db_lock,
                 )
                 .await
         );
