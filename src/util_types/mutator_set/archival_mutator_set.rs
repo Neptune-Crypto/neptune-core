@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::storage_vec::StorageVec;
+use twenty_first::util_types::storage_vec::{Index, StorageVec};
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
@@ -71,11 +71,11 @@ where
         }
     }
 
+    // note:  set_many() presently locks DB read/write until all utxo are set.
+    // future: revisit DB read/write concurrency or acquire lock per row or per batch.
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
         let new_chunks: HashMap<u64, Chunk> = self.kernel.remove_helper(removal_record);
-        for (chunk_index, chunk) in new_chunks {
-            self.chunks.set(chunk_index, chunk);
-        }
+        self.chunks.set_many(new_chunks);
     }
 
     fn hash(&self) -> Digest {
@@ -93,9 +93,9 @@ where
             .kernel
             .batch_remove(removal_records, preserved_membership_proofs);
 
-        for (chnk_idx, new_chunk_value) in chunk_index_to_chunk_mutation {
-            self.chunks.set(chnk_idx, new_chunk_value);
-        }
+        // note:  set_many() presently locks DB read/write until all utxo are set.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        self.chunks.set_many(chunk_index_to_chunk_mutation);
     }
 }
 
@@ -242,7 +242,7 @@ where
         let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
         let batch_index = self.kernel.get_batch_index();
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
-        let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
+        let mut chunkidx_to_difference_dict: BTreeMap<Index, Chunk> = Default::default();
 
         // Populate the dictionary by iterating over all the removal
         // record's indices and inserting them into the correct
@@ -262,18 +262,35 @@ where
             }
         }
 
-        for (chunk_index, revert_chunk) in chunkidx_to_difference_dict {
-            // For each chunk, subtract the difference from the chunk.
-            let previous_chunk = self.chunks.get(chunk_index);
-            let mut new_chunk = previous_chunk;
-            new_chunk.subtract(revert_chunk.clone());
-            self.chunks.set(chunk_index, new_chunk.clone());
+        // We get the existing chunks in a single call to get_many().
+        // This also enables us to pass an iterator to set_many() without
+        // needing to collect/allocate or clone.
+        //
+        // note:  get_many() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        let old_chunks = self
+            .chunks
+            .get_many(&Vec::from_iter(chunkidx_to_difference_dict.keys().copied()));
 
-            // update archival mmr
-            self.kernel
-                .swbf_inactive
-                .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
-        }
+        // note: BTreeMap guarantees the keys will be iterated in order, so
+        //       we can be sure old_chunks used in zip() match up.
+        let chunks_to_update_iter = chunkidx_to_difference_dict.into_iter().zip(old_chunks).map(
+            |((chunk_index, revert_chunk), mut update_chunk)| {
+                // For each chunk, subtract the difference
+                update_chunk.subtract(revert_chunk);
+
+                // update archival mmr.  (side-effect)
+                self.kernel
+                    .swbf_inactive
+                    .mutate_leaf_raw(chunk_index, H::hash(&update_chunk));
+
+                (chunk_index, update_chunk)
+            },
+        );
+
+        // note:  set_many() presently locks DB read/write until all utxo are set.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        self.chunks.set_many(chunks_to_update_iter);
     }
 
     /// Determine whether the given `AdditionRecord` can be reversed.

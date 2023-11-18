@@ -84,3 +84,7 @@ opt-level = 3
 # incremental = true
 # codegen-units = 256
 # rpath = false
+
+[patch.crates-io]
+# needed until 0.35.0 is released.
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git" }

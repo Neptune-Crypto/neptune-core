@@ -308,12 +308,10 @@ mod wallet_tests {
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         let lock = wallet_state.wallet_db.lock().await;
-        let num_monitored_utxos = lock.monitored_utxos.len();
-        let mut monitored_utxos = vec![];
-        for i in 0..num_monitored_utxos {
-            monitored_utxos.push(lock.monitored_utxos.get(i));
-        }
-        monitored_utxos
+
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        lock.monitored_utxos.get_all()
     }
 
     #[tokio::test]

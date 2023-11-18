@@ -141,9 +141,10 @@ impl GlobalState {
         //
         // We then continue working backward through all entries to
         // determine max(spent_in_block)
-        for i in (0..monitored_utxos.len()).rev() {
-            let utxo = monitored_utxos.get(i);
-
+        //
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        for utxo in monitored_utxos.get_all().into_iter().rev() {
             if max_confirmed_in_block.is_none() {
                 if let Some((.., confirmed_in_block)) = utxo.confirmed_in_block {
                     if utxo
@@ -176,11 +177,11 @@ impl GlobalState {
 
         let db_lock = self.wallet_state.wallet_db.lock().await;
         let monitored_utxos = db_lock.monitored_utxos.clone();
-        let num_monitored_utxos = monitored_utxos.len();
         let mut history = vec![];
-        for i in 0..num_monitored_utxos {
-            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
 
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        for monitored_utxo in monitored_utxos.get_all().into_iter() {
             if monitored_utxo
                 .get_membership_proof_for_block(current_tip_digest)
                 .is_none()
@@ -525,15 +526,14 @@ impl GlobalState {
         // Loop over all `incoming_utxos` and check if they have a corresponding
         // monitored UTXO in the database.
         let mut recovery_data_for_missing_mutxos = vec![];
-        let mutxo_count = wallet_db.monitored_utxos.len();
+
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        let monitored_utxos = wallet_db.monitored_utxos.get_all();
+
         '_outer: for incoming_utxo in incoming_utxos {
             // Find match in monitored UTXOs in wallet database
-            let mut searched_index = 0;
-            'inner: while mutxo_count > searched_index {
-                // TODO: It's inefficient to fetch each monitored UTXO in this loop.
-                // It would be better to fetch all monitored UTXOs at once and then
-                // run the loop.
-                let monitored_utxo = wallet_db.monitored_utxos.get(searched_index);
+            'inner: for monitored_utxo in monitored_utxos.iter() {
                 if monitored_utxo.utxo == incoming_utxo.utxo {
                     let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
                     let msmp = match msmp_res {
@@ -547,7 +547,6 @@ impl GlobalState {
                         continue '_outer;
                     }
                 }
-                searched_index += 1;
             }
 
             // If no match is found, add the UTXO to the list of missing UTXOs
@@ -614,18 +613,19 @@ impl GlobalState {
         &self,
         tip_hash: Digest,
     ) -> Result<()> {
-        // loop over all monitored utxos
+        // Grab local copy of monitored utxos to work on.
+        //
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
         let mut monitored_utxos = self
             .wallet_state
             .wallet_db
             .lock()
             .await
             .monitored_utxos
-            .clone();
-        let num_monitored_utxos = monitored_utxos.len();
-        'outer: for i in 0..num_monitored_utxos {
-            let mut monitored_utxo = monitored_utxos.get(i).clone();
+            .get_all();
 
+        'outer: for (i, &mut ref mut monitored_utxo) in monitored_utxos.iter_mut().enumerate() {
             // Ignore those MUTXOs that were marked as abandoned
             if monitored_utxo.abandoned_at.is_some() {
                 continue;
@@ -666,6 +666,9 @@ impl GlobalState {
                 .unwrap()
                 .find_path(block_hash, tip_hash)
                 .await;
+
+            // after this point, we may need to mutate the mutxo.
+            // let mut monitored_utxo = monitored_utxo.clone();
 
             // walk backwards, reverting
             for revert_block_hash in backwards.into_iter() {
@@ -766,16 +769,20 @@ impl GlobalState {
 
             // store updated membership proof
             monitored_utxo.add_membership_proof_for_tip(tip_hash, membership_proof);
-            monitored_utxos.set(i, monitored_utxo);
         }
 
+        // grab wallet lock for some writes.
+        let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
+
+        // update all monitored_utxos at once.
+        //
+        // note:  set_all() presently locks DB read/write until all utxo are set.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        wallet_db_lock.monitored_utxos.set_all(&monitored_utxos);
+
         // Update sync label and persist
-        self.wallet_state
-            .wallet_db
-            .lock()
-            .await
-            .set_sync_label(tip_hash);
-        self.wallet_state.wallet_db.lock().await.persist();
+        wallet_db_lock.set_sync_label(tip_hash);
+        wallet_db_lock.persist();
 
         Ok(())
     }
@@ -799,9 +806,8 @@ mod global_state_tests {
         tip_block: &Block,
     ) -> bool {
         let wallet_db_lock = wallet_state.wallet_db.lock().await;
-        let monitored_utxos = &wallet_db_lock.monitored_utxos;
-        for i in 0..monitored_utxos.len() {
-            let monitored_utxo = monitored_utxos.get(i);
+        let monitored_utxos = wallet_db_lock.monitored_utxos.get_all();
+        for monitored_utxo in monitored_utxos.iter() {
             let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash);
 
             match current_mp {

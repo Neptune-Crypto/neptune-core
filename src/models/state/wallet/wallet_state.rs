@@ -3,7 +3,7 @@ use itertools::Itertools;
 use num_traits::Zero;
 use rusty_leveldb::DB;
 use serde_derive::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt::Debug;
 use std::fs::OpenOptions;
@@ -17,7 +17,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
-use twenty_first::util_types::storage_vec::StorageVec;
+use twenty_first::util_types::storage_vec::{Index, StorageVec};
 
 use twenty_first::shared_math::digest::Digest;
 
@@ -237,21 +237,27 @@ impl WalletState {
             .map(|rr| rr.absolute_indices.clone())
             .collect_vec();
 
-        let mut spent_own_utxos = vec![];
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
-            let utxo = monitored_utxo.utxo.clone();
-            let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(Hash::hash(&utxo)),
-                None => continue,
-            };
+        // find "my" spent utxos
+        //
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        wallet_db_lock
+            .monitored_utxos
+            .get_all()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, monitored_utxo)| {
+                let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
+                    Some(msmp) => msmp.1.compute_indices(Hash::hash(&monitored_utxo.utxo)),
+                    None => return None,
+                };
 
-            if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.push((utxo, abs_i, i));
-            }
-        }
-
-        spent_own_utxos
+                match confirmed_absolute_index_sets.contains(&abs_i) {
+                    true => Some((monitored_utxo.utxo, abs_i, i as Index)),
+                    false => None,
+                }
+            })
+            .collect()
     }
 
     /// Scan the given transaction for announced UTXOs as
@@ -308,13 +314,15 @@ impl WalletState {
             Duration::from_millis(current_tip.timestamp.value()),
             current_tip.height,
         );
-        let mutxo_count = wallet_db_lock.monitored_utxos.len();
-        let mut monitored_utxos = wallet_db_lock
-            .monitored_utxos
-            .get_many(&(0..mutxo_count).collect_vec());
+
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        let mut monitored_utxos = wallet_db_lock.monitored_utxos.get_all();
         let mut removed_count = 0;
         let mut block_index_db_lock = archival_state.block_index_db.lock().await;
-        for (i, monitored_utxo) in monitored_utxos.iter_mut().enumerate() {
+
+        // Loop over all MUTXOs, checking which are not synced
+        for monitored_utxo in monitored_utxos.iter_mut() {
             // Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
             // once the spending block is buried sufficiently deep
             if monitored_utxo.spent_in_block.is_some() {
@@ -349,14 +357,16 @@ impl WalletState {
 
             if mark_as_abandoned {
                 monitored_utxo.abandoned_at = Some(current_tip_info);
-                wallet_db_lock
-                    .monitored_utxos
-                    .set(i as u64, monitored_utxo.to_owned());
                 removed_count += 1;
             }
         }
 
-        // Loop over all MUTXOs, checking which are not synced
+        // Write all updates to database
+        //
+        // note:  set_all() presently locks DB read/write until all utxo are set.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch
+        wallet_db_lock.monitored_utxos.set_all(&monitored_utxos);
+
         Ok(removed_count)
     }
 
@@ -412,8 +422,15 @@ impl WalletState {
             StrongUtxoKey,
             (MsMembershipProof<Hash>, u64),
         > = HashMap::default();
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let monitored_utxo: MonitoredUtxo = wallet_db_lock.monitored_utxos.get(i);
+
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        for (i, monitored_utxo) in wallet_db_lock
+            .monitored_utxos
+            .get_all()
+            .into_iter()
+            .enumerate()
+        {
             let utxo_digest = Hash::hash(&monitored_utxo.utxo);
 
             match monitored_utxo.get_membership_proof_for_block(block.header.prev_block_digest) {
@@ -421,7 +438,7 @@ impl WalletState {
                     debug!("Found valid mp for UTXO");
                     let insert_ret = valid_membership_proofs_and_own_utxo_count.insert(
                         StrongUtxoKey::new(utxo_digest, ms_mp.auth_path_aocl.leaf_index),
-                        (ms_mp, i),
+                        (ms_mp, i as u64),
                     );
                     assert!(
                         insert_ret.is_none(),
@@ -543,17 +560,21 @@ impl WalletState {
         }
 
         // sanity checks
-        let mut mutxo_with_valid_mps = 0;
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let mutxo = wallet_db_lock.monitored_utxos.get(i);
-            if mutxo.is_synced_to(block.header.prev_block_digest)
-                || mutxo.blockhash_to_membership_proof.is_empty()
-            {
-                mutxo_with_valid_mps += 1;
-            }
-        }
+        //
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        let mutxo_with_valid_mps = wallet_db_lock
+            .monitored_utxos
+            .get_all()
+            .iter()
+            .filter(|m| {
+                m.is_synced_to(block.header.prev_block_digest)
+                    || m.blockhash_to_membership_proof.is_empty()
+            })
+            .count();
+
         assert_eq!(
-            mutxo_with_valid_mps as usize,
+            mutxo_with_valid_mps,
             valid_membership_proofs_and_own_utxo_count.len(),
             "Monitored UTXO count must match number of managed membership proofs"
         );
@@ -565,6 +586,9 @@ impl WalletState {
             block.body.transaction.kernel.inputs.len()
         );
         let mut i = 0;
+
+        let mut mutxo_indexes_for_update: Vec<Index> = Default::default();
+
         while let Some(removal_record) = removal_records.pop() {
             let res = MsMembershipProof::batch_update_from_remove(
                 &mut valid_membership_proofs_and_own_utxo_count
@@ -599,21 +623,46 @@ impl WalletState {
                         i
                     );
 
-                    let mut spent_mutxo = wallet_db_lock.monitored_utxos.get(*mutxo_list_index);
-                    spent_mutxo.spent_in_block = Some((
-                        block.hash,
-                        Duration::from_millis(block.header.timestamp.value()),
-                        block.header.height,
-                    ));
-                    wallet_db_lock
-                        .monitored_utxos
-                        .set(*mutxo_list_index, spent_mutxo);
+                    mutxo_indexes_for_update.push(*mutxo_list_index);
                 }
             }
 
             msa_state.remove(removal_record);
             i += 1;
         }
+
+        // get all the spent mutxo that we identified above.
+        //
+        // note:  get_many() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        let spent_mutxos = wallet_db_lock
+            .monitored_utxos
+            .get_many(&mutxo_indexes_for_update);
+
+        // Create an iterator to mark these mutxo as spent.
+        //
+        // note: the zip is necessary so that indices match with values.
+        //       We cannot use array indices in get_many result because
+        //       get_many() does not (yet?) preserve input indices.
+        let mark_spent_iter =
+            mutxo_indexes_for_update
+                .iter()
+                .zip(spent_mutxos)
+                .map(|(idx, mut spent_mutxo)| {
+                    spent_mutxo.spent_in_block = Some((
+                        block.hash,
+                        Duration::from_millis(block.header.timestamp.value()),
+                        block.header.height,
+                    ));
+                    (*idx as Index, spent_mutxo)
+                });
+
+        // Update/write all updated monitored_utxos at once.
+        // we pass iterator directly to avoid ::collect()
+        //
+        // note:  set_many() presently locks DB read/write until all utxo are written.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        wallet_db_lock.monitored_utxos.set_many(mark_spent_iter);
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
@@ -626,19 +675,20 @@ impl WalletState {
         changed_mps.dedup();
         debug!("Number of mutated membership proofs: {}", changed_mps.len());
 
-        let num_monitored_utxos_after_block = wallet_db_lock.monitored_utxos.len();
-        let mut num_unspent_utxos = 0;
-        for j in 0..num_monitored_utxos_after_block {
-            if wallet_db_lock
-                .monitored_utxos
-                .get(j)
-                .spent_in_block
-                .is_none()
-            {
-                num_unspent_utxos += 1;
-            }
-        }
+        // note:  get_all() presently locks DB read/write until all utxo are retrieved.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        let num_unspent_utxos = wallet_db_lock
+            .monitored_utxos
+            .get_all()
+            .iter()
+            .filter(|m| m.spent_in_block.is_none())
+            .count();
+
         debug!("Number of unspent UTXOs: {}", num_unspent_utxos);
+
+        // this shadows above var, but it is already moved into a fn call.
+        #[allow(clippy::shadow_unrelated)]
+        let mut mutxos_to_update: BTreeMap<Index, MonitoredUtxo> = Default::default();
 
         for (&strong_utxo_key, (updated_ms_mp, own_utxo_index)) in
             valid_membership_proofs_and_own_utxo_count.iter()
@@ -653,15 +703,17 @@ impl WalletState {
                     || msa_state.verify(utxo_digest, updated_ms_mp)
             );
 
-            wallet_db_lock
-                .monitored_utxos
-                .set(*own_utxo_index, monitored_utxo);
+            mutxos_to_update.insert(*own_utxo_index, monitored_utxo);
 
             // TODO: What if a newly added transaction replaces a transaction that was in another fork?
             // How do we ensure that this transaction is not counted twice?
             // One option is to only count UTXOs that are synced as valid.
             // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
+
+        // note:  set_many() presently locks DB read/write until all utxo are written.
+        // future: revisit DB read/write concurrency or acquire lock per row or per batch.
+        wallet_db_lock.monitored_utxos.set_many(mutxos_to_update);
 
         wallet_db_lock.set_sync_label(block.hash);
         wallet_db_lock.persist();
@@ -708,13 +760,14 @@ impl WalletState {
         lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
         block: &Block,
     ) -> WalletStatus {
-        let num_monitored_utxos = lock.monitored_utxos.len();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
         let mut synced_spent = vec![];
         let mut unsynced_spent = vec![];
-        for i in 0..num_monitored_utxos {
-            let mutxo = lock.monitored_utxos.get(i);
+
+        let mutxos = lock.monitored_utxos.get_all();
+
+        for mutxo in mutxos.iter() {
             debug!(
                 "mutxo. Synced to: {}",
                 mutxo
