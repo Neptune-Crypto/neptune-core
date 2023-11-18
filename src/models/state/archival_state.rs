@@ -397,7 +397,7 @@ impl ArchivalState {
         }
     }
 
-    fn get_block_header_with_lock(
+    pub fn get_block_header_with_lock(
         &self,
         block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
         block_digest: Digest,
@@ -485,11 +485,15 @@ impl ArchivalState {
     }
 
     /// Return the number of blocks with the given height
-    async fn block_height_to_block_count(&self, height: BlockHeight) -> usize {
-        match self
-            .block_index_db
-            .lock()
-            .await
+    fn block_height_to_block_count_with_lock(
+        &self,
+        height: BlockHeight,
+        block_db_lock: &mut tokio::sync::MutexGuard<
+            '_,
+            RustyLevelDB<BlockIndexKey, BlockIndexValue>,
+        >,
+    ) -> usize {
+        match block_db_lock
             .get(BlockIndexKey::Height(height))
             .map(|x| x.as_height_record())
         {
@@ -548,11 +552,25 @@ impl ArchivalState {
             .collect()
     }
 
-    /// Return a boolean indicating if block belongs to most canonical chain
     pub async fn block_belongs_to_canonical_chain(
         &self,
         block_header: &BlockHeader,
         tip_header: &BlockHeader,
+    ) -> bool {
+        let mut block_db_lock = self.block_index_db.lock().await;
+        self.block_belongs_to_canonical_chain_with_lock(
+            block_header,
+            tip_header,
+            &mut block_db_lock,
+        )
+    }
+
+    /// Return a boolean indicating if block belongs to most canonical chain
+    pub fn block_belongs_to_canonical_chain_with_lock(
+        &self,
+        block_header: &BlockHeader,
+        tip_header: &BlockHeader,
+        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
     ) -> bool {
         let block_header_digest = Hash::hash(block_header);
         let tip_header_digest = Hash::hash(tip_header);
@@ -579,14 +597,15 @@ impl ArchivalState {
 
         // If only one block at this height is known and block height is less than or equal
         // to that of the tip, then this block must belong to the canonical chain
-        if self.block_height_to_block_count(block_header.height).await == 1
+        if self.block_height_to_block_count_with_lock(block_header.height, block_db_lock) == 1
             && tip_header.height >= block_header.height
         {
             return true;
         }
 
         // Find the path from block to tip and check if this involves stepping back
-        let (backwards, _, _) = self.find_path(block_header_digest, tip_header_digest).await;
+        let (backwards, _, _) =
+            self.find_path_with_lock(block_header_digest, tip_header_digest, block_db_lock);
 
         backwards.is_empty()
     }
