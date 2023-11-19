@@ -123,6 +123,11 @@ pub struct Args {
     /// coins. The default option is likely to change in the future.
     #[clap(long, default_value = "false")]
     pub privacy: bool,
+
+    /// Enable tokio tracing for consumption by the tokio-console application
+    /// note: this will attempt to connect to localhost:6669
+    #[structopt(long, name = "tokio-console", default_value = "false")]
+    pub tokio_console: bool,
 }
 
 impl Default for Args {

@@ -1,0 +1,4 @@
+# tokio_unstable compile flag is necessary for tokio-console usage.
+# see: https://docs.rs/console-subscriber/latest/console_subscriber/
+[build]
+rustflags = ["--cfg", "tokio_unstable"]
