@@ -61,6 +61,17 @@ sed 's/.*neptune_core:\+\(.*\)/\1/g'
 
 If the RPC server is spamming your log too much, set the logging-level environment to `RUST_LOG='info,tarpc=warn'`.
 
+## Running tokio-console
+
+[tokio-console](https://github.com/tokio-rs/console) is a tool for monitoring tokio tasks and resources/locks in real-time.  Kind of like unix `top`, but for a single application.
+
+To use tokio-console with neptune-core:
+
+1. `cargo install --locked tokio-console`   see: [tokio-console installation](https://github.com/tokio-rs/console#running-the-console)
+2. run tokio-console in a terminal
+3. run neptune-core in a separate terminal, passing the --tokio-console flag.
+
+
 ## Local Integration Test Strategy
 
 This repository contains unit tests, but multi-threaded programs are notoriously hard to test. And the unit tests usually only cover narrow parts of the code within a single thread. When you are making changes to the code, you can run through the following checks
