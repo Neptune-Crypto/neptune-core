@@ -804,7 +804,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git#24736170fa751188dcb6d7bf1bb6e08d24bdc3c7"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=a0d7f2ef#a0d7f2ef1952522a53fa3c9fd2534a8507571b4f"
 dependencies = [
  "quote",
  "syn 2.0.38",
@@ -2521,12 +2521,12 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git#24736170fa751188dcb6d7bf1bb6e08d24bdc3c7"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=a0d7f2ef#a0d7f2ef1952522a53fa3c9fd2534a8507571b4f"
 dependencies = [
  "anyhow",
  "derive_tasm_object",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "num",
  "num-traits",
  "rand",
@@ -2898,7 +2898,7 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 [[package]]
 name = "twenty-first"
 version = "0.34.0"
-source = "git+https://github.com/Neptune-Crypto/twenty-first.git#e0cf7e640162a730f56c409ce2b83cb111a339d8"
+source = "git+https://github.com/Neptune-Crypto/twenty-first.git?rev=e0cf7e64#e0cf7e640162a730f56c409ce2b83cb111a339d8"
 dependencies = [
  "anyhow",
  "arbitrary",
