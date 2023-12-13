@@ -1,0 +1,157 @@
+use std::sync::Arc;
+use tokio::sync::{Mutex, MutexGuard};
+
+/// An `Arc<Mutex<T>>` wrapper to make data thread-safe and easy to work with.
+///
+/// # Example
+/// ```
+/// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+/// struct Car {
+///     year: u16,
+/// };
+/// # tokio_test::block_on(async {
+/// let atomic_car = AtomicMutex::from(Car{year: 2016});
+/// atomic_car.with(|c| println!("year: {}", c.year)).await;
+/// atomic_car.with_mut(|mut c| c.year = 2023).await;
+/// # })
+/// ```
+#[derive(Debug, Default, Clone)]
+pub struct AtomicMutex<T>(Arc<Mutex<T>>);
+impl<T> From<T> for AtomicMutex<T> {
+    #[inline]
+    fn from(t: T) -> Self {
+        Self(Arc::new(Mutex::new(t)))
+    }
+}
+
+impl<T> From<Mutex<T>> for AtomicMutex<T> {
+    #[inline]
+    fn from(t: Mutex<T>) -> Self {
+        Self(Arc::new(t))
+    }
+}
+
+impl<T> TryFrom<AtomicMutex<T>> for Mutex<T> {
+    type Error = Arc<Mutex<T>>;
+
+    #[inline]
+    fn try_from(t: AtomicMutex<T>) -> Result<Mutex<T>, Self::Error> {
+        Arc::<Mutex<T>>::try_unwrap(t.0)
+    }
+}
+
+impl<T> From<Arc<Mutex<T>>> for AtomicMutex<T> {
+    #[inline]
+    fn from(t: Arc<Mutex<T>>) -> Self {
+        Self(t)
+    }
+}
+
+impl<T> From<AtomicMutex<T>> for Arc<Mutex<T>> {
+    #[inline]
+    fn from(t: AtomicMutex<T>) -> Self {
+        t.0
+    }
+}
+
+// note: we impl the Atomic trait methods here also so they
+// can be used without caller having to use the trait.
+impl<T> AtomicMutex<T> {
+    /// Acquire lock and return a `MutexGuard`
+    ///
+    /// # Examples
+    /// ```
+    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// struct Car {
+    ///     year: u16,
+    /// };
+    /// # tokio_test::block_on(async {
+    ///     let atomic_car = AtomicMutex::from(Car{year: 2016});
+    ///     atomic_car.guard_mut().await.year = 2022;
+    /// # })
+    /// ```
+    pub async fn guard_mut(&self) -> MutexGuard<T> {
+        self.0.lock().await
+    }
+
+    /// Immutably access the data of type `T` in a closure and return a result
+    ///
+    /// # Example
+    /// ```
+    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// struct Car {
+    ///     year: u16,
+    /// };
+    /// # tokio_test::block_on(async {
+    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
+    /// atomic_car.with(|c| println!("year: {}", c.year));
+    /// let year = atomic_car.with(|c| c.year).await;
+    /// # })
+    /// ```
+    pub async fn with<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&T) -> R,
+    {
+        let mut lock = self.0.lock().await;
+        f(&mut lock)
+    }
+
+    /// Mutably access the data of type `T` in a closure and return a result
+    ///
+    /// # Example
+    /// ```
+    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// struct Car {
+    ///     year: u16,
+    /// };
+    /// # tokio_test::block_on(async {
+    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
+    /// atomic_car.with_mut(|mut c| c.year = 2022).await;
+    /// let year = atomic_car.with_mut(|mut c| {c.year = 2023; c.year}).await;
+    /// # })
+    /// ```
+    pub async fn with_mut<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut T) -> R,
+    {
+        let mut lock = self.0.lock().await;
+        f(&mut lock)
+    }
+}
+
+/*
+    note: commenting until async-traits are supported in stable rust.
+        It is supposed to be available in 1.75.0 on Dec 28, 2023.
+        See: https://releases.rs/docs/1.75.0/
+impl<T> Atomic<T> for AtomicMutex<T> {
+    async fn with<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&T) -> R,
+    {
+        AtomicMutex::<T>::with(self, f).await
+    }
+
+    async fn with_mut<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut T) -> R,
+    {
+        AtomicMutex::<T>::with_mut(self, f).await
+    }
+}
+ */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    // Verify (compile-time) that AtomicMutex::with() and ::with_mut() accept mutable values.  (FnOnce)
+    async fn mutable_assignment() {
+        let name = "Jim".to_string();
+        let atomic_name = AtomicMutex::from(name);
+
+        let mut new_name: String = Default::default();
+        atomic_name.with(|n| new_name = n.to_string()).await;
+        atomic_name.with_mut(|n| new_name = n.to_string()).await;
+    }
+}
