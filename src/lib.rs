@@ -9,7 +9,7 @@ mod mine_loop;
 pub mod models;
 mod peer_loop;
 pub mod rpc_server;
-mod util_types;
+pub mod util_types;
 
 #[cfg(test)]
 pub mod tests;
