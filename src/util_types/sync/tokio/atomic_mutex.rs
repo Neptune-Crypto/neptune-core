@@ -1,3 +1,4 @@
+use futures::future::BoxFuture;
 use std::sync::Arc;
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -117,6 +118,54 @@ impl<T> AtomicMutex<T> {
         let mut lock = self.0.lock().await;
         f(&mut lock)
     }
+
+    /// Immutably access the data of type `T` in an async closure and possibly return a result of type `R`
+    ///
+    /// The async callback uses dynamic dispatch and it is necessary to call
+    /// `.boxed()` on the closure's async block and have [`FutureExt`](futures::future::FutureExt) in scope.
+    ///
+    /// # Examples
+    /// ```
+    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use futures::future::FutureExt;
+    /// struct Car {
+    ///     year: u16,
+    /// };
+    /// # tokio_test::block_on(async {
+    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
+    /// atomic_car.with_async(|c| async {println!("year: {}", c.year)}.boxed()).await;
+    /// let year = atomic_car.with_async(|c| async {c.year}.boxed()).await;
+    /// })
+    /// ```
+    // design background: https://stackoverflow.com/a/77657788/10087197
+    pub async fn with_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
+        let lock = self.0.lock().await;
+        f(&lock).await
+    }
+
+    /// Mutably access the data of type `T` in an async closure and possibly return a result of type `R`
+    ///
+    /// The async callback uses dynamic dispatch and it is necessary to call
+    /// `.boxed()` on the closure's async block and have [`FutureExt`](futures::future::FutureExt) in scope.
+    ///
+    /// # Examples
+    /// ```
+    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// # use futures::future::FutureExt;
+    /// struct Car {
+    ///     year: u16,
+    /// };
+    /// # tokio_test::block_on(async {
+    /// let atomic_car = AtomicMutex::from(Car{year: 2016});
+    /// atomic_car.with_mut_async(|mut c| async {c.year = 2022}.boxed()).await;
+    /// let year = atomic_car.with_mut_async(|mut c| async {c.year = 2023; c.year}.boxed()).await;
+    /// })
+    /// ```
+    // design background: https://stackoverflow.com/a/77657788/10087197
+    pub async fn with_mut_async<R>(&self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
+        let mut lock = self.0.lock().await;
+        f(&mut lock).await
+    }
 }
 
 /*
@@ -143,6 +192,7 @@ impl<T> Atomic<T> for AtomicMutex<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::future::FutureExt;
 
     #[tokio::test]
     // Verify (compile-time) that AtomicMutex::with() and ::with_mut() accept mutable values.  (FnOnce)
@@ -153,5 +203,28 @@ mod tests {
         let mut new_name: String = Default::default();
         atomic_name.with(|n| new_name = n.to_string()).await;
         atomic_name.with_mut(|n| new_name = n.to_string()).await;
+    }
+
+    #[tokio::test]
+    async fn async_with() {
+        struct Car {
+            year: u16,
+        }
+
+        let atomic_car = AtomicMutex::from(Car { year: 2016 });
+
+        // access data without returning anything from closure
+        atomic_car
+            .with_async(|c| {
+                async {
+                    assert_eq!(c.year, 2016);
+                }
+                .boxed()
+            })
+            .await;
+
+        // test return from closure.
+        let year = atomic_car.with_async(|c| async { c.year }.boxed()).await;
+        assert_eq!(year, 2016);
     }
 }
