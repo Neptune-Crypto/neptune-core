@@ -12,8 +12,8 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// };
 /// # tokio_test::block_on(async {
 /// let atomic_car = AtomicRw::from(Car{year: 2016});
-/// atomic_car.with(|c| {println!("year: {}", c.year)}).await;
-/// atomic_car.with_mut(|mut c| {c.year = 2023}).await;
+/// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
+/// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
 /// ```
 #[derive(Debug, Default)]
@@ -72,10 +72,10 @@ impl<T> AtomicRw<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// let year = atomic_car.guard().await.year;
+    /// let year = atomic_car.lock_guard().await.year;
     /// # })
     /// ```
-    pub async fn guard(&self) -> RwLockReadGuard<T> {
+    pub async fn lock_guard(&self) -> RwLockReadGuard<T> {
         self.0.read().await
     }
 
@@ -89,10 +89,10 @@ impl<T> AtomicRw<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// atomic_car.guard_mut().await.year = 2022;
+    /// atomic_car.lock_guard_mut().await.year = 2022;
     /// # })
     /// ```
-    pub async fn guard_mut(&self) -> RwLockWriteGuard<T> {
+    pub async fn lock_guard_mut(&self) -> RwLockWriteGuard<T> {
         self.0.write().await
     }
 
@@ -106,11 +106,11 @@ impl<T> AtomicRw<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// atomic_car.with(|c| println!("year: {}", c.year)).await;
-    /// let year = atomic_car.with(|c| c.year).await;
+    /// atomic_car.lock(|c| println!("year: {}", c.year)).await;
+    /// let year = atomic_car.lock(|c| c.year).await;
     /// })
     /// ```
-    pub async fn with<R, F>(&self, f: F) -> R
+    pub async fn lock<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
@@ -128,11 +128,11 @@ impl<T> AtomicRw<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// atomic_car.with_mut(|mut c| c.year = 2022).await;
-    /// let year = atomic_car.with_mut(|mut c| {c.year = 2023; c.year}).await;
+    /// atomic_car.lock_mut(|mut c| c.year = 2022).await;
+    /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// })
     /// ```
-    pub async fn with_mut<R, F>(&self, f: F) -> R
+    pub async fn lock_mut<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
     {
@@ -154,12 +154,12 @@ impl<T> AtomicRw<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// atomic_car.with_async(|c| async {println!("year: {}", c.year)}.boxed()).await;
-    /// let year = atomic_car.with_async(|c| async {c.year}.boxed()).await;
+    /// atomic_car.lock_async(|c| async {println!("year: {}", c.year)}.boxed()).await;
+    /// let year = atomic_car.lock_async(|c| async {c.year}.boxed()).await;
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
-    pub async fn with_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
+    pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
         let lock = self.0.read().await;
         f(&lock).await
     }
@@ -178,12 +178,12 @@ impl<T> AtomicRw<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// atomic_car.with_mut_async(|mut c| async {c.year = 2022}.boxed()).await;
-    /// let year = atomic_car.with_mut_async(|mut c| async {c.year = 2023; c.year}.boxed()).await;
+    /// atomic_car.lock_mut_async(|mut c| async {c.year = 2022}.boxed()).await;
+    /// let year = atomic_car.lock_mut_async(|mut c| async {c.year = 2023; c.year}.boxed()).await;
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
-    pub async fn with_mut_async<R>(&self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
+    pub async fn lock_mut_async<R>(&self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
         let mut lock = self.0.write().await;
         f(&mut lock).await
     }
@@ -195,19 +195,19 @@ note: commenting until async-traits are supported in stable rust.
       See: https://releases.rs/docs/1.75.0/
 impl<T> Atomic<T> for AtomicRw<T> {
     #[inline]
-    async fn with<R, F>(&self, f: F) -> R
+    async fn lock<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
-        AtomicRw::<T>::with(self, f).await
+        AtomicRw::<T>:.lock(self, f).await
     }
 
     #[inline]
-    async fn with_mut<R, F>(&self, f: F) -> R
+    async fn lock_mut<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
     {
-        AtomicRw::<T>::with_mut(self, f).await
+        AtomicRw::<T>:.lock_mut(self, f).await
     }
 }
 */
@@ -218,18 +218,18 @@ mod tests {
     use futures::future::FutureExt;
 
     #[tokio::test]
-    // Verify (compile-time) that AtomicRw::with() and ::with_mut() accept mutable values.  (FnMut)
+    // Verify (compile-time) that AtomicRw:.lock() and :.lock_mut() accept mutable values.  (FnMut)
     async fn mutable_assignment() {
         let name = "Jim".to_string();
         let atomic_name = AtomicRw::from(name);
 
         let mut new_name: String = Default::default();
-        atomic_name.with_mut(|n| *n = "Sally".to_string()).await;
-        atomic_name.with_mut(|n| new_name = n.to_string()).await;
+        atomic_name.lock_mut(|n| *n = "Sally".to_string()).await;
+        atomic_name.lock_mut(|n| new_name = n.to_string()).await;
     }
 
     #[tokio::test]
-    async fn async_with() {
+    async fn lock_async() {
         struct Car {
             year: u16,
         }
@@ -238,7 +238,7 @@ mod tests {
 
         // access data without returning anything from closure
         atomic_car
-            .with_async(|c| {
+            .lock_async(|c| {
                 async {
                     assert_eq!(c.year, 2016);
                 }
@@ -247,7 +247,7 @@ mod tests {
             .await;
 
         // test return from closure.
-        let year = atomic_car.with_async(|c| async { c.year }.boxed()).await;
+        let year = atomic_car.lock_async(|c| async { c.year }.boxed()).await;
         assert_eq!(year, 2016);
     }
 }
