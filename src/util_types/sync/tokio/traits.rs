@@ -16,8 +16,8 @@ pub trait Atomic<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// atomic_car.with(|c| {println!("year: {}", c.year); }).await;
-    /// let year = atomic_car.with(|c| c.year).await;
+    /// atomic_car.lock(|c| {println!("year: {}", c.year); }).await;
+    /// let year = atomic_car.lock(|c| c.year).await;
     /// # })
     /// ```
     async fn with<R, F>(&self, f: F) -> R
@@ -34,8 +34,8 @@ pub trait Atomic<T> {
     /// };
     /// # tokio_test::block_on(async {
     /// let atomic_car = AtomicRw::from(Car{year: 2016});
-    /// atomic_car.with_mut(|mut c| {c.year = 2022;}).await;
-    /// let year = atomic_car.with_mut(|mut c| {c.year = 2023; c.year}).await;
+    /// atomic_car.lock_mut(|mut c| {c.year = 2022;}).await;
+    /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// # })
     /// ```
     async fn with_mut<R, F>(&self, f: F) -> R
