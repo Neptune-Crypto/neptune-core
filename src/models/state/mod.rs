@@ -521,12 +521,23 @@ impl GlobalState {
 
         // Fetch all incoming UTXOs from recovery data
         let incoming_utxos = self.wallet_state.read_utxo_ms_recovery_data()?;
+        let incoming_utxo_count = incoming_utxos.len();
+        info!("Checking {} incoming UTXOs", incoming_utxo_count);
 
         // Loop over all `incoming_utxos` and check if they have a corresponding
         // monitored UTXO in the database.
         let mut recovery_data_for_missing_mutxos = vec![];
         let mutxo_count = wallet_db.monitored_utxos.len();
-        '_outer: for incoming_utxo in incoming_utxos {
+        '_outer: for (j, incoming_utxo) in incoming_utxos.into_iter().enumerate() {
+            // The outer loop can take a long time to run. So we inform the user how far we have progressed.
+            if j % 10 == 0 {
+                info!(
+                    "Checking incoming UTXO number {} out of {}",
+                    j + 1,
+                    incoming_utxo_count
+                );
+            }
+
             // Find match in monitored UTXOs in wallet database
             let mut searched_index = 0;
             'inner: while mutxo_count > searched_index {
