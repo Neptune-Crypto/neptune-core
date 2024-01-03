@@ -168,69 +168,174 @@ tasm_neptune_transaction_removal_records_integrity:
        tasm_memory_memcpy_loop: 24
      tasm_memory_memcpy: 105
        tasm_memory_memcpy_loop: 100
- tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices: 10314
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices: 12020
    tasm_list_unsafeimplu32_length___tuple_Ldigest___void_pointerR: 4
    tasm_list_unsafeimplu32_new___void_pointer: 31
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafeimplu32_set_length___tuple_Ldigest___void_pointerR: 2
-   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices_loop: 10265
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices_loop: 11971
      tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 29
-     tasm_neptune_transaction_compute_indices: 5080
+     tasm_neptune_transaction_compute_indices: 5933
        tasm_memory_push_ram_to_stack___digest: 22
        tasm_memory_push_ram_to_stack___digest: 22
-       tasm_neptune_mutator_get_swbf_indices_1048576_45: 4977
+       tasm_neptune_mutator_get_swbf_indices_1048576_45: 5830
          tasm_arithmetic_u128_shift_right_static_3: 24
          tasm_arithmetic_u128_shift_left_static_12: 22
-         tasm_hashing_sample_indices_to_unsafeimplu32_list: 1859
+         sample_indices: 2712
            tasm_list_unsafeimplu32_new___u32: 31
              tasm_memory_dyn_malloc: 25
-           tasm_list_unsafeimplu32_set_length___u32: 2
-           tasm_hashing_sample_indices_to_unsafeimplu32_list_loop: 1780
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+           sample_indices_main_loop: 2670
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
          tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128: 3026
            tasm_list_unsafeimplu32_length___u32: 4
            tasm_list_unsafeimplu32_new___u128: 33
@@ -374,62 +479,167 @@ tasm_neptune_transaction_removal_records_integrity:
              tasm_list_unsafeimplu32_set_element___u128: 21
      tasm_list_unsafeimplu32_set_element___void_pointer: 7
      tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 29
-     tasm_neptune_transaction_compute_indices: 5080
+     tasm_neptune_transaction_compute_indices: 5933
        tasm_memory_push_ram_to_stack___digest: 22
        tasm_memory_push_ram_to_stack___digest: 22
-       tasm_neptune_mutator_get_swbf_indices_1048576_45: 4977
+       tasm_neptune_mutator_get_swbf_indices_1048576_45: 5830
          tasm_arithmetic_u128_shift_right_static_3: 24
          tasm_arithmetic_u128_shift_left_static_12: 22
-         tasm_hashing_sample_indices_to_unsafeimplu32_list: 1859
+         sample_indices: 2712
            tasm_list_unsafeimplu32_new___u32: 31
              tasm_memory_dyn_malloc: 25
-           tasm_list_unsafeimplu32_set_length___u32: 2
-           tasm_hashing_sample_indices_to_unsafeimplu32_list_loop: 1780
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 16
+           sample_indices_main_loop: 2670
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_then_reduce_and_save: 30
+               tasm_list_unsafeimplu32_push___u32: 14
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
+             sample_indices_else_drop_tip: 5
+             tasm_list_unsafeimplu32_length___u32: 4
          tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128: 3026
            tasm_list_unsafeimplu32_length___u32: 4
            tasm_list_unsafeimplu32_new___u128: 33
@@ -1383,7 +1593,7 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_eq: 8
          tasm_list_unsafeimplu32_get_element___digest: 25
          tasm_hashing_eq_digest: 15
- total: 51192
+ total: 52898
 
 # aggregated
  tasm_neptune_transaction_transaction_kernel_mast_hash: 18194
@@ -1419,23 +1629,25 @@ tasm_neptune_transaction_removal_records_integrity:
    tasm_list_higher_order_unsafeimplu32_u32_zip_void_pointer_with_digest_loop: 345
      tasm_memory_memcpy: 268
        tasm_memory_memcpy_loop: 248
- tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices: 10314
+ tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices: 12020
    tasm_list_unsafeimplu32_length___tuple_Ldigest___void_pointerR: 8
    tasm_list_unsafeimplu32_set_length___tuple_Ldigest___void_pointerR: 4
-   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices_loop: 10265
+   tasm_list_higher_order_unsafeimplu32_u32_map_tasm_neptune_transaction_compute_indices_loop: 11971
      tasm_list_unsafeimplu32_get_element___tuple_Ldigest___void_pointerR: 116
-     tasm_neptune_transaction_compute_indices: 10160
-       tasm_neptune_mutator_get_swbf_indices_1048576_45: 9954
+     tasm_neptune_transaction_compute_indices: 11866
+       tasm_neptune_mutator_get_swbf_indices_1048576_45: 11660
          tasm_arithmetic_u128_shift_right_static_3: 48
          tasm_arithmetic_u128_shift_left_static_12: 44
-         tasm_hashing_sample_indices_to_unsafeimplu32_list: 3718
+         sample_indices: 5424
            tasm_list_unsafeimplu32_new___u32: 62
-           tasm_list_unsafeimplu32_set_length___u32: 8
-           tasm_hashing_sample_indices_to_unsafeimplu32_list_loop: 3560
-             tasm_hashing_sample_indices_to_unsafeimplu32_list_process_top_function_body: 1440
+           sample_indices_main_loop: 5340
+           tasm_list_unsafeimplu32_length___u32: 456
+             sample_indices_then_reduce_and_save: 2700
+               tasm_list_unsafeimplu32_push___u32: 1260
+             sample_indices_else_drop_tip: 50
          tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128: 6052
-           tasm_list_unsafeimplu32_length___u32: 8
            tasm_list_unsafeimplu32_new___u128: 66
+           tasm_list_unsafeimplu32_set_length___u32: 4
            tasm_list_higher_order_unsafeimplu32_u32_map_u32_to_u128_add_another_u128_loop: 5950
              tasm_list_unsafeimplu32_get_element___u32: 630
              u32_to_u128_add_another_u128: 2160
@@ -1479,4 +1691,4 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_div2: 1764
            tasm_hashing_swap_digest: 784
          tasm_hashing_eq_digest: 30
- total: 51192
+ total: 52898
