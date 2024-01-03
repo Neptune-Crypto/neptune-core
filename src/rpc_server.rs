@@ -138,6 +138,27 @@ pub struct NeptuneRPCServer {
     pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
+impl NeptuneRPCServer {
+    fn confirmations_internal(&self) -> Option<BlockHeight> {
+        match executor::block_on(self.state.get_latest_balance_height()) {
+            Some(latest_balance_height) => {
+                let tip_block_header =
+                    executor::block_on(self.state.chain.light_state.get_latest_block_header());
+
+                assert!(tip_block_header.height >= latest_balance_height);
+
+                // subtract latest balance height from chain tip.
+                // note: BlockHeight is u64 internally and BlockHeight::sub() returns i128.
+                //       The subtraction and cast is safe given we passed the above assert.
+                let confirmations: BlockHeight =
+                    ((tip_block_header.height - latest_balance_height) as u64).into();
+                Some(confirmations)
+            }
+            None => None,
+        }
+    }
+}
+
 impl RPC for NeptuneRPCServer {
     async fn get_network(self, _: context::Context) -> Network {
         self.state.cli.network
@@ -159,22 +180,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn get_confirmations(self, _: context::Context) -> Option<BlockHeight> {
-        match executor::block_on(self.state.get_latest_balance_height()) {
-            Some(latest_balance_height) => {
-                let tip_block_header =
-                    executor::block_on(self.state.chain.light_state.get_latest_block_header());
-
-                assert!(tip_block_header.height >= latest_balance_height);
-
-                // subtract latest balance height from chain tip.
-                // note: BlockHeight is u64 internally and BlockHeight::sub() returns i128.
-                //       The subtraction and cast is safe given we passed the above assert.
-                let confirmations: BlockHeight =
-                    ((tip_block_header.height - latest_balance_height) as u64).into();
-                Some(confirmations)
-            }
-            None => None,
-        }
+        self.confirmations_internal()
     }
 
     async fn head(self, _: context::Context) -> Digest {
@@ -323,7 +329,7 @@ impl RPC for NeptuneRPCServer {
 
     async fn get_dashboard_overview_data(
         self,
-        context: tarpc::context::Context,
+        _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
         let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
@@ -342,7 +348,7 @@ impl RPC for NeptuneRPCServer {
             Err(_) => None,
         };
 
-        let confirmations = executor::block_on(self.get_confirmations(context));
+        let confirmations = self.confirmations_internal();
 
         DashBoardOverviewDataFromClient {
             tip_header,
