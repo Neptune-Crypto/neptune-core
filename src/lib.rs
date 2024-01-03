@@ -33,6 +33,7 @@ use anyhow::{Context, Result};
 use config_models::cli_args;
 use database::rusty::RustyLevelDB;
 use futures::future;
+use futures::Future;
 use futures::StreamExt;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
@@ -198,6 +199,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     .await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
     let rpc_listener_state: GlobalState = state.clone();
+
+    async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
+        tokio::spawn(fut);
+    }
     let rpc_join_handle = tokio::spawn(async move {
         rpc_listener
             // Ignore accept errors.
@@ -213,7 +218,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                     state: rpc_listener_state.clone(),
                     rpc_server_to_main_tx: rpc_server_to_main_tx.clone(),
                 };
-                channel.execute(server.serve())
+                channel.execute(server.serve()).for_each(spawn)
             })
             // Max 10 channels.
             .buffer_unordered(10)

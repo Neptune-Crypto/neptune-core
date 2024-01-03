@@ -1,6 +1,5 @@
 use anyhow::Result;
 use futures::executor;
-use futures::future::{self, Ready};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -140,57 +139,26 @@ pub struct NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
-    type GetNetworkFut = Ready<Network>;
-    type GetListenAddressForPeersFut = Ready<Option<SocketAddr>>;
-    type BlockHeightFut = Ready<BlockHeight>;
-    type GetConfirmationsFut = Ready<Option<BlockHeight>>;
-    type GetPeerInfoFut = Ready<Vec<PeerInfo>>;
-    type HeadFut = Ready<Digest>;
-    type HeadsFut = Ready<Vec<Digest>>;
-    type ClearAllStandingsFut = Ready<()>;
-    type ClearIpStandingFut = Ready<()>;
-    type SendFut = Ready<Option<Digest>>;
-    type ValidateAddressFut = Ready<Option<generation_address::ReceivingAddress>>;
-    type ValidateAmountFut = Ready<Option<Amount>>;
-    type AmountLeqSyncedBalanceFut = Ready<bool>;
-    type ShutdownFut = Ready<bool>;
-    type GetSyncedBalanceFut = Ready<Amount>;
-    type GetWalletStatusFut = Ready<WalletStatus>;
-    type GetTipHeaderFut = Ready<BlockHeader>;
-    type GetHeaderFut = Ready<Option<BlockHeader>>;
-    type GetReceivingAddressFut = Ready<generation_address::ReceivingAddress>;
-    type GetMempoolTxCountFut = Ready<usize>;
-    type GetMempoolSizeFut = Ready<usize>;
-    type GetHistoryFut = Ready<Vec<(Digest, BlockHeight, Duration, Amount, Sign)>>;
-    type GetDashboardOverviewDataFut = Ready<DashBoardOverviewDataFromClient>;
-    type PauseMinerFut = Ready<()>;
-    type RestartMinerFut = Ready<()>;
-    type PruneAbandonedMonitoredUtxosFut = Ready<usize>;
-
-    fn get_network(self, _: context::Context) -> Self::GetNetworkFut {
-        let network = self.state.cli.network;
-        future::ready(network)
+    async fn get_network(self, _: context::Context) -> Network {
+        self.state.cli.network
     }
 
-    fn get_listen_address_for_peers(
-        self,
-        _context: context::Context,
-    ) -> Self::GetListenAddressForPeersFut {
+    async fn get_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
         let listen_for_peers_ip = self.state.cli.listen_addr;
         let listen_for_peers_socket = self.state.cli.peer_port;
         let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
-        future::ready(Some(socket_address))
+        Some(socket_address)
     }
 
-    fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
+    async fn block_height(self, _: context::Context) -> BlockHeight {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
         // let lookup_res = databases.latest_block_header.get(());
         let latest_block_header =
             executor::block_on(self.state.chain.light_state.get_latest_block_header());
-        future::ready(latest_block_header.height)
+        latest_block_header.height
     }
 
-    fn get_confirmations(self, _: context::Context) -> Self::GetConfirmationsFut {
+    async fn get_confirmations(self, _: context::Context) -> Option<BlockHeight> {
         match executor::block_on(self.state.get_latest_balance_height()) {
             Some(latest_balance_height) => {
                 let tip_block_header =
@@ -203,18 +171,18 @@ impl RPC for NeptuneRPCServer {
                 //       The subtraction and cast is safe given we passed the above assert.
                 let confirmations: BlockHeight =
                     ((tip_block_header.height - latest_balance_height) as u64).into();
-                future::ready(Some(confirmations))
+                Some(confirmations)
             }
-            None => future::ready(None),
+            None => None,
         }
     }
 
-    fn head(self, _: context::Context) -> Self::HeadFut {
+    async fn head(self, _: context::Context) -> Digest {
         let latest_block = executor::block_on(self.state.chain.light_state.get_latest_block());
-        future::ready(latest_block.hash)
+        latest_block.hash
     }
 
-    fn heads(self, _context: tarpc::context::Context, n: usize) -> Self::HeadsFut {
+    async fn heads(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
         let latest_block_digest =
             executor::block_on(self.state.chain.light_state.get_latest_block()).hash;
 
@@ -227,10 +195,10 @@ impl RPC for NeptuneRPCServer {
                 .get_ancestor_block_digests(latest_block_digest, n),
         );
 
-        future::ready(head_hashes)
+        head_hashes
     }
 
-    fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
+    async fn get_peer_info(self, _: context::Context) -> Vec<PeerInfo> {
         let peer_map = self
             .state
             .net
@@ -240,15 +208,15 @@ impl RPC for NeptuneRPCServer {
             .values()
             .cloned()
             .collect();
-        future::ready(peer_map)
+        peer_map
     }
 
-    fn validate_address(
+    async fn validate_address(
         self,
         _ctx: context::Context,
         address_string: String,
         network: Network,
-    ) -> Self::ValidateAddressFut {
+    ) -> Option<generation_address::ReceivingAddress> {
         let ret = if let Ok(address) =
             generation_address::ReceivingAddress::from_bech32m(address_string.clone(), network)
         {
@@ -260,56 +228,52 @@ impl RPC for NeptuneRPCServer {
             "Responding to address validation request of {address_string}: {}",
             ret.is_some()
         );
-        future::ready(ret)
+        ret
     }
 
-    fn validate_amount(
+    async fn validate_amount(
         self,
         _ctx: context::Context,
         amount_string: String,
-    ) -> Self::ValidateAmountFut {
+    ) -> Option<Amount> {
         // parse string
         let amount = if let Ok(amt) = Amount::from_str(&amount_string) {
             amt
         } else {
-            return future::ready(None);
+            return None;
         };
 
         // return amount
-        future::ready(Some(amount))
+        Some(amount)
     }
 
-    fn amount_leq_synced_balance(
-        self,
-        _ctx: context::Context,
-        amount: Amount,
-    ) -> Self::AmountLeqSyncedBalanceFut {
+    async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: Amount) -> bool {
         // test inequality
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
-        future::ready(amount <= wallet_status.synced_unspent_amount)
+        amount <= wallet_status.synced_unspent_amount
     }
 
-    fn get_synced_balance(self, _context: tarpc::context::Context) -> Self::GetSyncedBalanceFut {
+    async fn get_synced_balance(self, _context: tarpc::context::Context) -> Amount {
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
-        future::ready(wallet_status.synced_unspent_amount)
+        wallet_status.synced_unspent_amount
     }
 
-    fn get_wallet_status(self, _context: tarpc::context::Context) -> Self::GetWalletStatusFut {
+    async fn get_wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
-        future::ready(wallet_status)
+        wallet_status
     }
 
-    fn get_tip_header(self, _: context::Context) -> Self::GetTipHeaderFut {
+    async fn get_tip_header(self, _: context::Context) -> BlockHeader {
         let latest_block_block_header =
             executor::block_on(self.state.chain.light_state.get_latest_block_header());
-        future::ready(latest_block_block_header)
+        latest_block_block_header
     }
 
-    fn get_header(
+    async fn get_header(
         self,
         _context: tarpc::context::Context,
         block_digest: Digest,
-    ) -> Self::GetHeaderFut {
+    ) -> Option<BlockHeader> {
         let res = executor::block_on(
             self.state
                 .chain
@@ -318,31 +282,32 @@ impl RPC for NeptuneRPCServer {
                 .expect("Can not give ancestor hash unless there is an archival state.")
                 .get_block_header(block_digest),
         );
-        future::ready(res)
+        res
     }
 
-    fn get_receiving_address(
+    async fn get_receiving_address(
         self,
         _context: tarpc::context::Context,
-    ) -> Self::GetReceivingAddressFut {
-        let receiving_address = self
-            .state
+    ) -> generation_address::ReceivingAddress {
+        self.state
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0)
-            .to_address();
-        future::ready(receiving_address)
+            .to_address()
     }
 
-    fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> Self::GetMempoolTxCountFut {
-        future::ready(self.state.mempool.len())
+    async fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
+        self.state.mempool.len()
     }
 
-    fn get_mempool_size(self, _context: tarpc::context::Context) -> Self::GetMempoolSizeFut {
-        future::ready(self.state.mempool.get_size())
+    async fn get_mempool_size(self, _context: tarpc::context::Context) -> usize {
+        self.state.mempool.get_size()
     }
 
-    fn get_history(self, _context: tarpc::context::Context) -> Self::GetHistoryFut {
+    async fn get_history(
+        self,
+        _context: tarpc::context::Context,
+    ) -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)> {
         let history = executor::block_on(self.state.get_balance_history());
 
         // sort
@@ -353,13 +318,13 @@ impl RPC for NeptuneRPCServer {
         display_history.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
         // return
-        future::ready(display_history)
+        display_history
     }
 
-    fn get_dashboard_overview_data(
+    async fn get_dashboard_overview_data(
         self,
         context: tarpc::context::Context,
-    ) -> Self::GetDashboardOverviewDataFut {
+    ) -> DashBoardOverviewDataFromClient {
         let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
         let syncing = self.state.net.syncing.read().unwrap().to_owned();
@@ -379,7 +344,7 @@ impl RPC for NeptuneRPCServer {
 
         let confirmations = executor::block_on(self.get_confirmations(context));
 
-        future::ready(DashBoardOverviewDataFromClient {
+        DashBoardOverviewDataFromClient {
             tip_header,
             syncing,
             synced_balance: wallet_status.synced_unspent_amount,
@@ -388,12 +353,12 @@ impl RPC for NeptuneRPCServer {
             peer_count,
             is_mining,
             confirmations,
-        })
+        }
     }
 
     // endpoints for changing stuff
 
-    fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
+    async fn clear_all_standings(self, _: context::Context) {
         let mut peers = self
             .state
             .net
@@ -406,10 +371,9 @@ impl RPC for NeptuneRPCServer {
             peerinfo.standing.clear_standing();
         });
         executor::block_on(self.state.clear_all_standings_in_database());
-        future::ready(())
     }
 
-    fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
+    async fn clear_ip_standing(self, _: context::Context, ip: IpAddr) {
         let mut peers = self
             .state
             .net
@@ -423,16 +387,15 @@ impl RPC for NeptuneRPCServer {
         });
         //Also clears this IP's standing in database, whether it is connected or not.
         executor::block_on(self.state.clear_ip_standing_in_database(ip));
-        future::ready(())
     }
 
-    fn send(
+    async fn send(
         self,
         _ctx: context::Context,
         amount: Amount,
         address: generation_address::ReceivingAddress,
         fee: Amount,
-    ) -> Self::SendFut {
+    ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
 
@@ -459,7 +422,7 @@ impl RPC for NeptuneRPCServer {
                     tracing::error!(
                         "Failed to generate transaction because could not encrypt to address."
                     );
-                    return future::ready(None);
+                    return None;
                 }
             };
         let receiver_data = [(UtxoReceiverData {
@@ -500,34 +463,32 @@ impl RPC for NeptuneRPCServer {
             );
         }
 
-        future::ready(if response.is_ok() {
+        if response.is_ok() {
             Some(Hash::hash(&transaction))
         } else {
             None
-        })
+        }
     }
 
-    fn shutdown(self, _: context::Context) -> Self::ShutdownFut {
+    async fn shutdown(self, _: context::Context) -> bool {
         // 1. Send shutdown message to main
         let response =
             executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::Shutdown));
 
         // 2. Send acknowledgement to client.
-        future::ready(response.is_ok())
+        response.is_ok()
     }
 
-    fn pause_miner(self, _context: tarpc::context::Context) -> Self::PauseMinerFut {
+    async fn pause_miner(self, _context: tarpc::context::Context) {
         if self.state.cli.mine {
             let _ =
                 executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
         } else {
             info!("Cannot pause miner since it was never started");
         }
-
-        future::ready(())
     }
 
-    fn restart_miner(self, _context: tarpc::context::Context) -> Self::RestartMinerFut {
+    async fn restart_miner(self, _context: tarpc::context::Context) {
         if self.state.cli.mine {
             let _ = executor::block_on(
                 self.rpc_server_to_main_tx
@@ -536,14 +497,9 @@ impl RPC for NeptuneRPCServer {
         } else {
             info!("Cannot restart miner since it was never started");
         }
-
-        future::ready(())
     }
 
-    fn prune_abandoned_monitored_utxos(
-        self,
-        _context: tarpc::context::Context,
-    ) -> Self::PruneAbandonedMonitoredUtxosFut {
+    async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
         let prune_count_res = {
             // Hold lock on wallet_db
             let mut wallet_db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
@@ -568,11 +524,11 @@ impl RPC for NeptuneRPCServer {
         match prune_count_res {
             Ok(prune_count) => {
                 info!("Marked {prune_count} monitored UTXOs as abandoned");
-                future::ready(prune_count)
+                prune_count
             }
             Err(err) => {
                 error!("Pruning monitored UTXOs failed with error: {err}");
-                future::ready(0)
+                0
             }
         }
     }
