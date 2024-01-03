@@ -88,8 +88,8 @@ pub struct Args {
     #[clap(long, default_value = "9799", value_name = "PORT")]
     pub rpc_port: u16,
 
-    /// IP on which to listen for peer connections. Will default to all network interfaces.
-    #[clap(short, long, default_value = "0.0.0.0")]
+    /// IP on which to listen for peer connections. Will default to all network interfaces, IPv4 and IPv6.
+    #[clap(short, long, default_value = "::")]
     pub listen_addr: IpAddr,
 
     /// Max number of blocks that the client can catch up to before going into syncing mode.
@@ -139,7 +139,7 @@ impl Default for Args {
 
 #[cfg(test)]
 mod cli_args_tests {
-    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
 
     use super::*;
 
@@ -151,6 +151,9 @@ mod cli_args_tests {
         assert_eq!(8, default_args.max_peers);
         assert_eq!(9798, default_args.peer_port);
         assert_eq!(9799, default_args.rpc_port);
-        assert_eq!(Ipv4Addr::new(0, 0, 0, 0), default_args.listen_addr);
+        assert_eq!(
+            IpAddr::from(Ipv6Addr::UNSPECIFIED),
+            default_args.listen_addr
+        );
     }
 }
