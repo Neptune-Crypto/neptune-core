@@ -89,7 +89,7 @@ pub struct Args {
     pub rpc_port: u16,
 
     /// IP on which to listen for peer connections. Will default to all network interfaces.
-    #[clap(short, long, default_value = "0.0.0.0")]
+    #[clap(short, long, default_value = "::")]
     pub listen_addr: IpAddr,
 
     /// Max number of blocks that the client can catch up to before going into syncing mode.
