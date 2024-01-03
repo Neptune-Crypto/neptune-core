@@ -49,7 +49,7 @@ pub struct ReceivingAddress {
 }
 
 fn pubscript_input_is_marked(pubscript_input: &[BFieldElement]) -> bool {
-    matches!(pubscript_input.get(0), Some(&GENERATION_FLAG))
+    matches!(pubscript_input.first(), Some(&GENERATION_FLAG))
 }
 
 fn derive_receiver_id(seed: Digest) -> BFieldElement {

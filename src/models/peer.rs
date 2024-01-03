@@ -163,9 +163,7 @@ pub struct PeerStanding {
 impl PeerStanding {
     /// Sanction peer and return latest standing score
     pub fn sanction(&mut self, reason: PeerSanctionReason) -> i32 {
-        self.standing = self
-            .standing
-            .saturating_sub(reason.to_severity().try_into().unwrap());
+        self.standing = self.standing.saturating_sub(reason.to_severity().into());
         self.latest_sanction = Some(reason);
         self.timestamp_of_latest_sanction = Some(SystemTime::now());
         self.standing

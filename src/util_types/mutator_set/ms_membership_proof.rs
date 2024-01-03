@@ -1285,9 +1285,8 @@ mod ms_proof_tests {
                                             archival_mutator_set.revert_remove(&removal_record);
 
                                             // assert valid proofs
-                                            for (_, (_, mp)) in tracked_items_and_membership_proofs
-                                                .iter_mut()
-                                                .enumerate()
+                                            for (_, mp) in
+                                                tracked_items_and_membership_proofs.iter_mut()
                                             {
                                                 mp.revert_update_from_remove(&removal_record)
                                                     .expect("Could not revert remove.");

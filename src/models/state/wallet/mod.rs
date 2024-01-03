@@ -173,7 +173,7 @@ impl WalletSecret {
                 self.secret_seed.encode(),
                 vec![
                     generation_address::GENERATION_FLAG,
-                    BFieldElement::new(counter.try_into().unwrap()),
+                    BFieldElement::new(counter.into()),
                 ],
             ]
             .concat(),
