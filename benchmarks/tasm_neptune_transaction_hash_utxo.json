@@ -1,15 +1,15 @@
 [
   {
     "name": "tasm_neptune_transaction_hash_utxo",
-    "clock_cycle_count": 273,
-    "hash_table_height": 0,
+    "clock_cycle_count": 168,
+    "hash_table_height": 115,
     "u32_table_height": 11,
     "case": "CommonCase"
   },
   {
     "name": "tasm_neptune_transaction_hash_utxo",
-    "clock_cycle_count": 273,
-    "hash_table_height": 0,
+    "clock_cycle_count": 168,
+    "hash_table_height": 115,
     "u32_table_height": 11,
     "case": "WorstCase"
   }

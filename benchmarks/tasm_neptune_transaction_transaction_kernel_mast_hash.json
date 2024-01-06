@@ -1,16 +1,16 @@
 [
   {
     "name": "tasm_neptune_transaction_transaction_kernel_mast_hash",
-    "clock_cycle_count": 35160,
-    "hash_table_height": 42,
-    "u32_table_height": 6361,
+    "clock_cycle_count": 7822,
+    "hash_table_height": 3631,
+    "u32_table_height": 74,
     "case": "CommonCase"
   },
   {
     "name": "tasm_neptune_transaction_transaction_kernel_mast_hash",
-    "clock_cycle_count": 38774,
-    "hash_table_height": 42,
-    "u32_table_height": 7162,
+    "clock_cycle_count": 8484,
+    "hash_table_height": 3967,
+    "u32_table_height": 74,
     "case": "WorstCase"
   }
 ]
