@@ -1,22 +1,21 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
-use rusty_leveldb::DB;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
+use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use twenty_first::util_types::storage_vec::{RustyLevelDbVec, StorageVec};
+use twenty_first::util_types::storage_schema::DbtVec;
+use twenty_first::util_types::storage_vec::StorageVec;
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
 use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
@@ -31,6 +30,7 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_kernel::MutatorSetKernel;
 use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
+use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
 
 pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
@@ -71,25 +71,13 @@ pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher + BFieldCodec>() -> (
-    ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
-    Arc<Mutex<DB>>,
-) {
-    const AOCL_KEY: u8 = 0;
-    const SWBFI_KEY: u8 = 1;
-    const CHUNK_KEY: u8 = 2;
-    let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
-    let db = DB::open("unit test ams", opt).unwrap();
-    let db = Arc::new(Mutex::new(db));
-    let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
-    let swbfi = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");
-    let chunks = RustyLevelDbVec::new(db.clone(), CHUNK_KEY, "chunks");
-    let kernel = MutatorSetKernel {
-        aocl: ArchivalMmr::new(aocl_storage),
-        swbf_inactive: ArchivalMmr::new(swbfi),
-        swbf_active: ActiveWindow::default(),
-    };
-    (ArchivalMutatorSet { kernel, chunks }, db)
+pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher + BFieldCodec>(
+) -> (ArchivalMutatorSet<H, DbtVec<Digest>, DbtVec<Chunk>>, DB) {
+    // TODO: Reconsider return type for this helper function: What do we need for the tests?
+    let db = DB::open_new_test_database(true, None, None, None).unwrap();
+    let rusty_mutator_set: RustyArchivalMutatorSet<H> =
+        RustyArchivalMutatorSet::connect(db.clone());
+    (rusty_mutator_set.ams, db)
 }
 
 pub fn insert_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(

@@ -34,6 +34,8 @@ impl<H: AlgebraicHasher> Default for ChunkDictionary<H> {
 }
 
 impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
+    type Error = anyhow::Error;
+
     fn encode(&self) -> Vec<BFieldElement> {
         let mut string = vec![BFieldElement::new(self.dictionary.keys().len() as u64)];
         for key in self.dictionary.keys().sorted() {

@@ -1,6 +1,6 @@
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::leveldb::LevelDB;
-use crate::database::rusty::{default_options, RustyLevelDB};
+use crate::database::rusty::{create_db_if_missing, RustyLevelDB};
 use crate::models::database::PeerDatabases;
 use crate::models::peer::{self, PeerStanding};
 use anyhow::Result;
@@ -56,7 +56,7 @@ impl NetworkingState {
 
         let peer_standings = RustyLevelDB::<IpAddr, PeerStanding>::new(
             &data_dir.banned_ips_database_dir_path(),
-            default_options(),
+            &create_db_if_missing(),
         )?;
 
         Ok(PeerDatabases { peer_standings })

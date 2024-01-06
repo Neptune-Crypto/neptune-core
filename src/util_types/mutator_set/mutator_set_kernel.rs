@@ -477,6 +477,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
 impl<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H> + BFieldCodec> BFieldCodec
     for MutatorSetKernel<H, MMR>
 {
+    type Error = anyhow::Error;
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
         let mut index = 0;
         let aocl_len: usize = match sequence.first() {
@@ -484,7 +485,10 @@ impl<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H> + BFieldCodec> BFieldCodec
             None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
         };
         index += 1;
-        let aocl = *MMR::decode(&sequence[index..(index + aocl_len)])?;
+        let aocl = match MMR::decode(&sequence[index..(index + aocl_len)]) {
+            Ok(decoded) => *decoded,
+            Err(err) => anyhow::bail!("Failed to decode AOCL-MMR. Error was: {err}"),
+        };
         index += aocl_len;
 
         let swbf_inactive_len: usize = match sequence.get(index) {
@@ -492,7 +496,10 @@ impl<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H> + BFieldCodec> BFieldCodec
             None => anyhow::bail!("Invalid sequence length for decoding MutatorSetKernel."),
         };
         index += 1;
-        let swbf_inactive = *MMR::decode(&sequence[index..(index + swbf_inactive_len)])?;
+        let swbf_inactive = match MMR::decode(&sequence[index..(index + swbf_inactive_len)]) {
+            Ok(decoded) => *decoded,
+            Err(err) => anyhow::bail!("Failed to decode SWBF-MMR. Error was: {err}"),
+        };
         index += swbf_inactive_len;
 
         let swbf_active_len: usize = match sequence.get(index) {
@@ -546,7 +553,7 @@ mod accumulation_scheme_tests {
 
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-    use twenty_first::util_types::storage_vec::RustyLevelDbVec;
+    use twenty_first::util_types::storage_schema::DbtVec;
 
     use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -692,10 +699,8 @@ mod accumulation_scheme_tests {
         type H = Tip5;
 
         let accumulator = MutatorSetAccumulator::<H>::default();
-        let (archival, _): (
-            ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
-            _,
-        ) = empty_rustyleveldbvec_ams();
+        let (archival, _): (ArchivalMutatorSet<H, DbtVec<Digest>, DbtVec<Chunk>>, _) =
+            empty_rustyleveldbvec_ams();
 
         // Verify that function to get batch index does not overflow for the empty MS
         assert_eq!(

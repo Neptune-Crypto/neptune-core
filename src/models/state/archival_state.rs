@@ -1,7 +1,6 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
-use rusty_leveldb::DB;
 use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
@@ -11,6 +10,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
+use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::StorageWriter;
@@ -18,7 +18,7 @@ use twenty_first::util_types::storage_schema::StorageWriter;
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::leveldb::LevelDB;
-use crate::database::rusty::{default_options, RustyLevelDB};
+use crate::database::rusty::{create_db_if_missing, RustyLevelDB};
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::shared::Hash;
@@ -71,7 +71,7 @@ impl ArchivalState {
 
         let block_index = RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(
             &block_index_db_dir_path,
-            default_options(),
+            &create_db_if_missing(),
         )?;
 
         Ok(block_index)
@@ -84,8 +84,7 @@ impl ArchivalState {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
 
-        let options = rusty_leveldb::Options::default();
-        let db = match DB::open(ms_db_dir_path.clone(), options) {
+        let db = match DB::open(&ms_db_dir_path, &create_db_if_missing()) {
             Ok(db) => db,
             Err(e) => {
                 tracing::error!(
