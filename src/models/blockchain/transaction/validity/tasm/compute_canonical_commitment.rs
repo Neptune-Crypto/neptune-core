@@ -5,14 +5,13 @@ use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_se
 use num_traits::{One, Zero};
 use rand::RngCore;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::data_type::DataType;
 use tasm_lib::empty_stack;
-use tasm_lib::function::Function;
 use tasm_lib::library::Library;
-use tasm_lib::snippet::BasicSnippet;
-use tasm_lib::{
-    memory::push_ram_to_stack::PushRamToStack, neptune::mutator_set::commit::Commit,
-    snippet::DataType,
-};
+use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
+use tasm_lib::neptune::mutator_set::commit::Commit;
+use tasm_lib::traits::basic_snippet::BasicSnippet;
+use tasm_lib::traits::function::{Function, FunctionInitialState};
 use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -49,7 +48,7 @@ impl BasicSnippet for ComputeCanonicalCommitment {
         let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
         let commit = library.import(Box::new(Commit));
         let read_digest = library.import(Box::new(PushRamToStack {
-            output_type: DataType::Digest,
+            data_type: DataType::Digest,
         }));
         let entrypoint = self.entrypoint();
 
@@ -70,7 +69,6 @@ impl BasicSnippet for ComputeCanonicalCommitment {
 
             call {read_digest} // _ *mp i4 i3 i2 i1 i0 *sr 0 0 0 0 0 [receiver_preimage]
             hash
-            pop pop pop pop pop
             // _ *mp i4 i3 i2 i1 i0 *sr rd4 rd3 rd2 rd1 rd0
 
             swap 6                  // _ *mp i4 i3 i2 i1 rd0 *sr rd4 rd3 rd2 rd1 i0
@@ -94,7 +92,7 @@ impl BasicSnippet for ComputeCanonicalCommitment {
             swap 3 swap 8 swap 3 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 i1 i0 i4 i3 i2 sr1 sr0 1
             swap 2 swap 7 swap 2 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 sr1 i0 i4 i3 i2 i1 sr0 1
             swap 1 swap 6 swap 1 // _ *mp rd4 rd3 rd2 rd1 rd0 sr4 sr3 sr2 sr1 sr0 i4 i3 i2 i1 i0 1
-            pop
+            pop 1
 
             call {commit}
 
@@ -161,10 +159,7 @@ impl Function for ComputeCanonicalCommitment {
         &self,
         seed: [u8; 32],
         _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
-    ) -> (
-        Vec<BFieldElement>,
-        std::collections::HashMap<BFieldElement, BFieldElement>,
-    ) {
+    ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         // generate random ms membership proof object
@@ -192,13 +187,13 @@ impl Function for ComputeCanonicalCommitment {
         stack.push(digest.values()[0]);
         stack.push(address + BFieldElement::new(1));
 
-        (stack, memory)
+        FunctionInitialState { stack, memory }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
+    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
 
     use super::*;
 
@@ -210,7 +205,7 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
+    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
 
     use super::*;
 

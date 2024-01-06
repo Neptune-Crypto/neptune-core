@@ -16,7 +16,7 @@ bytes = "1"
 bytesize = "1"
 chrono = "^0.4.31"
 clap = { version = "4", features = ["derive"] }
-clap_complete = "4.4.3"
+clap_complete = "4.4.6"
 console-subscriber = "0.2.0"
 crossterm = "0"
 directories = "5"
@@ -31,14 +31,14 @@ num-traits = "0"
 priority-queue = "1"
 rand = "0.8"
 ratatui = "0.23"
-rusty-leveldb = "3"
-semver = "^1.0.20"
+rs-leveldb = "0.1.5"
+semver = "^1.0.21"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
 strum = { version = "0.25", features = ["derive"] }
-tarpc = { version = "0", features = ["tokio1", "serde-transport", "tcp"] }
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "a0d7f2ef" }
+tarpc = { version = "^0.34", features = ["tokio1", "serde-transport", "tcp"] }
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "20b7a7dc" }
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-serde = { version = "0", features = ["bincode", "json"] }
 tokio-util = { version = "0", features = ["codec"] }
@@ -50,8 +50,8 @@ tracing-subscriber = { version = "0", features = [
     "fmt",
 ] }
 tracing-test = "0"
-triton-vm = "0.35"
-twenty-first = "0.34"
+triton-vm = "0.36"
+twenty-first = "0.36"
 unicode-width = "0"
 
 [dev-dependencies]
@@ -85,7 +85,3 @@ opt-level = 3
 # incremental = true
 # codegen-units = 256
 # rpath = false
-
-[patch.crates-io]
-# needed until 0.35.0 is released.
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "e0cf7e64" }

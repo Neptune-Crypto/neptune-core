@@ -8,11 +8,12 @@ use crate::{
 use itertools::Itertools;
 use rand::RngCore;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use tasm_lib::data_type::DataType;
 use tasm_lib::empty_stack;
-use tasm_lib::function::Function;
 use tasm_lib::library::Library;
-use tasm_lib::snippet::BasicSnippet;
-use tasm_lib::{list::ListType, mmr::verify_from_memory::MmrVerifyFromMemory, snippet::DataType};
+use tasm_lib::traits::basic_snippet::BasicSnippet;
+use tasm_lib::traits::function::{Function, FunctionInitialState};
+use tasm_lib::{list::ListType, mmr::verify_from_memory::MmrVerifyFromMemory};
 use triton_vm::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
@@ -23,7 +24,7 @@ use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 /// buffer so that this function can be mapped over.
 ///
 /// input:  _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
-///  
+///
 /// output: _ *peaks leaf_count_hi leaf_count_lo [bu ff er] validation_result
 #[derive(Debug, Clone)]
 pub(crate) struct VerifyAoclMembership;
@@ -70,14 +71,9 @@ impl BasicSnippet for VerifyAoclMembership {
             {&mmr_mp_to_li}     // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li
 
             push 1              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li 1
-            add                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li_hi
-            read_mem            // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *li_hi li_hi
-            swap 1              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi *li_hi
-            push -1             // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi *li_hi -1
-            add                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi *li_lo
-            read_mem            // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi *li_lo li_lo
-            swap 1              // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *li_lo
-            pop                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo
+            add                 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 *list_last_word
+            read_mem 2          // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo (*li - 1)
+            pop 1               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo
 
             // get auth path
             dup 7               // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0 li_hi li_lo *msmp
@@ -106,9 +102,9 @@ impl BasicSnippet for VerifyAoclMembership {
 
             swap 12 // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] validation_result c4 c3 c2 c1 c0 li_hi li_lo *auth_path *auth_path li_hi li_lo *msmp
 
-            pop pop pop pop
-            pop pop pop pop
-            pop pop pop pop
+            pop 5
+            pop 5
+            pop 2
 
             // _ *peaks leaf_count_hi leaf_count_lo [bu ff er] validation_result
 
@@ -189,10 +185,7 @@ impl Function for VerifyAoclMembership {
         &self,
         seed: [u8; 32],
         _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
-    ) -> (
-        Vec<BFieldElement>,
-        std::collections::HashMap<BFieldElement, BFieldElement>,
-    ) {
+    ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let num_leafs = rng.gen_range(1..100);
         let leafs = (0..num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();
@@ -240,16 +233,15 @@ impl Function for VerifyAoclMembership {
         stack.push(leaf.values()[1]);
         stack.push(leaf.values()[0]);
 
-        (stack, memory)
+        FunctionInitialState { stack, memory }
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
-
     use super::*;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
 
     #[test]
     fn test_verify_aocl_membership() {
@@ -259,10 +251,9 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
-
     use super::*;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
 
     #[test]
     fn verify_aocl_membership_benchmark() {

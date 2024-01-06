@@ -1,8 +1,8 @@
 use super::{SupportedClaim, ValidationLogic};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
-use tasm_lib::compiled_program::CompiledProgram;
 use tasm_lib::library::Library;
+use tasm_lib::traits::compiled_program::CompiledProgram;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::{BFieldElement, NonDeterminism, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;

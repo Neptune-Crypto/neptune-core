@@ -2,10 +2,13 @@ use std::collections::HashMap;
 
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tasm_lib::{
-    function::Function,
+    data_type::DataType,
     hashing::hash_varlen::HashVarlen,
-    snippet::{BasicSnippet, DataType},
     snippet_bencher::BenchmarkCase,
+    traits::{
+        basic_snippet::BasicSnippet,
+        function::{Function, FunctionInitialState},
+    },
 };
 use triton_vm::{triton_asm, BFieldElement};
 
@@ -46,10 +49,9 @@ impl BasicSnippet for HashUtxo {
         // AFTER: _ [utxo_digest]
         {entrypoint}:
             push -1 add // _ *utxo_si // because it lives in a contiguous list
-            read_mem // _ *utxo_si utxo_size
-            swap 1 // _ utxo_size *utxo_si
-            push 1 add // _ utxo_size *utxo
-            swap 1 // _ *utxo utxo_size
+            read_mem 1  // _ utxo_size (*utxo_si - 1)
+            push 2 add  // _ utxo_size *utxo
+            swap 1      // _ *utxo utxo_size
 
             call {hash_varlen}
             return
@@ -95,7 +97,7 @@ impl Function for HashUtxo {
         &self,
         seed: [u8; 32],
         _bench_case: Option<BenchmarkCase>,
-    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+    ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let utxo = pseudorandom_utxo(seed);
         let address = triton_vm::BFieldElement::new(rng.next_u64() % (1 << 20));
@@ -110,15 +112,15 @@ impl Function for HashUtxo {
         for (i, v) in encoded_utxo.iter().enumerate() {
             memory.insert(address + BFieldElement::new(i as u64), v.to_owned());
         }
-        (stack, memory)
+
+        FunctionInitialState { stack, memory }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
-
     use super::*;
+    use tasm_lib::traits::{function::ShadowedFunction, rust_shadow::RustShadow};
 
     #[test]
     fn new_prop_test() {
@@ -129,9 +131,8 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
-
     use super::*;
+    use tasm_lib::traits::{function::ShadowedFunction, rust_shadow::RustShadow};
 
     #[test]
     fn hash_utxo_benchmark() {

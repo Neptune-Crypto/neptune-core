@@ -4,10 +4,11 @@ use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
-use tasm_lib::compiled_program::CompiledProgram;
+use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
 use tasm_lib::ram_builder::RamBuilder;
 use tasm_lib::structure::tasm_object::TasmObject;
+use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::{
     list::{
         contiguous_list::get_pointer_list::GetPointerList,
@@ -17,7 +18,6 @@ use tasm_lib::{
         ListType,
     },
     mmr::bag_peaks::BagPeaks,
-    snippet::DataType,
     DIGEST_LENGTH,
 };
 use tracing::{debug, warn};
@@ -315,14 +315,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
     fn code() -> (Vec<LabelledInstruction>, Library) {
         let mut library = Library::new();
         let transaction_kernel_mast_hash = library.import(Box::new(TransactionKernelMastHash));
-        // let load_struct_from_input = library.import(Box::new(LoadStructFromInput {
-        //     input_source: InputSource::SecretIn,
-        // }));
         let bag_peaks = library.import(Box::new(BagPeaks));
-        // let read_input = vec![triton_instr!(read_io); DIGEST_LENGTH];
-        let read_input = "\nread_io\nread_io\nread_io\nread_io\nread_io\n".to_owned();
         let read_digest = library.import(Box::new(PushRamToStack {
-            output_type: DataType::Digest,
+            data_type: DataType::Digest,
         }));
         let map_hash_utxo = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
@@ -359,7 +354,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             f: InnerFunction::BasicSnippet(Box::new(VerifyAoclMembership)),
         }));
 
-        let _get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
+        let _get_element = library.import(Box::new(UnsafeGet {
+            data_type: DataType::Digest,
+        }));
         let _compute_indices = library.import(Box::new(ComputeIndices));
 
         // field getters
@@ -382,25 +379,23 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         push 1 // _ *witness
 
         // 2. assert that witness kernel hash == public input
-        dup 0 // _ *witness *witness
+        dup 0                               // _ *witness *witness
 
-        {&witness_to_kernel}       // _ *witness *kernel
-        dup 0 // _ *witness *kernel *kernel
+        {&witness_to_kernel}                // _ *witness *kernel
+        dup 0                               // _ *witness *kernel *kernel
         call {transaction_kernel_mast_hash} // _ *witness *kernel [witness_kernel_digest]
-        {read_input} // _ *witness *kernel [witness_kernel_digest] [input_kernel_digest]
-        assert_vector
-        pop pop pop pop pop // _ *witness *kernel [kernel_digest]
-        pop pop pop pop pop // _ *witness *kernel
+        read_io 5                           // _ *witness *kernel [witness_kernel_digest] [input_kernel_digest]
+        assert_vector                       // _ *witness *kernel [witness_kernel_digest]
+        pop 5                               // _ *witness *kernel
 
         // 3. assert that witness mutator set MMRs match those in kernel
 
         push 0 push 0 push 0 push 0 push 0 // _ *witness *kernel 0 0 0 0 0
-        dup 6 // _ *witness *kernel 0^5 *witness
-        {&witness_to_swbfa_hash} // _ *witness *kernel 0^5 *witness_swbfa_hash
+        dup 6                              // _ *witness *kernel 0^5 *witness
+        {&witness_to_swbfa_hash}           // _ *witness *kernel 0^5 *witness_swbfa_hash
         call {read_digest}
 
-        hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [garbage]
-        pop pop pop pop pop // _ *witness *kernel [H(H(swbfaw)||0^5)]
+        hash // _ *witness *kernel [H(H(swbfaw)||0^5)]
 
         dup 6 // _ *witness *kernel [H(H(swbfaw)||0^5)] *witness
 
@@ -413,11 +408,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         {&aocl_to_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] *witness_aocl_peaks
         call {bag_peaks} // _ *witness *kernel [H(H(swbfaw)||0^5)] [witness_swbfi_hash] [witness_aocl_hash]
 
-        hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)] [garbage]
-        pop pop pop pop pop // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)]
+        hash // _ *witness *kernel [H(H(swbfaw)||0^5)] [H(aocl||swbfi)]
 
-        hash // _ *witness *kernel [H(H(aocl||swbfi))||H(H(swbfaw)||0^5)] [garbage]
-        pop pop pop pop pop // _ *witness *kernel [Hw]
+        hash // _ *witness *kernel [Hw]
 
         dup 5 // _ *witness *kernel [Hw] *kernel
         {&kernel_to_mutator_set_hash} // _ *witness *kernel [Hw] *kernel_msh
@@ -425,8 +418,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // _ *witness *kernel [Hw] [Hk]
 
         assert_vector
-        pop pop pop pop pop
-        pop pop pop pop pop
+        pop 5
         // _ *witness *kernel
 
         // 4. derive index sets and match them against kernel
@@ -464,10 +456,10 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         dup 1 // _ *[(*mp, item)] *witness *kernel *witness
         {&witness_to_aocl}              // _ *[(*mp, item)] *witness *kernel *aocl
         dup 0                   // _ *[(*mp, item)] *witness *kernel *aocl *aocl
-        {&aocl_to_leaf_count} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count_si
-        push 1 add // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count+2
-        read_mem swap 1 push -1 add // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi *leaf_count+1
-        read_mem swap 1 pop // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo
+        {&aocl_to_leaf_count} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count
+        push 1 add // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count_last_word
+        read_mem 2
+        pop 1      // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo
 
         dup 2                   // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *aocl
         {&aocl_to_peaks}              // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
@@ -476,11 +468,11 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(*mp, item)]
         swap 2 // _ *peaks *witness *kernel *aocl *[(*mp, item)] leaf_count_lo leaf_count_hi
         swap 5 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo *witness
-        pop    // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo
+        pop  1 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo
         swap 3 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)] *kernel
-        pop    // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)]
+        pop  1 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)]
         swap 1 // _ *peaks leaf_count_hi leaf_count_lo *[(*mp, item)] *aocl
-        pop    // _ *peaks leaf_count_hi leaf_count_lo *[(*mp, item)]
+        pop  1 // _ *peaks leaf_count_hi leaf_count_lo *[(*mp, item)]
 
         call {map_compute_canonical_commitment}
                // _ *peaks leaf_count_hi leaf_count_lo *[(cc, *mp)]
@@ -511,7 +503,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::compiled_program::test_rust_shadow;
+    use tasm_lib::traits::compiled_program::test_rust_shadow;
     use triton_vm::{Claim, StarkParameters};
     use twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -685,15 +677,10 @@ mod tests {
         let _pointer = ram_builder.load(&removal_record_integrity_witness);
         let memory = ram_builder.finish();
         let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
-        let run_res = program.debug_terminal_state(
-            PublicInput::new(stdin.clone()),
-            nondeterminism.clone(),
-            None,
-            None,
-        );
+        let run_res = program.run(PublicInput::new(stdin.clone()), nondeterminism.clone());
         match run_res {
             Ok(_) => println!("Run successful."),
-            Err((state, msg)) => panic!("Failed: {msg}\n last state was: {state}"),
+            Err(err) => panic!("Failed:\n last state was:\n{err}"),
         };
 
         if std::env::var("DYING_TO_PROVE").is_ok() {
@@ -748,7 +735,7 @@ mod bench {
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
 
     use super::RemovalRecordsIntegrity;
-    use tasm_lib::compiled_program::bench_program;
+    use tasm_lib::traits::compiled_program::bench_and_profile_program;
 
     #[test]
     fn benchmark() {
@@ -772,7 +759,7 @@ mod bench {
         let memory = ram_builder.finish();
         let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
 
-        bench_program::<RemovalRecordsIntegrity>(
+        bench_and_profile_program::<RemovalRecordsIntegrity>(
             "tasm_neptune_transaction_removal_records_integrity".to_string(),
             BenchmarkCase::CommonCase,
             &public_input,
