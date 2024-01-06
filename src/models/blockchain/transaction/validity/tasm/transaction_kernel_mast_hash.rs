@@ -7,18 +7,17 @@ use crate::models::blockchain::transaction::transaction_kernel::{
 use num_traits::One;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use tasm_lib::function::Function;
+use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
-use tasm_lib::snippet::BasicSnippet;
 use tasm_lib::snippet_bencher::BenchmarkCase;
+use tasm_lib::traits::basic_snippet::BasicSnippet;
+use tasm_lib::traits::function::{Function, FunctionInitialState};
 use tasm_lib::{
     hashing::hash_varlen::HashVarlen,
     list::unsafeimplu32::{
         get::UnsafeGet, new::UnsafeNew, set::UnsafeSet, set_length::UnsafeSetLength,
     },
-    rust_shadowing_helper_functions,
-    snippet::DataType,
-    ExecutionState,
+    rust_shadowing_helper_functions, ExecutionState,
 };
 use triton_vm::{triton_asm, BFieldElement};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -60,8 +59,7 @@ impl TransactionKernelMastHash {
         ExecutionState {
             stack,
             std_in: vec![],
-            nondeterminism: NonDeterminism::new(vec![]),
-            memory,
+            nondeterminism: NonDeterminism::default().with_ram(memory),
             words_allocated: 0,
         }
     }
@@ -82,10 +80,18 @@ impl BasicSnippet for TransactionKernelMastHash {
 
     fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         let entrypoint = self.entrypoint();
-        let new_list = library.import(Box::new(UnsafeNew(DataType::Digest)));
-        let get_element = library.import(Box::new(UnsafeGet(DataType::Digest)));
-        let set_element = library.import(Box::new(UnsafeSet(DataType::Digest)));
-        let set_length = library.import(Box::new(UnsafeSetLength(DataType::Digest)));
+        let new_list = library.import(Box::new(UnsafeNew {
+            data_type: DataType::Digest,
+        }));
+        let get_element = library.import(Box::new(UnsafeGet {
+            data_type: DataType::Digest,
+        }));
+        let set_element = library.import(Box::new(UnsafeSet {
+            data_type: DataType::Digest,
+        }));
+        let set_length = library.import(Box::new(UnsafeSetLength {
+            data_type: DataType::Digest,
+        }));
 
         let kernel_to_inputs_with_size = tasm_lib::field_with_size!(TransactionKernel::inputs);
         let kernel_to_outputs_with_size = tasm_lib::field_with_size!(TransactionKernel::outputs);
@@ -175,8 +181,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 14               // _ *kernel *list d4 d3 d2 d1 d0 *list 14
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0 e4 e3 e2 e1 e0
-            hash                        // _ *kernel *list f4 f3 f2 f1 f0 0 0 0 0 0
-            pop pop pop pop pop         // _ *kernel *list f4 f3 f2 f1 f0
+            hash                        // _ *kernel *list f4 f3 f2 f1 f0
             dup 5 push 7                // _ *kernel *list f4 f3 f2 f1 f0 *list 7
             call {set_element}
 
@@ -185,8 +190,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 12               // _ *kernel *list d4 d3 d2 d1 d0 *list 12
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0 e4 e3 e2 e1 e0
-            hash                        // _ *kernel *list f4 f3 f2 f1 f0 0 0 0 0 0
-            pop pop pop pop pop         // _ *kernel *list f4 f3 f2 f1 f0
+            hash                        // _ *kernel *list f4 f3 f2 f1 f0
             dup 5 push 6                // _ *kernel *list f4 f3 f2 f1 f0 *list 6
             call {set_element}
 
@@ -195,8 +199,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 10               // _ *kernel *list d4 d3 d2 d1 d0 *list 10
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0 e4 e3 e2 e1 e0
-            hash                        // _ *kernel *list f4 f3 f2 f1 f0 0 0 0 0 0
-            pop pop pop pop pop         // _ *kernel *list f4 f3 f2 f1 f0
+            hash                        // _ *kernel *list f4 f3 f2 f1 f0
             dup 5 push 5                // _ *kernel *list f4 f3 f2 f1 f0 *list 5
             call {set_element}
 
@@ -205,8 +208,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 8                // _ *kernel *list d4 d3 d2 d1 d0 *list 8
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0 e4 e3 e2 e1 e0
-            hash                        // _ *kernel *list f4 f3 f2 f1 f0 0 0 0 0 0
-            pop pop pop pop pop         // _ *kernel *list f4 f3 f2 f1 f0
+            hash                        // _ *kernel *list f4 f3 f2 f1 f0
             dup 5 push 4                // _ *kernel *list f4 f3 f2 f1 f0 *list 4
             call {set_element}
 
@@ -215,8 +217,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 6                // _ *kernel *list d4 d3 d2 d1 d0 *list 6
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0 e4 e3 e2 e1 e0
-            hash                        // _ *kernel *list f4 f3 f2 f1 f0 0 0 0 0 0
-            pop pop pop pop pop         // _ *kernel *list f4 f3 f2 f1 f0
+            hash                        // _ *kernel *list f4 f3 f2 f1 f0
             dup 5 push 3                // _ *kernel *list f4 f3 f2 f1 f0 *list 3
             call {set_element}
 
@@ -225,8 +226,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 4                // _ *kernel *list d4 d3 d2 d1 d0 *list 4
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0 e4 e3 e2 e1 e0
-            hash                        // _ *kernel *list f4 f3 f2 f1 f0 0 0 0 0 0
-            pop pop pop pop pop         // _ *kernel *list f4 f3 f2 f1 f0
+            hash                        // _ *kernel *list f4 f3 f2 f1 f0
             dup 5 push 2                // _ *kernel *list f4 f3 f2 f1 f0 *list 2
             call {set_element}
 
@@ -235,15 +235,14 @@ impl BasicSnippet for TransactionKernelMastHash {
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 2                // _ *kernel *list d4 d3 d2 d1 d0 *list 2
             call {get_element}          // _ *kernel *list d4 d3 d2 d1 d0 e4 e3 e2 e1 e0
-            hash                        // _ *kernel *list f4 f3 f2 f1 f0 0 0 0 0 0
-            pop pop pop pop pop         // _ *kernel *list f4 f3 f2 f1 f0
+            hash                        // _ *kernel *list f4 f3 f2 f1 f0
             dup 5 push 1                // _ *kernel *list f4 f3 f2 f1 f0 *list 1
 
             call {set_element}
 
             // return list[1]
             swap 1                      // _ *list *kernel
-            pop
+            pop 1
             push 1 // _ *list 1
             call {get_element}          // _ d4 d3 d2 d1 d0
 
@@ -426,7 +425,7 @@ impl Function for TransactionKernelMastHash {
         &self,
         seed: [u8; 32],
         _bench_case: Option<BenchmarkCase>,
-    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+    ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let input_state = Self::input_state_with_kernel_in_memory(
             BFieldElement::new(rng.gen_range(0..(1 << 20))),
@@ -434,17 +433,19 @@ impl Function for TransactionKernelMastHash {
                 &pseudorandom_transaction_kernel(rand::Rng::gen::<[u8; 32]>(&mut rng), 4, 4, 2),
             ),
         );
-        (input_state.stack, input_state.memory)
+        FunctionInitialState {
+            stack: input_state.stack,
+            memory: input_state.nondeterminism.ram,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::{
-        function::ShadowedFunction, snippet::RustShadow,
-        test_helpers::test_rust_equivalence_given_complete_state,
-    };
+    use tasm_lib::test_helpers::test_rust_equivalence_given_complete_state;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
     use twenty_first::shared_math::tip5::Tip5State;
     use twenty_first::util_types::algebraic_hasher::Domain;
@@ -468,9 +469,8 @@ mod tests {
             &execution_state.stack,
             &execution_state.std_in,
             &nondeterminism,
-            &execution_state.memory,
-            &Tip5State::new(Domain::FixedLength),
-            execution_state.words_allocated,
+            &Some(Tip5State::new(Domain::FixedLength)),
+            0,
             None,
         );
 
@@ -494,10 +494,9 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
-
     use super::*;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::rust_shadow::RustShadow;
 
     #[test]
     fn bench() {

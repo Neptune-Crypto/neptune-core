@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use tasm_lib::{
+    data_type::DataType,
     empty_stack,
-    function::Function,
     hashing::hash_varlen::HashVarlen,
-    snippet::{BasicSnippet, DataType},
     snippet_bencher::BenchmarkCase,
+    traits::basic_snippet::BasicSnippet,
+    traits::function::{Function, FunctionInitialState},
 };
 use triton_vm::{triton_asm, BFieldElement};
 use twenty_first::{
@@ -93,7 +94,7 @@ impl Function for HashRemovalRecordIndices {
         &self,
         seed: [u8; 32],
         _bench_case: Option<BenchmarkCase>,
-    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+    ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let removal_record = pseudorandom_removal_record::<Hash>(rng.gen());
         let address: BFieldElement = BFieldElement::new(rng.gen_range(2..(1 << 20)));
@@ -110,7 +111,7 @@ impl Function for HashRemovalRecordIndices {
         let mut stack = empty_stack();
         stack.push(address);
 
-        (stack, memory)
+        FunctionInitialState { stack, memory }
     }
 }
 
@@ -126,14 +127,14 @@ mod tests {
     };
     use tasm_lib::{
         empty_stack,
-        function::ShadowedFunction,
         list::{
             contiguous_list::get_pointer_list::GetPointerList,
             higher_order::{inner_function::InnerFunction, map::Map},
             ListType,
         },
         rust_shadowing_helper_functions,
-        snippet::RustShadow,
+        traits::function::ShadowedFunction,
+        traits::rust_shadow::RustShadow,
     };
     use triton_vm::{BFieldElement, Digest, NonDeterminism};
     use twenty_first::shared_math::tip5::DIGEST_LENGTH;
@@ -188,7 +189,6 @@ mod tests {
         // STACK: 0^16 *removal_record_list_encoding_address
 
         // transform contiguous list to list of pointers
-        let allocated = address.value() as usize + removal_records_encoded.len();
         let get_pointer_list = GetPointerList {
             output_list_type: ListType::Unsafe,
         };
@@ -197,22 +197,24 @@ mod tests {
             &mut stack,
             vec![],
             vec![],
-            &mut memory,
-            allocated,
+            memory,
+            0,
         );
-
-        let new_dyn_malloc_value = memory[&BFieldElement::zero()].value() as usize;
 
         // STACK: 0^16 *[*removal_record]
 
         // read list of pointers from memory
         let pointers_list_address = *stack.last().unwrap();
 
-        let num_pointers = memory.get(&pointers_list_address).unwrap().value() as usize;
+        let memory_after_1st_run = _vm_output.final_ram;
+        let num_pointers = memory_after_1st_run
+            .get(&pointers_list_address)
+            .unwrap()
+            .value() as usize;
         let mut pointers_list = vec![];
         for i in 0..num_pointers {
             pointers_list.push(
-                *memory
+                *memory_after_1st_run
                     .get(&(pointers_list_address + BFieldElement::new(1 + i as u64)))
                     .unwrap(),
             );
@@ -224,14 +226,14 @@ mod tests {
             // Since this pointer list points into a contiguous list, every
             // element is size-prepended, but the pointer points past the size.
             // So move one back to read the size works.
-            let size = memory
+            let size = memory_after_1st_run
                 .get(&(pointer - BFieldElement::new(1)))
                 .unwrap()
                 .value() as usize;
             let mut removal_record_encoding = vec![];
             for i in 0..size {
                 removal_record_encoding.push(
-                    *memory
+                    *memory_after_1st_run
                         .get(&(pointer + BFieldElement::new(i as u64)))
                         .unwrap(),
                 );
@@ -245,7 +247,11 @@ mod tests {
 
         // assert length of list
         assert_eq!(
-            memory.get(stack.last().unwrap()).unwrap().clone().value() as usize,
+            memory_after_1st_run
+                .get(stack.last().unwrap())
+                .unwrap()
+                .clone()
+                .value() as usize,
             num_removal_records
         );
 
@@ -254,20 +260,20 @@ mod tests {
             list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(HashRemovalRecordIndices)),
         };
-        let _vm_output_state = link_and_run_tasm_for_test(
+        let vm_output_state = link_and_run_tasm_for_test(
             &ShadowedFunction::new(map_hash_removal_record_indices),
             &mut stack,
             vec![],
-            &mut NonDeterminism::new(vec![]),
-            &mut memory,
+            NonDeterminism::default().with_ram(memory_after_1st_run),
             None,
-            new_dyn_malloc_value,
+            0,
         );
         // STACK: 0^16 *[digest]
 
         // inspect memory
+        let final_memory = vm_output_state.final_ram;
         let output_address = stack.pop().unwrap();
-        let length: usize = memory.get(&output_address).unwrap().value() as usize;
+        let length: usize = final_memory.get(&output_address).unwrap().value() as usize;
         assert_eq!(length, num_removal_records);
         // output_address.increment();
         let mut tasm_digests = vec![];
@@ -276,7 +282,7 @@ mod tests {
             let values = rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
                 output_address,
                 i,
-                &memory,
+                &final_memory,
                 DIGEST_LENGTH,
             );
             tasm_digests.push(Digest::new(values.try_into().unwrap()));
@@ -301,7 +307,7 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
+    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
 
     use super::*;
 

@@ -348,7 +348,10 @@ impl ReceivingAddress {
         let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
         ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
 
-        let pubscript = [triton_asm![read_io; ciphertext.len()], triton_asm!(halt)].concat();
+        let pubscript = triton_asm!(
+            {&tasm_lib::io::InputSource::StdIn.read_words(ciphertext.len())}
+            halt
+        );
 
         Ok((pubscript.into(), ciphertext))
     }
@@ -379,18 +382,19 @@ impl ReceivingAddress {
         // ]
         // .concat();
 
-        let mut instructions = [
-            vec![triton_instr!(divine); DIGEST_LENGTH],
-            triton_asm!(hash),
-            vec![triton_instr!(pop); DIGEST_LENGTH],
-        ]
-        .concat();
+        let mut push_spending_lock_digest_to_stack = vec![];
         for elem in self.spending_lock.values().iter().rev() {
-            instructions.push(triton_instr!(push elem.value()));
+            push_spending_lock_digest_to_stack.push(triton_instr!(push elem.value()));
         }
-        instructions.push(triton_instr!(assert_vector));
-        instructions.append(&mut triton_asm![read_io; DIGEST_LENGTH]);
-        instructions.push(triton_instr!(halt));
+
+        let instructions = triton_asm!(
+            divine 5
+            hash
+            {&push_spending_lock_digest_to_stack}
+            assert_vector
+            read_io 5
+            halt
+        );
 
         instructions.into()
     }

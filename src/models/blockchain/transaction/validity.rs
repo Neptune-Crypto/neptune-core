@@ -9,7 +9,7 @@ use anyhow::{Ok, Result};
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use tasm_lib::compiled_program::CompiledProgram;
+use tasm_lib::traits::compiled_program::CompiledProgram;
 use tracing::{debug, info};
 use triton_vm::program::Program;
 use triton_vm::{proof::Proof, Claim};

@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tasm_lib::{
-    function::Function,
+    data_type::DataType,
     hashing::hash_varlen::HashVarlen,
-    snippet::{BasicSnippet, DataType},
     snippet_bencher::BenchmarkCase,
+    traits::basic_snippet::BasicSnippet,
+    traits::function::{Function, FunctionInitialState},
 };
 use triton_vm::{triton_asm, BFieldElement};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -39,13 +38,10 @@ impl BasicSnippet for HashIndexList {
         // AFTER: _ [digest]
         {entrypoint}:
 
-            read_mem // _ *index_list length
-            push 4 mul // _ *index_list size
-
-            swap 1 // _ size *index_list
-            push 1 // _ size *index_list 1
-            add    // _ size *index_list+1
-            swap 1 // _ *index_list+1 size
+            read_mem 1 // _ length (*index_list - 1)
+            push 2 add // _ length (*index_list + 1)
+            swap 1     // _ (*index_list + 1) length
+            push 4 mul // _ (*index_list + 1) size
 
             call {hash_varlen}
 
@@ -88,7 +84,7 @@ impl Function for HashIndexList {
         &self,
         seed: [u8; 32],
         bench_case: Option<BenchmarkCase>,
-    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+    ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let length = if let Some(case) = bench_case {
             match case {
@@ -121,7 +117,7 @@ impl Function for HashIndexList {
         let mut stack = tasm_lib::empty_stack();
         stack.push(address);
 
-        (stack, memory)
+        FunctionInitialState { stack, memory }
     }
 }
 
@@ -131,19 +127,19 @@ mod tests {
 
     use itertools::Itertools;
     use rand::{rngs::StdRng, RngCore, SeedableRng};
-    use tasm_lib::snippet::RustShadow;
     use tasm_lib::test_helpers::{
         link_and_run_tasm_for_test, link_and_run_tasm_for_test_deprecated,
     };
+    use tasm_lib::traits::rust_shadow::RustShadow;
     use tasm_lib::{
         empty_stack,
-        function::ShadowedFunction,
         list::{
             contiguous_list::get_pointer_list::GetPointerList,
             higher_order::{inner_function::InnerFunction, map::Map},
             ListType,
         },
         rust_shadowing_helper_functions,
+        traits::function::ShadowedFunction,
     };
     use triton_vm::{Digest, NonDeterminism};
     use twenty_first::{
@@ -194,45 +190,44 @@ mod tests {
         stack.push(address);
 
         // transform contiguous list to list of pointers
-        let allocated = address.value() as usize + meta_list.encode().len();
         let get_pointer_list = GetPointerList {
             output_list_type: ListType::Unsafe,
         };
-        let _vm_output = link_and_run_tasm_for_test_deprecated(
+        let vm_output = link_and_run_tasm_for_test_deprecated(
             &get_pointer_list,
             &mut stack,
             vec![],
             vec![],
-            &mut memory,
-            allocated,
+            memory,
+            0,
         );
 
+        let memory_after_1st_run = vm_output.final_ram;
         assert_eq!(
-            *memory.get(stack.last().unwrap()).unwrap(),
+            *memory_after_1st_run.get(stack.last().unwrap()).unwrap(),
             BFieldElement::new(num_lists as u64)
         );
 
         // run map snippet
-        let new_malloc = memory[&BFieldElement::new(0)].value() as usize;
         let map_hash_removal_record_indices = Map {
             list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(HashIndexList)),
         };
-        let _vm_output_state = link_and_run_tasm_for_test(
+        let vm_output_state = link_and_run_tasm_for_test(
             &ShadowedFunction::new(map_hash_removal_record_indices),
             &mut stack,
             vec![],
-            &mut NonDeterminism::new(vec![]),
-            &mut memory,
+            NonDeterminism::default().with_ram(memory_after_1st_run),
             None,
-            new_malloc,
+            0,
         );
 
         // inspect memory
+        let final_memory = vm_output_state.final_ram;
         let output_list = stack.pop().unwrap();
         let num_hashes = rust_shadowing_helper_functions::unsafe_list::unsafe_list_get_length(
             output_list,
-            &memory,
+            &final_memory,
         );
         assert_eq!(num_hashes, num_lists);
         let mut tasm_digests = vec![];
@@ -241,7 +236,7 @@ mod tests {
             let values = rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
                 output_list,
                 i,
-                &memory,
+                &final_memory,
                 DIGEST_LENGTH,
             );
             tasm_digests.push(Digest::new(values.try_into().unwrap()));
@@ -259,7 +254,7 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
+    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
 
     use super::*;
 

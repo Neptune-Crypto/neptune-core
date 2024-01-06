@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use crate::models::blockchain::shared::Hash;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use tasm_lib::function::Function;
+use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
+use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
+use tasm_lib::traits::function::{Function, FunctionInitialState};
 
-use tasm_lib::snippet::BasicSnippet;
+use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::{
-    memory::push_ram_to_stack::PushRamToStack,
     neptune::mutator_set::get_swbf_indices::GetSwbfIndices, rust_shadowing_helper_functions,
-    snippet::DataType,
 };
 use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -52,7 +52,10 @@ impl BasicSnippet for ComputeIndices {
         let ap_to_li = tasm_lib::field!(MmrMpH::leaf_index);
         let entrypoint = self.entrypoint();
         let read_digest = library.import(Box::new(PushRamToStack {
-            output_type: DataType::Digest,
+            data_type: DataType::Digest,
+        }));
+        let read_u64 = library.import(Box::new(PushRamToStack {
+            data_type: DataType::U64,
         }));
         let get_swbf_indices = library.import(Box::new(GetSwbfIndices {
             window_size: WINDOW_SIZE,
@@ -76,17 +79,16 @@ impl BasicSnippet for ComputeIndices {
             {&ap_to_li} // _ [item] *rp *sr *li
 
             // read leaf index from memory
-            read_mem // _ [item] *rp *sr *li li_lo
-            swap 1   // _ [item] *rp *sr li_lo *li
-            push 1 add // _ [item] *rp *sr li_lo *li+1
-            read_mem // _ [item] *rp *sr li_lo *li+1 li_hi
-            swap 1 pop // _ [item] *rp *sr li_lo li_hi
+            call {read_u64}
+            // _ [item] *rp *sr li_hi li_lo
 
             // re-arrange so that leaf index is deepest in stack
-                   // _ i4 i3 i2 i1 i0 *rp *sr li_lo li_hi
-            swap 8 // _ li_hi i3 i2 i1 i0 *rp *sr li_lo i4
-            swap 1 // _ li_hi i3 i2 i1 i0 *rp *sr i4 li_lo
-            swap 7 // _ li_hi li_lo i2 i1 i0 *rp *sr i4 i3
+            // _ i4 i3 i2 i1 i0 *rp *sr li_hi li_lo
+
+            swap 7 // _ i4 li_lo i2 i1 i0 *rp *sr li_hi i3
+            swap 1 // _ i4 li_lo i2 i1 i0 *rp *sr i3 li_hi
+            swap 8 // _ li_hi li_lo i2 i1 i0 *rp *sr i3 i4
+            swap 1 // _ li_hi li_lo i2 i1 i0 *rp *sr i4 i3
             swap 2 // _ li_hi li_lo i2 i1 i0 *rp i3 i4 *sr
             swap 1 // _ li_hi li_lo i2 i1 i0 *rp i3 *sr i4
             swap 3 // _ li_hi li_lo i2 i1 i0 i4 i3 *sr *rp
@@ -95,8 +97,8 @@ impl BasicSnippet for ComputeIndices {
             call {read_digest} // _ li_hi li_lo i2 i1 i0 i4 i3 *sr [rp]
 
             // read sender_randomness from memory
-            push 1 // _ li_hi li_lo i2 i1 i0 i4 i3 *sr [rp] 1
-            swap 6 // _ li_hi li_lo i2 i1 i0 i4 i3 1 [rp] *sr
+            push 1             // _ li_hi li_lo i2 i1 i0 i4 i3 *sr [rp] 1
+            swap 6             // _ li_hi li_lo i2 i1 i0 i4 i3 1 [rp] *sr
             call {read_digest} // _ li_hi li_lo i2 i1 i0 i4 i3 1 [rp] [sr]
 
             // re-arrange stack in anticipation of swbf_get_indices
@@ -113,7 +115,7 @@ impl BasicSnippet for ComputeIndices {
             swap 11 // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 1 sr0 i2 i1 i0 i4 sr4 sr3 sr2 sr1 i3
             swap 4  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 1 sr0 i2 i1 i0 i4 i3 sr3 sr2 sr1 sr4
             swap 10 // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr0 i2 i1 i0 i4 i3 sr3 sr2 sr1 1
-            pop     // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr0 i2 i1 i0 i4 i3 sr3 sr2 sr1
+            pop 1   // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr0 i2 i1 i0 i4 i3 sr3 sr2 sr1
             swap 2  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr0 i2 i1 i0 i4 i3 sr1 sr2 sr3
             swap 8  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 i2 i1 i0 i4 i3 sr1 sr2 sr0
             swap 1  // _ li_hi li_lo rp4 rp3 rp2 rp1 rp0 sr4 sr3 i2 i1 i0 i4 i3 sr1 sr0 sr2
@@ -209,7 +211,7 @@ impl Function for ComputeIndices {
         &self,
         seed: [u8; 32],
         _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
-    ) -> (Vec<BFieldElement>, HashMap<BFieldElement, BFieldElement>) {
+    ) -> FunctionInitialState {
         use rand::RngCore;
 
         let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -244,7 +246,7 @@ impl Function for ComputeIndices {
         stack.push(item.values()[0]);
         stack.push(BFieldElement::new(2u64));
 
-        (stack, memory)
+        FunctionInitialState { stack, memory }
     }
 }
 
@@ -256,13 +258,13 @@ mod tests {
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
     use tasm_lib::{
         empty_stack,
-        function::ShadowedFunction,
         list::{
             higher_order::{inner_function::InnerFunction, map::Map},
             ListType,
         },
-        snippet::RustShadow,
         test_helpers::link_and_run_tasm_for_test,
+        traits::function::ShadowedFunction,
+        traits::rust_shadow::RustShadow,
     };
     use triton_vm::NonDeterminism;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -345,24 +347,23 @@ mod tests {
         stack.push(main_list_address);
 
         // run map snippet
-        let mallocked = address.value() as usize;
         let map_compute_indices = Map {
             list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
         };
-        let _vm_output_state = link_and_run_tasm_for_test(
+        let vm_output_state = link_and_run_tasm_for_test(
             &ShadowedFunction::new(map_compute_indices),
             &mut stack,
             vec![],
-            &mut NonDeterminism::new(vec![]),
-            &mut memory,
+            NonDeterminism::default().with_ram(memory),
             None,
-            mallocked,
+            0,
         );
 
         // inspect memory
+        let final_ram = vm_output_state.final_ram;
         let output_list_address = stack.pop().unwrap();
-        let output_list_length = memory.get(&output_list_address).unwrap().value() as usize;
+        let output_list_length = final_ram.get(&output_list_address).unwrap().value() as usize;
         assert_eq!(output_list_length, num_items);
         let mut index_set_pointers = vec![];
         for i in 0..output_list_length {
@@ -370,7 +371,7 @@ mod tests {
                 rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
                     output_list_address,
                     i,
-                    &memory,
+                    &final_ram,
                     1,
                 )[0],
             );
@@ -381,7 +382,7 @@ mod tests {
             for i in 0..NUM_TRIALS as usize {
                 index_set.push(
                     rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
-                        *ptr, i, &memory, 4,
+                        *ptr, i, &final_ram, 4,
                     )
                     .iter()
                     .enumerate()
@@ -427,7 +428,7 @@ mod tests {
 
 #[cfg(test)]
 mod benches {
-    use tasm_lib::{function::ShadowedFunction, snippet::RustShadow};
+    use tasm_lib::{traits::function::ShadowedFunction, traits::rust_shadow::RustShadow};
 
     use super::*;
 
