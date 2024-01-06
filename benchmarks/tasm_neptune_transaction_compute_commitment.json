@@ -1,15 +1,15 @@
 [
   {
     "name": "tasm_neptune_transaction_compute_commitment",
-    "clock_cycle_count": 114,
-    "hash_table_height": 18,
+    "clock_cycle_count": 95,
+    "hash_table_height": 114,
     "u32_table_height": 0,
     "case": "CommonCase"
   },
   {
     "name": "tasm_neptune_transaction_compute_commitment",
-    "clock_cycle_count": 114,
-    "hash_table_height": 18,
+    "clock_cycle_count": 95,
+    "hash_table_height": 114,
     "u32_table_height": 0,
     "case": "WorstCase"
   }
