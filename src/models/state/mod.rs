@@ -34,7 +34,6 @@ use super::blockchain::transaction::{
 use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
 use crate::database::leveldb::LevelDB;
-use crate::database::rusty::RustyLevelDBIterator;
 use crate::models::peer::{HandshakeData, PeerStanding};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::time_fn_call_async;
@@ -481,18 +480,14 @@ impl GlobalState {
     pub async fn clear_all_standings_in_database(&self) {
         let mut peer_databases = self.net.peer_databases.lock().await;
 
-        let mut dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
-            peer_databases.peer_standings.new_iter();
+        let mut dbiterator = peer_databases.peer_standings.new_iter();
 
-        for (ip, _v) in dbiterator.by_ref() {
-            let old_standing = peer_databases.peer_standings.get(ip);
-
-            if old_standing.is_some() {
-                peer_databases
-                    .peer_standings
-                    .put(ip, PeerStanding::default())
-            }
+        let mut new_entries = vec![];
+        for (ip, _old_standing) in dbiterator.by_ref() {
+            new_entries.push((ip, PeerStanding::default()));
         }
+
+        peer_databases.peer_standings.batch_write(&new_entries);
     }
 
     /// In case the wallet database is corrupted or deleted, this method will restore
@@ -626,7 +621,7 @@ impl GlobalState {
         tip_hash: Digest,
     ) -> Result<()> {
         // loop over all monitored utxos
-        let mut monitored_utxos = self
+        let monitored_utxos = self
             .wallet_state
             .wallet_db
             .lock()
@@ -941,7 +936,7 @@ mod global_state_tests {
 
         // Delete everything from monitored UTXO (the premined UTXO)
         {
-            let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+            let wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             assert!(
                 wallet_db_lock.monitored_utxos.len().is_one(),
                 "MUTXO must have genesis element before emptying it"

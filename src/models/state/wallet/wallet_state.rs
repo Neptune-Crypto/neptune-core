@@ -1,7 +1,6 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::Zero;
-use rusty_leveldb::DB;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -14,6 +13,7 @@ use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
@@ -156,9 +156,11 @@ impl WalletState {
         cli_args: &Args,
     ) -> Self {
         // Create or connect to wallet block DB
+
+        DataDirectory::create_dir_if_not_exists(&data_dir.wallet_database_dir_path()).unwrap();
         let wallet_db = DB::open(
-            data_dir.wallet_database_dir_path(),
-            rusty_leveldb::Options::default(),
+            &data_dir.wallet_database_dir_path(),
+            &crate::database::rusty::create_db_if_missing(),
         );
         let wallet_db = match wallet_db {
             Ok(wdb) => wdb,

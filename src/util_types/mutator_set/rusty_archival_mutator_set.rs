@@ -1,15 +1,15 @@
 use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
-use rusty_leveldb::{WriteBatch, DB};
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
+    storage::level_db::DB,
     util_types::{
         algebraic_hasher::AlgebraicHasher,
         mmr::archival_mmr::ArchivalMmr,
         storage_schema::{
-            DbtSchema, DbtSingleton, DbtVec, RustyKey, StorageReader, StorageSingleton,
-            StorageWriter, WriteOperation,
+            DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage, StorageReader,
+            StorageSingleton, StorageWriter,
         },
     },
 };
@@ -23,16 +23,16 @@ struct RamsReader {
     db: Arc<Mutex<DB>>,
 }
 
-impl StorageReader<RustyKey, RustyMSValue> for RamsReader {
-    fn get_many(&mut self, keys: &[RustyKey]) -> Vec<Option<RustyMSValue>> {
-        let mut lock = self.db.lock().unwrap();
+impl StorageReader for RamsReader {
+    fn get_many(&self, keys: &[RustyKey]) -> Vec<Option<RustyValue>> {
+        let lock = self.db.lock().unwrap();
         keys.iter()
-            .map(|key| lock.get(&key.0).map(RustyMSValue))
+            .map(|key| lock.get(&key.0).unwrap().map(RustyValue))
             .collect_vec()
     }
 
-    fn get(&mut self, key: RustyKey) -> Option<RustyMSValue> {
-        self.db.lock().expect("StorageReader for RustyArchivalMutatorSet: could not get database lock for reading (get)").get(&key.0).map(RustyMSValue)
+    fn get(&self, key: RustyKey) -> Option<RustyValue> {
+        self.db.lock().expect("StorageReader for RustyArchivalMutatorSet: could not get database lock for reading (get)").get(&key.0).unwrap().map(RustyValue)
     }
 }
 
@@ -129,49 +129,46 @@ impl From<Vec<u32>> for RustyMSValue {
     }
 }
 
-type AmsMmrStorage = Arc<Mutex<DbtVec<RustyKey, RustyMSValue, u64, Digest>>>;
-type AmsChunkStorage = Arc<Mutex<DbtVec<RustyKey, RustyMSValue, u64, Chunk>>>;
+type AmsMmrStorage = DbtVec<Digest>;
+type AmsChunkStorage = DbtVec<Chunk>;
 pub struct RustyArchivalMutatorSet<H>
 where
     H: AlgebraicHasher + BFieldCodec,
 {
     pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
-    schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
-    db: Arc<Mutex<DB>>,
-    active_window_storage: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
-    sync_label: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Digest>>>,
+    storage: SimpleRustyStorage,
+    active_window_storage: DbtSingleton<Vec<u32>>,
+    sync_label: DbtSingleton<Digest>,
 }
 
 impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
-        let db_pointer = Arc::new(Mutex::new(db));
-        let reader = RamsReader {
-            db: db_pointer.clone(),
-        };
-        let reader_pointer = Arc::new(Mutex::new(reader));
-        let mut schema = DbtSchema::<RustyKey, RustyMSValue, RamsReader> {
-            tables: vec![],
-            reader: reader_pointer,
-        };
-        let aocl_storage = schema.new_vec::<u64, Digest>("aocl");
-        let swbf_inactive_storage = schema.new_vec::<u64, Digest>("swbfi");
-        let chunks = schema.new_vec::<u64, Chunk>("chunks");
-        let active_window_storage =
-            schema.new_singleton::<Vec<u32>>(RustyKey("active_window".into()));
-        let sync_label = schema.new_singleton::<Digest>(RustyKey("sync_label".into()));
-        let active_window = ActiveWindow::<H>::new();
+        let mut storage = SimpleRustyStorage::new(db);
+
+        let aocl = storage.schema.new_vec::<Digest>("aocl");
+        let swbfi = storage.schema.new_vec::<Digest>("swbfi");
+        let chunks = storage.schema.new_vec::<Chunk>("chunks");
+        let active_window = storage
+            .schema
+            .new_singleton::<Vec<u32>>(RustyKey("active_window".into()));
+        let sync_label = storage
+            .schema
+            .new_singleton::<Digest>(RustyKey("sync_label".into()));
+        storage.restore_or_new();
+
         let kernel = MutatorSetKernel::<H, ArchivalMmr<H, AmsMmrStorage>> {
-            aocl: ArchivalMmr::<H, AmsMmrStorage>::new(aocl_storage),
-            swbf_inactive: ArchivalMmr::<H, AmsMmrStorage>::new(swbf_inactive_storage),
-            swbf_active: active_window,
+            aocl: ArchivalMmr::<H, AmsMmrStorage>::new(aocl),
+            swbf_inactive: ArchivalMmr::<H, AmsMmrStorage>::new(swbfi),
+            swbf_active: ActiveWindow::<H>::new(),
         };
+
         let ams = ArchivalMutatorSet::<H, AmsMmrStorage, AmsChunkStorage> { chunks, kernel };
+
         Self {
             ams,
-            schema,
-            db: db_pointer,
-            active_window_storage,
+            storage,
             sync_label,
+            active_window_storage: active_window,
         }
     }
 
@@ -184,35 +181,16 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
-    for RustyArchivalMutatorSet<H>
-{
+impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet<H> {
     fn persist(&mut self) {
-        let mut write_batch = WriteBatch::new();
-
         self.active_window_storage
             .set(self.ams.kernel.swbf_active.sbf.clone());
 
-        for table in &self.schema.tables {
-            let operations = table.lock().expect("Could not obtain lock on table in RustyArchivalMutatorSet as StorageWriter (persist).").pull_queue();
-            for op in operations {
-                match op {
-                    WriteOperation::Write(key, value) => write_batch.put(&key.0, &value.0),
-                    WriteOperation::Delete(key) => write_batch.delete(&key.0),
-                }
-            }
-        }
-
-        self.db
-            .lock().expect("RustyArchivalMutatorSet: StorageWriter -- could not get lock on database for writing.")
-            .write(write_batch, true)
-            .expect("Could not persist to database.");
+        self.storage.persist();
     }
 
     fn restore_or_new(&mut self) {
-        for table in &self.schema.tables {
-            table.lock().expect("Could not obtain lock on table in RustyArchivalMutatorSet as StorageWriter (restore_or_new).").restore_or_new();
-        }
+        self.storage.restore_or_new();
 
         // The field `digests` of ArchivalMMR should always have at
         // least one element (a dummy digest), owing to 1-indexation.
@@ -228,6 +206,7 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
 mod tests {
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
     use itertools::Itertools;
+    use rand::distributions::{Alphanumeric, DistString};
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
@@ -247,9 +226,14 @@ mod tests {
         let num_removals = 50usize;
         let mut rng = thread_rng();
 
-        // let (mut archival_mutator_set, db) = empty_rustyleveldb_ams();
-        let options = rusty_leveldb::in_memory();
-        let db = DB::open("test-database", options.clone()).expect("Could not open database.");
+        let db_path = std::env::temp_dir().join(format!(
+            "test-db-{}",
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 10)
+        ));
+        let db = twenty_first::storage::level_db::DB::open_test_database(
+            &db_path, false, None, None, None,
+        )
+        .unwrap();
         let mut rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(db);
         println!("Connected to database");
@@ -332,15 +316,13 @@ mod tests {
 
         let active_window_before = rusty_mutator_set.ams.kernel.swbf_active.clone();
 
-        rusty_mutator_set
-            .db
-            .lock()
-            .expect("(In test:) Could not get lock on database for closing.")
-            .close()
-            .expect("Could not close database.");
+        drop(rusty_mutator_set);
 
         // new database
-        let new_db = DB::open("test-database", options).expect("Could not open database.");
+        let new_db = twenty_first::storage::level_db::DB::open_test_database(
+            &db_path, true, None, None, None,
+        )
+        .unwrap();
         let mut new_rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(new_db);
         new_rusty_mutator_set.restore_or_new();

@@ -8,7 +8,7 @@ where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned,
 {
-    fn new(db_path: &Path, options: rusty_leveldb::Options) -> Result<Self>
+    fn new(db_path: &Path, options: &leveldb::options::Options) -> Result<Self>
     where
         Self: Sized;
     fn batch_write(&mut self, entries: &[(Key, Value)]);
