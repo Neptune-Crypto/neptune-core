@@ -187,7 +187,7 @@ impl OverviewScreen {
         loop {
             select! {
                 _ = &mut dashboard_overview_data => {
-                        match rpc_client.get_dashboard_overview_data(context::current()).await {
+                        match rpc_client.dashboard_overview_data(context::current()).await {
                         Ok(resp) => {
 
                             {

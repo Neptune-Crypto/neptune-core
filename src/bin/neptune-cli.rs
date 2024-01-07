@@ -84,12 +84,12 @@ async fn main() -> Result<()> {
             println!("Block height: {}", block_height);
         }
         Command::GetPeerInfo => {
-            let peers = client.get_peer_info(context::current()).await?;
+            let peers = client.peer_info(context::current()).await?;
             println!("{} connected peers", peers.len());
             println!("{}", serde_json::to_string(&peers)?);
         }
         Command::GetHeader { hash } => {
-            let res = client.get_header(context::current(), hash).await?;
+            let res = client.header(context::current(), hash).await?;
             if res.is_none() {
                 println!("Block did not exist in database.");
             } else {
@@ -97,12 +97,12 @@ async fn main() -> Result<()> {
             }
         }
         Command::Head => {
-            let head_hash = client.head(context::current()).await?;
+            let head_hash = client.tip_digest(context::current()).await?;
             println!("{}", head_hash);
         }
         Command::Heads { n } => {
             if n > 0 {
-                let head_hashes = client.heads(context::current(), n).await?;
+                let head_hashes = client.latest_tip_digests(context::current(), n).await?;
                 for hash in head_hashes {
                     println!("{}", hash);
                 }
@@ -139,32 +139,28 @@ async fn main() -> Result<()> {
         }
 
         Command::SyncedBalance => {
-            let balance: BigUint = client
-                .get_synced_balance(context::current())
-                .await?
-                .0
-                .into();
+            let balance: BigUint = client.synced_balance(context::current()).await?.0.into();
             println!("{}", balance);
         }
 
         Command::WalletStatus => {
-            let wallet_status: WalletStatus = client.get_wallet_status(context::current()).await?;
+            let wallet_status: WalletStatus = client.wallet_status(context::current()).await?;
             println!("{}", wallet_status)
         }
 
         Command::GetReceivingAddress => {
             let rec_addr: generation_address::ReceivingAddress =
-                client.get_receiving_address(context::current()).await?;
+                client.own_receiving_address(context::current()).await?;
             println!("{}", rec_addr.to_bech32m(args.network).unwrap())
         }
 
         Command::MempoolTxCount => {
-            let count: usize = client.get_mempool_tx_count(context::current()).await?;
+            let count: usize = client.mempool_tx_count(context::current()).await?;
             println!("{}", count);
         }
 
         Command::MempoolSize => {
-            let size_in_bytes: usize = client.get_mempool_size(context::current()).await?;
+            let size_in_bytes: usize = client.mempool_size(context::current()).await?;
             println!("{} bytes", size_in_bytes);
         }
 

@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let client = RPCClient::new(client::Config::default(), transport).spawn();
 
     // Read what network the client is running and ensure that client is up and running
-    let network = match client.get_network(context::current()).await {
+    let network = match client.network(context::current()).await {
         Ok(nw) => nw,
         Err(err) => {
             eprintln!("{err}");
@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     };
 
     let listen_addr_for_peers = match client
-        .get_listen_address_for_peers(context::current())
+        .own_listen_address_for_peers(context::current())
         .await
     {
         Ok(la) => la,

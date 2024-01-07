@@ -146,7 +146,7 @@ impl HistoryScreen {
         loop {
             select! {
                 _ = &mut balance_history => {
-                    let bh = rpc_client.get_history(context::current()).await.unwrap();
+                    let bh = rpc_client.history(context::current()).await.unwrap();
                     let mut history_builder = Vec::with_capacity(bh.len());
                     let mut balance = Amount::zero();
                     for (_, block_height, timestamp, amount, sign) in bh.iter() {
