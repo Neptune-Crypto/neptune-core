@@ -61,4 +61,29 @@ impl NetworkingState {
 
         Ok(PeerDatabases { peer_standings })
     }
+
+    pub async fn clear_ip_standing_in_database(&self, ip: IpAddr) {
+        let mut peer_databases = self.peer_databases.lock().await;
+
+        let old_standing = peer_databases.peer_standings.get(ip);
+
+        if old_standing.is_some() {
+            peer_databases
+                .peer_standings
+                .put(ip, PeerStanding::default())
+        }
+    }
+
+    pub async fn clear_all_standings_in_database(&self) {
+        let mut peer_databases = self.peer_databases.lock().await;
+
+        let mut dbiterator = peer_databases.peer_standings.new_iter();
+
+        let mut new_entries = vec![];
+        for (ip, _old_standing) in dbiterator.by_ref() {
+            new_entries.push((ip, PeerStanding::default()));
+        }
+
+        peer_databases.peer_standings.batch_write(&new_entries);
+    }
 }
