@@ -83,7 +83,7 @@ pub trait RPC {
     /// Return the block header for the specified block
     async fn header(hash: Digest) -> Option<BlockHeader>;
 
-    // Get sum of unspent UTXOs.
+    /// Get sum of unspent UTXOs.
     async fn synced_balance() -> Amount;
 
     /// Get the client's wallet transaction history
@@ -125,7 +125,7 @@ pub trait RPC {
     async fn clear_all_standings();
 
     /// Clears standing for ip, whether connected or not
-    async fn clear_ip_standing(ip: IpAddr);
+    async fn clear_standing_by_ip(ip: IpAddr);
 
     /// Send coins
     async fn send(
@@ -398,7 +398,7 @@ impl RPC for NeptuneRPCServer {
         executor::block_on(self.state.clear_all_standings_in_database());
     }
 
-    async fn clear_ip_standing(self, _: context::Context, ip: IpAddr) {
+    async fn clear_standing_by_ip(self, _: context::Context, ip: IpAddr) {
         let mut peers = self
             .state
             .net
@@ -672,7 +672,7 @@ mod rpc_server_tests {
                 rpc_server_to_main_tx: dummy_tx,
             };
             rpc_server
-                .clear_ip_standing(context::current(), peer_address_0.ip())
+                .clear_standing_by_ip(context::current(), peer_address_0.ip())
                 .await;
         }
         // Verify expected resulting conditions in database

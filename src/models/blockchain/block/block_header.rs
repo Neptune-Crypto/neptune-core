@@ -46,13 +46,13 @@ impl Display for BlockHeader {
             "Height: {}\n\
             Timestamp: {}\n\
             Prev. Digest: {}\n\
-            Proof-of-work-line: IMPLEMENT\n\
-            Proof-of-work-family: IMPLEMENT",
+            Proof-of-work-line: {}\n\
+            Proof-of-work-family: {}",
             self.height,
             self.timestamp,
             self.prev_block_digest,
-            //self.proof_of_work_line,
-            //self.proof_of_work_family
+            self.proof_of_work_line,
+            self.proof_of_work_family
         );
 
         write!(f, "{}", string)
