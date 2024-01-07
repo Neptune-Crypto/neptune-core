@@ -520,26 +520,12 @@ impl GlobalState {
         info!("Checking {} incoming UTXOs", incoming_utxo_count);
 
         // Loop over all `incoming_utxos` and check if they have a corresponding
-        // monitored UTXO in the database.
+        // monitored UTXO in the database. All monitored UTXOs are fetched outside
+        // of the loop to avoid DB access/IO inside the loop.
         let mut recovery_data_for_missing_mutxos = vec![];
-        let mutxo_count = wallet_db.monitored_utxos.len();
-        '_outer: for (j, incoming_utxo) in incoming_utxos.into_iter().enumerate() {
-            // The outer loop can take a long time to run. So we inform the user how far we have progressed.
-            if j % 10 == 0 {
-                info!(
-                    "Checking incoming UTXO number {} out of {}",
-                    j + 1,
-                    incoming_utxo_count
-                );
-            }
-
-            // Find match in monitored UTXOs in wallet database
-            let mut searched_index = 0;
-            'inner: while mutxo_count > searched_index {
-                // TODO: It's inefficient to fetch each monitored UTXO in this loop.
-                // It would be better to fetch all monitored UTXOs at once and then
-                // run the loop.
-                let monitored_utxo = wallet_db.monitored_utxos.get(searched_index);
+        let mutxos = wallet_db.monitored_utxos.get_all();
+        '_outer: for incoming_utxo in incoming_utxos.into_iter() {
+            'inner: for monitored_utxo in mutxos.iter() {
                 if monitored_utxo.utxo == incoming_utxo.utxo {
                     let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
                     let msmp = match msmp_res {
@@ -553,7 +539,6 @@ impl GlobalState {
                         continue '_outer;
                     }
                 }
-                searched_index += 1;
             }
 
             // If no match is found, add the UTXO to the list of missing UTXOs
