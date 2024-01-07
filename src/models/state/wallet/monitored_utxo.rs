@@ -1,7 +1,10 @@
 use std::{collections::VecDeque, time::Duration};
 
 use crate::{
-    models::{blockchain::block::block_height::BlockHeight, state::archival_state::ArchivalState},
+    models::{
+        blockchain::block::{block_header::BlockHeader, block_height::BlockHeight},
+        state::archival_state::ArchivalState,
+    },
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
     Hash,
 };
@@ -75,16 +78,19 @@ impl MonitoredUtxo {
     }
 
     /// Returns true if the MUTXO was abandoned
-    pub async fn was_abandoned(&self, current_tip: Digest, archival_state: &ArchivalState) -> bool {
+    pub async fn was_abandoned(
+        &self,
+        tip_header: &BlockHeader,
+        archival_state: &ArchivalState,
+    ) -> bool {
         match self.confirmed_in_block {
             Some((confirm_block, _, _)) => {
                 let confirm_block_header = archival_state
                     .get_block_header(confirm_block)
                     .await
                     .unwrap();
-                let tip_header = archival_state.get_block_header(current_tip).await.unwrap();
                 !archival_state
-                    .block_belongs_to_canonical_chain(&confirm_block_header, &tip_header)
+                    .block_belongs_to_canonical_chain(&confirm_block_header, tip_header)
                     .await
             }
             None => false,

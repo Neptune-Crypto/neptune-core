@@ -1123,7 +1123,7 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .was_abandoned(
-                    parent_block.hash,
+                    &parent_block.header,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await
@@ -1132,7 +1132,7 @@ mod global_state_tests {
             monitored_utxos
                 .get(1)
                 .was_abandoned(
-                    parent_block.hash,
+                    &parent_block.header,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await
@@ -1382,7 +1382,7 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .was_abandoned(
-                    fork_c_block.hash,
+                    &fork_c_block.header,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await
@@ -1391,7 +1391,7 @@ mod global_state_tests {
             monitored_utxos
                 .get(1)
                 .was_abandoned(
-                    fork_c_block.hash,
+                    &fork_c_block.header,
                     global_state.chain.archival_state.as_ref().unwrap()
                 )
                 .await
