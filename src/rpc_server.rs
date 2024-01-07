@@ -1,6 +1,7 @@
 use anyhow::Result;
 use futures::executor;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -21,6 +22,7 @@ use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
+use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::{GlobalState, UtxoReceiverData};
@@ -70,6 +72,9 @@ pub trait RPC {
 
     /// Returns info about the peers we are connected to
     async fn peer_info() -> Vec<PeerInfo>;
+
+    /// Return info about all peers that have been sanctioned
+    async fn all_sanctioned_peers() -> HashMap<IpAddr, PeerStanding>;
 
     /// Returns the digest of the latest block
     async fn tip_digest() -> Digest;
@@ -173,6 +178,7 @@ impl NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
+    /******** READ DATA ********/
     async fn network(self, _: context::Context) -> Network {
         self.state.cli.network
     }
@@ -232,6 +238,40 @@ impl RPC for NeptuneRPCServer {
             .cloned()
             .collect();
         peer_map
+    }
+
+    #[doc = r" Return info about all peers that have been sanctioned"]
+    async fn all_sanctioned_peers(
+        self,
+        _context: tarpc::context::Context,
+    ) -> HashMap<IpAddr, PeerStanding> {
+        let mut sanctions_in_memory = HashMap::default();
+
+        // Get all connected peers
+        let peers = self
+            .state
+            .net
+            .peer_map
+            .lock()
+            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
+            .to_owned();
+
+        for (socket_address, peer_info) in peers {
+            if peer_info.standing.is_negative() {
+                sanctions_in_memory.insert(socket_address.ip(), peer_info.standing);
+            }
+        }
+
+        let sanctions_in_db = self.state.net.all_peer_sanctions_in_database().await;
+
+        // Combine result for currently connected peers and previously connected peers but
+        // use result for currently connected peer if there is an overlap
+        let mut all_sanctions = sanctions_in_memory;
+        for (ip_addr, sanction) in sanctions_in_db {
+            all_sanctions.entry(ip_addr).or_insert(sanction);
+        }
+
+        all_sanctions
     }
 
     async fn validate_address(
@@ -577,7 +617,7 @@ mod rpc_server_tests {
         RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
-    use num_traits::Zero;
+    use num_traits::{One, Zero};
     use std::{
         collections::HashMap,
         net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -611,6 +651,14 @@ mod rpc_server_tests {
         // Create initial conditions
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
             get_test_genesis_setup(Network::Alpha, 2).await?;
+        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+        let rpc_server = NeptuneRPCServer {
+            socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+            state: state.clone(),
+            rpc_server_to_main_tx: dummy_tx,
+        };
+        let rpc_request_context = context::current();
+
         let peer_address_0 = state
             .net
             .peer_map
@@ -627,6 +675,16 @@ mod rpc_server_tests {
             .values()
             .collect::<Vec<_>>()[1]
             .connected_address;
+
+        // Verify that sanctions list is empty
+        let sanctioned_peers_startup = rpc_server
+            .clone()
+            .all_sanctioned_peers(rpc_request_context)
+            .await;
+        assert!(
+            sanctioned_peers_startup.is_empty(),
+            "Sanctions list must be empty at startup"
+        );
 
         // sanction both
         let (standing_0, standing_1) = {
@@ -646,46 +704,68 @@ mod rpc_server_tests {
             (standing_0, standing_1)
         };
 
+        // Verify expected sanctions reading
+        let sanction_peers_from_memory = rpc_server
+            .clone()
+            .all_sanctioned_peers(rpc_request_context)
+            .await;
+        assert_eq!(
+            2,
+            sanction_peers_from_memory.len(),
+            "Sanctions list must have to elements after sanctionings"
+        );
+
         state
+            .net
             .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
             .await;
         state
+            .net
             .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
+
+        // Verify expected sanctions reading, after DB-write
+        let sanction_peers_from_memory_and_db = rpc_server
+            .clone()
+            .all_sanctioned_peers(rpc_request_context)
+            .await;
+        assert_eq!(
+            2,
+            sanction_peers_from_memory_and_db.len(),
+            "Sanctions list must have to elements after sanctionings and after DB write"
+        );
 
         // Verify expected initial conditions
         {
             let peer_standing_0 = state
+                .net
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_ne!(0, peer_standing_0.unwrap().standing);
             assert_ne!(None, peer_standing_0.unwrap().latest_sanction);
             let peer_standing_1 = state
+                .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
             assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
 
             // Clear standing of #0
-            let (dummy_tx, _rx) =
-                tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-            let rpc_server = NeptuneRPCServer {
-                socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                state: state.clone(),
-                rpc_server_to_main_tx: dummy_tx,
-            };
             rpc_server
-                .clear_standing_by_ip(context::current(), peer_address_0.ip())
+                .clone()
+                .clear_standing_by_ip(rpc_request_context, peer_address_0.ip())
                 .await;
         }
         // Verify expected resulting conditions in database
         {
             let peer_standing_0 = state
+                .net
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
             assert_eq!(None, peer_standing_0.unwrap().latest_sanction);
             let peer_standing_1 = state
+                .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
@@ -699,6 +779,17 @@ mod rpc_server_tests {
                 state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
             assert_ne!(0, peer_standing_1_from_memory.standing.standing);
         }
+
+        // Verify expected sanctions reading, after one forgiveness
+        let sanctions_list_after_one_clear = rpc_server
+            .clone()
+            .all_sanctioned_peers(rpc_request_context)
+            .await;
+        assert!(
+            sanctions_list_after_one_clear.len().is_one(),
+            "Sanctions list must have to elements after sanctionings and after DB write"
+        );
+
         Ok(())
     }
     #[traced_test]
@@ -744,15 +835,18 @@ mod rpc_server_tests {
         };
 
         state
+            .net
             .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
             .await;
         state
+            .net
             .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
 
         // Verify expected initial conditions
         {
             let peer_standing_0 = state
+                .net
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_ne!(0, peer_standing_0.unwrap().standing);
@@ -761,24 +855,37 @@ mod rpc_server_tests {
 
         {
             let peer_standing_1 = state
+                .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
             assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
         }
 
-        // Clear standing of both by clearing all standings
+        // Verify expected reading through an RPC call
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
             state: state.clone(),
             rpc_server_to_main_tx: dummy_tx.clone(),
         };
-        rpc_server.clear_all_standings(context::current()).await;
+        let rpc_request_context = context::current();
+        let after_two_sanctions = rpc_server
+            .clone()
+            .all_sanctioned_peers(rpc_request_context)
+            .await;
+        assert_eq!(2, after_two_sanctions.len());
+
+        // Clear standing of both by clearing all standings
+        rpc_server
+            .clone()
+            .clear_all_standings(rpc_request_context)
+            .await;
 
         // Verify expected resulting conditions in database
         {
             let peer_standing_0 = state
+                .net
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
@@ -787,6 +894,7 @@ mod rpc_server_tests {
 
         {
             let peer_still_standing_1 = state
+                .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_eq!(0, peer_still_standing_1.unwrap().standing);
@@ -805,6 +913,13 @@ mod rpc_server_tests {
                 state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
             assert_eq!(0, peer_still_standing_1_from_memory.standing.standing);
         }
+
+        // Verify expected reading through an RPC call
+        let after_global_forgiveness = rpc_server
+            .clone()
+            .all_sanctioned_peers(rpc_request_context)
+            .await;
+        assert!(after_global_forgiveness.is_empty());
 
         Ok(())
     }
