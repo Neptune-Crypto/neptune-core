@@ -39,8 +39,9 @@ ctags:
 format:
 	cargo fmt --all --check
 
-install:
-	cp target/$(target)/$(prog) ~/bin/$(prog)$(extension)
+install-linux:
+	cargo install --path .
+	@echo "\n\nPlease run:\n./scripts/linux/install-bash-completions.sh\nto install bash-completions for Neptune-core's CLI."
 
 lint:
 	cargo clippy --all-targets
