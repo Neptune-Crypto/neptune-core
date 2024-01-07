@@ -379,40 +379,43 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
-    // endpoints for changing stuff
-
+    /******** CHANGE THINGS ********/
     async fn clear_all_standings(self, _: context::Context) {
-        let mut peers = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+        {
+            let mut peers = self
+                .state
+                .net
+                .peer_map
+                .lock()
+                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
 
-        // iterates and modifies standing field for all connected peers
-        peers.iter_mut().for_each(|(_, peerinfo)| {
-            peerinfo.standing.clear_standing();
-        });
+            // iterates and modifies standing field for all connected peers
+            peers.iter_mut().for_each(|(_, peerinfo)| {
+                peerinfo.standing.clear_standing();
+            });
+        }
 
         // Clear standings from database
-        executor::block_on(self.state.clear_all_standings_in_database());
+        executor::block_on(self.state.net.clear_all_standings_in_database());
     }
 
     async fn clear_standing_by_ip(self, _: context::Context, ip: IpAddr) {
-        let mut peers = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-        peers.iter_mut().for_each(|(socketaddr, peerinfo)| {
-            if socketaddr.ip() == ip {
-                peerinfo.standing.clear_standing();
-            }
-        });
+        {
+            let mut peers = self
+                .state
+                .net
+                .peer_map
+                .lock()
+                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+            peers.iter_mut().for_each(|(socketaddr, peerinfo)| {
+                if socketaddr.ip() == ip {
+                    peerinfo.standing.clear_standing();
+                }
+            });
+        }
 
         // Clear standing from database
-        executor::block_on(self.state.clear_ip_standing_in_database(ip));
+        executor::block_on(self.state.net.clear_ip_standing_in_database(ip));
     }
 
     async fn send(
