@@ -325,6 +325,11 @@ impl WalletState {
                 continue;
             }
 
+            // If already marked as abandoned, we don't do that again
+            if monitored_utxo.abandoned_at.is_some() {
+                continue;
+            }
+
             // MUTXO is neither spent nor synced. Mark as abandoned if it was confirmed in block that is now
             // abandoned, and if that block is older than threshold.
             let mark_as_abandoned = match monitored_utxo.confirmed_in_block {
