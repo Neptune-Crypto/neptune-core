@@ -19,6 +19,7 @@ use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::amount::Sign;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::channel::RPCServerToMain;
+use crate::models::peer::InstanceId;
 use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
@@ -51,6 +52,11 @@ pub trait RPC {
     async fn network() -> Network;
 
     async fn own_listen_address_for_peers() -> Option<SocketAddr>;
+
+    /// Return the node's instance-ID which is a globally unique random generated number
+    /// set at startup used to ensure that the node does not connect to itself, or the
+    /// same peer twice.
+    async fn own_instance_id() -> InstanceId;
 
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
@@ -176,6 +182,10 @@ impl RPC for NeptuneRPCServer {
         let listen_for_peers_socket = self.state.cli.peer_port;
         let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
         Some(socket_address)
+    }
+
+    async fn own_instance_id(self, _context: context::Context) -> InstanceId {
+        self.state.net.instance_id
     }
 
     async fn block_height(self, _: context::Context) -> BlockHeight {
