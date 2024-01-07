@@ -1244,6 +1244,7 @@ mod peer_loop_tests {
         drop(to_main_tx);
 
         let peer_standing = state
+            .net
             .get_peer_standing_from_database(peer_address.ip())
             .await;
         assert_eq!(-(u16::MAX as i32), peer_standing.unwrap().standing);
@@ -1761,6 +1762,7 @@ mod peer_loop_tests {
 
         // Verify that peer is sanctioned for failed fork reconciliation attempt
         assert!(state
+            .net
             .get_peer_standing_from_database(peer_address1.ip())
             .await
             .unwrap()

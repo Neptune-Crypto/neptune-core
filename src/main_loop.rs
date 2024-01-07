@@ -740,6 +740,7 @@ impl MainLoopHandler {
             // Disallow reconnection if peer is in bad standing
             let standing = self
                 .global_state
+                .net
                 .get_peer_standing_from_database(peer_with_lost_connection.ip())
                 .await;
 

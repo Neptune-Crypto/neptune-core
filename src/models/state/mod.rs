@@ -2,7 +2,6 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::{CheckedSub, Zero};
 use std::cmp::max;
-use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -33,8 +32,7 @@ use super::blockchain::transaction::{
 };
 use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
-use crate::database::leveldb::LevelDB;
-use crate::models::peer::{HandshakeData, PeerStanding};
+use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -427,27 +425,6 @@ impl GlobalState {
             kernel,
             witness: Witness::ValidityLogic((transaction_validity_logic, primitive_witness)),
         })
-    }
-
-    // Storing IP addresses is, according to this answer, not a violation of GDPR:
-    // https://law.stackexchange.com/a/28609/45846
-    // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
-    pub async fn write_peer_standing_on_decrease(
-        &self,
-        ip: IpAddr,
-        current_standing: PeerStanding,
-    ) {
-        let mut peer_databases = self.net.peer_databases.lock().await;
-        let old_standing = peer_databases.peer_standings.get(ip);
-
-        if old_standing.is_none() || old_standing.unwrap().standing > current_standing.standing {
-            peer_databases.peer_standings.put(ip, current_standing)
-        }
-    }
-
-    pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        let mut peer_databases = self.net.peer_databases.lock().await;
-        peer_databases.peer_standings.get(ip)
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {

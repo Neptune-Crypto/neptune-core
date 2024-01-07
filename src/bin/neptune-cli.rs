@@ -26,6 +26,7 @@ enum Command {
     BlockHeight,
     Confirmations,
     PeerInfo,
+    AllSanctionedPeers,
     TipDigest,
     LatestTipDigests {
         n: usize,
@@ -122,6 +123,20 @@ async fn main() -> Result<()> {
             let peers = client.peer_info(ctx).await?;
             println!("{} connected peers", peers.len());
             println!("{}", serde_json::to_string(&peers)?);
+        }
+        Command::AllSanctionedPeers => {
+            let peer_sanctions = client.all_sanctioned_peers(ctx).await?;
+            for (ip, sanction) in peer_sanctions {
+                let standing = sanction.standing;
+                let latest_sanction_str = match sanction.latest_sanction {
+                    Some(sanction) => sanction.to_string(),
+                    None => String::default(),
+                };
+                println!(
+                    "{ip}\nstanding: {standing}\nlatest sanction: {} \n\n",
+                    latest_sanction_str
+                );
+            }
         }
         Command::TipDigest => {
             let head_hash = client.tip_digest(ctx).await?;
