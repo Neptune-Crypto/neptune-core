@@ -336,7 +336,7 @@ impl WalletState {
                     let depth = current_tip.height - block_height_confirmed + 1;
                     depth >= block_depth_threshhold as i128
                         && monitored_utxo
-                            .was_abandoned(current_tip_info.0, archival_state)
+                            .was_abandoned(current_tip, archival_state)
                             .await
                 }
                 None => false,
