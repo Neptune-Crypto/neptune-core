@@ -62,6 +62,26 @@ impl NetworkingState {
         Ok(PeerDatabases { peer_standings })
     }
 
+    /// Return a list of peer sanctions stored in the database.
+    pub async fn all_peer_sanctions_in_database(&self) -> HashMap<IpAddr, PeerStanding> {
+        let mut sanctions = HashMap::default();
+
+        let peer_databases = self.peer_databases.lock().await;
+        let mut dbiterator = peer_databases.peer_standings.new_iter();
+        for (ip, standing) in dbiterator.by_ref() {
+            if standing.is_negative() {
+                sanctions.insert(ip, standing);
+            }
+        }
+
+        sanctions
+    }
+
+    pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
+        let mut peer_databases = self.peer_databases.lock().await;
+        peer_databases.peer_standings.get(ip)
+    }
+
     pub async fn clear_ip_standing_in_database(&self, ip: IpAddr) {
         let mut peer_databases = self.peer_databases.lock().await;
 
@@ -85,5 +105,21 @@ impl NetworkingState {
         }
 
         peer_databases.peer_standings.batch_write(&new_entries);
+    }
+
+    // Storing IP addresses is, according to this answer, not a violation of GDPR:
+    // https://law.stackexchange.com/a/28609/45846
+    // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
+    pub async fn write_peer_standing_on_decrease(
+        &self,
+        ip: IpAddr,
+        current_standing: PeerStanding,
+    ) {
+        let mut peer_databases = self.peer_databases.lock().await;
+        let old_standing = peer_databases.peer_standings.get(ip);
+
+        if old_standing.is_none() || old_standing.unwrap().standing > current_standing.standing {
+            peer_databases.peer_standings.put(ip, current_standing)
+        }
     }
 }

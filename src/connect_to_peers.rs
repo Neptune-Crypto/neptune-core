@@ -76,6 +76,7 @@ async fn check_if_connection_is_allowed(
 
     // Disallow connection if peer is in bad standing
     let standing = state
+        .net
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
@@ -420,6 +421,7 @@ pub async fn close_peer_connected_callback(
     };
     debug!("Fetched peer info standing for {}", peer_address);
     global_state
+        .net
         .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
         .await;
     debug!("Stored peer info standing for {}", peer_address);
@@ -581,6 +583,7 @@ mod connect_tests {
             timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
         state
+            .net
             .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
             .await;
         status = check_if_connection_is_allowed(&state, &own_handshake, &other_handshake, &peer_sa)
@@ -845,6 +848,7 @@ mod connect_tests {
         };
         let peer_address = get_dummy_socket_address(3);
         state
+            .net
             .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
             .await;
 
