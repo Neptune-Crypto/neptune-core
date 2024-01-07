@@ -19,6 +19,7 @@ use twenty_first::shared_math::digest::Digest;
 enum Command {
     BlockHeight,
     GetPeerInfo,
+    OwnInstanceId,
     Head,
     Heads {
         n: usize,
@@ -87,6 +88,10 @@ async fn main() -> Result<()> {
             let peers = client.peer_info(context::current()).await?;
             println!("{} connected peers", peers.len());
             println!("{}", serde_json::to_string(&peers)?);
+        }
+        Command::OwnInstanceId => {
+            let own_instance_id = client.own_instance_id(context::current()).await?;
+            println!("Own instance ID: {own_instance_id}");
         }
         Command::GetHeader { hash } => {
             let res = client.header(context::current(), hash).await?;
