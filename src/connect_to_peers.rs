@@ -24,8 +24,8 @@ use crate::{
     MAGIC_STRING_REQUEST, MAGIC_STRING_RESPONSE,
 };
 
-// Max peer message size is 200MB
-pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 200 * 1024 * 1024;
+// Max peer message size is 2000MB
+pub const MAX_PEER_FRAME_LENGTH_IN_BYTES: usize = 2000 * 1024 * 1024;
 
 /// Use this function to ensure that the same rules apply for both
 /// ingoing and outgoing connections. This limits the size of messages
