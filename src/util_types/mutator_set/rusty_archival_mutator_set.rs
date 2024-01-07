@@ -1,15 +1,11 @@
-use std::sync::{Arc, Mutex};
-
-use itertools::Itertools;
 use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
+    shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     storage::level_db::DB,
     util_types::{
         algebraic_hasher::AlgebraicHasher,
         mmr::archival_mmr::ArchivalMmr,
         storage_schema::{
-            DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage, StorageReader,
-            StorageSingleton, StorageWriter,
+            DbtSingleton, DbtVec, RustyKey, SimpleRustyStorage, StorageSingleton, StorageWriter,
         },
     },
 };
@@ -18,116 +14,6 @@ use super::{
     active_window::ActiveWindow, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
     mutator_set_kernel::MutatorSetKernel,
 };
-
-struct RamsReader {
-    db: Arc<Mutex<DB>>,
-}
-
-impl StorageReader for RamsReader {
-    fn get_many(&self, keys: &[RustyKey]) -> Vec<Option<RustyValue>> {
-        let lock = self.db.lock().unwrap();
-        keys.iter()
-            .map(|key| lock.get(&key.0).unwrap().map(RustyValue))
-            .collect_vec()
-    }
-
-    fn get(&self, key: RustyKey) -> Option<RustyValue> {
-        self.db.lock().expect("StorageReader for RustyArchivalMutatorSet: could not get database lock for reading (get)").get(&key.0).unwrap().map(RustyValue)
-    }
-}
-
-#[derive(Debug)]
-pub struct RustyMSValue(Vec<u8>);
-
-impl From<RustyMSValue> for u64 {
-    fn from(value: RustyMSValue) -> Self {
-        u64::from_be_bytes(value.0.try_into().unwrap())
-    }
-}
-impl From<u64> for RustyMSValue {
-    fn from(value: u64) -> Self {
-        RustyMSValue(value.to_be_bytes().to_vec())
-    }
-}
-impl From<RustyMSValue> for Digest {
-    fn from(value: RustyMSValue) -> Self {
-        Digest::new(
-            value
-                .0
-                .chunks(8)
-                .map(|ch| {
-                    u64::from_be_bytes(ch.try_into().expect("Cannot cast RustyMSValue into Digest"))
-                })
-                .map(BFieldElement::new)
-                .collect::<Vec<_>>()
-                .try_into().expect("Can cast RustyMSValue into BFieldElements but number does not match that of Digest."),
-        )
-    }
-}
-impl From<Digest> for RustyMSValue {
-    fn from(value: Digest) -> Self {
-        RustyMSValue(
-            value
-                .values()
-                .map(|b| b.value())
-                .map(u64::to_be_bytes)
-                .concat(),
-        )
-    }
-}
-impl From<RustyMSValue> for Chunk {
-    fn from(value: RustyMSValue) -> Self {
-        Chunk {
-            relative_indices: value
-                .0
-                .chunks(4)
-                .map(|ch| {
-                    u32::from_be_bytes(
-                        ch.try_into()
-                            .expect("Could not convert RustyMSValue into Chunk"),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        }
-    }
-}
-impl From<Chunk> for RustyMSValue {
-    fn from(value: Chunk) -> Self {
-        RustyMSValue(
-            value
-                .relative_indices
-                .iter()
-                .map(|i| i.to_be_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        )
-    }
-}
-impl From<RustyMSValue> for Vec<u32> {
-    fn from(value: RustyMSValue) -> Self {
-        value
-            .0
-            .chunks(4)
-            .map(|ch| {
-                u32::from_be_bytes(
-                    ch.try_into()
-                        .expect("Cannot unpack RustyMSValue as Vec<u32>s"),
-                )
-            })
-            .collect_vec()
-    }
-}
-impl From<Vec<u32>> for RustyMSValue {
-    fn from(value: Vec<u32>) -> Self {
-        RustyMSValue(
-            value
-                .iter()
-                .map(|&i| i.to_be_bytes())
-                .collect_vec()
-                .concat(),
-        )
-    }
-}
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
