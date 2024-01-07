@@ -48,9 +48,9 @@ pub trait RPC {
     /******** READ DATA ********/
     // Place all methods that only read here
     // Return which network the client is running
-    async fn get_network() -> Network;
+    async fn network() -> Network;
 
-    async fn get_listen_address_for_peers() -> Option<SocketAddr>;
+    async fn own_listen_address_for_peers() -> Option<SocketAddr>;
 
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
@@ -60,36 +60,43 @@ pub trait RPC {
     /// returns Option<BlockHeight>
     ///
     /// return value will be None if wallet has not received any incoming funds.
-    async fn get_confirmations() -> Option<BlockHeight>;
+    async fn confirmations() -> Option<BlockHeight>;
 
     /// Returns info about the peers we are connected to
-    async fn get_peer_info() -> Vec<PeerInfo>;
+    async fn peer_info() -> Vec<PeerInfo>;
 
     /// Returns the digest of the latest block
-    async fn head() -> Digest;
+    async fn tip_digest() -> Digest;
 
     /// Returns the digest of the latest n blocks
-    async fn heads(n: usize) -> Vec<Digest>;
+    async fn latest_tip_digests(n: usize) -> Vec<Digest>;
 
-    async fn get_tip_header() -> BlockHeader;
+    /// Return the block header of the tip digest
+    async fn tip_header() -> BlockHeader;
 
-    async fn get_header(hash: Digest) -> Option<BlockHeader>;
+    /// Return the block header for the specified block
+    async fn header(hash: Digest) -> Option<BlockHeader>;
 
     // Get sum of unspent UTXOs.
-    async fn get_synced_balance() -> Amount;
+    async fn synced_balance() -> Amount;
 
-    async fn get_history() -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)>;
+    /// Get the client's wallet transaction history
+    async fn history() -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)>;
 
-    async fn get_wallet_status() -> WalletStatus;
+    /// Return information about funds in the wallet
+    async fn wallet_status() -> WalletStatus;
 
-    async fn get_receiving_address() -> generation_address::ReceivingAddress;
+    /// Return an address that this client can receive funds on
+    async fn own_receiving_address() -> generation_address::ReceivingAddress;
 
-    async fn get_mempool_tx_count() -> usize;
+    /// Return the number of transactions in the mempool
+    async fn mempool_tx_count() -> usize;
 
     // TODO: Change to return current size and max size
-    async fn get_mempool_size() -> usize;
+    async fn mempool_size() -> usize;
 
-    async fn get_dashboard_overview_data() -> DashBoardOverviewDataFromClient;
+    /// Return the information used on the dashboard's overview tab
+    async fn dashboard_overview_data() -> DashBoardOverviewDataFromClient;
 
     /// Determine whether the user-supplied string is a valid address
     async fn validate_address(
@@ -160,11 +167,11 @@ impl NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
-    async fn get_network(self, _: context::Context) -> Network {
+    async fn network(self, _: context::Context) -> Network {
         self.state.cli.network
     }
 
-    async fn get_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
+    async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
         let listen_for_peers_ip = self.state.cli.listen_addr;
         let listen_for_peers_socket = self.state.cli.peer_port;
         let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
@@ -179,16 +186,16 @@ impl RPC for NeptuneRPCServer {
         latest_block_header.height
     }
 
-    async fn get_confirmations(self, _: context::Context) -> Option<BlockHeight> {
+    async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
         self.confirmations_internal()
     }
 
-    async fn head(self, _: context::Context) -> Digest {
+    async fn tip_digest(self, _: context::Context) -> Digest {
         let latest_block = executor::block_on(self.state.chain.light_state.get_latest_block());
         latest_block.hash
     }
 
-    async fn heads(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
+    async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
         let latest_block_digest =
             executor::block_on(self.state.chain.light_state.get_latest_block()).hash;
 
@@ -204,7 +211,7 @@ impl RPC for NeptuneRPCServer {
         head_hashes
     }
 
-    async fn get_peer_info(self, _: context::Context) -> Vec<PeerInfo> {
+    async fn peer_info(self, _: context::Context) -> Vec<PeerInfo> {
         let peer_map = self
             .state
             .net
@@ -259,23 +266,23 @@ impl RPC for NeptuneRPCServer {
         amount <= wallet_status.synced_unspent_amount
     }
 
-    async fn get_synced_balance(self, _context: tarpc::context::Context) -> Amount {
+    async fn synced_balance(self, _context: tarpc::context::Context) -> Amount {
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
         wallet_status.synced_unspent_amount
     }
 
-    async fn get_wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
+    async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
         wallet_status
     }
 
-    async fn get_tip_header(self, _: context::Context) -> BlockHeader {
+    async fn tip_header(self, _: context::Context) -> BlockHeader {
         let latest_block_block_header =
             executor::block_on(self.state.chain.light_state.get_latest_block_header());
         latest_block_block_header
     }
 
-    async fn get_header(
+    async fn header(
         self,
         _context: tarpc::context::Context,
         block_digest: Digest,
@@ -291,7 +298,7 @@ impl RPC for NeptuneRPCServer {
         res
     }
 
-    async fn get_receiving_address(
+    async fn own_receiving_address(
         self,
         _context: tarpc::context::Context,
     ) -> generation_address::ReceivingAddress {
@@ -302,15 +309,15 @@ impl RPC for NeptuneRPCServer {
             .to_address()
     }
 
-    async fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
+    async fn mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
         self.state.mempool.len()
     }
 
-    async fn get_mempool_size(self, _context: tarpc::context::Context) -> usize {
+    async fn mempool_size(self, _context: tarpc::context::Context) -> usize {
         self.state.mempool.get_size()
     }
 
-    async fn get_history(
+    async fn history(
         self,
         _context: tarpc::context::Context,
     ) -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)> {
@@ -327,7 +334,7 @@ impl RPC for NeptuneRPCServer {
         display_history
     }
 
-    async fn get_dashboard_overview_data(
+    async fn dashboard_overview_data(
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
@@ -376,6 +383,8 @@ impl RPC for NeptuneRPCServer {
         peers.iter_mut().for_each(|(_, peerinfo)| {
             peerinfo.standing.clear_standing();
         });
+
+        // Clear standings from database
         executor::block_on(self.state.clear_all_standings_in_database());
     }
 
@@ -391,7 +400,8 @@ impl RPC for NeptuneRPCServer {
                 peerinfo.standing.clear_standing();
             }
         });
-        //Also clears this IP's standing in database, whether it is connected or not.
+
+        // Clear standing from database
         executor::block_on(self.state.clear_ip_standing_in_database(ip));
     }
 
@@ -576,7 +586,7 @@ mod rpc_server_tests {
             rpc_server_to_main_tx: dummy_tx,
         };
 
-        let balance = rpc_server.get_synced_balance(context::current()).await;
+        let balance = rpc_server.synced_balance(context::current()).await;
         assert!(balance.is_zero());
 
         Ok(())

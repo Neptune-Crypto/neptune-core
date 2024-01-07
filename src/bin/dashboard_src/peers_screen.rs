@@ -91,7 +91,7 @@ impl PeersScreen {
                     //         is_archival_node: false,
                     //     }
                     // ];
-                    match rpc_client.get_peer_info(context::current()).await {
+                    match rpc_client.peer_info(context::current()).await {
                         Ok(pi) => {
                             *peer_info.lock().unwrap() = pi;
                             reset_poller!(balance, Duration::from_secs(10));
