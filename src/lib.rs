@@ -170,7 +170,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     }
     info!("Made outgoing connections to peers");
 
-    // Start handling of mining. So far we can only mine on the `RegTest` network.
+    // Start mining threads if requested
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     let state_clone_for_miner = state.clone();
