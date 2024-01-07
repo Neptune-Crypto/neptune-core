@@ -310,11 +310,10 @@ impl WalletState {
             Duration::from_millis(current_tip.timestamp.value()),
             current_tip.height,
         );
-        let mutxo_count = wallet_db_lock.monitored_utxos.len();
+        let monitored_utxos = wallet_db_lock.monitored_utxos.get_all();
         let mut removed_count = 0;
-        for i in 0..mutxo_count {
-            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
-
+        let mut mutated_monitored_utxos = vec![];
+        for (i, monitored_utxo) in monitored_utxos.into_iter().enumerate() {
             // Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
             // once the spending block is buried sufficiently deep
             if monitored_utxo.spent_in_block.is_some() {
@@ -344,13 +343,17 @@ impl WalletState {
             };
 
             if mark_as_abandoned {
-                monitored_utxo.abandoned_at = Some(current_tip_info);
-                wallet_db_lock.monitored_utxos.set(i, monitored_utxo);
+                let mut mutated_mutxo = monitored_utxo;
+                mutated_mutxo.abandoned_at = Some(current_tip_info);
                 removed_count += 1;
+                mutated_monitored_utxos.push((i as u64, mutated_mutxo))
             }
         }
 
-        // Loop over all MUTXOs, checking which are not synced
+        wallet_db_lock
+            .monitored_utxos
+            .set_many(mutated_monitored_utxos);
+
         Ok(removed_count)
     }
 
