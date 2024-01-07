@@ -56,7 +56,7 @@ run:
 test: export RUST_BACKTRACE = 1
 test:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
-	cargo test
+	cargo test -- --test-threads=1
 
 bench:
 	$(info RUSTFLAGS is $(RUSTFLAGS))
