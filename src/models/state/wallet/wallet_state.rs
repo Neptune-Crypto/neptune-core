@@ -710,22 +710,12 @@ impl WalletState {
         lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
         block: &Block,
     ) -> WalletStatus {
-        let num_monitored_utxos = lock.monitored_utxos.len();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
         let mut synced_spent = vec![];
         let mut unsynced_spent = vec![];
-        for i in 0..num_monitored_utxos {
-            let mutxo = lock.monitored_utxos.get(i);
-            debug!(
-                "mutxo. Synced to: {}",
-                mutxo
-                    .get_latest_membership_proof_entry()
-                    .as_ref()
-                    .unwrap()
-                    .0
-                    .emojihash()
-            );
+        let monitored_utxos = lock.monitored_utxos.get_all();
+        for mutxo in monitored_utxos.iter() {
             let utxo = mutxo.utxo.clone();
             let spent = mutxo.spent_in_block.is_some();
             if let Some(mp) = mutxo.get_membership_proof_for_block(block.hash) {
