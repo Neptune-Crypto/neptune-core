@@ -683,9 +683,8 @@ impl WalletState {
             return false;
         }
         let wallet_db_lock = self.wallet_db.lock().await;
-        let monitored_utxos = &wallet_db_lock.monitored_utxos;
-        for i in 0..monitored_utxos.len() {
-            let monitored_utxo = monitored_utxos.get(i);
+        let monitored_utxos = wallet_db_lock.monitored_utxos.get_all();
+        for monitored_utxo in monitored_utxos {
             let has_current_mp = monitored_utxo
                 .get_membership_proof_for_block(tip_hash)
                 .is_some();
@@ -696,6 +695,7 @@ impl WalletState {
                 return false;
             }
         }
+
         true
     }
 
