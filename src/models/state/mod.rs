@@ -138,12 +138,11 @@ impl GlobalState {
         //
         // We then continue working backward through all entries to
         // determine max(spent_in_block)
-        for i in (0..monitored_utxos.len()).rev() {
-            let utxo = monitored_utxos.get(i);
-
+        let monitored_utxos = monitored_utxos.get_all();
+        for mutxo in monitored_utxos.into_iter().rev() {
             if max_confirmed_in_block.is_none() {
-                if let Some((.., confirmed_in_block)) = utxo.confirmed_in_block {
-                    if utxo
+                if let Some((.., confirmed_in_block)) = mutxo.confirmed_in_block {
+                    if mutxo
                         .get_membership_proof_for_block(current_tip_digest)
                         .is_some()
                     {
@@ -152,8 +151,8 @@ impl GlobalState {
                 }
             }
 
-            if let Some((.., spent_in_block)) = utxo.spent_in_block {
-                if utxo
+            if let Some((.., spent_in_block)) = mutxo.spent_in_block {
+                if mutxo
                     .get_membership_proof_for_block(current_tip_digest)
                     .is_some()
                     && (max_spent_in_block.is_none()
