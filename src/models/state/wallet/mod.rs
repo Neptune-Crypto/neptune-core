@@ -278,15 +278,15 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
-    use std::sync::Arc;
-
     use itertools::Itertools;
     use num_traits::CheckedSub;
     use rand::random;
-    use tokio::sync::Mutex;
     use tracing_test::traced_test;
     use twenty_first::util_types::storage_vec::StorageVec;
 
+    use super::monitored_utxo::MonitoredUtxo;
+    use super::wallet_state::WalletState;
+    use super::*;
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
@@ -301,10 +301,6 @@ mod wallet_tests {
         make_mock_transaction_with_generation_key,
     };
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
-
-    use super::monitored_utxo::MonitoredUtxo;
-    use super::wallet_state::WalletState;
-    use super::*;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         let lock = wallet_state.wallet_db.lock().await;
@@ -548,15 +544,11 @@ mod wallet_tests {
             &mut own_wallet_state.wallet_db.lock().await,
         )?;
 
-        // wrap block
-        let wrapped_block = Arc::new(Mutex::new(block_1.clone()));
-        let locked_block = wrapped_block.lock().await;
-
         // Verify that the allocater returns a sane amount
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(Amount::one(), &locked_block)
+                .allocate_sufficient_input_funds(Amount::one(), block_1.hash)
                 .await
                 .unwrap()
                 .len()
@@ -566,7 +558,7 @@ mod wallet_tests {
             own_wallet_state
                 .allocate_sufficient_input_funds(
                     mining_reward.checked_sub(&Amount::one()).unwrap(),
-                    &locked_block
+                    block_1.hash
                 )
                 .await
                 .unwrap()
@@ -575,7 +567,7 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(mining_reward, &locked_block)
+                .allocate_sufficient_input_funds(mining_reward, block_1.hash)
                 .await
                 .unwrap()
                 .len()
@@ -583,7 +575,7 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: `mining_reward`
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(mining_reward + Amount::one(), &locked_block)
+            .allocate_sufficient_input_funds(mining_reward + Amount::one(), block_1.hash)
             .await
             .is_err());
 
@@ -611,13 +603,10 @@ mod wallet_tests {
             next_block = next_block_prime;
         }
 
-        let wrapped_block_ = Arc::new(Mutex::new(next_block.clone()));
-        let block_lock = wrapped_block_.lock().await;
-
         assert_eq!(
             5,
             own_wallet_state
-                .allocate_sufficient_input_funds(mining_reward.scalar_mul(5), &block_lock)
+                .allocate_sufficient_input_funds(mining_reward.scalar_mul(5), next_block.hash)
                 .await
                 .unwrap()
                 .len()
@@ -627,7 +616,7 @@ mod wallet_tests {
             own_wallet_state
                 .allocate_sufficient_input_funds(
                     mining_reward.scalar_mul(5) + Amount::one(),
-                    &block_lock
+                    next_block.hash
                 )
                 .await
                 .unwrap()
@@ -638,7 +627,7 @@ mod wallet_tests {
         assert_eq!(
             22,
             own_wallet_state
-                .allocate_sufficient_input_funds(expected_balance, &block_lock)
+                .allocate_sufficient_input_funds(expected_balance, next_block.hash)
                 .await
                 .unwrap()
                 .len()
@@ -646,14 +635,14 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: 22 * mining reward
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(expected_balance + Amount::one(), &block_lock)
+            .allocate_sufficient_input_funds(expected_balance + Amount::one(), next_block.hash)
             .await
             .is_err());
 
         // Make a block that spends an input, then verify that this is reflected by
         // the allocator.
         let two_utxos = own_wallet_state
-            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), &block_lock)
+            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), next_block.hash)
             .await
             .unwrap();
         assert_eq!(
@@ -703,7 +692,7 @@ mod wallet_tests {
         assert_eq!(
             20,
             own_wallet_state
-                .allocate_sufficient_input_funds(2000.into(), &next_block)
+                .allocate_sufficient_input_funds(2000.into(), next_block.hash)
                 .await
                 .unwrap()
                 .len()
@@ -711,7 +700,7 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: 2000
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(2001.into(), &block_lock)
+            .allocate_sufficient_input_funds(2001.into(), next_block.hash)
             .await
             .is_err());
 
@@ -926,7 +915,7 @@ mod wallet_tests {
         // Check that `WalletStatus` is returned correctly
         let wallet_status = {
             let mut wallet_db_lock = own_wallet_state.wallet_db.lock().await;
-            own_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, &block_18)
+            own_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, block_18.hash)
         };
         assert_eq!(
             19,
