@@ -400,7 +400,7 @@ impl ReceivingAddress {
     }
 
     fn get_hrp(network: Network) -> String {
-        let mut hrp = "nga".to_string();
+        let mut hrp = "nolga".to_string();
         let network_byte: char = match network {
             Network::Alpha => 'm',
             Network::Testnet => 't',
@@ -427,7 +427,7 @@ impl ReceivingAddress {
             bail!("Can only decode bech32m addresses.");
         }
 
-        if hrp[0..4] != Self::get_hrp(network) {
+        if hrp[0..=5] != Self::get_hrp(network) {
             bail!("Could not decode bech32m address because of invalid prefix");
         }
 
