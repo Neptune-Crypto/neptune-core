@@ -14,6 +14,16 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
  - Enter the repository: `cd neptune-core`
  - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM)
 
+### Windows
+
+To install Rust and cargo on Windows, you can follow [these instructions](https://doc.rust-lang.org/cargo/getting-started/installation.html).
+Installing cargo might require you to install Visual Studio with some C++ support but the cargo installer for Windows should handle that.
+With a functioning version of cargo, compilation on Windows should just work out-of-the-box with cargo build etc.
+- Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
+- Enter the repository: `cd neptune-core`
+- Run `cargo install --path .`
+
+
 ## Running & Connecting
 
  - Generate a wallet file: `neptune-wallet-gen`
