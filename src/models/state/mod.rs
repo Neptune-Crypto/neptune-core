@@ -4,15 +4,14 @@ use num_traits::{CheckedSub, Zero};
 use std::cmp::max;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
+use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::digest::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::StorageWriter;
 use twenty_first::util_types::storage_vec::StorageVec;
-
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
@@ -172,11 +171,9 @@ impl GlobalState {
 
         let db_lock = self.wallet_state.wallet_db.lock().await;
         let monitored_utxos = db_lock.monitored_utxos.clone();
-        let num_monitored_utxos = monitored_utxos.len();
         let mut history = vec![];
-        for i in 0..num_monitored_utxos {
-            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
-
+        let monitored_utxos = monitored_utxos.get_all();
+        for monitored_utxo in monitored_utxos.iter() {
             if monitored_utxo
                 .get_membership_proof_for_block(current_tip_digest)
                 .is_none()
