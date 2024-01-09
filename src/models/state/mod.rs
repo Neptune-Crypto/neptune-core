@@ -86,9 +86,9 @@ impl GlobalState {
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         // Grab locks in canonical order, hold over execution of request to wallet
         let mut wallet_db_lock = self.wallet_state.wallet_db.lock().await;
-        let block_lock = self.chain.light_state.latest_block.lock().await;
+        let tip_digest = self.chain.light_state.latest_block.lock().await.hash;
         self.wallet_state
-            .get_wallet_status_from_lock(&mut wallet_db_lock, &block_lock)
+            .get_wallet_status_from_lock(&mut wallet_db_lock, tip_digest)
     }
 
     pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
@@ -241,7 +241,11 @@ impl GlobalState {
         // todo: accomodate a future change whereby this function also returns the matching spending keys
         let spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = self
             .wallet_state
-            .allocate_sufficient_input_funds_from_lock(&mut wallet_db_lock, total_spend, &bc_tip)?;
+            .allocate_sufficient_input_funds_from_lock(
+                &mut wallet_db_lock,
+                total_spend,
+                bc_tip.hash,
+            )?;
 
         // Create all removal records. These must be relative to the block tip.
         let msa_tip = bc_tip.body.next_mutator_set_accumulator;
@@ -1063,7 +1067,7 @@ mod global_state_tests {
         // Verify that wallet has monitored UTXOs, from genesis and from block_1a
         let wallet_status = global_state.wallet_state.get_wallet_status_from_lock(
             &mut global_state.wallet_state.wallet_db.lock().await,
-            &mock_block_1a,
+            mock_block_1a.hash,
         );
         assert_eq!(2, wallet_status.synced_unspent.len());
 
@@ -1110,7 +1114,7 @@ mod global_state_tests {
         // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
         let wallet_status_after_forking = global_state.wallet_state.get_wallet_status_from_lock(
             &mut global_state.wallet_state.wallet_db.lock().await,
-            &parent_block,
+            parent_block.hash,
         );
         assert_eq!(1, wallet_status_after_forking.synced_unspent.len());
         assert_eq!(1, wallet_status_after_forking.unsynced_unspent.len());
@@ -1205,7 +1209,7 @@ mod global_state_tests {
             // Verify that UTXO was recorded
             let wallet_status_after_1a = global_state
                 .wallet_state
-                .get_wallet_status_from_lock(&mut wallet_db_lock, &mock_block_1a);
+                .get_wallet_status_from_lock(&mut wallet_db_lock, mock_block_1a.hash);
             assert_eq!(2, wallet_status_after_1a.synced_unspent.len());
         }
 
@@ -1243,7 +1247,7 @@ mod global_state_tests {
         // Verify that all both MUTXOs have synced MPs
         let wallet_status_on_a_fork = global_state.wallet_state.get_wallet_status_from_lock(
             &mut global_state.wallet_state.wallet_db.lock().await,
-            &fork_a_block,
+            fork_a_block.hash,
         );
 
         assert_eq!(2, wallet_status_on_a_fork.synced_unspent.len());
@@ -1283,7 +1287,7 @@ mod global_state_tests {
         let wallet_status_on_b_fork_before_resync =
             global_state.wallet_state.get_wallet_status_from_lock(
                 &mut global_state.wallet_state.wallet_db.lock().await,
-                &fork_b_block,
+                fork_b_block.hash,
             );
         assert_eq!(
             0,
@@ -1302,7 +1306,7 @@ mod global_state_tests {
         let wallet_status_on_b_fork_after_resync =
             global_state.wallet_state.get_wallet_status_from_lock(
                 &mut global_state.wallet_state.wallet_db.lock().await,
-                &fork_b_block,
+                fork_b_block.hash,
             );
         assert_eq!(2, wallet_status_on_b_fork_after_resync.synced_unspent.len());
         assert_eq!(
@@ -1347,7 +1351,7 @@ mod global_state_tests {
         let wallet_status_on_c_fork_before_resync =
             global_state.wallet_state.get_wallet_status_from_lock(
                 &mut global_state.wallet_state.wallet_db.lock().await,
-                &fork_c_block,
+                fork_c_block.hash,
             );
         assert_eq!(
             0,
@@ -1367,7 +1371,7 @@ mod global_state_tests {
         let wallet_status_on_c_fork_after_resync =
             global_state.wallet_state.get_wallet_status_from_lock(
                 &mut global_state.wallet_state.wallet_db.lock().await,
-                &fork_c_block,
+                fork_c_block.hash,
             );
         assert_eq!(1, wallet_status_on_c_fork_after_resync.synced_unspent.len());
         assert_eq!(

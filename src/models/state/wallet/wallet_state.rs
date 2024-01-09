@@ -708,7 +708,7 @@ impl WalletState {
     pub fn get_wallet_status_from_lock(
         &self,
         lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
-        block: &Block,
+        tip_digest: Digest,
     ) -> WalletStatus {
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
@@ -718,7 +718,7 @@ impl WalletState {
         for mutxo in monitored_utxos.iter() {
             let utxo = mutxo.utxo.clone();
             let spent = mutxo.spent_in_block.is_some();
-            if let Some(mp) = mutxo.get_membership_proof_for_block(block.hash) {
+            if let Some(mp) = mutxo.get_membership_proof_for_block(tip_digest) {
                 if spent {
                     synced_spent.push(WalletStatusElement(mp.auth_path_aocl.leaf_index, utxo));
                 } else {
@@ -766,12 +766,12 @@ impl WalletState {
         &self,
         lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
         requested_amount: Amount,
-        block: &Block,
+        tip_digest: Digest,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let wallet_status: WalletStatus = self.get_wallet_status_from_lock(lock, block);
+        let wallet_status: WalletStatus = self.get_wallet_status_from_lock(lock, tip_digest);
 
         // First check that we have enough. Otherwise return an error.
         if wallet_status.synced_unspent_amount < requested_amount {
@@ -780,7 +780,7 @@ impl WalletState {
                 "Insufficient synced amount to create transaction. Requested: {:?}, synced unspent amount: {:?}. Unsynced unspent amount: {:?}. Block is: {}",
                 requested_amount,
                 wallet_status.synced_unspent_amount, wallet_status.unsynced_unspent_amount,
-                block.hash.emojihash());
+                tip_digest.emojihash());
         }
 
         let mut ret: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = vec![];
@@ -809,10 +809,10 @@ impl WalletState {
     pub async fn allocate_sufficient_input_funds(
         &self,
         requested_amount: Amount,
-        block: &Block,
+        tip_digest: Digest,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         let mut lock = self.wallet_db.lock().await;
-        self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, block)
+        self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, tip_digest)
     }
 }
 
