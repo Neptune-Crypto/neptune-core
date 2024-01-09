@@ -415,8 +415,12 @@ impl WalletState {
             StrongUtxoKey,
             (MsMembershipProof<Hash>, u64),
         > = HashMap::default();
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let monitored_utxo: MonitoredUtxo = wallet_db_lock.monitored_utxos.get(i);
+        for (i, monitored_utxo) in wallet_db_lock
+            .monitored_utxos
+            .get_all()
+            .into_iter()
+            .enumerate()
+        {
             let utxo_digest = Hash::hash(&monitored_utxo.utxo);
 
             match monitored_utxo.get_membership_proof_for_block(block.header.prev_block_digest) {
@@ -424,7 +428,7 @@ impl WalletState {
                     debug!("Found valid mp for UTXO");
                     let insert_ret = valid_membership_proofs_and_own_utxo_count.insert(
                         StrongUtxoKey::new(utxo_digest, ms_mp.auth_path_aocl.leaf_index),
-                        (ms_mp, i),
+                        (ms_mp, i as u64),
                     );
                     assert!(
                         insert_ret.is_none(),
@@ -494,7 +498,6 @@ impl WalletState {
                 let utxo = addition_record_to_utxo_info[&addition_record].0.clone();
                 let sender_randomness = addition_record_to_utxo_info[&addition_record].1;
                 let receiver_preimage = addition_record_to_utxo_info[&addition_record].2;
-                // TODO: Change this logging to use `Display` for `Amount` once functionality is merged from t-f
                 info!(
                     "Received UTXO in block {}, height {}: value = {}",
                     block.hash.emojihash(),
@@ -545,21 +548,23 @@ impl WalletState {
             msa_state.add(&addition_record);
         }
 
-        // sanity checks
-        let mut mutxo_with_valid_mps = 0;
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let mutxo = wallet_db_lock.monitored_utxos.get(i);
-            if mutxo.is_synced_to(block.header.prev_block_digest)
-                || mutxo.blockhash_to_membership_proof.is_empty()
-            {
-                mutxo_with_valid_mps += 1;
+        // sanity check
+        {
+            let mut mutxo_with_valid_mps = 0;
+            let monitored_utxos_fetched_again = wallet_db_lock.monitored_utxos.get_all();
+            for mutxo in monitored_utxos_fetched_again {
+                if mutxo.is_synced_to(block.header.prev_block_digest)
+                    || mutxo.blockhash_to_membership_proof.is_empty()
+                {
+                    mutxo_with_valid_mps += 1;
+                }
             }
+            assert_eq!(
+                mutxo_with_valid_mps as usize,
+                valid_membership_proofs_and_own_utxo_count.len(),
+                "Monitored UTXO count must match number of managed membership proofs"
+            );
         }
-        assert_eq!(
-            mutxo_with_valid_mps as usize,
-            valid_membership_proofs_and_own_utxo_count.len(),
-            "Monitored UTXO count must match number of managed membership proofs"
-        );
 
         // apply all removal records
         debug!("Block has {} removal records", removal_records.len());
@@ -567,7 +572,7 @@ impl WalletState {
             "Transaction has {} inputs",
             block.body.transaction.kernel.inputs.len()
         );
-        let mut i = 0;
+        let mut block_tx_input_count = 0;
         while let Some(removal_record) = removal_records.pop() {
             let res = MsMembershipProof::batch_update_from_remove(
                 &mut valid_membership_proofs_and_own_utxo_count
@@ -589,8 +594,6 @@ impl WalletState {
             // how do we ensure that we can recover them in case of a fork? For now we maintain
             // them even if the are spent, and then, later, we can add logic to remove these
             // membership proofs of spent UTXOs once they have been spent for M blocks.
-            // let input_utxo = block.body.transaction.kernel.inputs[i].utxo;
-            // if input_utxo.matches_pubkey(my_pub_key) {
             match spent_inputs
                 .iter()
                 .find(|(_, abs_i, _mutxo_list_index)| *abs_i == removal_record.absolute_indices)
@@ -599,7 +602,7 @@ impl WalletState {
                 Some((_spent_utxo, _abs_i, mutxo_list_index)) => {
                     debug!(
                         "Discovered own input at input {}, marking UTXO as spent.",
-                        i
+                        block_tx_input_count
                     );
 
                     let mut spent_mutxo = wallet_db_lock.monitored_utxos.get(*mutxo_list_index);
@@ -615,7 +618,7 @@ impl WalletState {
             }
 
             msa_state.remove(removal_record);
-            i += 1;
+            block_tx_input_count += 1;
         }
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
@@ -629,20 +632,9 @@ impl WalletState {
         changed_mps.dedup();
         debug!("Number of mutated membership proofs: {}", changed_mps.len());
 
-        let num_monitored_utxos_after_block = wallet_db_lock.monitored_utxos.len();
-        let mut num_unspent_utxos = 0;
-        for j in 0..num_monitored_utxos_after_block {
-            if wallet_db_lock
-                .monitored_utxos
-                .get(j)
-                .spent_in_block
-                .is_none()
-            {
-                num_unspent_utxos += 1;
-            }
-        }
-        debug!("Number of unspent UTXOs: {}", num_unspent_utxos);
-
+        // TODO: It would be more efficient to use `get_many` on monitored_utxos
+        // instead of `get` here.
+        let mut batch_mutxo_update_list: Vec<(u64, MonitoredUtxo)> = vec![];
         for (&strong_utxo_key, (updated_ms_mp, own_utxo_index)) in
             valid_membership_proofs_and_own_utxo_count.iter()
         {
@@ -656,9 +648,7 @@ impl WalletState {
                     || msa_state.verify(utxo_digest, updated_ms_mp)
             );
 
-            wallet_db_lock
-                .monitored_utxos
-                .set(*own_utxo_index, monitored_utxo);
+            batch_mutxo_update_list.push((*own_utxo_index, monitored_utxo));
 
             // TODO: What if a newly added transaction replaces a transaction that was in another fork?
             // How do we ensure that this transaction is not counted twice?
@@ -666,6 +656,9 @@ impl WalletState {
             // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
 
+        wallet_db_lock
+            .monitored_utxos
+            .set_many(batch_mutxo_update_list);
         wallet_db_lock.set_sync_label(block.hash);
         wallet_db_lock.persist();
 
