@@ -227,6 +227,7 @@ impl WalletState {
         ret
     }
 
+    /// Return a list of UTXOs spent by this wallet in the transaction
     fn scan_for_spent_utxos(
         &self,
         transaction: &Transaction,
@@ -240,8 +241,8 @@ impl WalletState {
             .collect_vec();
 
         let mut spent_own_utxos = vec![];
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+        let monitored_utxos = wallet_db_lock.monitored_utxos.get_all();
+        for (i, monitored_utxo) in monitored_utxos.into_iter().enumerate() {
             let utxo = monitored_utxo.utxo.clone();
             let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
                 Some(msmp) => msmp.1.compute_indices(Hash::hash(&utxo)),
@@ -249,7 +250,7 @@ impl WalletState {
             };
 
             if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.push((utxo, abs_i, i));
+                spent_own_utxos.push((utxo, abs_i, i as u64));
             }
         }
 
