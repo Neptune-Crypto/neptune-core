@@ -163,7 +163,7 @@ impl UtxoNotificationPool {
         self.len().is_zero()
     }
 
-    /// Scans the transaction for outputs that match with list of expected
+    /// Scan the transaction for outputs that match with list of expected
     /// incoming UTXOs, and returns expected UTXOs that are present in the
     /// transaction.
     /// Returns a list of (addition record, UTXO, sender randomness, receiver_preimage)
