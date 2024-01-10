@@ -788,7 +788,7 @@ mod archival_state_tests {
                 archival_state: Some(archival_state2),
                 light_state: LightState::new(*archival_state1.genesis_block),
             };
-            let some_wallet_secret = WalletSecret::new(random());
+            let some_wallet_secret = WalletSecret::new_random();
             let some_spending_key = some_wallet_secret.nth_generation_spending_key(0);
             let some_receiving_address = some_spending_key.to_address();
 
@@ -1019,7 +1019,7 @@ mod archival_state_tests {
             make_unit_test_archival_state(network).await;
         let mut block_db_lock = archival_state.block_index_db.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
-        let own_wallet = WalletSecret::new(random());
+        let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
 
         // 1. Create new block 1 and store it to the DB
@@ -1442,11 +1442,11 @@ mod archival_state_tests {
         let genesis_state =
             get_mock_global_state(network, 3, Some(genesis_wallet_state.wallet_secret)).await;
 
-        let wallet_secret_alice = WalletSecret::new(random());
+        let wallet_secret_alice = WalletSecret::new_random();
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
         let alice_state = get_mock_global_state(network, 3, Some(wallet_secret_alice)).await;
 
-        let wallet_secret_bob = WalletSecret::new(random());
+        let wallet_secret_bob = WalletSecret::new_random();
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let bob_state = get_mock_global_state(network, 3, Some(wallet_secret_bob)).await;
 
@@ -1878,7 +1878,7 @@ mod archival_state_tests {
         drop(db_lock_0);
 
         // Add a block to archival state and verify that this is returned
-        let own_wallet = WalletSecret::new(random());
+        let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
         let genesis = *archival_state.genesis_block.clone();
         let (mock_block_1, _, _) =
@@ -1925,7 +1925,7 @@ mod archival_state_tests {
         let archival_state = make_test_archival_state(network).await;
 
         let genesis = *archival_state.genesis_block.clone();
-        let own_wallet = WalletSecret::new(random());
+        let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
         let (mock_block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis.clone(), None, own_receiving_address);
@@ -2006,7 +2006,7 @@ mod archival_state_tests {
         );
 
         // Add a fork with genesis as LUCA and verify that correct results are returned
-        let own_wallet = WalletSecret::new(random());
+        let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
         let (mock_block_1_a, _, _) =
             make_mock_block_with_valid_pow(&genesis.clone(), None, own_receiving_address);
@@ -2146,7 +2146,7 @@ mod archival_state_tests {
         );
 
         // Insert a block that is descendant from genesis block and verify that it is canonical
-        let own_wallet = WalletSecret::new(random());
+        let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
         let (mock_block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis.clone(), None, own_receiving_address);
@@ -2490,7 +2490,7 @@ mod archival_state_tests {
     async fn digest_of_ancestors_test() {
         let archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
-        let own_wallet = WalletSecret::new(random());
+        let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
 
         assert!(archival_state
@@ -2589,7 +2589,7 @@ mod archival_state_tests {
     async fn write_block_db_test() -> Result<()> {
         let archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
-        let own_wallet = WalletSecret::new(random());
+        let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
 
         let (mock_block_1, _, _) =

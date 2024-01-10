@@ -497,7 +497,7 @@ mod tests {
             },
             shared::SIZE_20MB_IN_BYTES,
             state::{
-                wallet::{generate_secret_key, utxo_notification_pool::UtxoNotifier, WalletSecret},
+                wallet::{utxo_notification_pool::UtxoNotifier, WalletSecret},
                 UtxoReceiverData,
             },
         },
@@ -638,7 +638,7 @@ mod tests {
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new(generate_secret_key());
+        let other_wallet_secret = WalletSecret::new_random();
         let other_global_state =
             get_mock_global_state(Network::Alpha, 2, Some(other_wallet_secret.clone())).await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);

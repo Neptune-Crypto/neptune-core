@@ -824,7 +824,6 @@ mod tests {
 
     use crate::{
         config_models::network::Network,
-        models::state::wallet::generate_secret_key,
         tests::shared::{get_mock_global_state, make_mock_block},
     };
 
@@ -848,7 +847,7 @@ mod tests {
         // Verify that MUTXO *is* marked as abandoned
 
         let network = Network::Testnet;
-        let own_wallet_secret = WalletSecret::new(generate_secret_key());
+        let own_wallet_secret = WalletSecret::new_random();
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_global_state = get_mock_global_state(network, 0, Some(own_wallet_secret)).await;
         let genesis_block = Block::genesis_block();
@@ -869,7 +868,7 @@ mod tests {
         );
 
         // Add two blocks with no UTXOs for us
-        let other_recipient_address = WalletSecret::new(generate_secret_key())
+        let other_recipient_address = WalletSecret::new_random()
             .nth_generation_spending_key(0)
             .to_address();
         let mut latest_block = genesis_block;

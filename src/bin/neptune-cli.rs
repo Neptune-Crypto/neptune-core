@@ -2,9 +2,13 @@ use anyhow::{bail, Result};
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 
+use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::transaction::amount::Amount;
 use neptune_core::models::state::wallet::address::generation_address;
+use neptune_core::models::state::wallet::WalletSecret;
+use std::io;
+use std::io::Write;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
@@ -55,6 +59,11 @@ enum Command {
     PauseMiner,
     RestartMiner,
     PruneAbandonedMonitoredUtxos,
+
+    /******** WALLET ********/
+    GenerateWallet,
+    ExportSeedPhrase,
+    ImportSeedPhrase,
 }
 
 #[derive(Debug, Parser)]
@@ -75,7 +84,7 @@ struct Config {
 async fn main() -> Result<()> {
     let args: Config = Config::parse();
 
-    // Check for completions command before establishing server connection.
+    // Check for completions command before doing anything else
     if let Command::Completions = args.command {
         if let Some(shell) = Shell::from_env() {
             generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
@@ -85,12 +94,144 @@ async fn main() -> Result<()> {
         }
     }
 
+    // wallet operations do not need a connection to the server
+    let network = Network::Alpha;
+    match args.command {
+        Command::GenerateWallet => {
+            let network = Network::Alpha;
+
+            // The root path is where both the wallet and all databases are stored
+            let data_dir = DataDirectory::get(None, network)?;
+
+            // Get wallet object, create various wallet secret files
+            let wallet_dir = data_dir.wallet_directory_path();
+            DataDirectory::create_dir_if_not_exists(&wallet_dir)?;
+
+            let (wallet_secret, secret_file_paths) =
+                WalletSecret::read_from_file_or_create(&wallet_dir).unwrap();
+
+            println!(
+                "Wallet stored in: {}\nMake sure you also see this path if you run the neptune-core client",
+                secret_file_paths.wallet_secret_path.display()
+            );
+            let spending_key = wallet_secret.nth_generation_spending_key(0);
+            let receiver_address = spending_key.to_address();
+            println!(
+                "Wallet receiver address: {}",
+                receiver_address.to_bech32m(network).unwrap()
+            );
+
+            println!("To display the seed phrase, run `neptune-cli export-seed-phrase`.");
+
+            return Ok(());
+        }
+        Command::ImportSeedPhrase => {
+            // The root path is where both the wallet and all databases are stored
+            let data_dir = DataDirectory::get(None, network)?;
+            let wallet_dir = data_dir.wallet_directory_path();
+            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+
+            // if the wallet file already exists,
+            if wallet_file.exists() {
+                println!(
+                    "Cannot import seed phrase; wallet file {} already exists. Move it to another location (or remove it) to import a seed phrase.",
+                    wallet_file.display()
+                );
+                return Ok(());
+            }
+
+            // read seed phrase from user input
+            println!("Importing seed phrase. Please enter words:");
+            let mut phrase = vec![];
+            let mut i = 1;
+            loop {
+                print!("{}. ", i);
+                io::stdout().flush()?;
+                let mut buffer = "".to_string();
+                std::io::stdin()
+                    .read_line(&mut buffer)
+                    .expect("Cannot accept user input.");
+                let word = buffer.trim();
+                if bip39::Language::English
+                    .wordlist()
+                    .get_words_by_prefix("")
+                    .iter()
+                    .any(|s| *s == word)
+                {
+                    phrase.push(word.to_string());
+                    i += 1;
+                    if i > 18 {
+                        break;
+                    }
+                } else {
+                    println!("Did not recognize word \"{}\"; please try again.", word);
+                }
+            }
+            let wallet_secret = match WalletSecret::from_phrase(&phrase) {
+                Err(_) => {
+                    println!("Invalid seed phrase. Please try again.");
+                    return Ok(());
+                }
+                Ok(ws) => ws,
+            };
+
+            // wallet file does not exist yet, so create it and save
+            println!("Saving wallet to disk at {} ...", wallet_file.display());
+            DataDirectory::create_dir_if_not_exists(&wallet_dir)?;
+            match wallet_secret.save_to_disk(&wallet_file) {
+                Err(e) => {
+                    println!("Could not save imported wallet to disk.");
+                    println!("Error:");
+                    println!("{e}");
+                }
+                Ok(_) => {
+                    println!("Success.");
+                }
+            }
+
+            return Ok(());
+        }
+        Command::ExportSeedPhrase => {
+            // The root path is where both the wallet and all databases are stored
+            let data_dir = DataDirectory::get(None, network)?;
+
+            // Get wallet object, create various wallet secret files
+            let wallet_dir = data_dir.wallet_directory_path();
+            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            if !wallet_file.exists() {
+                println!(
+                    "Cannot export seed phrase because there is no wallet.dat file to export from."
+                );
+                println!("Generate one using `neptune-cli generate-wallet` or `neptune-wallet-gen`, or import a seed phrase using `neptune-cli import-seed-phrase`.");
+                return Ok(());
+            }
+            let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
+                Err(e) => {
+                    println!("Could not export seed phrase.");
+                    println!("Error:");
+                    println!("{e}");
+                    return Ok(());
+                }
+                Ok(result) => result,
+            };
+            for (i, word) in wallet_secret.to_phrase().into_iter().enumerate() {
+                println!("{}. {word}", i + 1);
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    // all other operations need a connection to the server
     let transport = tarpc::serde_transport::tcp::connect(args.server_addr, Json::default);
     let client = RPCClient::new(client::Config::default(), transport.await?).spawn();
     let ctx = context::current();
 
     match args.command {
-        Command::Completions => {} // handled before server connection.
+        Command::Completions => {}
+        Command::GenerateWallet => {}
+        Command::ExportSeedPhrase => {}
+        Command::ImportSeedPhrase => {}
 
         /******** READ STATE ********/
         Command::Network => {

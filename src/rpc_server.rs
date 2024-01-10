@@ -608,10 +608,7 @@ mod rpc_server_tests {
     use super::*;
     use crate::{
         config_models::network::Network,
-        models::{
-            peer::PeerSanctionReason,
-            state::wallet::{generate_secret_key, WalletSecret},
-        },
+        models::{peer::PeerSanctionReason, state::wallet::WalletSecret},
         rpc_server::NeptuneRPCServer,
         tests::shared::{get_mock_global_state, get_test_genesis_setup},
         RPC_CHANNEL_CAPACITY,
@@ -630,8 +627,7 @@ mod rpc_server_tests {
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         let network = Network::Alpha;
-        let state =
-            get_mock_global_state(network, 2, Some(WalletSecret::new(generate_secret_key()))).await;
+        let state = get_mock_global_state(network, 2, Some(WalletSecret::new_random())).await;
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),

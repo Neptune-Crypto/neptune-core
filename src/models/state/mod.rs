@@ -732,7 +732,6 @@ mod global_state_tests {
         tests::shared::{add_block_to_light_state, get_mock_global_state, make_mock_block},
     };
     use num_traits::One;
-    use rand::random;
     use tracing_test::traced_test;
 
     use super::{wallet::WalletSecret, *};
@@ -768,7 +767,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn premine_recipient_can_spend_genesis_block_output() {
         let network = Network::Alpha;
-        let other_wallet = WalletSecret::new(wallet::generate_secret_key());
+        let other_wallet = WalletSecret::new_random();
         let global_state = get_mock_global_state(network, 2, None).await;
         let twenty_amount: Amount = 20.into();
         let twenty_coins = twenty_amount.to_native_coins();
@@ -856,7 +855,7 @@ mod global_state_tests {
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Alpha;
         let global_state = get_mock_global_state(network, 2, None).await;
-        let other_receiver_address = WalletSecret::new(random())
+        let other_receiver_address = WalletSecret::new_random()
             .nth_generation_spending_key(0)
             .to_address();
         let genesis_block = Block::genesis_block();
@@ -932,7 +931,7 @@ mod global_state_tests {
         let network = Network::RegTest;
         let global_state = get_mock_global_state(network, 2, None).await;
 
-        let other_receiver_wallet_secret = WalletSecret::new(random());
+        let other_receiver_wallet_secret = WalletSecret::new_random();
         let other_receiver_address = other_receiver_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
@@ -1068,7 +1067,7 @@ mod global_state_tests {
         assert_eq!(2, wallet_status.synced_unspent.len());
 
         // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
-        let other_wallet_secret = WalletSecret::new(random());
+        let other_wallet_secret = WalletSecret::new_random();
         let other_receiving_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
@@ -1149,7 +1148,7 @@ mod global_state_tests {
         let wallet_secret = global_state.wallet_state.wallet_secret.clone();
         let own_spending_key = wallet_secret.nth_generation_spending_key(0);
         let own_receiving_address = own_spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new(random());
+        let other_wallet_secret = WalletSecret::new_random();
         let other_receiving_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
