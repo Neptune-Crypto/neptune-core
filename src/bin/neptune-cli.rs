@@ -93,18 +93,16 @@ struct Config {
 async fn main() -> Result<()> {
     let args: Config = Config::parse();
 
-    // Check for completions command before doing anything else
-    if let Command::Completions = args.command {
-        if let Some(shell) = Shell::from_env() {
-            generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
-            return Ok(());
-        } else {
-            bail!("Unknown shell.  Shell completions not available.")
-        }
-    }
-
-    // wallet operations do not need a connection to the server
+    // Handle commands that don't require a server
     match args.command {
+        Command::Completions => {
+            if let Some(shell) = Shell::from_env() {
+                generate(shell, &mut Config::command(), "neptune-cli", &mut stdout());
+                return Ok(());
+            } else {
+                bail!("Unknown shell.  Shell completions not available.")
+            }
+        }
         Command::GenerateWallet { network } => {
             // The root path is where both the wallet and all databases are stored
             let data_dir = DataDirectory::get(None, network)?;
