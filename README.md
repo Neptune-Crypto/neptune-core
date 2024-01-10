@@ -9,7 +9,7 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
  - Install curl: `sudo apt install curl`
  - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
  - Source the rust environment: `source "$HOME/.cargo/env"`
- - Install LebelDB: `apt install libleveldb-dev libsnappy-dev cmake` (as root)
+ - Install LebelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
  - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
  - Enter the repository: `cd neptune-core`
  - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM and a minute or two)
