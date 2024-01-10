@@ -441,8 +441,15 @@ impl WalletState {
                     if monitored_utxo.abandoned_at.is_some() {
                         debug!("Monitored UTXO with digest {utxo_digest} was marked as abandoned. Skipping.");
                     } else {
+                        let confirmed_in_block_info = match monitored_utxo.confirmed_in_block {
+                            Some(mutxo_received_in_block) => format!(
+                                "UTXO was received at block height {}.",
+                                mutxo_received_in_block.2
+                            ),
+                            None => String::from("No info about when UTXO was confirmed."),
+                        };
                         warn!(
-                        "Unable to find valid membership proof for UTXO with digest {utxo_digest} at block height {}", block.header.height
+                        "Unable to find valid membership proof for UTXO with digest {utxo_digest}. {confirmed_in_block_info} Current block height is {}", block.header.height
                     );
                     }
                 }
