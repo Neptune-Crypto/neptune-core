@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
-use twenty_first::shared_math::other::random_elements_array;
 use twenty_first::shared_math::x_field_element::XFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -45,11 +44,6 @@ impl Zeroize for SecretKeyMaterial {
     fn zeroize(&mut self) {
         self.0 = XFieldElement::zero();
     }
-}
-
-/// Generate a new secret for test
-pub fn generate_secret_key() -> XFieldElement {
-    XFieldElement::new(random_elements_array())
 }
 
 /// Wallet contains the wallet-related data we want to store in a JSON file,
