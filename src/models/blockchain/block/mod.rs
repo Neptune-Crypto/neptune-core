@@ -478,7 +478,7 @@ mod block_tests {
             .wallet_secret
             .nth_generation_spending_key(0);
         let address = spending_key.to_address();
-        let other_wallet_secret = WalletSecret::new(random());
+        let other_wallet_secret = WalletSecret::new_random();
         let other_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
