@@ -52,7 +52,7 @@ impl Zeroize for SecretKeyMaterial {
 pub struct WalletSecret {
     name: String,
 
-    pub(self) secret_seed: SecretKeyMaterial,
+    secret_seed: SecretKeyMaterial,
     version: u8,
 }
 
@@ -78,7 +78,7 @@ impl WalletSecret {
     }
 
     /// Create new `Wallet` given a `secret` key.
-    pub(self) fn new(secret_seed: SecretKeyMaterial) -> Self {
+    fn new(secret_seed: SecretKeyMaterial) -> Self {
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
             secret_seed,
@@ -301,7 +301,7 @@ impl WalletSecret {
             .iter()
             .flat_map(|bfe| bfe.value().to_le_bytes())
             .collect_vec();
-        debug_assert_eq!(
+        assert_eq!(
             entropy.len(),
             24,
             "Entropy for secret seed does not consist of 24 bytes."
