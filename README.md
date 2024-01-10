@@ -2,17 +2,17 @@
 
 Neptune-core is the reference implementation for the [Neptune](https://neptune.cash/) protocol. The implementation is not complete yet, but already supports many integral components. In particular, alpha-net is live.
 
-## Compiling from Source
+## Installing
 
-### Linux Debian/Ubuntu
+### Compile from Source -- Linux Debian/Ubuntu
 
- - Install curl: `apt install curl`
- - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
- - Source the rust environment: `source $HOME/.cargo/env`
- - Install LebelDB: `apt install libleveldb-dev libsnappy-dev cmake`
+ - Install curl: `apt install curl` (as root)
+ - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
+ - Source the rust environment: `source "$HOME/.cargo/env"`
+ - Install LebelDB: `apt install libleveldb-dev libsnappy-dev cmake` (as root)
  - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
  - Enter the repository: `cd neptune-core`
- - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM)
+ - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM and a minute or two)
 
 ## Running & Connecting
 
