@@ -61,9 +61,18 @@ enum Command {
     PruneAbandonedMonitoredUtxos,
 
     /******** WALLET ********/
-    GenerateWallet,
-    ExportSeedPhrase,
-    ImportSeedPhrase,
+    GenerateWallet {
+        #[clap(long, default_value_t=Network::default())]
+        network: Network,
+    },
+    ExportSeedPhrase {
+        #[clap(long, default_value_t=Network::default())]
+        network: Network,
+    },
+    ImportSeedPhrase {
+        #[clap(long, default_value_t=Network::default())]
+        network: Network,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -95,11 +104,8 @@ async fn main() -> Result<()> {
     }
 
     // wallet operations do not need a connection to the server
-    let network = Network::Alpha;
     match args.command {
-        Command::GenerateWallet => {
-            let network = Network::Alpha;
-
+        Command::GenerateWallet { network } => {
             // The root path is where both the wallet and all databases are stored
             let data_dir = DataDirectory::get(None, network)?;
 
@@ -125,7 +131,7 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ImportSeedPhrase => {
+        Command::ImportSeedPhrase { network } => {
             // The root path is where both the wallet and all databases are stored
             let data_dir = DataDirectory::get(None, network)?;
             let wallet_dir = data_dir.wallet_directory_path();
@@ -191,7 +197,7 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ExportSeedPhrase => {
+        Command::ExportSeedPhrase { network } => {
             // The root path is where both the wallet and all databases are stored
             let data_dir = DataDirectory::get(None, network)?;
 
@@ -229,9 +235,9 @@ async fn main() -> Result<()> {
 
     match args.command {
         Command::Completions => {}
-        Command::GenerateWallet => {}
-        Command::ExportSeedPhrase => {}
-        Command::ImportSeedPhrase => {}
+        Command::GenerateWallet { .. } => {}
+        Command::ExportSeedPhrase { .. } => {}
+        Command::ImportSeedPhrase { .. } => {}
 
         /******** READ STATE ********/
         Command::Network => {
