@@ -6,7 +6,7 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
 
 ### Compile from Source -- Linux Debian/Ubuntu
 
- - Install curl: `apt install curl` (as root)
+ - Install curl: `sudo apt install curl`
  - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
  - Source the rust environment: `source "$HOME/.cargo/env"`
  - Install LebelDB: `apt install libleveldb-dev libsnappy-dev cmake` (as root)
