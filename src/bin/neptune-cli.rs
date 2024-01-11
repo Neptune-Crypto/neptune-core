@@ -143,7 +143,10 @@ async fn main() -> Result<()> {
                 receiver_address.to_bech32m(network).unwrap()
             );
 
-            println!("To display the seed phrase, run `neptune-cli export-seed-phrase`.");
+            println!(
+                "To display the seed phrase, run `{} export-seed-phrase`.",
+                std::env::args().next().unwrap()
+            );
 
             return Ok(());
         }
