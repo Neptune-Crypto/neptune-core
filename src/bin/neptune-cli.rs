@@ -65,6 +65,10 @@ enum Command {
         #[clap(long, default_value_t=Network::default())]
         network: Network,
     },
+    WhichWallet {
+        #[clap(long, default_value_t=Network::default())]
+        network: Network,
+    },
     ExportSeedPhrase {
         #[clap(long, default_value_t=Network::default())]
         network: Network,
@@ -102,6 +106,20 @@ async fn main() -> Result<()> {
             } else {
                 bail!("Unknown shell.  Shell completions not available.")
             }
+        }
+        Command::WhichWallet { network } => {
+            // The root path is where both the wallet and all databases are stored
+            let data_dir = DataDirectory::get(None, network)?;
+
+            // Get wallet object, create various wallet secret files
+            let wallet_dir = data_dir.wallet_directory_path();
+            let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
+            if !wallet_file.exists() {
+                println!("No wallet file found at {}.", wallet_file.display());
+            } else {
+                println!("{}", wallet_file.display());
+            }
+            return Ok(());
         }
         Command::GenerateWallet { network } => {
             // The root path is where both the wallet and all databases are stored
@@ -232,10 +250,11 @@ async fn main() -> Result<()> {
     let ctx = context::current();
 
     match args.command {
-        Command::Completions => {}
-        Command::GenerateWallet { .. } => {}
-        Command::ExportSeedPhrase { .. } => {}
-        Command::ImportSeedPhrase { .. } => {}
+        Command::Completions
+        | Command::GenerateWallet { .. }
+        | Command::WhichWallet { .. }
+        | Command::ExportSeedPhrase { .. }
+        | Command::ImportSeedPhrase { .. } => unreachable!("Case should be handled earlier."),
 
         /******** READ STATE ********/
         Command::Network => {
