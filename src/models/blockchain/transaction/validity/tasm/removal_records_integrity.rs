@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use field_count::FieldCount;
 use get_size::GetSize;
@@ -6,7 +6,7 @@ use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
 use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
-use tasm_lib::ram_builder::RamBuilder;
+use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::{
@@ -132,14 +132,30 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                 Ok(())
             }
             ClaimSupport::SecretWitness(witness, _program) => {
+                let removal_record_integrity_witness =
+                    *RemovalRecordsIntegrityWitness::decode(witness)
+                        .expect("Provided witness is not a removal records integrity witness ...");
                 debug!(
                     "program digest: ({})\nclaimed digest: ({})",
                     Hash::hash_varlen(&Self::program().encode()),
                     self.supported_claim.claim.program_digest
                 );
-                let mut ram_builder = RamBuilder::start();
-                let _pointer = ram_builder.load(witness);
-                let nondeterminism = NonDeterminism::new(vec![]).with_ram(ram_builder.finish());
+                let mut memory = HashMap::default();
+                encode_to_memory(
+                    &mut memory,
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    removal_record_integrity_witness,
+                );
+                let nondeterminism = NonDeterminism::default().with_ram(memory);
+
+                // Run program before proving
+                Self::program()
+                    .run(
+                        self.supported_claim.claim.public_input().into(),
+                        nondeterminism.clone(),
+                    )
+                    .expect("Program execution prior to proving must succeed");
+
                 let proof = triton_vm::prove(
                     StarkParameters::default(),
                     &self.supported_claim.claim,
@@ -175,11 +191,16 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                 //     self.supported_claim.claim.input.clone().into(),
                 //     witness.clone().into(),
                 // );
-                let mut ram_builder = RamBuilder::start();
-                let _pointer = ram_builder.load(&removal_record_integrity_witness);
+                let mut memory = HashMap::default();
+                encode_to_memory(
+                    &mut memory,
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                    removal_record_integrity_witness,
+                );
+                let nondeterminism = NonDeterminism::default().with_ram(memory);
                 let vm_result = Self::program().run(
                     PublicInput::new(self.supported_claim.claim.input.clone()),
-                    NonDeterminism::new(vec![]).with_ram(ram_builder.finish()),
+                    nondeterminism,
                 );
                 match vm_result {
                     Ok(observed_output) => {
@@ -224,45 +245,63 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
 
         // 1. read and process witness data
-        let memory_length = nondeterminism.ram.len() as u64;
-        let memory_vector = (1u64..memory_length)
-            .map(BFieldElement::new)
-            .map(|b| *nondeterminism.ram.get(&b).unwrap_or(&BFieldElement::new(0)))
-            .collect_vec();
-        let witness = *RemovalRecordsIntegrityWitness::decode(&memory_vector).unwrap();
+        let removal_record_integrity_witness = *RemovalRecordsIntegrityWitness::decode_from_memory(
+            &nondeterminism.ram,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+        )
+        .unwrap();
 
-        println!("first element of witness: {}", witness.encode()[0]);
-        println!("first element of kernel: {}", witness.kernel.encode()[0]);
+        println!(
+            "first element of witness: {}",
+            removal_record_integrity_witness.encode()[0]
+        );
+        println!(
+            "first element of kernel: {}",
+            removal_record_integrity_witness.kernel.encode()[0]
+        );
 
         // 2. assert that the kernel from the witness matches the hash in the public input
         // now we can trust all data in kernel
         assert_eq!(
             hash_of_kernel,
-            witness.kernel.mast_hash(),
+            removal_record_integrity_witness.kernel.mast_hash(),
             "hash of kernel ({})\nwitness kernel ({})",
             hash_of_kernel,
-            witness.kernel.mast_hash()
+            removal_record_integrity_witness.kernel.mast_hash()
         );
 
         // 3. assert that the mutator set's MMRs in the witness match the kernel
         // now we can trust all data in these MMRs as well
         let mutator_set_hash = Hash::hash_pair(
-            Hash::hash_pair(witness.aocl.bag_peaks(), witness.swbfi.bag_peaks()),
-            Hash::hash_pair(witness.swbfa_hash, Digest::default()),
+            Hash::hash_pair(
+                removal_record_integrity_witness.aocl.bag_peaks(),
+                removal_record_integrity_witness.swbfi.bag_peaks(),
+            ),
+            Hash::hash_pair(
+                removal_record_integrity_witness.swbfa_hash,
+                Digest::default(),
+            ),
         );
-        assert_eq!(witness.kernel.mutator_set_hash, mutator_set_hash);
+        assert_eq!(
+            removal_record_integrity_witness.kernel.mutator_set_hash,
+            mutator_set_hash
+        );
 
         // 4. derive index sets from inputs and match them against those listed in the kernel
         // How do we trust input UTXOs?
         // Because they generate removal records, and we can match
         // those against the removal records that are listed in the
         // kernel.
-        let items = witness.input_utxos.iter().map(Hash::hash).collect_vec();
+        let items = removal_record_integrity_witness
+            .input_utxos
+            .iter()
+            .map(Hash::hash)
+            .collect_vec();
 
         // test that removal records listed in kernel match those derived from input utxos
         let digests_of_derived_index_lists = items
             .iter()
-            .zip(witness.membership_proofs.iter())
+            .zip(removal_record_integrity_witness.membership_proofs.iter())
             .map(|(&item, msmp)| {
                 AbsoluteIndexSet::new(&get_swbf_indices::<Hash>(
                     item,
@@ -274,7 +313,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             })
             .map(|x| Hash::hash_varlen(&x))
             .collect::<HashSet<_>>();
-        let digests_of_claimed_index_lists = witness
+        let digests_of_claimed_index_lists = removal_record_integrity_witness
             .kernel
             .inputs
             .iter()
@@ -289,7 +328,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         // 5. verify that all input utxos (mutator set items) live in the AOCL
         assert!(items
             .into_iter()
-            .zip(witness.membership_proofs.iter())
+            .zip(removal_record_integrity_witness.membership_proofs.iter())
             .map(|(item, msmp)| {
                 (
                     commit::<Hash>(
@@ -302,9 +341,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             })
             .all(|(cc, mp)| {
                 mp.verify(
-                    &witness.aocl.get_peaks(),
+                    &removal_record_integrity_witness.aocl.get_peaks(),
                     cc.canonical_commitment,
-                    witness.aocl.count_leaves(),
+                    removal_record_integrity_witness.aocl.count_leaves(),
                 )
                 .0
             }));
@@ -376,7 +415,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let code = triton_asm! {
 
         // 1. Witness was already loaded into memory, just point to it
-        push 1 // _ *witness
+        push {FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS} // _ *witness
 
         // 2. assert that witness kernel hash == public input
         dup 0                               // _ *witness *witness
@@ -672,10 +711,12 @@ mod tests {
                 .join(";")
         );
 
-        // assert!(triton_vm::vm::run(&program, stdin, secret_in).is_ok());
-        let mut ram_builder = RamBuilder::start();
-        let _pointer = ram_builder.load(&removal_record_integrity_witness);
-        let memory = ram_builder.finish();
+        let mut memory = HashMap::default();
+        encode_to_memory(
+            &mut memory,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            removal_record_integrity_witness,
+        );
         let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
         let run_res = program.run(PublicInput::new(stdin.clone()), nondeterminism.clone());
         match run_res {
@@ -714,12 +755,20 @@ mod tests {
         seed[0] = 0xa0;
         seed[1] = 0xf1;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let mut ram_builder = RamBuilder::start();
-        let witness = pseudorandom_removal_record_integrity_witness(rng.gen());
-        let _pointer = ram_builder.load(&witness);
-        let memory = ram_builder.finish();
+        let removal_record_integrity_witness =
+            pseudorandom_removal_record_integrity_witness(rng.gen());
+        let mut memory = HashMap::default();
+        encode_to_memory(
+            &mut memory,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            removal_record_integrity_witness.clone(),
+        );
         let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
-        let kernel_hash = witness.kernel.mast_hash().reversed().values();
+        let kernel_hash = removal_record_integrity_witness
+            .kernel
+            .mast_hash()
+            .reversed()
+            .values();
         let public_input = PublicInput::new(kernel_hash.to_vec());
 
         test_rust_shadow::<RemovalRecordsIntegrity>(&public_input, &nondeterminism);
@@ -728,8 +777,13 @@ mod tests {
 
 #[cfg(test)]
 mod bench {
+    use std::collections::HashMap;
+
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use tasm_lib::{ram_builder::RamBuilder, snippet_bencher::BenchmarkCase};
+    use tasm_lib::{
+        memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
+        snippet_bencher::BenchmarkCase,
+    };
     use triton_vm::{BFieldElement, NonDeterminism, PublicInput};
 
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
@@ -753,11 +807,13 @@ mod bench {
             .values()
             .to_vec();
         let public_input = PublicInput::new(stdin);
-
-        let mut ram_builder = RamBuilder::start();
-        let _pointer = ram_builder.load(&removal_record_integrity_witness);
-        let memory = ram_builder.finish();
-        let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
+        let mut memory = HashMap::default();
+        encode_to_memory(
+            &mut memory,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            removal_record_integrity_witness,
+        );
+        let nondeterminism = NonDeterminism::default().with_ram(memory);
 
         bench_and_profile_program::<RemovalRecordsIntegrity>(
             "tasm_neptune_transaction_removal_records_integrity".to_string(),
