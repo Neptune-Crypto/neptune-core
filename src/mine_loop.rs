@@ -14,7 +14,7 @@ use crate::models::channel::*;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
 use crate::models::state::wallet::WalletSecret;
-use crate::models::state::GlobalState;
+use crate::models::state::{GlobalState, GlobalStateLock};
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use anyhow::{Context, Result};
@@ -24,6 +24,7 @@ use rand::rngs::StdRng;
 use rand::thread_rng;
 use rand::Rng;
 use rand::SeedableRng;
+use std::ops::Deref;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
@@ -102,7 +103,7 @@ async fn mine_block(
     mut block_header: BlockHeader,
     block_body: BlockBody,
     sender: oneshot::Sender<NewBlockFound>,
-    state: GlobalState,
+    global_state_lock: GlobalStateLock,
     coinbase_utxo_info: ExpectedUtxo,
     difficulty: U32s<5>,
 ) {
@@ -121,7 +122,7 @@ async fn mine_block(
 
     // Mining takes place here
     while Hash::hash(&block_header) >= threshold {
-        if !state.cli.unrestricted_mining {
+        if !global_state_lock.lock(|s| s.cli.unrestricted_mining).await {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
@@ -138,7 +139,7 @@ async fn mine_block(
         }
 
         // Don't mine if we are syncing (but don't check too often)
-        if counter % 100 == 0 && state.net.syncing.read().unwrap().to_owned() {
+        if counter % 100 == 0 && global_state_lock.lock(|s| s.net.syncing).await {
             return;
         } else {
             counter += 1;
@@ -236,12 +237,12 @@ fn make_coinbase_transaction(
 /// "sender randomness" used in the coinbase transaction.
 fn create_block_transaction(
     latest_block: &Block,
-    state: &GlobalState,
+    global_state: &GlobalState,
 ) -> (Transaction, ExpectedUtxo) {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
     // Get most valuable transactions from mempool
-    let transactions_to_include = state
+    let transactions_to_include = global_state
         .mempool
         .get_transactions_for_block(block_capacity_for_transactions);
 
@@ -250,7 +251,7 @@ fn create_block_transaction(
         .iter()
         .fold(Amount::zero(), |acc, tx| acc + tx.kernel.fee);
 
-    let coinbase_recipient_spending_key = state
+    let coinbase_recipient_spending_key = global_state
         .wallet_state
         .wallet_secret
         .nth_generation_spending_key(0);
@@ -264,7 +265,7 @@ fn create_block_transaction(
     let (coinbase_transaction, coinbase_sender_randomness) = make_coinbase_transaction(
         &coinbase_utxo,
         receiving_address.privacy_digest,
-        &state.wallet_state.wallet_secret,
+        &global_state.wallet_state.wallet_secret,
         next_block_height,
         latest_block.body.next_mutator_set_accumulator.clone(),
     );
@@ -295,11 +296,13 @@ fn create_block_transaction(
     (merged_transaction, utxo_info_for_coinbase)
 }
 
+/// Locking:
+///   * acquires `global_state_lock` for write
 pub async fn mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut latest_block: Block,
-    state: GlobalState,
+    global_state_lock: GlobalStateLock,
 ) -> Result<()> {
     // Wait before starting mining thread to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
@@ -310,29 +313,37 @@ pub async fn mine(
     let mut pause_mine = false;
     loop {
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
-        let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
-            info!("Not mining because we are syncing");
-            *state.mining.write().unwrap() = false;
-            None
-        } else if pause_mine {
-            info!("Not mining because mining was paused");
-            *state.mining.write().unwrap() = false;
-            None
-        } else {
-            // Build the block template and spawn the worker thread to mine on it
-            let (transaction, coinbase_utxo_info) = create_block_transaction(&latest_block, &state);
-            let (block_header, block_body) = make_block_template(&latest_block, transaction);
-            let miner_task = mine_block(
-                block_header,
-                block_body,
-                worker_thread_tx,
-                state.clone(),
-                coinbase_utxo_info,
-                latest_block.header.difficulty,
-            );
-            *state.mining.write().unwrap() = true;
-            Some(tokio::spawn(miner_task))
-        };
+        let miner_thread: Option<JoinHandle<()>> =
+            if global_state_lock.lock(|s| s.net.syncing).await {
+                info!("Not mining because we are syncing");
+                global_state_lock.set_mining(false).await;
+                None
+            } else if pause_mine {
+                info!("Not mining because mining was paused");
+                global_state_lock.set_mining(false).await;
+                None
+            } else {
+                // Build the block template and spawn the worker thread to mine on it
+                let (transaction, coinbase_utxo_info) = create_block_transaction(
+                    &latest_block,
+                    global_state_lock.lock_guard().await.deref(),
+                );
+                let (block_header, block_body) = make_block_template(&latest_block, transaction);
+                let miner_task = mine_block(
+                    block_header,
+                    block_body,
+                    worker_thread_tx,
+                    global_state_lock.clone(),
+                    coinbase_utxo_info,
+                    latest_block.header.difficulty,
+                );
+                global_state_lock.set_mining(true).await;
+                Some(
+                    tokio::task::Builder::new()
+                        .name("mine_block")
+                        .spawn(miner_task)?,
+                )
+            };
 
         // Await a message from either the worker thread or from the main loop
         select! {
@@ -358,7 +369,7 @@ pub async fn mine(
                             mt.abort();
                         }
                         latest_block = *block;
-                        info!("Miner thread received {} block height {}", state.cli.network, latest_block.header.height);
+                        info!("Miner thread received {} block height {}", global_state_lock.lock(|s| s.cli.network).await, latest_block.header.height);
                     }
                     MainToMiner::Empty => (),
                     MainToMiner::ReadyToMineNextBlock => {
@@ -402,7 +413,7 @@ pub async fn mine(
                 // if it is not.
                 assert!(new_block_info.block.is_valid(&latest_block), "Own mined block must be valid. Failed validity check after successful PoW check.");
 
-                info!("Found new {} block with block height {}. Hash: {}", state.cli.network, new_block_info.block.header.height, new_block_info.block.hash.emojihash());
+                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.lock(|s| s.cli.network).await, new_block_info.block.header.height, new_block_info.block.hash.emojihash());
 
                 latest_block = *new_block_info.block.to_owned();
                 to_main.send(MinerToMain::NewBlockFound(new_block_info)).await?;
@@ -444,7 +455,10 @@ mod mine_loop_tests {
     #[tokio::test]
     async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
-        let premine_receiver_global_state = get_mock_global_state(Network::Alpha, 2, None).await;
+        let premine_receiver_global_state_lock =
+            get_mock_global_state(Network::Alpha, 2, None).await;
+        let mut premine_receiver_global_state =
+            premine_receiver_global_state_lock.lock_guard_mut().await;
         assert!(
             premine_receiver_global_state.mempool.is_empty(),
             "Mempool must be empty at startup"

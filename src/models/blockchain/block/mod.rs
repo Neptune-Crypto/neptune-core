@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 
 use tracing::{debug, warn};
+
+use twenty_first::amount::u32s::U32s;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::{amount::u32s::U32s, shared_math::digest::Digest};
 
 pub mod block_body;
 pub mod block_header;
@@ -61,6 +62,28 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
+    #[inline]
+    pub fn hash(&self) -> Digest {
+        self.hash
+    }
+
+    #[inline]
+    pub fn header(&self) -> &BlockHeader {
+        &self.header
+    }
+
+    #[inline]
+    pub fn body(&self) -> &BlockBody {
+        &self.body
+    }
+
+    #[inline]
+    pub fn set_block(&mut self, block: Block) {
+        self.hash = block.hash;
+        self.header = block.header;
+        self.body = block.body;
+    }
+
     pub fn get_mining_reward(block_height: BlockHeight) -> Amount {
         let mut reward: Amount = Amount(U32s::new([100, 0, 0, 0]));
         let generation = block_height.get_generation();
@@ -472,8 +495,10 @@ mod block_tests {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let network = Network::Alpha;
-        let global_state = get_mock_global_state(network, 2, None).await;
-        let spending_key = global_state
+        let global_state_lock = get_mock_global_state(network, 2, None).await;
+        let spending_key = global_state_lock
+            .lock_guard()
+            .await
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -499,7 +524,9 @@ mod block_tests {
             sender_randomness: random(),
             utxo: new_utxo,
         };
-        let new_tx = global_state
+        let new_tx = global_state_lock
+            .lock_guard_mut()
+            .await
             .create_transaction(vec![reciever_data], 1.into())
             .await
             .unwrap();

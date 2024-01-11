@@ -1,14 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::storage_vec::StorageVec;
-
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::util_types::storage_vec::traits::*;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
@@ -73,9 +72,8 @@ where
 
     fn remove(&mut self, removal_record: &RemovalRecord<H>) {
         let new_chunks: HashMap<u64, Chunk> = self.kernel.remove_helper(removal_record);
-        for (chunk_index, chunk) in new_chunks {
-            self.chunks.set(chunk_index, chunk);
-        }
+        // note: set_many() is atomic.
+        self.chunks.set_many(new_chunks);
     }
 
     fn hash(&self) -> Digest {
@@ -93,9 +91,8 @@ where
             .kernel
             .batch_remove(removal_records, preserved_membership_proofs);
 
-        for (chnk_idx, new_chunk_value) in chunk_index_to_chunk_mutation {
-            self.chunks.set(chnk_idx, new_chunk_value);
-        }
+        // note: set_many() is atomic.
+        self.chunks.set_many(chunk_index_to_chunk_mutation)
     }
 }
 
@@ -208,18 +205,17 @@ where
         let batch_index = self.kernel.get_batch_index();
         let window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
-        let chunk_indices: HashSet<u64> = swbf_indices
+        let chunk_indices: BTreeSet<u64> = swbf_indices
             .iter()
             .filter(|bi| **bi < window_start)
             .map(|bi| (*bi / CHUNK_SIZE as u128) as u64)
             .collect();
         let mut target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
-        for chunk_index in chunk_indices {
+        for (chunk_index, chunk) in self.chunks.many_iter(chunk_indices) {
             assert!(
                 self.chunks.len() > chunk_index,
                 "Chunks must be known if its authentication path is known."
             );
-            let chunk = self.chunks.get(chunk_index);
             let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<H> =
                 self.kernel.swbf_inactive.prove_membership(chunk_index).0;
             target_chunks
@@ -267,12 +263,13 @@ where
             let previous_chunk = self.chunks.get(chunk_index);
             let mut new_chunk = previous_chunk;
             new_chunk.subtract(revert_chunk.clone());
-            self.chunks.set(chunk_index, new_chunk.clone());
 
             // update archival mmr
             self.kernel
                 .swbf_inactive
                 .mutate_leaf_raw(chunk_index, H::hash(&new_chunk));
+
+            self.chunks.set(chunk_index, new_chunk);
         }
     }
 

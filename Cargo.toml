@@ -32,7 +32,6 @@ num-traits = "0"
 priority-queue = "1"
 rand = "0.8"
 ratatui = "0.23"
-rs-leveldb = "0.1.5"
 semver = "^1.0.21"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
@@ -87,3 +86,7 @@ opt-level = 0
 # incremental = true
 # codegen-units = 256
 # rpath = false
+
+[patch.crates-io]
+# needed for now.
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "d4ee75bf0b1f7f0ae2b04968b15638899e6f36d4" }

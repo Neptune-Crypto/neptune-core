@@ -1,13 +1,10 @@
+use twenty_first::storage::level_db::DB;
+use twenty_first::storage::storage_schema::{
+    traits::*, DbtSingleton, DbtVec, RustyKey, SimpleRustyStorage,
+};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
-    storage::level_db::DB,
-    util_types::{
-        algebraic_hasher::AlgebraicHasher,
-        mmr::archival_mmr::ArchivalMmr,
-        storage_schema::{
-            DbtSingleton, DbtVec, RustyKey, SimpleRustyStorage, StorageSingleton, StorageWriter,
-        },
-    },
+    util_types::{algebraic_hasher::AlgebraicHasher, mmr::archival_mmr::ArchivalMmr},
 };
 
 use super::{
@@ -28,8 +25,12 @@ where
 }
 
 impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
-    pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
-        let mut storage = SimpleRustyStorage::new(db);
+    pub fn connect(db: DB) -> Self {
+        let mut storage = SimpleRustyStorage::new_with_callback(
+            db,
+            "RustyArchivalMutatorSet-Schema",
+            crate::LOG_LOCK_EVENT_CB,
+        );
 
         let aocl = storage.schema.new_vec::<Digest>("aocl");
         let swbfi = storage.schema.new_vec::<Digest>("swbfi");
@@ -92,7 +93,6 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet
 mod tests {
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
     use itertools::Itertools;
-    use rand::distributions::{Alphanumeric, DistString};
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
@@ -104,22 +104,16 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn persist_test() {
+    #[tokio::test]
+    async fn persist_test() {
         type H = Tip5;
 
         let num_additions = 150 + 2 * BATCH_SIZE as usize;
         let num_removals = 50usize;
         let mut rng = thread_rng();
 
-        let db_path = std::env::temp_dir().join(format!(
-            "test-db-{}",
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 10)
-        ));
-        let db = twenty_first::storage::level_db::DB::open_test_database(
-            &db_path, false, None, None, None,
-        )
-        .unwrap();
+        let db = DB::open_new_test_database(false, None, None, None).unwrap();
+        let db_path = db.path().clone();
         let mut rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(db);
         println!("Connected to database");
@@ -202,13 +196,11 @@ mod tests {
 
         let active_window_before = rusty_mutator_set.ams.kernel.swbf_active.clone();
 
-        drop(rusty_mutator_set);
+        drop(rusty_mutator_set); // Drop DB
 
         // new database
-        let new_db = twenty_first::storage::level_db::DB::open_test_database(
-            &db_path, true, None, None, None,
-        )
-        .unwrap();
+        let new_db = DB::open_test_database(&db_path, true, None, None, None)
+            .expect("should open existing database");
         let mut new_rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(new_db);
         new_rusty_mutator_set.restore_or_new();

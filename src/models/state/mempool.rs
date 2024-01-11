@@ -7,19 +7,14 @@
 //! `queue` maintains transactions id's ordered by 'fee density'. Usually, we
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
-//!
-//! The `Mempool` type is a thread-safe wrapper around `MempoolInternal`, and
-//! all interaction should go through the wrapper.
 
 use bytesize::ByteSize;
 use get_size::GetSize;
 use num_traits::Zero;
 use priority_queue::{double_priority_queue::iterators::IntoSortedIter, DoublePriorityQueue};
-use std::sync::RwLock as StdRwLock;
 use std::{
     collections::{hash_map::RandomState, HashMap, HashSet},
     iter::Rev,
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use twenty_first::shared_math::digest::Digest;
@@ -62,155 +57,8 @@ fn now() -> Duration {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }
 
-#[derive(Debug, Clone)]
-pub struct Mempool {
-    pub internal: Arc<StdRwLock<MempoolInternal>>,
-}
-
-impl Mempool {
-    pub fn new(max_total_size: ByteSize) -> Self {
-        let mempool_internal = MempoolInternal::new(max_total_size);
-        let internal = Arc::new(StdRwLock::new(mempool_internal));
-        Mempool { internal }
-    }
-
-    pub fn get_size(&self) -> usize {
-        self.internal.get_size()
-    }
-
-    /// Computes in O(1) from HashMap
-    pub fn contains(&self, transaction_id: Digest) -> bool {
-        let lock = self.internal.read().unwrap();
-        lock.contains(transaction_id)
-    }
-
-    /// Computes in O(1) from HashMap
-    pub fn get(&self, transaction_id: Digest) -> Option<Transaction> {
-        let lock = self.internal.read().unwrap();
-        lock.get(transaction_id).cloned()
-    }
-
-    /// Returns `None` if transaction was not already in the mempool and did
-    /// not conflict with other transactions. Otherwise returns `Some(Digest)`.
-    pub fn insert(&self, transaction: &Transaction) -> Option<Digest> {
-        let mut lock = self.internal.write().unwrap();
-        lock.insert(transaction)
-    }
-
-    /// The operation is performed in Ο(log(N)) time (worst case).
-    /// Computes in θ(lg N)
-    pub fn remove(&self, transaction_id: Digest) -> Option<Transaction> {
-        let mut lock = self.internal.write().unwrap();
-        lock.remove(transaction_id)
-    }
-
-    /// Return the number of transactions currently stored in the Mempool.
-    /// Computes in O(1)
-    pub fn len(&self) -> usize {
-        let lock = self.internal.read().unwrap();
-        lock.len()
-    }
-
-    /// Computes in O(1)
-    pub fn is_empty(&self) -> bool {
-        let lock = self.internal.read().unwrap();
-        lock.is_empty()
-    }
-
-    /// Return a vector with copies of the transactions, in descending order, with
-    /// the highest fee density not using more than `remaining_storage` bytes.
-    /// Typically a block is about 0MB, meaning that the return value of this function is also less than 1MB.
-    pub fn get_transactions_for_block(&self, remaining_storage: usize) -> Vec<Transaction> {
-        let lock = self.internal.read().unwrap();
-        lock.get_transactions_for_block(remaining_storage)
-    }
-
-    /// Prune based on `Transaction.timestamp`
-    /// Computes in O(n)
-    pub fn prune_stale_transactions(&self) {
-        let mut lock = self.internal.write().unwrap();
-        lock.prune_stale_transactions()
-    }
-
-    /// Remove any transaction from the mempool that are invalid due to the latest block
-    /// containing a new transaction.
-    pub fn update_with_block(
-        &self,
-        block: &Block,
-        lock: &mut std::sync::RwLockWriteGuard<MempoolInternal>,
-    ) {
-        lock.update_with_block(block)
-    }
-
-    /// Shrink the memory pool to the value of its `max_size` field.
-    /// Likely computes in O(n)
-    pub fn shrink_to_max_size(&self) {
-        let mut lock = self.internal.write().unwrap();
-        lock.shrink_to_max_size()
-    }
-
-    /// Shrinks internal data structures as much as possible.
-    /// Computes in O(n) (Likely)
-    pub fn shrink_to_fit(&self) {
-        let mut lock = self.internal.write().unwrap();
-        lock.shrink_to_fit()
-    }
-
-    /// Produce a sorted iterator over a snapshot of the Double-Ended Priority Queue.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use neptune_core::models::state::mempool::Mempool;
-    /// use bytesize::ByteSize;
-    ///
-    /// let mempool = Mempool::new(ByteSize::gb(1));
-    /// // insert transactions here.
-    /// let mut most_valuable_transactions = vec![];
-    /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
-    ///    let t = mempool.get(transaction_digest);
-    ///    most_valuable_transactions.push(t);
-    /// }
-    /// ```
-    ///
-    /// Yields the `transaction_digest` in order of descending `fee_density`, since
-    /// users (miner or transaction merger) will likely only care about the most valuable transactions
-    /// Computes in O(N lg N)
-    pub fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
-        let lock = self.internal.read().unwrap();
-        lock.get_sorted_iter()
-    }
-}
-
-#[allow(rustdoc::invalid_codeblock_attributes)]
-/// The fundamental data type in this module.
-///
-/// # Example
-///
-/// ```norun
-/// // Instantiate Mempool, insert and get a transaction.
-/// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
-/// use neptune_core::models::state::mempool::Mempool;
-/// use byte_size::ByteSize;
-/// use twenty_first::{shared_math::b_field_element::BFieldElement, amount::u32s::U32s};
-///
-/// let mempool = Mempool::new(ByteSize::gb(1));
-/// let timestamp = BFieldElement::new(0);
-/// let transaction = Transaction {
-///     inputs: vec![],
-///     outputs: vec![],
-///     public_scripts: vec![],
-///     fee: U32s::from(0u32),
-///     timestamp,
-///     authority_proof: None,
-/// };
-/// mempool.insert(&transaction);
-/// let transaction_digest = transaction.neptune_hash();
-/// let stored_transaction = mempool.get(&transaction_digest).unwrap();
-/// assert_eq!(transaction, stored_transaction)
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
-pub struct MempoolInternal {
+pub struct Mempool {
     max_total_size: usize,
     // Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
@@ -219,8 +67,9 @@ pub struct MempoolInternal {
     queue: DoublePriorityQueue<Digest, FeeDensity>,
 }
 
-impl MempoolInternal {
-    fn new(max_total_size: ByteSize) -> Self {
+impl Mempool {
+    /// instantiate a new `Mempool`
+    pub fn new(max_total_size: ByteSize) -> Self {
         let table = Default::default();
         let queue = Default::default();
         let max_total_size = max_total_size.0.try_into().unwrap();
@@ -231,11 +80,17 @@ impl MempoolInternal {
         }
     }
 
-    fn contains(&self, transaction_id: Digest) -> bool {
+    /// check if transaction exists in mempool
+    ///
+    /// Computes in O(1) from HashMap
+    pub fn contains(&self, transaction_id: Digest) -> bool {
         self.tx_dictionary.contains_key(&transaction_id)
     }
 
-    fn get(&self, transaction_id: Digest) -> Option<&Transaction> {
+    /// get transaction from mempool
+    ///
+    /// Computes in O(1) from HashMap
+    pub fn get(&self, transaction_id: Digest) -> Option<&Transaction> {
         self.tx_dictionary.get(&transaction_id)
     }
 
@@ -266,7 +121,7 @@ impl MempoolInternal {
 
     /// Insert a transaction into the mempool. It is the caller's responsibility to verify
     /// that the transaction is valid and confirmable.
-    fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
+    pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         {
             // Early exit on transactions too long into the future.
             let horizon =
@@ -314,7 +169,8 @@ impl MempoolInternal {
         None
     }
 
-    fn remove(&mut self, transaction_id: Digest) -> Option<Transaction> {
+    /// remove a transaction from the `Mempool`
+    pub fn remove(&mut self, transaction_id: Digest) -> Option<Transaction> {
         if let rv @ Some(_) = self.tx_dictionary.remove(&transaction_id) {
             self.queue.remove(&transaction_id);
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -324,15 +180,23 @@ impl MempoolInternal {
         None
     }
 
-    fn len(&self) -> usize {
+    /// Return the number of transactions currently stored in the Mempool.
+    /// Computes in O(1)
+    pub fn len(&self) -> usize {
         self.tx_dictionary.len()
     }
 
-    fn is_empty(&self) -> bool {
+    /// check if `Mempool` is empty
+    ///
+    /// Computes in O(1)
+    pub fn is_empty(&self) -> bool {
         self.tx_dictionary.is_empty()
     }
 
-    fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
+    /// Return a vector with copies of the transactions, in descending order, with
+    /// the highest fee density not using more than `remaining_storage` bytes.
+    /// Typically a block is about 0MB, meaning that the return value of this function is also less than 1MB.
+    pub fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
         let mut transactions = vec![];
         let mut _fee_acc = Amount::zero();
 
@@ -363,7 +227,7 @@ impl MempoolInternal {
 
     /// Computes in θ(lg N)
     #[allow(dead_code)]
-    fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
+    pub fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
             let transaction = self.tx_dictionary.remove(&transaction_digest).unwrap();
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -374,7 +238,7 @@ impl MempoolInternal {
     }
 
     /// Computes in θ(lg N)
-    fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
+    pub fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
             let transaction = self.tx_dictionary.remove(&transaction_digest).unwrap();
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -384,10 +248,10 @@ impl MempoolInternal {
         }
     }
 
-    /// Modelled after [HashMap::retain][HashMap::retain]
-    /// [HashMap::retain]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.retain
+    /// Modelled after [HashMap::retain](std::collections::HashMap::retain())
+    ///
     /// Computes in O(capacity) >= O(N)
-    fn retain<F>(&mut self, mut predicate: F)
+    pub fn retain<F>(&mut self, mut predicate: F)
     where
         F: FnMut(LookupItem) -> bool,
     {
@@ -408,7 +272,9 @@ impl MempoolInternal {
         self.shrink_to_fit()
     }
 
-    fn prune_stale_transactions(&mut self) {
+    /// Prune based on `Transaction.timestamp`
+    /// Computes in O(n)
+    pub fn prune_stale_transactions(&mut self) {
         let cutoff = now() - Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
@@ -421,7 +287,7 @@ impl MempoolInternal {
     /// This function remove from the mempool all those transactions that become invalid because
     /// of this newly mined block. It also updates all mutator set data for the monitored
     /// transactions that were not removed due to being included in the block.
-    fn update_with_block(&mut self, block: &Block) {
+    pub fn update_with_block(&mut self, block: &Block) {
         // Check if the sets of inserted indices in the block transaction
         // and transactions in the mempool are disjoint.
         // Removes the transaction from the mempool if they are not as this would
@@ -465,6 +331,8 @@ impl MempoolInternal {
         self.shrink_to_max_size();
     }
 
+    /// Shrink the memory pool to the value of its `max_size` field.
+    /// Likely computes in O(n)
     fn shrink_to_max_size(&mut self) {
         // Repeately remove the least valuable transaction
         while self.get_size() > self.max_total_size && self.pop_min().is_some() {
@@ -474,12 +342,34 @@ impl MempoolInternal {
         self.shrink_to_fit()
     }
 
+    /// Shrinks internal data structures as much as possible.
+    /// Computes in O(n) (Likely)
     fn shrink_to_fit(&mut self) {
         self.queue.shrink_to_fit();
         self.tx_dictionary.shrink_to_fit()
     }
 
-    fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
+    /// Produce a sorted iterator over a snapshot of the Double-Ended Priority Queue.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use neptune_core::models::state::mempool::Mempool;
+    /// use bytesize::ByteSize;
+    ///
+    /// let mempool = Mempool::new(ByteSize::gb(1));
+    /// // insert transactions here.
+    /// let mut most_valuable_transactions = vec![];
+    /// for (transaction_digest, fee_density) in mempool.get_sorted_iter() {
+    ///    let t = mempool.get(transaction_digest);
+    ///    most_valuable_transactions.push(t);
+    /// }
+    /// ```
+    ///
+    /// Yields the `transaction_digest` in order of descending `fee_density`, since
+    /// users (miner or transaction merger) will likely only care about the most valuable transactions
+    /// Computes in O(N lg N)
+    pub fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
         let dpq_clone = self.queue.clone();
         dpq_clone.into_sorted_iter().rev()
     }
@@ -519,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         let network = Network::Alpha;
         let wallet_state = get_mock_wallet_state(None, network).await;
         let transaction =
@@ -530,7 +420,7 @@ mod tests {
         assert!(mempool.contains(transaction_digest));
 
         let transaction_get_option = mempool.get(transaction_digest);
-        assert_eq!(Some(transaction.clone()), transaction_get_option);
+        assert_eq!(Some(&transaction), transaction_get_option);
         assert!(mempool.contains(transaction_digest));
 
         let transaction_remove_option = mempool.remove(transaction_digest);
@@ -544,7 +434,7 @@ mod tests {
 
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32, network: Network) -> Mempool {
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         let wallet_state = get_mock_wallet_state(None, network).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
@@ -594,7 +484,7 @@ mod tests {
     #[tokio::test]
     async fn prune_stale_transactions() {
         let wallet_state = get_mock_wallet_state(None, Network::Alpha).await;
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -634,13 +524,17 @@ mod tests {
     async fn remove_transactions_with_block_test() -> Result<()> {
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let premine_receiver_global_state = get_mock_global_state(Network::Alpha, 2, None).await;
+        let premine_receiver_global_state_lock =
+            get_mock_global_state(Network::Alpha, 2, None).await;
+        let mut premine_receiver_global_state =
+            premine_receiver_global_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
         let other_wallet_secret = WalletSecret::new_random();
-        let other_global_state =
+        let other_global_state_lock =
             get_mock_global_state(Network::Alpha, 2, Some(other_wallet_secret.clone())).await;
+        let mut other_global_state = other_global_state_lock.lock_guard_mut().await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
         let other_receiver_address = other_receiver_spending_key.to_address();
 
@@ -652,25 +546,15 @@ mod tests {
         // Update both states with block 1
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut premine_receiver_global_state
-                    .wallet_state
-                    .wallet_db
-                    .lock()
-                    .await,
-            )?;
-        *premine_receiver_global_state
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
+        premine_receiver_global_state
             .chain
-            .light_state
-            .latest_block
-            .lock()
-            .await = block_1.clone();
+            .light_state_mut()
+            .set_block(block_1.clone());
         other_global_state
             .wallet_state
             .expected_utxos
-            .write()
-            .unwrap()
             .add_expected_utxo(
                 coinbase_utxo_1,
                 cb_sender_randomness_1,
@@ -680,16 +564,12 @@ mod tests {
             .expect("UTXO notification from miner must be accepted");
         other_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut other_global_state.wallet_state.wallet_db.lock().await,
-            )?;
-        *other_global_state
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
+        other_global_state
             .chain
-            .light_state
-            .latest_block
-            .lock()
-            .await = block_1.clone();
+            .light_state_mut()
+            .set_block(block_1.clone());
 
         // Create a transaction that's valid to be included in block 2
         let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];
@@ -714,7 +594,7 @@ mod tests {
             .await?;
 
         // Add this transaction to the mempool
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         mempool.insert(&tx_by_preminer);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
@@ -744,7 +624,7 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool.update_with_block(&block_2, &mut mempool.internal.write().unwrap());
+        mempool.update_with_block(&block_2);
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction still contains
@@ -789,7 +669,7 @@ mod tests {
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
             let (next_block, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
-            mempool.update_with_block(&next_block, &mut mempool.internal.write().unwrap());
+            mempool.update_with_block(&next_block);
             previous_block = next_block;
         }
 
@@ -802,7 +682,7 @@ mod tests {
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        mempool.update_with_block(&block_14, &mut mempool.internal.write().unwrap());
+        mempool.update_with_block(&block_14);
 
         assert!(
             mempool.is_empty(),
@@ -816,7 +696,8 @@ mod tests {
     #[tokio::test]
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
-        let preminer_state = get_mock_global_state(Network::Alpha, 2, None).await;
+        let preminer_state_lock = get_mock_global_state(Network::Alpha, 2, None).await;
+        let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
         let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_address = premine_spending_key.to_address();
@@ -842,7 +723,7 @@ mod tests {
 
         assert_eq!(1, preminer_state.mempool.len());
         assert_eq!(
-            tx_by_preminer_low_fee,
+            &tx_by_preminer_low_fee,
             preminer_state
                 .mempool
                 .get(Hash::hash(&tx_by_preminer_low_fee))
@@ -857,7 +738,7 @@ mod tests {
         preminer_state.mempool.insert(&tx_by_preminer_high_fee);
         assert_eq!(1, preminer_state.mempool.len());
         assert_eq!(
-            tx_by_preminer_high_fee,
+            &tx_by_preminer_high_fee,
             preminer_state
                 .mempool
                 .get(Hash::hash(&tx_by_preminer_high_fee))
@@ -872,7 +753,7 @@ mod tests {
         preminer_state.mempool.insert(&tx_by_preminer_medium_fee);
         assert_eq!(1, preminer_state.mempool.len());
         assert_eq!(
-            tx_by_preminer_high_fee,
+            &tx_by_preminer_high_fee,
             preminer_state
                 .mempool
                 .get(Hash::hash(&tx_by_preminer_high_fee))
@@ -889,10 +770,9 @@ mod tests {
         let tx_count_small = 10;
         let mempool_small = setup(10, Network::Alpha).await;
         let size_gs_small = mempool_small.get_size();
-        let size_serialized_small =
-            bincode::serialize(&mempool_small.internal.read().unwrap().tx_dictionary)
-                .unwrap()
-                .len();
+        let size_serialized_small = bincode::serialize(&mempool_small.tx_dictionary)
+            .unwrap()
+            .len();
         assert!(size_gs_small >= size_serialized_small);
         println!(
             "size of mempool with {tx_count_small} empty txs reported as: {}",
@@ -906,10 +786,9 @@ mod tests {
         let tx_count_big = 100;
         let mempool_big = setup(tx_count_big, Network::Alpha).await;
         let size_gs_big = mempool_big.get_size();
-        let size_serialized_big =
-            bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
-                .unwrap()
-                .len();
+        let size_serialized_big = bincode::serialize(&mempool_big.tx_dictionary)
+            .unwrap()
+            .len();
         assert!(size_gs_big >= size_serialized_big);
         assert!(size_gs_big >= 5 * size_gs_small);
         println!("size of mempool with {tx_count_big} empty txs reported as: {size_gs_big}",);

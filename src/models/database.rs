@@ -6,7 +6,7 @@ use twenty_first::shared_math::digest::Digest;
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
 use super::peer::PeerStanding;
-use crate::database::rusty::RustyLevelDB;
+use crate::database::rusty::RustyLevelDbAsync;
 
 pub const DATABASE_DIRECTORY_ROOT_NAME: &str = "databases";
 
@@ -131,8 +131,9 @@ impl BlockIndexValue {
     }
 }
 
+#[derive(Clone)]
 pub struct PeerDatabases {
-    pub peer_standings: RustyLevelDB<IpAddr, PeerStanding>,
+    pub peer_standings: RustyLevelDbAsync<IpAddr, PeerStanding>,
 }
 
 impl fmt::Debug for PeerDatabases {
