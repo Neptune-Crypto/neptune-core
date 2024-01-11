@@ -214,7 +214,11 @@ pub async fn get_mock_global_state(
         archival_state: Some(archival_state),
     };
     let mempool = Mempool::new(ByteSize::gb(1));
-    let cli_args: cli_args::Args = Default::default();
+    let cli_args = cli_args::Args {
+        network,
+        ..Default::default()
+    };
+
     GlobalState {
         chain: blockchain_state,
         cli: cli_args.clone(),

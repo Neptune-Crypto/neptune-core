@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+use strum::EnumIter;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {
     #[default]
     Alpha,

@@ -123,8 +123,6 @@ pub trait RPC {
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
-    // Gracious shutdown.
-    async fn shutdown() -> bool;
 
     /// Clears standing for all peers, connected or not
     async fn clear_all_standings();
@@ -139,14 +137,17 @@ pub trait RPC {
         fee: Amount,
     ) -> Option<Digest>;
 
-    // Stop miner if running
+    /// Stop miner if running
     async fn pause_miner();
 
-    // Start miner if not running
+    /// Start miner if not running
     async fn restart_miner();
 
-    // mark MUTXOs as abandoned
+    /// mark MUTXOs as abandoned
     async fn prune_abandoned_monitored_utxos() -> usize;
+
+    /// Gracious shutdown.
+    async fn shutdown() -> bool;
 }
 
 #[derive(Clone)]
@@ -515,7 +516,10 @@ impl RPC for NeptuneRPCServer {
 
         let transaction = match transaction_result {
             Ok(tx) => tx,
-            Err(err) => panic!("Could not create transaction: {}", err),
+            Err(err) => {
+                tracing::error!("Could not create transaction: {}", err);
+                return None;
+            }
         };
 
         // 2. Send transaction message to main
@@ -610,7 +614,7 @@ mod rpc_server_tests {
         config_models::network::Network,
         models::{peer::PeerSanctionReason, state::wallet::WalletSecret},
         rpc_server::NeptuneRPCServer,
-        tests::shared::{get_mock_global_state, get_test_genesis_setup},
+        tests::shared::get_mock_global_state,
         RPC_CHANNEL_CAPACITY,
     };
     use anyhow::Result;
@@ -620,21 +624,90 @@ mod rpc_server_tests {
         net::{IpAddr, Ipv4Addr, SocketAddr},
         sync::MutexGuard,
     };
+    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
+
+    async fn test_rpc_server(
+        network: Network,
+        wallet_secret: WalletSecret,
+        peer_count: u8,
+    ) -> (NeptuneRPCServer, GlobalState) {
+        let state = get_mock_global_state(network, peer_count, Some(wallet_secret)).await;
+        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
+        (
+            NeptuneRPCServer {
+                socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+                state: state.clone(),
+                rpc_server_to_main_tx: dummy_tx,
+            },
+            state,
+        )
+    }
+
+    #[tokio::test]
+    async fn network_response_is_consistent() -> Result<()> {
+        // Verify that a wallet not receiving a premine is empty at startup
+        for network in Network::iter() {
+            let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+            assert_eq!(network, rpc_server.network(context::current()).await);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn verify_that_all_requests_leave_server_running() -> Result<()> {
+        // Got through *all* request types and verify that server does not crash.
+        // We don't care about the actual response data in this test, just that the
+        // requests do not crash the server.
+
+        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let ctx = context::current();
+        let _ = rpc_server.clone().network(ctx).await;
+        let _ = rpc_server.clone().own_listen_address_for_peers(ctx).await;
+        let _ = rpc_server.clone().own_instance_id(ctx).await;
+        let _ = rpc_server.clone().block_height(ctx).await;
+        let _ = rpc_server.clone().peer_info(ctx).await;
+        let _ = rpc_server.clone().all_sanctioned_peers(ctx).await;
+        let _ = rpc_server.clone().tip_digest(ctx).await;
+        let _ = rpc_server.clone().latest_tip_digests(ctx, 2).await;
+        let _ = rpc_server.clone().header(ctx, Digest::default()).await;
+        let _ = rpc_server.clone().synced_balance(ctx).await;
+        let _ = rpc_server.clone().history(ctx).await;
+        let _ = rpc_server.clone().wallet_status(ctx).await;
+        let own_receiving_address = rpc_server.clone().own_receiving_address(ctx).await;
+        let _ = rpc_server.clone().mempool_tx_count(ctx).await;
+        let _ = rpc_server.clone().mempool_size(ctx).await;
+        let _ = rpc_server.clone().dashboard_overview_data(ctx).await;
+        let _ = rpc_server
+            .clone()
+            .validate_address(ctx, "Not a valid address".to_owned(), Network::Testnet)
+            .await;
+        let _ = rpc_server.clone().clear_all_standings(ctx).await;
+        let _ = rpc_server
+            .clone()
+            .clear_standing_by_ip(ctx, "127.0.0.1".parse().unwrap())
+            .await;
+        let _ = rpc_server
+            .clone()
+            .send(ctx, Amount::one(), own_receiving_address, Amount::one())
+            .await;
+        let _ = rpc_server.clone().pause_miner(ctx).await;
+        let _ = rpc_server.clone().restart_miner(ctx).await;
+        let _ = rpc_server
+            .clone()
+            .prune_abandoned_monitored_utxos(ctx)
+            .await;
+        let _ = rpc_server.shutdown(ctx).await;
+
+        Ok(())
+    }
 
     #[traced_test]
     #[tokio::test]
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
-        let network = Network::Alpha;
-        let state = get_mock_global_state(network, 2, Some(WalletSecret::new_random())).await;
-        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-        let rpc_server = NeptuneRPCServer {
-            socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-            state: state.clone(),
-            rpc_server_to_main_tx: dummy_tx,
-        };
-
+        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let balance = rpc_server.synced_balance(context::current()).await;
         assert!(balance.is_zero());
 
@@ -644,15 +717,8 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
-        // Create initial conditions
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await?;
-        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-        let rpc_server = NeptuneRPCServer {
-            socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-            state: state.clone(),
-            rpc_server_to_main_tx: dummy_tx,
-        };
+        let (rpc_server, state) =
+            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let rpc_request_context = context::current();
 
         let peer_address_0 = state
@@ -752,6 +818,7 @@ mod rpc_server_tests {
                 .clear_standing_by_ip(rpc_request_context, peer_address_0.ip())
                 .await;
         }
+
         // Verify expected resulting conditions in database
         {
             let peer_standing_0 = state
@@ -792,8 +859,8 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await?;
+        let (rpc_server, state) =
+            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let peer_address_0 = state
             .net
             .peer_map
@@ -859,12 +926,6 @@ mod rpc_server_tests {
         }
 
         // Verify expected reading through an RPC call
-        let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
-        let rpc_server = NeptuneRPCServer {
-            socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-            state: state.clone(),
-            rpc_server_to_main_tx: dummy_tx.clone(),
-        };
         let rpc_request_context = context::current();
         let after_two_sanctions = rpc_server
             .clone()
