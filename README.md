@@ -6,6 +6,7 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
 
 ### Compile from Source -- Linux Debian/Ubuntu
 
+ - Open a terminal to run the following commands.
  - Install curl: `sudo apt install curl`
  - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
  - Source the rust environment: `source "$HOME/.cargo/env"`
@@ -19,6 +20,8 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
 To install Rust and cargo on Windows, you can follow [these instructions](https://doc.rust-lang.org/cargo/getting-started/installation.html).
 Installing cargo might require you to install Visual Studio with some C++ support but the cargo installer for Windows should handle that.
 With a functioning version of cargo, compilation on Windows should just work out-of-the-box with cargo build etc.
+- Download and run the CMake installer from the [website](https://cmake.org/download/).
+- Open PowerShell to run the following commands.
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
 - Run `cargo install --path .`
