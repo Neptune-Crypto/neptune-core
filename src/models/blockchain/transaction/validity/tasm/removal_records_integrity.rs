@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::bail;
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -31,6 +32,7 @@ use twenty_first::{
     },
 };
 
+use crate::models::blockchain::transaction::validity::SecretWitness;
 use crate::{
     models::blockchain::{
         shared::Hash,
@@ -99,6 +101,22 @@ impl RemovalRecordsIntegrityWitness {
     }
 }
 
+impl SecretWitness for RemovalRecordsIntegrityWitness {
+    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+        let mut memory = HashMap::default();
+        encode_to_memory(
+            &mut memory,
+            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            self.clone(),
+        );
+        NonDeterminism::default().with_ram(memory)
+    }
+
+    fn program(&self) -> Option<triton_vm::Program> {
+        None
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct RemovalRecordsIntegrity {
     pub supported_claim: SupportedClaim,
@@ -120,110 +138,8 @@ impl ValidationLogic for RemovalRecordsIntegrity {
                     input: tx_kernel.mast_hash().encode(),
                     output: vec![],
                 },
-                support: ClaimSupport::SecretWitness(witness_data, None),
+                support: ClaimSupport::SecretWitness(SecretWitness::new(witness_data, None)),
             },
-        }
-    }
-
-    fn prove(&mut self) -> anyhow::Result<()> {
-        match &self.supported_claim.support {
-            ClaimSupport::Proof(_) => {
-                // nothing to do; proof already exists
-                Ok(())
-            }
-            ClaimSupport::SecretWitness(witness, _program) => {
-                let removal_record_integrity_witness =
-                    *RemovalRecordsIntegrityWitness::decode(witness)
-                        .expect("Provided witness is not a removal records integrity witness ...");
-                debug!(
-                    "program digest: ({})\nclaimed digest: ({})",
-                    Hash::hash_varlen(&Self::program().encode()),
-                    self.supported_claim.claim.program_digest
-                );
-                let mut memory = HashMap::default();
-                encode_to_memory(
-                    &mut memory,
-                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                    removal_record_integrity_witness,
-                );
-                let nondeterminism = NonDeterminism::default().with_ram(memory);
-
-                // Run program before proving
-                Self::program()
-                    .run(
-                        self.supported_claim.claim.public_input().into(),
-                        nondeterminism.clone(),
-                    )
-                    .expect("Program execution prior to proving must succeed");
-
-                let proof = triton_vm::prove(
-                    StarkParameters::default(),
-                    &self.supported_claim.claim,
-                    &Self::program(),
-                    nondeterminism,
-                )
-                .expect("Proving integrity of removal records must succeed.");
-                self.supported_claim.support = ClaimSupport::Proof(proof);
-                Ok(())
-            }
-            ClaimSupport::DummySupport => {
-                // nothing to do
-                warn!(
-                    "Trying to prove removal record integrity for claim supported by dummy support"
-                );
-                Ok(())
-            }
-        }
-    }
-
-    fn verify(&self) -> bool {
-        match &self.supported_claim.support {
-            ClaimSupport::Proof(proof) => triton_vm::verify(
-                StarkParameters::default(),
-                &self.supported_claim.claim,
-                proof,
-            ),
-            ClaimSupport::SecretWitness(witness, _no_program) => {
-                let removal_record_integrity_witness =
-                    *RemovalRecordsIntegrityWitness::decode(witness)
-                        .expect("Provided witness is not a removal records integrity witness ...");
-                // let rust_output = Self::rust_shadow(
-                //     self.supported_claim.claim.input.clone().into(),
-                //     witness.clone().into(),
-                // );
-                let mut memory = HashMap::default();
-                encode_to_memory(
-                    &mut memory,
-                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-                    removal_record_integrity_witness,
-                );
-                let nondeterminism = NonDeterminism::default().with_ram(memory);
-                let vm_result = Self::program().run(
-                    PublicInput::new(self.supported_claim.claim.input.clone()),
-                    nondeterminism,
-                );
-                match vm_result {
-                    Ok(observed_output) => {
-                        let found_expected_output =
-                            observed_output == self.supported_claim.claim.output;
-                        if !found_expected_output {
-                            warn!("Observed output does not match claimed output for RRI");
-                            debug!("Got output: {found_expected_output}");
-                        }
-
-                        found_expected_output
-                    }
-                    Err(err) => {
-                        warn!("VM execution for removal records integrity did not halt gracefully");
-                        debug!("Last state was: {err}");
-                        false
-                    }
-                }
-            }
-            ClaimSupport::DummySupport => {
-                warn!("removal record integrity support must be supplied");
-                false
-            }
         }
     }
 }
@@ -541,13 +457,37 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 #[cfg(test)]
 
 mod tests {
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use super::*;
+    use crate::{
+        models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel,
+        tests::shared::pseudorandom_removal_record_integrity_witness,
+    };
+    use rand::{rngs::StdRng, thread_rng, Rng, SeedableRng};
     use tasm_lib::traits::compiled_program::test_rust_shadow;
     use triton_vm::{Claim, StarkParameters};
-    use twenty_first::util_types::emojihash_trait::Emojihash;
 
-    use super::*;
-    use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
+    // #[test]
+    // fn test_validation_logic() {
+    //     let mut rng = thread_rng();
+    //     let tx_kernel = &pseudorandom_transaction_kernel(rng.gen(), 2, 2, 2);
+    //     let prrriw =
+    //         pseudorandom_removal_record_integrity_witness(rng.gen());
+    //     let input_utxos = prrriw.input_utxos;
+    //     let input_lock_scripts = prrriw.input_utxos.iter().map(|x| x.)
+
+    //     // pub struct PrimitiveWitness {
+    //     // pub input_utxos: Vec<Utxo>,
+    //     // pub input_lock_scripts: Vec<LockScript>,
+    //     // pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
+    //     // pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
+    //     // pub output_utxos: Vec<Utxo>,
+    //     // pub pubscripts: Vec<PubScript>,
+    //     // pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+    //     // }
+
+    //     // let primitive_witness = pseudorandom_pri
+    //     let rriw = RemovalRecordsIntegrity::new_from_witness(primitive_witness, tx_kernel);
+    // }
 
     #[test]
     fn test_graceful_halt() {
@@ -557,159 +497,13 @@ mod tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let removal_record_integrity_witness =
             pseudorandom_removal_record_integrity_witness(rng.gen());
-        let aocl_leaf_count = removal_record_integrity_witness.aocl.count_leaves();
-        println!("aocl leaf count: {aocl_leaf_count}",);
-        let aocl_leaf_count_hi = (aocl_leaf_count >> 32) as u32;
-        let aocl_leaf_count_lo = (aocl_leaf_count & u32::MAX as u64) as u32;
-        println!("aocl_leaf_count_hi: {aocl_leaf_count_hi}",);
-        println!("aocl_leaf_count_lo: {aocl_leaf_count_lo}",);
-        println!(
-            "number of peaks in AOCL: {}",
-            removal_record_integrity_witness.aocl.get_peaks().len()
-        );
 
-        let program = RemovalRecordsIntegrity::program();
         let stdin: Vec<BFieldElement> = removal_record_integrity_witness
             .kernel
             .mast_hash()
             .reversed()
             .values()
             .to_vec();
-
-        let witness_index_lists = removal_record_integrity_witness
-            .input_utxos
-            .iter()
-            .zip_eq(removal_record_integrity_witness.membership_proofs.iter())
-            .map(|(utxo, mp)| {
-                (
-                    Hash::hash(utxo),
-                    mp.sender_randomness,
-                    mp.receiver_preimage,
-                    mp.auth_path_aocl.leaf_index,
-                )
-            })
-            .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(item, sr, rp, li))
-            .map(|ais| AbsoluteIndexSet::new(&ais))
-            .collect_vec();
-        let very_first_index = witness_index_lists[0].to_array()[0];
-        println!(
-            "very first index: {} {} {} {}",
-            very_first_index >> 96,
-            (very_first_index >> 64) & u32::MAX as u128,
-            (very_first_index >> 32) & u32::MAX as u128,
-            very_first_index & u32::MAX as u128
-        );
-        let very_second_index = witness_index_lists[1].to_array()[0];
-        println!(
-            "very second index: {} {} {} {}",
-            very_second_index >> 96,
-            (very_second_index >> 64) & u32::MAX as u128,
-            (very_second_index >> 32) & u32::MAX as u128,
-            very_second_index & u32::MAX as u128
-        );
-        let mut witness_index_lists_hashes = witness_index_lists
-            .iter()
-            .map(|l| Hash::hash_varlen(&l.encode()[1..]))
-            .collect_vec();
-        witness_index_lists_hashes.sort();
-
-        println!(
-            "witness index set hashes: ({})",
-            witness_index_lists_hashes
-                .iter()
-                .map(|wis| wis.emojihash())
-                .join(", ")
-        );
-        println!(
-            "as numbers: ({})-({})",
-            witness_index_lists_hashes[0].values().iter().join(", "),
-            witness_index_lists_hashes[1].values().iter().join(", ")
-        );
-
-        let kernel_index_lists = removal_record_integrity_witness
-            .kernel
-            .inputs
-            .iter()
-            .map(|rr| rr.absolute_indices.clone())
-            .collect_vec();
-        let mut kernel_index_lists_hashes = kernel_index_lists
-            .iter()
-            .map(|l| Hash::hash_varlen(&l.encode()[1..]))
-            .collect_vec();
-        kernel_index_lists_hashes.sort();
-
-        println!(
-            "kernel index set hashes: ({})",
-            kernel_index_lists_hashes
-                .iter()
-                .map(|wis| wis.emojihash())
-                .join(", ")
-        );
-        println!(
-            "as numbers: ({})-({})",
-            kernel_index_lists_hashes[0].values().iter().join(", "),
-            kernel_index_lists_hashes[1].values().iter().join(", ")
-        );
-
-        let canonical_commitments = removal_record_integrity_witness
-            .input_utxos
-            .iter()
-            .map(Hash::hash)
-            .zip(removal_record_integrity_witness.membership_proofs.iter())
-            .map(|(item, mp)| {
-                commit::<Hash>(
-                    item,
-                    mp.sender_randomness,
-                    mp.receiver_preimage.hash::<Hash>(),
-                )
-            })
-            .collect_vec();
-        println!(
-            "first canonical commitment: ({})",
-            canonical_commitments[0].canonical_commitment
-        );
-        println!(
-            "second canonical commitment: ({})",
-            canonical_commitments[1].canonical_commitment
-        );
-
-        println!(
-            "canonical commitments live in aocl? {}",
-            removal_record_integrity_witness
-                .membership_proofs
-                .iter()
-                .zip(canonical_commitments.iter())
-                .all(|(mp, cc)| mp
-                    .auth_path_aocl
-                    .verify(
-                        &removal_record_integrity_witness.aocl.get_peaks(),
-                        cc.canonical_commitment,
-                        removal_record_integrity_witness.aocl.count_leaves()
-                    )
-                    .0)
-        );
-
-        println!(
-            "kernel's mutator set accumulator hash: {}",
-            removal_record_integrity_witness.kernel.mutator_set_hash
-        );
-
-        println!(
-            "witness's active window hash: {}",
-            removal_record_integrity_witness.swbfa_hash
-        );
-        println!(
-            "peaks bag of swbfi: {}",
-            removal_record_integrity_witness.swbfi.bag_peaks()
-        );
-        println!(
-            "peaks: {}",
-            removal_record_integrity_witness
-                .swbfi
-                .get_peaks()
-                .iter()
-                .join(";")
-        );
 
         let mut memory = HashMap::default();
         encode_to_memory(
@@ -718,6 +512,7 @@ mod tests {
             removal_record_integrity_witness,
         );
         let nondeterminism = NonDeterminism::new(vec![]).with_ram(memory);
+        let program = RemovalRecordsIntegrity::program();
         let run_res = program.run(PublicInput::new(stdin.clone()), nondeterminism.clone());
         match run_res {
             Ok(_) => println!("Run successful."),

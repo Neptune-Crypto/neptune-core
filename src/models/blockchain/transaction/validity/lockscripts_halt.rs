@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 use triton_vm::{NonDeterminism, PublicInput, StarkParameters};
 use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
-use super::{ClaimSupport, SupportedClaim, ValidationLogic};
+use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
 use crate::models::blockchain::{
     shared::Hash,
     transaction::{transaction_kernel::TransactionKernel, PrimitiveWitness},
@@ -41,10 +41,10 @@ impl ValidationLogic for LockScriptsHalt {
                         input: tx_kernel_mast_hash.values().to_vec(),
                         output: empty_string.clone(),
                     },
-                    support: ClaimSupport::SecretWitness(
+                    support: ClaimSupport::SecretWitness(SecretWitness::new(
                         spendkey.to_owned(),
                         Some(lockscript.program.clone()),
-                    ),
+                    )),
                 })
                 .collect(),
         }
@@ -52,57 +52,59 @@ impl ValidationLogic for LockScriptsHalt {
 
     fn prove(&mut self) -> Result<()> {
         for supported_claim in self.supported_claims.iter_mut() {
-            if let ClaimSupport::SecretWitness(secret_witness, maybe_program) =
-                &supported_claim.support
+            if let ClaimSupport::SecretWitness(SecretWitness {
+                witness,
+                maybe_program,
+            }) = &supported_claim.support
             {
-                if let Some(program) = maybe_program {
-                    let input_bfes: Vec<BFieldElement> = supported_claim.claim.input.to_vec();
-                    debug!(
+                let program = match maybe_program {
+                    Some(prog) => prog,
+                    None => bail!("No program supplied; which lock script do I prove?"),
+                };
+                let input_bfes: Vec<BFieldElement> = supported_claim.claim.input.to_vec();
+                debug!(
                         "Running lockscript program:\n{}\n program digest: {}\n Secret input\n{}\n, Public input\n{}\n",
                         program,
                         supported_claim.claim.program_digest,
-                        secret_witness.iter().map(|x| x.to_string()).join(","),
+                        witness.iter().map(|x| x.to_string()).join(","),
                         input_bfes.iter().map(|x| x.to_string()).join(","),
                     );
 
-                    // sanity check
-                    assert_eq!(supported_claim.claim.program_digest, program.hash::<Hash>());
-                    if program
-                        .run(
-                            PublicInput::new(input_bfes),
-                            NonDeterminism::new(secret_witness.to_owned()),
-                        )
-                        .is_err()
-                    {
-                        bail!("Lockscript execution failed for program:\n{program}")
-                    }
-
-                    info!("Lockscript run suceeded. Now proving...");
-                    debug!("Proving program ({})", program.hash::<Hash>());
-                    debug!("Claimed program ({})", supported_claim.claim.program_digest);
-                    let tick = SystemTime::now();
-                    let proof = triton_vm::prove(
-                        StarkParameters::default(),
-                        &supported_claim.claim,
-                        program,
-                        NonDeterminism::new(secret_witness.clone()),
-                    );
-
-                    let proof = match proof {
-                        Ok(proof) => proof,
-                        Err(e) => {
-                            bail!("Proof generation failed: {}", e);
-                        }
-                    };
-
-                    info!(
-                        "Done proving lock script. Elapsed time: {:?}",
-                        tick.elapsed().expect("Don't mess with time")
-                    );
-                    supported_claim.support = ClaimSupport::Proof(proof);
-                } else {
-                    bail!("No program supplied; which lock script do I prove?");
+                // sanity check
+                assert_eq!(supported_claim.claim.program_digest, program.hash::<Hash>());
+                if program
+                    .run(
+                        PublicInput::new(input_bfes),
+                        NonDeterminism::new(witness.to_owned()),
+                    )
+                    .is_err()
+                {
+                    bail!("Lockscript execution failed for program:\n{program}")
                 }
+
+                info!("Lockscript run suceeded. Now proving...");
+                debug!("Proving program ({})", program.hash::<Hash>());
+                debug!("Claimed program ({})", supported_claim.claim.program_digest);
+                let tick = SystemTime::now();
+                let proof = triton_vm::prove(
+                    StarkParameters::default(),
+                    &supported_claim.claim,
+                    program,
+                    NonDeterminism::new(witness.clone()),
+                );
+
+                let proof = match proof {
+                    Ok(proof) => proof,
+                    Err(e) => {
+                        bail!("Proof generation failed: {}", e);
+                    }
+                };
+
+                info!(
+                    "Done proving lock script. Elapsed time: {:?}",
+                    tick.elapsed().expect("Don't mess with time")
+                );
+                supported_claim.support = ClaimSupport::Proof(proof);
             }
 
             // The claim already has a proof. Should we return an error here?
@@ -132,20 +134,26 @@ impl ValidationLogic for LockScriptsHalt {
                         tick.elapsed().expect("Don't mess with time.")
                     );
                 }
-                ClaimSupport::SecretWitness(secretw, maybe_program) => {
-                    if let Some(program) = maybe_program {
-                        if program
-                            .run(
-                                PublicInput::new(claim.input.to_vec()),
-                                NonDeterminism::new(secretw.to_owned()),
-                            )
-                            .is_err()
-                        {
-                            warn!("Execution of program failed:\n{}", program);
+                ClaimSupport::SecretWitness(SecretWitness {
+                    witness,
+                    maybe_program,
+                }) => {
+                    let program = match maybe_program {
+                        Some(prog) => prog,
+                        None => {
+                            warn!("Cannot verify secret witness; program not supplied.");
                             return false;
                         }
-                    } else {
-                        warn!("Cannot verify secret witness; program not supplied.");
+                    };
+
+                    if program
+                        .run(
+                            PublicInput::new(claim.input.to_vec()),
+                            NonDeterminism::new(witness.to_owned()),
+                        )
+                        .is_err()
+                    {
+                        warn!("Execution of program failed:\n{}", program);
                         return false;
                     }
                 }
