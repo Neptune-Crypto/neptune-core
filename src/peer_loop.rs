@@ -1,6 +1,5 @@
 use super::models::blockchain::shared::Hash;
 use crate::connect_to_peers::close_peer_connected_callback;
-use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
@@ -12,7 +11,7 @@ use crate::models::peer::{
 use crate::models::state::mempool::{
     MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD, MEMPOOL_TX_THRESHOLD_AGE_IN_SECS,
 };
-use crate::models::state::GlobalState;
+use crate::models::state::GlobalStateLock;
 use anyhow::{bail, Result};
 use futures::sink::{Sink, SinkExt};
 use futures::stream::{TryStream, TryStreamExt};
@@ -40,7 +39,7 @@ pub type PeerStandingNumber = i32;
 /// since this needs to be a mutable variable in most methods.
 pub struct PeerLoopHandler {
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    state: GlobalState,
+    global_state_lock: GlobalStateLock,
     peer_address: SocketAddr,
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
@@ -50,7 +49,7 @@ pub struct PeerLoopHandler {
 impl PeerLoopHandler {
     pub fn new(
         to_main_tx: mpsc::Sender<PeerThreadToMain>,
-        state: GlobalState,
+        global_state_lock: GlobalStateLock,
         peer_address: SocketAddr,
         peer_handshake_data: HandshakeData,
         inbound_connection: bool,
@@ -58,7 +57,7 @@ impl PeerLoopHandler {
     ) -> Self {
         Self {
             to_main_tx,
-            state,
+            global_state_lock,
             peer_address,
             peer_handshake_data,
             inbound_connection,
@@ -68,24 +67,23 @@ impl PeerLoopHandler {
 
     // TODO: Add a reward function that mutates the peer status
 
-    fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
+    async fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
+        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
         warn!(
             "Sanctioning peer {} for {:?}",
             self.peer_address.ip(),
             reason
         );
-        let mut peers = self
-            .state
+        let new_standing = global_state_mut
             .net
             .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-        let new_standing: &mut PeerStandingNumber = &mut 0;
-        peers
-            .entry(self.peer_address)
-            .and_modify(|p| *new_standing = p.standing.sanction(reason));
+            .get_mut(&self.peer_address)
+            .map(|p| p.standing.sanction(reason))
+            .unwrap_or(0);
 
-        if *new_standing < -(self.state.cli.peer_tolerance as PeerStandingNumber) {
+        if new_standing < -(global_state_mut.cli.peer_tolerance as PeerStandingNumber) {
             warn!("Banning peer");
             bail!("Banning peer");
         }
@@ -98,6 +96,9 @@ impl PeerLoopHandler {
     /// `received_blocks` is a list, the parent of the `i+1`th block in the
     /// list is the `i`th block. The parent of element zero in this list is
     /// `parent_of_first_block`.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for write via Self::punish()
     async fn handle_blocks(
         &self,
         received_blocks: Vec<Block>,
@@ -128,7 +129,8 @@ impl PeerLoopHandler {
                 self.punish(PeerSanctionReason::InvalidBlock((
                     new_block.header.height,
                     new_block.hash,
-                )))?;
+                )))
+                .await?;
                 bail!("Failed to validate block due to insufficient PoW");
             } else if !new_block.is_valid(previous_block) {
                 warn!(
@@ -138,10 +140,16 @@ impl PeerLoopHandler {
                 self.punish(PeerSanctionReason::InvalidBlock((
                     new_block.header.height,
                     new_block.hash,
-                )))?;
+                )))
+                .await?;
                 bail!("Failed to validate block: invalid block");
             } else {
-                info!("Block with height {} is valid", new_block.header.height);
+                info!(
+                    "Block with height {} is valid. mined: {}",
+                    new_block.header.height,
+                    crate::utc_timestamp_to_localtime(new_block.header.timestamp.value())
+                        .to_string()
+                );
             }
 
             previous_block = new_block;
@@ -162,6 +170,9 @@ impl PeerLoopHandler {
     }
 
     /// Function for handling the receiving of single new block from a peer
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for write via Self::punish()
     async fn receive_new_block<S>(
         &self,
         received_block: Box<Block>,
@@ -176,11 +187,11 @@ impl PeerLoopHandler {
         let parent_digest = received_block.header.prev_block_digest;
         debug!("Fetching parent block");
         let parent_block = self
-            .state
+            .global_state_lock
+            .lock_guard()
+            .await
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_block(parent_digest)
             .await?;
         debug!(
@@ -212,7 +223,12 @@ impl PeerLoopHandler {
                     .previous()
                     == received_block.header.height
                     && peer_state.fork_reconciliation_blocks.len() + 1
-                        < self.state.cli.max_number_of_blocks_before_syncing
+                        < self
+                            .global_state_lock
+                            .lock_guard()
+                            .await
+                            .cli
+                            .max_number_of_blocks_before_syncing
             {
                 peer_state.fork_reconciliation_blocks.push(*received_block);
             } else {
@@ -222,7 +238,8 @@ impl PeerLoopHandler {
                     received_block.header.height,
                     peer_state.fork_reconciliation_blocks.len() as u16,
                     received_block.hash,
-                )))?;
+                )))
+                .await?;
                 warn!(
                     "Fork reconciliation failed after receiving {} blocks",
                     peer_state.fork_reconciliation_blocks.len() + 1
@@ -239,7 +256,7 @@ impl PeerLoopHandler {
 
         // We got all the way back to genesis, but disagree about genesis. Ban peer.
         if parent_block.is_none() && parent_height == BlockHeight::genesis() {
-            self.punish(PeerSanctionReason::DifferentGenesis)?;
+            self.punish(PeerSanctionReason::DifferentGenesis).await?;
             return Ok(());
         }
 
@@ -291,6 +308,10 @@ impl PeerLoopHandler {
     /// Handle peer messages and returns Ok(true) if connection should be closed.
     /// Connection should also be closed if an error is returned.
     /// Otherwise returns OK(false).
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for read
+    ///   * acquires `global_state_lock` for write via Self::punish()
     async fn handle_peer_message<S>(
         &self,
         msg: PeerMessage,
@@ -309,7 +330,7 @@ impl PeerLoopHandler {
         );
         match msg {
             PeerMessage::Bye => {
-                // Note that the current peer is not removed from the state.peer_map here
+                // Note that the current peer is not removed from the global_state.peer_map here
                 // but that this is done by the caller.
                 info!("Got bye. Closing connection to peer");
                 Ok(true)
@@ -319,11 +340,11 @@ impl PeerLoopHandler {
                 // not in the address in which they are connected to us. We are only interested in
                 // peers that accept incoming connections.
                 let mut peer_info: Vec<(SocketAddr, u128)> = self
-                    .state
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .net
                     .peer_map
-                    .lock()
-                    .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
                     .values()
                     .filter(|peer_info| peer_info.listen_address().is_some())
                     .take(MAX_PEER_LIST_LENGTH) // limit length of response
@@ -345,7 +366,8 @@ impl PeerLoopHandler {
             }
             PeerMessage::PeerListResponse(peers) => {
                 if peers.len() > MAX_PEER_LIST_LENGTH {
-                    self.punish(PeerSanctionReason::FloodPeerListResponse)?;
+                    self.punish(PeerSanctionReason::FloodPeerListResponse)
+                        .await?;
                 }
                 self.to_main_tx
                     .send(PeerThreadToMain::PeerDiscoveryAnswer((
@@ -359,8 +381,10 @@ impl PeerLoopHandler {
             }
             PeerMessage::Block(t_block) => {
                 info!(
-                    "Got new block from peer {}, block height {}",
-                    self.peer_address, t_block.header.height
+                    "Got new block from peer {}, height {}, mined {}",
+                    self.peer_address,
+                    t_block.header.height,
+                    crate::utc_timestamp_to_localtime(t_block.header.timestamp.value()).to_string()
                 );
                 let new_block_height = t_block.header.height;
 
@@ -373,11 +397,12 @@ impl PeerLoopHandler {
                 }
 
                 let incoming_block_is_heavier = self
-                    .state
-                    .chain
-                    .light_state
-                    .get_latest_block_header()
+                    .global_state_lock
+                    .lock_guard()
                     .await
+                    .chain
+                    .light_state()
+                    .header()
                     .proof_of_work_family
                     < block.header.proof_of_work_family;
                 let reconciliation_ongoing = match peer_state_info.fork_reconciliation_blocks.last()
@@ -403,15 +428,15 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestBatch(most_canonical_digests, requested_batch_size) => {
                 // Find the block that the peer is requesting to start from
                 let mut peers_most_canonical_block: Option<Block> = None;
-                let tip_header = self.state.chain.light_state.get_latest_block_header().await;
+
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
-                        .state
+                        .global_state_lock
+                        .lock_guard()
+                        .await
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
+                        .archival_state()
                         .get_block(digest)
                         .await
                         .expect("Lookup must work");
@@ -419,13 +444,14 @@ impl PeerLoopHandler {
                         // Verify that this block is not only known but also belongs to the canonical
                         // chain. Also check if it's the genesis block.
 
-                        if self
-                            .state
+                        let global_state = self.global_state_lock.lock_guard().await;
+
+                        let tip_header = global_state.chain.light_state().header();
+
+                        if global_state
                             .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
-                            .block_belongs_to_canonical_chain(&block_candidate.header, &tip_header)
+                            .archival_state()
+                            .block_belongs_to_canonical_chain(&block_candidate.header, tip_header)
                             .await
                         {
                             peers_most_canonical_block = Some(block_candidate);
@@ -438,7 +464,8 @@ impl PeerLoopHandler {
                 let peers_most_canonical_block = match peers_most_canonical_block {
                     Some(mcb) => mcb,
                     None => {
-                        self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)?;
+                        self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)
+                            .await?;
                         return Ok(false);
                     }
                 };
@@ -447,20 +474,25 @@ impl PeerLoopHandler {
                 // to that height plus the batch size.
                 let responded_batch_size = cmp::min(
                     requested_batch_size,
-                    self.state.cli.max_number_of_blocks_before_syncing / 2,
+                    self.global_state_lock
+                        .lock_guard()
+                        .await
+                        .cli
+                        .max_number_of_blocks_before_syncing
+                        / 2,
                 );
+                let global_state = self.global_state_lock.lock_guard().await;
+                let tip_header = global_state.chain.light_state().header();
+
                 let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
                 let mut parent_block_header: BlockHeader = peers_most_canonical_block.header;
                 while returned_blocks.len() < responded_batch_size {
-                    let children = self
-                        .state
+                    let children = global_state
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
+                        .archival_state()
                         .get_children_blocks(&parent_block_header)
                         .await;
                     if children.is_empty() {
@@ -471,13 +503,10 @@ impl PeerLoopHandler {
                     } else {
                         let mut canonical: BlockHeader = children[0].clone();
                         for child in children {
-                            if self
-                                .state
+                            if global_state
                                 .chain
-                                .archival_state
-                                .as_ref()
-                                .unwrap()
-                                .block_belongs_to_canonical_chain(&child, &tip_header)
+                                .archival_state()
+                                .block_belongs_to_canonical_chain(&child, tip_header)
                                 .await
                             {
                                 canonical = child;
@@ -487,12 +516,9 @@ impl PeerLoopHandler {
                         canonical
                     };
 
-                    let canonical_child: Block = self
-                        .state
+                    let canonical_child: Block = global_state
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
+                        .archival_state()
                         .get_block(Hash::hash(&header_of_canonical_child))
                         .await?
                         .unwrap();
@@ -518,16 +544,17 @@ impl PeerLoopHandler {
                 );
                 if t_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
-                    self.punish(PeerSanctionReason::TooShortBlockBatch)?;
+                    self.punish(PeerSanctionReason::TooShortBlockBatch).await?;
                     return Ok(false);
                 }
 
                 // Verify that we are in fact in syncing mode
                 // TODO: Seperate peer messages into those allowed under syncing
                 // and those that are not
-                if !self.state.net.syncing.read().unwrap().to_owned() {
+                if !self.global_state_lock.lock_guard().await.net.syncing {
                     warn!("Received a batch of blocks without being in syncing mode");
-                    self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)?;
+                    self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)
+                        .await?;
                     return Ok(false);
                 }
 
@@ -536,11 +563,11 @@ impl PeerLoopHandler {
                 // only valid for archival nodes.
                 let first_blocks_parent_digest: Digest = t_blocks[0].header.prev_block_digest;
                 let most_canonical_own_block_match: Option<Block> = self
-                    .state
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(first_blocks_parent_digest)
                     .await
                     .expect("Block lookup must succeed");
@@ -548,7 +575,8 @@ impl PeerLoopHandler {
                     Some(block) => block,
                     None => {
                         warn!("Got batch reponse with invalid start height");
-                        self.punish(PeerSanctionReason::BatchBlocksInvalidStartHeight)?;
+                        self.punish(PeerSanctionReason::BatchBlocksInvalidStartHeight)
+                            .await?;
                         return Ok(false);
                     }
                 };
@@ -569,16 +597,17 @@ impl PeerLoopHandler {
             PeerMessage::BlockNotificationRequest => {
                 debug!("Got BlockNotificationRequest");
 
-                let block_header = self
-                    .state
-                    .chain
-                    .light_state
-                    .latest_block
-                    .lock()
-                    .await
-                    .to_owned();
-                peer.send(PeerMessage::BlockNotification(block_header.into()))
-                    .await?;
+                peer.send(PeerMessage::BlockNotification(
+                    (self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .header())
+                    .into(),
+                ))
+                .await?;
 
                 Ok(false)
             }
@@ -590,11 +619,12 @@ impl PeerLoopHandler {
                 peer_state_info.highest_shared_block_height = block_notification.height;
                 {
                     let block_is_new = self
-                        .state
-                        .chain
-                        .light_state
-                        .get_latest_block_header()
+                        .global_state_lock
+                        .lock_guard()
                         .await
+                        .chain
+                        .light_state()
+                        .header()
                         .proof_of_work_family
                         < block_notification.proof_of_work_family;
 
@@ -602,7 +632,7 @@ impl PeerLoopHandler {
                     // a fork. If we are reconciling, that is handled later, and the information
                     // about that is stored in `highest_shared_block_height`. If we are syncing
                     // we are also not requesting the block but instead updating the sync state.
-                    if self.state.net.syncing.read().unwrap().to_owned() {
+                    if self.global_state_lock.lock_guard().await.net.syncing {
                         self.to_main_tx
                             .send(PeerThreadToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
@@ -622,11 +652,11 @@ impl PeerLoopHandler {
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
                 match self
-                    .state
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(block_digest)
                     .await?
                 {
@@ -645,34 +675,32 @@ impl PeerLoopHandler {
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
                 let block_headers: Vec<BlockHeader> = self
-                    .state
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .block_height_to_block_headers(block_height)
                     .await;
                 debug!("Found {} blocks", block_headers.len());
-                debug!("Locked block database object");
 
                 if block_headers.is_empty() {
                     warn!("Got block request by height for unknown block");
-                    self.punish(PeerSanctionReason::BlockRequestUnknownHeight)?;
+                    self.punish(PeerSanctionReason::BlockRequestUnknownHeight)
+                        .await?;
                     return Ok(false);
                 }
 
                 // If more than one block is found, we need to find the one that's canonical
                 let mut canonical_chain_block_header = block_headers[0].clone();
                 if block_headers.len() > 1 {
-                    let tip_header = self.state.chain.light_state.get_latest_block_header().await;
+                    let global_state = self.global_state_lock.lock_guard().await;
+                    let tip_header = global_state.chain.light_state().header();
                     for block_header in block_headers {
-                        if self
-                            .state
+                        if global_state
                             .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
-                            .block_belongs_to_canonical_chain(&block_header, &tip_header)
+                            .archival_state()
+                            .block_belongs_to_canonical_chain(&block_header, tip_header)
                             .await
                         {
                             canonical_chain_block_header = block_header;
@@ -681,11 +709,11 @@ impl PeerLoopHandler {
                 }
 
                 let canonical_chain_block: Block = self
-                    .state
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(Hash::hash(&canonical_chain_block_header))
                     .await?
                     .unwrap();
@@ -698,11 +726,11 @@ impl PeerLoopHandler {
                 Ok(false)
             }
             PeerMessage::Handshake(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage)?;
+                self.punish(PeerSanctionReason::InvalidMessage).await?;
                 Ok(false)
             }
             PeerMessage::ConnectionStatus(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage)?;
+                self.punish(PeerSanctionReason::InvalidMessage).await?;
                 Ok(false)
             }
             PeerMessage::Transaction(transaction) => {
@@ -716,7 +744,7 @@ impl PeerLoopHandler {
                 // If transaction is invalid, punish
                 if !transaction.is_valid() {
                     warn!("Received invalid tx");
-                    self.punish(PeerSanctionReason::InvalidTransaction)?;
+                    self.punish(PeerSanctionReason::InvalidTransaction).await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -725,17 +753,26 @@ impl PeerLoopHandler {
                 // Only the miner is allowed to produce transactions with non-empty coinbase fields.
                 if transaction.kernel.coinbase.is_some() {
                     warn!("Received non-mined transaction with coinbase.");
-                    self.punish(PeerSanctionReason::NonMinedTransactionHasCoinbase)?;
+                    self.punish(PeerSanctionReason::NonMinedTransactionHasCoinbase)
+                        .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
                 // if transaction is not confirmable, punish
-                let latest_block = self.state.chain.light_state.get_latest_block().await;
-                if !transaction
-                    .is_confirmable_relative_to(&latest_block.body.next_mutator_set_accumulator)
-                {
+                let confirmable = transaction.is_confirmable_relative_to(
+                    &self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .body
+                        .next_mutator_set_accumulator,
+                );
+                if !confirmable {
                     warn!("Received unconfirmable tx");
-                    self.punish(PeerSanctionReason::UnconfirmableTransaction)?;
+                    self.punish(PeerSanctionReason::UnconfirmableTransaction)
+                        .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
@@ -773,7 +810,13 @@ impl PeerLoopHandler {
                 // Otherwise relay to main
                 let pt2m_transaction = PeerThreadToMainTransaction {
                     transaction: *transaction.to_owned(),
-                    confirmable_for_block: latest_block.hash,
+                    confirmable_for_block: self
+                        .global_state_lock
+                        .lock_guard()
+                        .await
+                        .chain
+                        .light_state()
+                        .hash(),
                 };
                 self.to_main_tx
                     .send(PeerThreadToMain::Transaction(Box::new(pt2m_transaction)))
@@ -784,7 +827,9 @@ impl PeerLoopHandler {
             PeerMessage::TransactionNotification(transaction_notification) => {
                 // 1. Ignore if we already know this transaction.
                 let transaction_is_known = self
-                    .state
+                    .global_state_lock
+                    .lock_guard()
+                    .await
                     .mempool
                     .contains(transaction_notification.transaction_digest);
                 if transaction_is_known {
@@ -804,8 +849,14 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
-                if let Some(transaction) = self.state.mempool.get(transaction_identifier) {
-                    peer.send(PeerMessage::Transaction(Box::new(transaction)))
+                if let Some(transaction) = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .mempool
+                    .get(transaction_identifier)
+                {
+                    peer.send(PeerMessage::Transaction(Box::new(transaction.clone())))
                         .await?;
                 }
 
@@ -816,6 +867,9 @@ impl PeerLoopHandler {
 
     /// Handle message from main thread. The boolean return value indicates if
     /// the connection should be closed.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for write via Self::punish()
     async fn handle_main_thread_message<S>(
         &self,
         msg: MainToPeerThread,
@@ -850,7 +904,9 @@ impl PeerLoopHandler {
 
                 let request_batch_size = std::cmp::min(
                     STANDARD_BLOCK_BATCH_SIZE,
-                    self.state.cli.max_number_of_blocks_before_syncing,
+                    self.global_state_lock
+                        .lock(|s| s.cli.max_number_of_blocks_before_syncing)
+                        .await,
                 );
 
                 peer.send(PeerMessage::BlockRequestBatch(
@@ -866,7 +922,8 @@ impl PeerLoopHandler {
                     return Ok(false);
                 }
 
-                self.punish(PeerSanctionReason::SynchronizationTimeout)?;
+                self.punish(PeerSanctionReason::SynchronizationTimeout)
+                    .await?;
 
                 // If this peer failed the last synchronization attempt, we only
                 // sanction, we don't disconnect.
@@ -926,7 +983,7 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
-                                    let syncing = self.state.net.syncing.read().unwrap().to_owned();
+                                    let syncing = self.global_state_lock.lock(|s| s.net.syncing).await;
                                     if peer_msg.ignore_during_sync() && syncing {
                                         debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;
@@ -988,6 +1045,9 @@ impl PeerLoopHandler {
     /// its final resting place: the `peer_loop`. Note that the peer has already been
     /// accepted for a connection for this loop to be entered. So we don't need
     /// to check the standing again.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
     pub async fn run_wrapper<S>(
         &self,
         mut peer: S,
@@ -998,15 +1058,14 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
+        let global_state = self.global_state_lock.lock_guard().await;
         // Check if peer standing exists in database, return default if it does not.
-        let standing: PeerStanding = self
-            .state
+        let standing: PeerStanding = global_state
             .net
             .peer_databases
-            .lock()
-            .await
             .peer_standings
             .get(self.peer_address.ip())
+            .await
             .unwrap_or_default();
 
         // Add peer to peer map
@@ -1023,29 +1082,31 @@ impl PeerLoopHandler {
 
         // There is potential for a race-condition in the peer_map here, as we've previously
         // counted the number of entries and checked if instance ID was already connected. But
-        // this check could have been invalidated by other threads so we perform it again under
-        // a lock.
+        // this check could have been invalidated by other threads so we perform it again
+
+        if global_state
+            .net
+            .peer_map
+            .values()
+            .any(|pi| pi.instance_id == self.peer_handshake_data.instance_id)
         {
-            let mut peer_map_lock: std::sync::MutexGuard<_> =
-                self.state.net.peer_map.lock().unwrap();
-            if peer_map_lock
-                .values()
-                .any(|pi| pi.instance_id == self.peer_handshake_data.instance_id)
-            {
-                bail!("Attempted to connect to already connected peer. Aborting connection.");
-            }
-
-            if peer_map_lock.len() >= self.state.cli.max_peers as usize {
-                bail!("Attempted to connect to more peers than allowed. Aborting connection.");
-            }
-
-            if peer_map_lock.contains_key(&self.peer_address) {
-                // This shouldn't be possible, unless the peer reports a different instance ID than
-                // for the other connection. Only a malignant client would do that.
-                bail!("Already connected to peer. Aborting connection");
-            }
-            peer_map_lock.insert(self.peer_address, new_peer);
+            bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
+
+        if global_state.net.peer_map.len() >= global_state.cli.max_peers as usize {
+            bail!("Attempted to connect to more peers than allowed. Aborting connection.");
+        }
+
+        if global_state.net.peer_map.contains_key(&self.peer_address) {
+            // This shouldn't be possible, unless the peer reports a different instance ID than
+            // for the other connection. Only a malignant client would do that.
+            bail!("Already connected to peer. Aborting connection");
+        }
+        drop(global_state);
+
+        self.global_state_lock
+            .lock_mut(|s| s.net.peer_map.insert(self.peer_address, new_peer))
+            .await;
 
         // This message is used to determine if we are to enter synchronization mode.
         self.to_main_tx
@@ -1062,11 +1123,12 @@ impl PeerLoopHandler {
         // If peer indicates more canonical block, request a block notification to catch up ASAP
         if self.peer_handshake_data.tip_header.proof_of_work_family
             > self
-                .state
-                .chain
-                .light_state
-                .get_latest_block_header()
+                .global_state_lock
+                .lock_guard()
                 .await
+                .chain
+                .light_state()
+                .header()
                 .proof_of_work_family
         {
             peer.send(PeerMessage::BlockNotificationRequest).await?;
@@ -1075,7 +1137,12 @@ impl PeerLoopHandler {
         let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
-        close_peer_connected_callback(&self.state, self.peer_address, &self.to_main_tx).await?;
+        close_peer_connected_callback(
+            self.global_state_lock.clone(),
+            self.peer_address,
+            &self.to_main_tx,
+        )
+        .await?;
 
         debug!("Ending peer loop for {}", self.peer_address);
 
@@ -1109,20 +1176,20 @@ mod peer_loop_tests {
     async fn test_peer_loop_bye() -> Result<()> {
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
 
-        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(Network::Alpha, 2).await?;
 
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
         let peer_loop_handler =
-            PeerLoopHandler::new(to_main_tx, state.clone(), peer_address, hsd, true, 1);
+            PeerLoopHandler::new(to_main_tx, state_lock.clone(), peer_address, hsd, true, 1);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
         assert_eq!(
             2,
-            state.net.peer_map.lock().unwrap().len(),
+            state_lock.lock_guard().await.net.peer_map.len(),
             "peer map length must be back to 2 after goodbye"
         );
 
@@ -1132,14 +1199,14 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_peer_list() -> Result<()> {
-        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 2).await?;
 
-        let mut peer_infos = state
+        let mut peer_infos = state_lock
+            .lock_guard()
+            .await
             .net
             .peer_map
-            .lock()
-            .unwrap()
             .clone()
             .into_values()
             .collect::<Vec<_>>();
@@ -1163,14 +1230,15 @@ mod peer_loop_tests {
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-        let peer_loop_handler = PeerLoopHandler::new(to_main_tx, state.clone(), sa2, hsd2, true, 0);
+        let peer_loop_handler =
+            PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa2, hsd2, true, 0);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
 
         assert_eq!(
             2,
-            state.net.peer_map.lock().unwrap().len(),
+            state_lock.lock_guard().await.net.peer_map.len(),
             "peer map must have length 2 after saying goodbye to peer 2"
         );
 
@@ -1184,17 +1252,17 @@ mod peer_loop_tests {
         // hardcoded. This should lead to the closing of the connection to this peer
         // and a ban.
         let network = Network::Alpha;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
         // since that block is hardcoded.
-        let mut different_genesis_block: Block = state
-            .clone()
+        let mut different_genesis_block: Block = state_lock
+            .lock_guard()
+            .await
             .chain
-            .archival_state
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         different_genesis_block.header.nonce[2].increment();
@@ -1209,7 +1277,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             true,
@@ -1242,7 +1310,9 @@ mod peer_loop_tests {
 
         drop(to_main_tx);
 
-        let peer_standing = state
+        let peer_standing = state_lock
+            .lock_guard()
+            .await
             .net
             .get_peer_standing_from_database(peer_address.ip())
             .await;
@@ -1261,14 +1331,14 @@ mod peer_loop_tests {
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
         let network = Network::Alpha;
-        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
+        let genesis_block: Block = state_lock
+            .lock_guard()
+            .await
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
 
@@ -1290,7 +1360,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             true,
@@ -1328,13 +1398,14 @@ mod peer_loop_tests {
         drop(to_main_tx);
 
         // Verify that peer standing was stored in database
-        let standing = state
+        let standing = state_lock
+            .lock_guard()
+            .await
             .net
             .peer_databases
-            .lock()
-            .await
             .peer_standings
             .get(peer_address.ip())
+            .await
             .unwrap();
         assert!(
             standing.standing < 0,
@@ -1351,14 +1422,13 @@ mod peer_loop_tests {
         // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main thread.
         let network = Network::Alpha;
-        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
+        let genesis_block: Block = global_state_mut
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
 
@@ -1366,7 +1436,8 @@ mod peer_loop_tests {
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
-        add_block(&state, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let mock_peer_messages = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
@@ -1377,7 +1448,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             false,
@@ -1402,7 +1473,7 @@ mod peer_loop_tests {
         };
         drop(to_main_tx);
 
-        if !state.net.peer_map.lock().unwrap().is_empty() {
+        if !state_lock.lock_guard().await.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1416,13 +1487,12 @@ mod peer_loop_tests {
         // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
         // are returned.
         let network = Network::Alpha;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let genesis_block: Block = state
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let genesis_block: Block = global_state_mut
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         let peer_address = get_dummy_socket_address(0);
@@ -1437,11 +1507,13 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
 
-        add_block(&state, block_1.clone()).await?;
-        add_block(&state, block_2_a.clone()).await?;
-        add_block(&state, block_3_a.clone()).await?;
-        add_block(&state, block_2_b.clone()).await?;
-        add_block(&state, block_3_b.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_2_a.clone()).await?;
+        add_block(&mut global_state_mut, block_3_a.clone()).await?;
+        add_block(&mut global_state_mut, block_2_b.clone()).await?;
+        add_block(&mut global_state_mut, block_3_b.clone()).await?;
+
+        drop(global_state_mut);
 
         let mut mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestBatch(vec![genesis_block.hash], 14)),
@@ -1455,7 +1527,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler_1 = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd.clone(),
             false,
@@ -1481,7 +1553,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler_2 = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             false,
@@ -1501,13 +1573,12 @@ mod peer_loop_tests {
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
         let network = Network::Alpha;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let genesis_block: Block = state
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let genesis_block: Block = global_state_mut
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         let peer_address = get_dummy_socket_address(0);
@@ -1522,11 +1593,13 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
 
-        add_block(&state, block_1.clone()).await?;
-        add_block(&state, block_2_a.clone()).await?;
-        add_block(&state, block_3_a.clone()).await?;
-        add_block(&state, block_2_b.clone()).await?;
-        add_block(&state, block_3_b.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_2_a.clone()).await?;
+        add_block(&mut global_state_mut, block_3_a.clone()).await?;
+        add_block(&mut global_state_mut, block_2_b.clone()).await?;
+        add_block(&mut global_state_mut, block_3_b.clone()).await?;
+
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
@@ -1538,7 +1611,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             false,
@@ -1558,16 +1631,16 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
         // Scenario: client only knows genesis block. Then receives block 1.
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(Network::Alpha, 0).await?;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
+        let genesis_block: Block = state_lock
+            .lock_guard()
+            .await
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
 
@@ -1580,7 +1653,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             false,
@@ -1607,7 +1680,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock().unwrap().is_empty() {
+        if !state_lock.lock_guard().await.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1620,14 +1693,14 @@ mod peer_loop_tests {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 2, meaning that block 1 will have to be requested.
         let network = Network::Testnet;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
+        let genesis_block: Block = state_lock
+            .lock_guard()
+            .await
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         let a_wallet_secret = WalletSecret::new_random();
@@ -1646,7 +1719,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             true,
@@ -1678,7 +1751,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock().unwrap().is_empty() {
+        if !state_lock.lock_guard().await.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1691,24 +1764,23 @@ mod peer_loop_tests {
         // In this scenario the peer sends more blocks than the client allows to store in the
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
         // process as the alternative is that the program will crash because it runs out of RAM.
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, mut state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 1).await?;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
 
         // Restrict max number of blocks held in memory to 2.
-        state.cli = cli_args::Args {
+        global_state_mut.cli = cli_args::Args {
             max_number_of_blocks_before_syncing: 2,
             ..Default::default()
         };
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
-        let genesis_block: Block = state
+        let genesis_block: Block = global_state_mut
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
-        let own_recipient_address = state
+        let own_recipient_address = global_state_mut
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0)
@@ -1721,7 +1793,9 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, own_recipient_address);
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, own_recipient_address);
-        add_block(&state, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1732,7 +1806,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address1,
             hsd1,
             true,
@@ -1760,7 +1834,9 @@ mod peer_loop_tests {
         drop(to_main_tx);
 
         // Verify that peer is sanctioned for failed fork reconciliation attempt
-        assert!(state
+        assert!(state_lock
+            .lock_guard()
+            .await
             .net
             .get_peer_standing_from_database(peer_address1.ip())
             .await
@@ -1777,14 +1853,13 @@ mod peer_loop_tests {
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
         let network = Network::Testnet;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = state
+        let genesis_block: Block = global_state_mut
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         let a_wallet_secret = WalletSecret::new_random();
@@ -1797,7 +1872,8 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
-        add_block(&state, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1810,7 +1886,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             true,
@@ -1845,7 +1921,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock().unwrap().is_empty() {
+        if !state_lock.lock_guard().await.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1858,17 +1934,12 @@ mod peer_loop_tests {
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 3, meaning that block 2 and 1 will have to be requested.
         let network = Network::RegTest;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
+        let global_state = state_lock.lock_guard().await;
         let peer_address = get_dummy_socket_address(0);
 
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = global_state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
@@ -1877,6 +1948,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
         let (block_3, _, _) =
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+        drop(global_state);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -1889,7 +1961,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_address,
             hsd,
             true,
@@ -1924,7 +1996,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock().unwrap().is_empty() {
+        if !state_lock.lock_guard().await.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1939,16 +2011,15 @@ mod peer_loop_tests {
         // But the requests are interrupted by the peer sending another message: a new block
         // notification.
         let network = Network::RegTest;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = state
+        let genesis_block: Block = global_state_mut
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         let (block_1, _, _) =
@@ -1961,7 +2032,8 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
         let (block_5, _, _) =
             make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address);
-        add_block(&state, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1987,7 +2059,7 @@ mod peer_loop_tests {
 
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
-            state.clone(),
+            state_lock.clone(),
             peer_socket_address,
             hsd,
             false,
@@ -2022,7 +2094,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock().unwrap().is_empty() {
+        if !state_lock.lock_guard().await.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -2037,22 +2109,19 @@ mod peer_loop_tests {
         // But the requests are interrupted by the peer sending another message: a request
         // for a list of peers.
         let network = Network::RegTest;
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 1).await?;
-        let peer_infos: Vec<PeerInfo> = state
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let peer_infos: Vec<PeerInfo> = global_state_mut
             .net
             .peer_map
-            .lock()
-            .unwrap()
             .clone()
             .into_values()
             .collect::<Vec<_>>();
 
-        let genesis_block: Block = state
+        let genesis_block: Block = global_state_mut
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         let a_wallet_secret = WalletSecret::new_random();
@@ -2065,7 +2134,8 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
-        add_block(&state, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let expected_peer_list_resp = vec![
@@ -2094,7 +2164,7 @@ mod peer_loop_tests {
         ]);
 
         let peer_loop_handler =
-            PeerLoopHandler::new(to_main_tx, state.clone(), sa_1, hsd_1, true, 1);
+            PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa_1, hsd_1, true, 1);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
             .await?;
@@ -2128,7 +2198,7 @@ mod peer_loop_tests {
 
         assert_eq!(
             1,
-            state.net.peer_map.lock().unwrap().len(),
+            state_lock.lock_guard().await.net.peer_map.len(),
             "One peer must remain in peer list after peer_1 closed gracefully"
         );
 
@@ -2140,7 +2210,7 @@ mod peer_loop_tests {
     async fn empty_mempool_request_tx_test() -> Result<()> {
         // In this scenerio the client receives a transaction notification from
         // a peer of a transaction it doesn't know; the client must then request it.
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 1).await?;
 
         let transaction_1 = make_mock_transaction(vec![], vec![]);
@@ -2159,7 +2229,7 @@ mod peer_loop_tests {
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
-            state.clone(),
+            state_lock.clone(),
             get_dummy_socket_address(0),
             hsd_1.clone(),
             true,
@@ -2167,7 +2237,10 @@ mod peer_loop_tests {
         );
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
-        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
+        assert!(
+            state_lock.lock_guard().await.mempool.is_empty(),
+            "Mempool must be empty at init"
+        );
         peer_loop_handler
             .run(mock, from_main_rx_clone, &mut peer_state)
             .await?;
@@ -2186,7 +2259,7 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn populated_mempool_request_tx_test() -> Result<()> {
         // In this scenario the peer is informed of a transaction that it already knows
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 1).await?;
 
         let transaction_1 = make_mock_transaction(vec![], vec![]);
@@ -2201,7 +2274,7 @@ mod peer_loop_tests {
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
         let peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
-            state.clone(),
+            state_lock.clone(),
             get_dummy_socket_address(0),
             hsd_1.clone(),
             true,
@@ -2209,10 +2282,17 @@ mod peer_loop_tests {
         );
         let mut peer_state = MutablePeerState::new(hsd_1.tip_header.height);
 
-        assert!(state.mempool.is_empty(), "Mempool must be empty at init");
-        state.mempool.insert(&transaction_1);
         assert!(
-            !state.mempool.is_empty(),
+            state_lock.lock_guard().await.mempool.is_empty(),
+            "Mempool must be empty at init"
+        );
+        state_lock
+            .lock_guard_mut()
+            .await
+            .mempool
+            .insert(&transaction_1);
+        assert!(
+            !state_lock.lock_guard().await.mempool.is_empty(),
             "Mempool must be non-empty after insertion"
         );
 

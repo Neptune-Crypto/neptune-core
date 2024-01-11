@@ -1,16 +1,14 @@
 use crate::connect_to_peers::{answer_peer_wrapper, call_peer_wrapper};
-use crate::database::rusty::RustyLevelDB;
+
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::Block;
-use crate::models::database::{BlockIndexKey, BlockIndexValue};
+
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
-use crate::models::state::mempool::MempoolInternal;
-use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
+
 use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
-use crate::models::state::GlobalState;
+use crate::models::state::GlobalStateLock;
 use anyhow::Result;
 use itertools::Itertools;
 use rand::prelude::{IteratorRandom, SliceRandom};
@@ -26,7 +24,6 @@ use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::util_types::emojihash_trait::Emojihash;
-use twenty_first::util_types::storage_schema::StorageWriter;
 
 use crate::models::channel::{
     MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
@@ -45,7 +42,7 @@ const STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE: usize = 100;
 /// MainLoop is the immutable part of the input for the main loop function
 pub struct MainLoopHandler {
     incoming_peer_listener: TcpListener,
-    global_state: GlobalState,
+    global_state_lock: GlobalStateLock,
     main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
     peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
     main_to_miner_tx: watch::Sender<MainToMiner>,
@@ -54,14 +51,14 @@ pub struct MainLoopHandler {
 impl MainLoopHandler {
     pub fn new(
         incoming_peer_listener: TcpListener,
-        state: GlobalState,
+        global_state_lock: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
         peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
         main_to_miner_tx: watch::Sender<MainToMiner>,
     ) -> Self {
         Self {
             incoming_peer_listener,
-            global_state: state,
+            global_state_lock,
             main_to_miner_tx,
             main_to_peer_broadcast_tx,
             peer_thread_to_main_tx,
@@ -267,7 +264,7 @@ impl PotentialPeersState {
 
 /// Return a boolean indicating if synchronization mode should be entered
 fn enter_sync_mode(
-    own_block_tip_header: BlockHeader,
+    own_block_tip_header: &BlockHeader,
     peer_synchronization_state: PeerSynchronizationState,
     max_number_of_blocks_before_syncing: usize,
 ) -> bool {
@@ -278,7 +275,7 @@ fn enter_sync_mode(
 
 /// Return a boolean indicating if synchronization mode should be left
 fn stay_in_sync_mode(
-    own_block_tip_header: BlockHeader,
+    own_block_tip_header: &BlockHeader,
     sync_state: &SyncState,
     max_number_of_blocks_before_syncing: usize,
 ) -> bool {
@@ -300,6 +297,8 @@ fn stay_in_sync_mode(
 }
 
 impl MainLoopHandler {
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
     async fn handle_miner_thread_message(&self, msg: MinerToMain) -> Result<()> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
@@ -310,82 +309,52 @@ impl MainLoopHandler {
                 info!("Miner found new block: {}", new_block.header.height);
 
                 // Store block in database
-                // Acquire all locks before updating
+                // This block spans global state write lock for updating.
                 {
-                    let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
-                        self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut db_lock: tokio::sync::MutexGuard<
-                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
-                    > = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await;
-                    let mut ams_lock = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .archival_mutator_set
-                        .lock()
-                        .await;
-                    let mut light_state_locked = self
-                        .global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock()
-                        .await;
-                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
-                        .global_state
-                        .mempool
-                        .internal
-                        .write()
-                        .expect("Locking mempool for write must succeed");
+                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+
+                    let (tip_hash, tip_proof_of_work_family) = (
+                        global_state_mut.chain.light_state().hash,
+                        global_state_mut
+                            .chain
+                            .light_state()
+                            .header
+                            .proof_of_work_family,
+                    );
 
                     // If we received a new block from a peer and updated the global state before this message from the miner was handled,
                     // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
                     // node considered the most canonical block.
-                    let block_is_new = light_state_locked.header.proof_of_work_family
+                    let block_is_new = tip_proof_of_work_family
                         < new_block.header.proof_of_work_family
-                        && new_block.header.prev_block_digest == light_state_locked.hash;
+                        && new_block.header.prev_block_digest == tip_hash;
                     if !block_is_new {
                         warn!("Got new block from miner thread that was not child of tip. Discarding.");
                         return Ok(());
                     }
 
                     // Apply the updates
-                    self.global_state
+                    global_state_mut
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
+                        .archival_state()
                         .write_block(
-                            new_block.clone(),
-                            &mut db_lock,
-                            Some(light_state_locked.header.proof_of_work_family),
-                        )?;
+                            new_block.clone(), // todo: avoid clone
+                            Some(tip_proof_of_work_family),
+                        )
+                        .await?;
 
                     // update the mutator set with the UTXOs from this block
-                    self.global_state
+                    global_state_mut
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)
+                        .archival_state_mut()
+                        .update_mutator_set(&new_block)
+                        .await
                         .expect("Updating mutator set must succeed");
 
                     // Notify wallet to expect the coinbase UTXO, as we mined this block
-                    self.global_state
+                    global_state_mut
                         .wallet_state
                         .expected_utxos
-                        .write()
-                        .unwrap()
                         .add_expected_utxo(
                             new_block_info.coinbase_utxo_info.utxo,
                             new_block_info.coinbase_utxo_info.sender_randomness,
@@ -395,21 +364,23 @@ impl MainLoopHandler {
                         .expect("UTXO notification from miner must be accepted");
 
                     // update wallet state with relevant UTXOs from this block
-                    self.global_state
+                    global_state_mut
                         .wallet_state
-                        .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+                        .update_wallet_state_with_new_block(&new_block)
+                        .await?;
 
                     // Update mempool with UTXOs from this block. This is done by removing all transaction
                     // that became invalid/was mined by this block.
-                    self.global_state
-                        .mempool
-                        .update_with_block(&new_block, &mut mempool_write_lock);
+                    global_state_mut.mempool.update_with_block(&new_block);
 
-                    *light_state_locked = *new_block.clone();
+                    global_state_mut
+                        .chain
+                        .light_state_mut()
+                        .set_block(*new_block.clone());
+
+                    // Flush databases
+                    global_state_mut.flush_databases().await?;
                 }
-
-                // Flush databases
-                self.flush_databases().await?;
 
                 // Inform miner that mempool has been updated and that it is safe
                 // to mine the next block
@@ -424,10 +395,11 @@ impl MainLoopHandler {
                     );
             }
         }
-
         Ok(())
     }
 
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
     async fn handle_peer_thread_message(
         &self,
         msg: PeerThreadToMain,
@@ -438,42 +410,6 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
-                        self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut block_db_lock: tokio::sync::MutexGuard<
-                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
-                    > = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await;
-                    let mut ams_lock = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .archival_mutator_set
-                        .lock()
-                        .await;
-                    let mut light_state_locked: tokio::sync::MutexGuard<Block> = self
-                        .global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock()
-                        .await;
-                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
-                        .global_state
-                        .mempool
-                        .internal
-                        .write()
-                        .expect("Locking mempool for write must succeed");
-
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer.
@@ -481,8 +417,16 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
-                    let block_is_new = light_state_locked.header.proof_of_work_family
-                        < last_block.header.proof_of_work_family;
+                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+
+                    let tip_proof_of_work_family = global_state_mut
+                        .chain
+                        .light_state()
+                        .header
+                        .proof_of_work_family;
+
+                    let block_is_new =
+                        tip_proof_of_work_family < last_block.header.proof_of_work_family;
                     if !block_is_new {
                         warn!("Blocks were not new. Not storing blocks.");
 
@@ -493,64 +437,65 @@ impl MainLoopHandler {
                     }
 
                     // Get out of sync mode if needed
-                    if self.global_state.net.syncing.read().unwrap().to_owned() {
+                    if global_state_mut.net.syncing {
                         let stay_in_sync_mode = stay_in_sync_mode(
-                            last_block.header.clone(),
+                            &last_block.header,
                             &main_loop_state.sync_state,
-                            self.global_state.cli.max_number_of_blocks_before_syncing,
+                            global_state_mut.cli.max_number_of_blocks_before_syncing,
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
-                            *self.global_state.net.syncing.write().unwrap() = false;
+                            global_state_mut.net.syncing = false;
                         }
                     }
 
                     for new_block in blocks {
                         debug!(
-                            "Storing block {} in database. Height: {}",
+                            "Storing block {} in database. Height: {}, Mined: {}",
                             new_block.hash.emojihash(),
-                            new_block.header.height
+                            new_block.header.height,
+                            crate::utc_timestamp_to_localtime(new_block.header.timestamp.value())
+                                .to_string()
                         );
-                        self.global_state
+                        global_state_mut
                             .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
+                            .archival_state_mut()
                             .write_block(
                                 Box::new(new_block.clone()),
-                                &mut block_db_lock,
-                                Some(light_state_locked.header.proof_of_work_family),
-                            )?;
+                                Some(tip_proof_of_work_family),
+                            )
+                            .await?;
 
                         // update the mutator set with the UTXOs from this block
-                        self.global_state
+                        global_state_mut
                             .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
-                            .update_mutator_set(&mut block_db_lock, &mut ams_lock, &new_block)?;
+                            .archival_state_mut()
+                            .update_mutator_set(&new_block)
+                            .await?;
 
                         // update wallet state with relevant UTXOs from this block
-                        self.global_state
+                        global_state_mut
                             .wallet_state
-                            .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+                            .update_wallet_state_with_new_block(&new_block)
+                            .await?;
 
                         // Update mempool with UTXOs from this block. This is done by removing all transaction
                         // that became invalid/was mined by this block.
-                        self.global_state
-                            .mempool
-                            .update_with_block(&new_block, &mut mempool_write_lock);
+                        global_state_mut.mempool.update_with_block(&new_block);
                     }
 
                     // Update information about latest block
-                    *light_state_locked = last_block.clone();
+                    global_state_mut
+                        .chain
+                        .light_state_mut()
+                        .set_block(last_block.clone());
+
+                    // Flush databases
+                    global_state_mut.flush_databases().await?;
                 }
 
-                // Flush databases
-                self.flush_databases().await?;
-
                 // Inform miner to work on a new block
-                if self.global_state.cli.mine {
+                if self.global_state_lock.lock(|s| s.cli.mine).await {
                     self.main_to_miner_tx
                         .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                 }
@@ -576,22 +521,17 @@ impl MainLoopHandler {
                 // PoW family exceeds our tip and if the height difference is beyond a threshold value.
                 // TODO: If we are not checking the PoW claims of the tip this can be abused by forcing
                 // the client into synchronization mode.
-                let our_block_tip_header: BlockHeader = self
-                    .global_state
-                    .chain
-                    .light_state
-                    .get_latest_block_header()
-                    .await;
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if enter_sync_mode(
-                    our_block_tip_header,
+                    global_state_mut.chain.light_state().header(),
                     claimed_state,
-                    self.global_state.cli.max_number_of_blocks_before_syncing / 3,
+                    global_state_mut.cli.max_number_of_blocks_before_syncing / 3,
                 ) {
                     info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
-                    *self.global_state.net.syncing.write().unwrap() = true;
+                    global_state_mut.net.syncing = true;
                 }
             }
             PeerThreadToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -604,30 +544,24 @@ impl MainLoopHandler {
                     .peer_sync_states
                     .remove(&socket_addr);
 
-                // Get out of sync mode if needed. Note that we do not need to hold
-                // a lock on any state, as it's only this thread (main thread) that
-                // is allowed to update the `BlockchainState` or the `syncing` state.
-                let tip_header: BlockHeader = self
-                    .global_state
-                    .chain
-                    .light_state
-                    .get_latest_block_header()
-                    .await;
+                // Get out of sync mode if needed.
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                if self.global_state.net.syncing.read().unwrap().to_owned() {
+                if global_state_mut.net.syncing {
                     let stay_in_sync_mode = stay_in_sync_mode(
-                        tip_header,
+                        global_state_mut.chain.light_state().header(),
                         &main_loop_state.sync_state,
-                        self.global_state.cli.max_number_of_blocks_before_syncing,
+                        global_state_mut.cli.max_number_of_blocks_before_syncing,
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
-                        *self.global_state.net.syncing.write().unwrap() = false;
+                        global_state_mut.net.syncing = false;
                     }
                 }
             }
             PeerThreadToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
-                let max_peers = self.global_state.cli.max_peers;
+                let global_state = self.global_state_lock.lock_guard().await;
+                let max_peers = global_state.cli.max_peers;
                 for pot_peer in pot_peers {
                     main_loop_state.potential_peers.add(
                         reported_by,
@@ -645,22 +579,16 @@ impl MainLoopHandler {
                     pt2m_transaction.transaction.kernel.mutator_set_hash
                 );
 
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if pt2m_transaction.confirmable_for_block
-                    != self
-                        .global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock()
-                        .await
-                        .hash
+                    != global_state_mut.chain.light_state().hash()
                 {
                     warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                     return Ok(());
                 }
 
                 // Insert into mempool
-                self.global_state
+                global_state_mut
                     .mempool
                     .insert(&pt2m_transaction.transaction);
 
@@ -679,37 +607,33 @@ impl MainLoopHandler {
 
     /// Function to perform peer discovery: Finds potential peers from connected peers and attempts
     /// to establish connections with one of those potential peers.
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for read
     async fn peer_discovery_and_reconnector(
         &self,
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<()> {
-        let connected_peers: Vec<PeerInfo> = match self.global_state.net.peer_map.try_lock() {
-            Ok(pm) => pm.values().cloned().collect(),
-            Err(_) => return Ok(()),
-        };
+        let global_state = self.global_state_lock.lock_guard().await;
+
+        let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
 
         // Check if we are connected to too many peers
-        if connected_peers.len() > self.global_state.cli.max_peers as usize {
+        if connected_peers.len() > global_state.cli.max_peers as usize {
             // This would indicate a race-condition on the peer map field in the state which
             // we unfortunately cannot exclude. So we just disconnect from a peer that the user
             // didn't request a connection to.
             warn!(
-            "Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.",
-            connected_peers.len(),
-            self.global_state.cli.max_peers
-        );
+                "Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.",
+                connected_peers.len(),
+                global_state.cli.max_peers
+            );
             let mut rng = thread_rng();
 
             // pick a peer that was not specified in the CLI arguments to disconnect from
             let peer_to_disconnect = connected_peers
                 .iter()
-                .filter(|peer| {
-                    !self
-                        .global_state
-                        .cli
-                        .peers
-                        .contains(&peer.connected_address)
-                })
+                .filter(|peer| !global_state.cli.peers.contains(&peer.connected_address))
                 .choose(&mut rng);
             match peer_to_disconnect {
                 Some(peer) => {
@@ -728,8 +652,7 @@ impl MainLoopHandler {
             .iter()
             .map(|x| x.connected_address)
             .collect_vec();
-        let peers_with_lost_connection = self
-            .global_state
+        let peers_with_lost_connection = global_state
             .cli
             .peers
             .iter()
@@ -738,14 +661,13 @@ impl MainLoopHandler {
             .collect_vec();
         for peer_with_lost_connection in peers_with_lost_connection {
             // Disallow reconnection if peer is in bad standing
-            let standing = self
-                .global_state
+            let standing = global_state
                 .net
                 .get_peer_standing_from_database(peer_with_lost_connection.ip())
                 .await;
 
             if standing.is_some()
-                && standing.unwrap().standing < -(self.global_state.cli.peer_tolerance as i32)
+                && standing.unwrap().standing < -(global_state.cli.peer_tolerance as i32)
             {
                 info!("Not reconnecting to peer with lost connection because it was banned: {peer_with_lost_connection}");
             } else {
@@ -754,21 +676,24 @@ impl MainLoopHandler {
                 );
             }
 
-            let own_handshake_data: HandshakeData = self.global_state.get_own_handshakedata().await;
+            let own_handshake_data: HandshakeData = global_state.get_own_handshakedata().await;
             let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
-            let state_clone = self.global_state.to_owned();
+            let global_state_lock_clone = self.global_state_lock.clone();
             let peer_thread_to_main_tx_clone = self.peer_thread_to_main_tx.to_owned();
-            let outgoing_connection_thread = tokio::spawn(async move {
-                call_peer_wrapper(
-                    peer_with_lost_connection,
-                    state_clone,
-                    main_to_peer_broadcast_rx,
-                    peer_thread_to_main_tx_clone,
-                    own_handshake_data,
-                    1, // All CLI-specified peers have distance 1 by definition
-                )
-                .await;
-            });
+
+            let outgoing_connection_thread = tokio::task::Builder::new()
+                .name("call_peer_wrapper_1")
+                .spawn(async move {
+                    call_peer_wrapper(
+                        peer_with_lost_connection,
+                        global_state_lock_clone,
+                        main_to_peer_broadcast_rx,
+                        peer_thread_to_main_tx_clone,
+                        own_handshake_data,
+                        1, // All CLI-specified peers have distance 1 by definition
+                    )
+                    .await;
+                })?;
             main_loop_state
                 .thread_handles
                 .push(outgoing_connection_thread);
@@ -779,9 +704,9 @@ impl MainLoopHandler {
 
         // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
         // one below the peer limit as we reserve this last slot for an ingoing connection.
-        if connected_peers.len() == self.global_state.cli.max_peers as usize
+        if connected_peers.len() == global_state.cli.max_peers as usize
             || connected_peers.len() > 2
-                && connected_peers.len() - 1 == self.global_state.cli.max_peers as usize
+                && connected_peers.len() - 1 == global_state.cli.max_peers as usize
         {
             return Ok(());
         }
@@ -802,7 +727,7 @@ impl MainLoopHandler {
         // 1)
         let (peer_candidate, candidate_distance) = match main_loop_state
             .potential_peers
-            .get_distant_candidate(&connected_peers, self.global_state.net.instance_id)
+            .get_distant_candidate(&connected_peers, global_state.net.instance_id)
         {
             Some(candidate) => candidate,
             None => return Ok(()),
@@ -813,21 +738,23 @@ impl MainLoopHandler {
             "Connecting to peer {} with distance {}",
             peer_candidate, candidate_distance
         );
-        let own_handshake_data: HandshakeData = self.global_state.get_own_handshakedata().await;
+        let own_handshake_data: HandshakeData = global_state.get_own_handshakedata().await;
         let main_to_peer_broadcast_rx = self.main_to_peer_broadcast_tx.subscribe();
-        let state_clone = self.global_state.to_owned();
+        let global_state_lock_clone = self.global_state_lock.clone();
         let peer_thread_to_main_tx_clone = self.peer_thread_to_main_tx.to_owned();
-        let outgoing_connection_thread = tokio::spawn(async move {
-            call_peer_wrapper(
-                peer_candidate,
-                state_clone,
-                main_to_peer_broadcast_rx,
-                peer_thread_to_main_tx_clone,
-                own_handshake_data,
-                candidate_distance,
-            )
-            .await;
-        });
+        let outgoing_connection_thread = tokio::task::Builder::new()
+            .name("call_peer_wrapper_2")
+            .spawn(async move {
+                call_peer_wrapper(
+                    peer_candidate,
+                    global_state_lock_clone,
+                    main_to_peer_broadcast_rx,
+                    peer_thread_to_main_tx_clone,
+                    own_handshake_data,
+                    candidate_distance,
+                )
+                .await;
+            })?;
         main_loop_state
             .thread_handles
             .push(outgoing_connection_thread);
@@ -848,29 +775,29 @@ impl MainLoopHandler {
     }
 
     /// Logic for requesting the batch-download of blocks from peers
+    ///
+    /// Locking:
+    ///   * acquires `global_state_lock` for read
     async fn block_sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
+        let global_state = self.global_state_lock.lock_guard().await;
+
         // Check if we are in sync mode
-        if !self.global_state.net.syncing.read().unwrap().to_owned() {
+        if !global_state.net.syncing {
             return Ok(());
         }
 
         info!("Running sync");
 
         // Check when latest batch of blocks was requested
-        let current_block = match self.global_state.chain.light_state.latest_block.try_lock() {
-            Ok(lock) => lock.to_owned(),
-
-            // If we can't acquire lock on latest block header, don't block. Just exit and try again next
-            // time.
-            Err(_) => {
-                warn!("Could not read current block. Aborting block synchronization");
-                return Ok(());
-            }
-        };
+        let (current_block_hash, current_block_height, current_block_proof_of_work_family) = (
+            global_state.chain.light_state().hash,
+            global_state.chain.light_state().header.height,
+            global_state.chain.light_state().header.proof_of_work_family,
+        );
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
-            .get_status_of_last_request(current_block.header.height);
+            .get_status_of_last_request(current_block_height);
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
@@ -889,7 +816,7 @@ impl MainLoopHandler {
         // Pick a random peer that has reported to have relevant blocks
         let candidate_peers = main_loop_state
             .sync_state
-            .get_potential_peers_for_sync_request(current_block.header.proof_of_work_family);
+            .get_potential_peers_for_sync_request(current_block_proof_of_work_family);
         let mut rng = thread_rng();
         let chosen_peer = candidate_peers.choose(&mut rng);
         assert!(
@@ -898,13 +825,10 @@ impl MainLoopHandler {
         );
 
         // Find the blocks to request
-        let tip_digest = current_block.hash;
-        let most_canonical_digests = self
-            .global_state
+        let tip_digest = current_block_hash;
+        let most_canonical_digests = global_state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_ancestor_block_digests(tip_digest, STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE)
             .await;
 
@@ -917,8 +841,8 @@ impl MainLoopHandler {
         info!(
             "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
             chosen_peer,
-            current_block.hash.emojihash(),
-            current_block.header.height
+            current_block_hash.emojihash(),
+            current_block_height
         );
         self.main_to_peer_broadcast_tx
             .send(MainToPeerThread::RequestBlockBatch(
@@ -928,7 +852,7 @@ impl MainLoopHandler {
             .expect("Sending message to peers must succeed");
 
         // Record that this request was sent to the peer
-        let requested_block_height = current_block.header.height.next();
+        let requested_block_height = current_block_height.next();
         main_loop_state
             .sync_state
             .record_request(requested_block_height, *chosen_peer);
@@ -986,30 +910,36 @@ impl MainLoopHandler {
 
             // Monitor for SIGTERM
             let mut sigterm = signal(SignalKind::terminate())?;
-            tokio::spawn(async move {
-                if sigterm.recv().await.is_some() {
-                    info!("Received SIGTERM");
-                    _tx_term.send(()).await.unwrap();
-                }
-            });
+            tokio::task::Builder::new()
+                .name("sigterm_handler")
+                .spawn(async move {
+                    if sigterm.recv().await.is_some() {
+                        info!("Received SIGTERM");
+                        _tx_term.send(()).await.unwrap();
+                    }
+                })?;
 
             // Monitor for SIGINT
             let mut sigint = signal(SignalKind::interrupt())?;
-            tokio::spawn(async move {
-                if sigint.recv().await.is_some() {
-                    info!("Received SIGINT");
-                    _tx_int.send(()).await.unwrap();
-                }
-            });
+            tokio::task::Builder::new()
+                .name("sigint_handler")
+                .spawn(async move {
+                    if sigint.recv().await.is_some() {
+                        info!("Received SIGINT");
+                        _tx_int.send(()).await.unwrap();
+                    }
+                })?;
 
             // Monitor for SIGQUIT
             let mut sigquit = signal(SignalKind::quit())?;
-            tokio::spawn(async move {
-                if sigquit.recv().await.is_some() {
-                    info!("Received SIGQUIT");
-                    _tx_quit.send(()).await.unwrap();
-                }
-            });
+            tokio::task::Builder::new()
+                .name("sigquit_handler")
+                .spawn(async move {
+                    if sigquit.recv().await.is_some() {
+                        info!("Received SIGQUIT");
+                        _tx_quit.send(()).await.unwrap();
+                    }
+                })?;
         }
 
         loop {
@@ -1035,14 +965,17 @@ impl MainLoopHandler {
 
                 // Handle incoming connections from peer
                 Ok((stream, peer_address)) = self.incoming_peer_listener.accept() => {
-                    let state = self.global_state.clone();
+                    let state = self.global_state_lock.lock_guard().await;
                     let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> = self.main_to_peer_broadcast_tx.subscribe();
                     let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> = self.peer_thread_to_main_tx.clone();
                     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
-                    let incoming_peer_thread_handle = tokio::spawn(async move {
+                    let global_state_lock = self.global_state_lock.clone(); // bump arc refcount.
+                    let incoming_peer_thread_handle = tokio::task::Builder::new()
+                        .name("sigterm_handler")
+                        .spawn(async move {
                         match answer_peer_wrapper(
                             stream,
-                            state,
+                            global_state_lock,
                             peer_address,
                             main_to_peer_broadcast_rx_clone,
                             peer_thread_to_main_tx_clone,
@@ -1051,7 +984,7 @@ impl MainLoopHandler {
                             Ok(()) => (),
                             Err(err) => error!("Got error: {:?}", err),
                         }
-                    });
+                    })?;
                     main_loop_state.thread_handles.push(incoming_peer_thread_handle);
                     main_loop_state.thread_handles.retain(|th| !th.is_finished());
                 }
@@ -1102,7 +1035,7 @@ impl MainLoopHandler {
                 // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
                 _ = &mut mempool_cleanup_timer => {
                     debug!("Timer: mempool-cleaner job");
-                    self.global_state.mempool.prune_stale_transactions();
+                    self.global_state_lock.lock_mut(|s| s.mempool.prune_stale_transactions()).await;
 
                     // Reset the timer to run this branch again in P seconds
                     mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
@@ -1111,7 +1044,7 @@ impl MainLoopHandler {
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
                 _ = &mut utxo_notification_cleanup_timer => {
                     debug!("Timer: UTXO notification pool cleanup job");
-                    self.global_state.wallet_state.expected_utxos.write().unwrap().prune_stale_utxo_notifications();
+                    self.global_state_lock.lock_mut(|s| s.wallet_state.expected_utxos.prune_stale_utxo_notifications()).await;
 
                     utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
                 }
@@ -1133,25 +1066,21 @@ impl MainLoopHandler {
         Ok(())
     }
 
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
     async fn resync_membership_proofs(&self) -> Result<()> {
+        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
-        if *self.global_state.net.syncing.read().unwrap() {
+        if global_state_mut.net.syncing {
             debug!("Not syncing MS membership proofs because we are syncing");
             return Ok(());
         }
 
         // is it necessary?
-        let current_tip_digest = self
-            .global_state
-            .chain
-            .light_state
-            .latest_block
-            .lock()
-            .await
-            .hash;
-        if self
-            .global_state
+        let current_tip_digest = global_state_mut.chain.light_state().hash();
+        if global_state_mut
             .wallet_state
             .is_synced_to(current_tip_digest)
             .await
@@ -1161,10 +1090,9 @@ impl MainLoopHandler {
         }
 
         // do we have blocks?
-        let we_have_blocks = self.global_state.chain.archival_state.is_some();
+        let we_have_blocks = global_state_mut.chain.is_archival_node();
         if we_have_blocks {
-            return self
-                .global_state
+            return global_state_mut
                 .resync_membership_proofs_from_stored_blocks(current_tip_digest)
                 .await;
         }
@@ -1193,7 +1121,9 @@ impl MainLoopHandler {
                     .send(MainToPeerThread::TransactionNotification(notification))?;
 
                 // insert transaction into mempool
-                self.global_state.mempool.insert(&transaction);
+                self.global_state_lock
+                    .lock_mut(|s| s.mempool.insert(&transaction))
+                    .await;
 
                 // do not shut down
                 Ok(false)
@@ -1218,70 +1148,6 @@ impl MainLoopHandler {
         }
     }
 
-    async fn flush_databases(&self) -> Result<()> {
-        // flush wallet databases
-        self.global_state
-            .wallet_state
-            .wallet_db
-            .as_ref()
-            .lock()
-            .await
-            .persist();
-
-        // flush block_index database
-        self.global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .block_index_db
-            .lock()
-            .await
-            .flush();
-
-        // persist archival_mutator_set, with sync label
-        self.global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .archival_mutator_set
-            .lock()
-            .await
-            .set_sync_label(
-                self.global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .get_latest_block()
-                    .await
-                    .hash,
-            );
-        self.global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .archival_mutator_set
-            .lock()
-            .await
-            .persist();
-
-        // flush peer_standings
-        self.global_state
-            .net
-            .peer_databases
-            .as_ref()
-            .lock()
-            .await
-            .peer_standings
-            .flush();
-        debug!("Flushed all databases");
-
-        Ok(())
-    }
-
     async fn graceful_shutdown(&self, thread_handles: Vec<JoinHandle<()>>) -> Result<()> {
         info!("Shutdown initiated.");
 
@@ -1295,7 +1161,7 @@ impl MainLoopHandler {
         debug!("sent bye");
 
         // Flush all databases
-        self.flush_databases().await?;
+        self.global_state_lock.flush_databases().await?;
 
         // wait 0.5 seconds to ensure that child processes have been shut down
         sleep(Duration::new(0, 500 * 1_000_000));

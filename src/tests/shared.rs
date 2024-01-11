@@ -40,8 +40,7 @@ use twenty_first::shared_math::other::random_elements_array;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
-use crate::database::leveldb::LevelDB;
-use crate::database::rusty::RustyLevelDB;
+use crate::database::rusty::RustyLevelDbAsync;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
@@ -67,15 +66,15 @@ use crate::models::database::PeerDatabases;
 use crate::models::peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding};
 use crate::models::shared::LatestBlockInfo;
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::BlockchainState;
+use crate::models::state::blockchain_state::{BlockchainArchivalState, BlockchainState};
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
-use crate::models::state::GlobalState;
 use crate::models::state::UtxoReceiverData;
+use crate::models::state::{GlobalState, GlobalStateLock};
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
@@ -93,29 +92,28 @@ use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
 /// Return an empty peer map
-pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
-    Arc::new(std::sync::Mutex::new(HashMap::new()))
+pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
+    HashMap::new()
 }
 
 // Return empty database objects, and root directory for this unit test instantiation's
 /// data directory.
 #[allow(clippy::type_complexity)]
-pub fn unit_test_databases(
+pub async fn unit_test_databases(
     network: Network,
 ) -> Result<(
-    Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
-    Arc<tokio::sync::Mutex<PeerDatabases>>,
+    RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
+    PeerDatabases,
     DataDirectory,
 )> {
     let data_dir: DataDirectory = unit_test_data_directory(network)?;
 
-    let block_db = ArchivalState::initialize_block_index_database(&data_dir)?;
-    let block_db_lock = Arc::new(tokio::sync::Mutex::new(block_db));
+    // The returned future is not `Send` without block_on().
+    use futures::executor::block_on;
+    let block_db = block_on(ArchivalState::initialize_block_index_database(&data_dir))?;
+    let peer_db = block_on(NetworkingState::initialize_peer_databases(&data_dir))?;
 
-    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)?;
-    let peer_db_lock = Arc::new(tokio::sync::Mutex::new(peer_db));
-
-    Ok((block_db_lock, peer_db_lock, data_dir))
+    Ok((block_db, peer_db, data_dir))
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
@@ -193,40 +191,37 @@ pub async fn get_mock_global_state(
     network: Network,
     peer_count: u8,
     wallet: Option<WalletSecret>,
-) -> GlobalState {
-    let (archival_state, peer_db_lock, _data_dir) = make_unit_test_archival_state(network).await;
+) -> GlobalStateLock {
+    let (archival_state, peer_db, _data_dir) = make_unit_test_archival_state(network).await;
 
-    let syncing = Arc::new(std::sync::RwLock::new(false));
-    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
+    let syncing = false;
+    let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
-        peer_map
-            .lock()
-            .unwrap()
-            .insert(peer_address, get_dummy_peer(peer_address));
+        peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db_lock, syncing);
+    let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
     let (block, _, _) = get_dummy_latest_block(None);
-    let light_state: LightState = LightState::new(block);
-    let blockchain_state = BlockchainState {
+    let light_state: LightState = LightState::from(block);
+    let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
-        archival_state: Some(archival_state),
-    };
+        archival_state,
+    });
     let mempool = Mempool::new(ByteSize::gb(1));
     let cli_args = cli_args::Args {
         network,
         ..Default::default()
     };
 
-    GlobalState {
-        chain: blockchain_state,
-        cli: cli_args.clone(),
-        net: networking_state,
-        wallet_state: get_mock_wallet_state(wallet, network).await,
+    GlobalStateLock::new(
+        get_mock_wallet_state(wallet, network).await,
+        blockchain_state,
+        networking_state,
+        cli_args.clone(),
         mempool,
-        mining: Arc::new(std::sync::RwLock::new(cli_args.mine)),
-    }
+        cli_args.mine,
+    )
 }
 
 /// Return a setup with empty databases, and with the genesis block in the
@@ -242,7 +237,7 @@ pub async fn get_test_genesis_setup(
     broadcast::Receiver<MainToPeerThread>,
     mpsc::Sender<PeerThreadToMain>,
     mpsc::Receiver<PeerThreadToMain>,
-    GlobalState,
+    GlobalStateLock,
     HandshakeData,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =
@@ -261,13 +256,13 @@ pub async fn get_test_genesis_setup(
     ))
 }
 
-pub async fn add_block_to_light_state(light_state: &LightState, new_block: Block) -> Result<()> {
-    let mut light_state_locked: tokio::sync::MutexGuard<Block> =
-        light_state.latest_block.lock().await;
-
-    let previous_pow_family = light_state_locked.header.proof_of_work_family;
+pub async fn add_block_to_light_state(
+    light_state: &mut LightState,
+    new_block: Block,
+) -> Result<()> {
+    let previous_pow_family = light_state.header.proof_of_work_family;
     if previous_pow_family < new_block.header.proof_of_work_family {
-        *light_state_locked = new_block;
+        light_state.set_block(new_block);
     } else {
         panic!("Attempted to add to light state an older block than the current light state block");
     }
@@ -276,30 +271,34 @@ pub async fn add_block_to_light_state(light_state: &LightState, new_block: Block
 }
 
 pub async fn add_block_to_archival_state(
-    archival_state: &ArchivalState,
+    archival_state: &mut ArchivalState,
     new_block: Block,
 ) -> Result<()> {
-    let mut db_lock = archival_state.block_index_db.lock().await;
-    let tip_digest: Option<Digest> = db_lock
+    let tip_digest: Option<Digest> = archival_state
+        .block_index_db
         .get(BlockIndexKey::BlockTipDigest)
+        .await
         .map(|x| x.as_tip_digest());
-    let tip_header: Option<BlockHeader> = tip_digest.map(|digest| {
-        db_lock
-            .get(BlockIndexKey::Block(digest))
-            .unwrap()
-            .as_block_record()
-            .block_header
-    });
-    archival_state.write_block(
-        Box::new(new_block.clone()),
-        &mut db_lock,
-        tip_header.map(|x| x.proof_of_work_family),
-    )?;
-
-    let mut ams_lock = archival_state.archival_mutator_set.lock().await;
+    let tip_header: Option<BlockHeader> = match tip_digest {
+        Some(digest) => Some(
+            archival_state
+                .block_index_db
+                .get(BlockIndexKey::Block(digest))
+                .await
+                .unwrap()
+                .as_block_record()
+                .block_header,
+        ),
+        None => None,
+    };
     archival_state
-        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)
-        .unwrap();
+        .write_block(
+            Box::new(new_block.clone()),
+            tip_header.map(|x| x.proof_of_work_family),
+        )
+        .await?;
+
+    archival_state.update_mutator_set(&new_block).await.unwrap();
 
     Ok(())
 }
@@ -319,26 +318,15 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 }
 
 /// Helper function for tests to update state with a new block
-pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
-    let mut db_lock = state
+pub async fn add_block(state: &mut GlobalState, new_block: Block) -> Result<()> {
+    let previous_pow_family = state.chain.light_state().header.proof_of_work_family;
+    state
         .chain
-        .archival_state
-        .as_ref()
-        .unwrap()
-        .block_index_db
-        .lock()
-        .await;
-    let mut light_state_locked: tokio::sync::MutexGuard<Block> =
-        state.chain.light_state.latest_block.lock().await;
-
-    let previous_pow_family = light_state_locked.header.proof_of_work_family;
-    state.chain.archival_state.as_ref().unwrap().write_block(
-        Box::new(new_block.clone()),
-        &mut db_lock,
-        Some(previous_pow_family),
-    )?;
+        .archival_state()
+        .write_block(Box::new(new_block.clone()), Some(previous_pow_family))
+        .await?;
     if previous_pow_family < new_block.header.proof_of_work_family {
-        *light_state_locked = new_block;
+        state.chain.light_state_mut().set_block(new_block);
     }
 
     Ok(())
@@ -1046,17 +1034,14 @@ pub async fn get_mock_wallet_state(
 
 pub async fn make_unit_test_archival_state(
     network: Network,
-) -> (
-    ArchivalState,
-    Arc<tokio::sync::Mutex<PeerDatabases>>,
-    DataDirectory,
-) {
-    let (block_index_db, peer_db, data_dir) = unit_test_databases(network).unwrap();
+) -> (ArchivalState, PeerDatabases, DataDirectory) {
+    let (block_index_db, peer_db, data_dir) = unit_test_databases(network).await.unwrap();
 
-    let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
-    let ams_lock = Arc::new(tokio::sync::Mutex::new(ams));
+    let ams = ArchivalState::initialize_mutator_set(&data_dir)
+        .await
+        .unwrap();
 
-    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams_lock).await;
+    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams).await;
 
     (archival_state, peer_db, data_dir)
 }

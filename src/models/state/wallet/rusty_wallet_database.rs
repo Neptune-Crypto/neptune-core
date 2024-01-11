@@ -1,8 +1,7 @@
-use twenty_first::storage::level_db::DB;
-use twenty_first::util_types::storage_schema::SimpleRustyStorage;
+use twenty_first::shared_math::tip5::Digest;
 use twenty_first::{
-    shared_math::tip5::Digest,
-    util_types::storage_schema::{DbtSingleton, DbtVec, RustyKey, StorageSingleton, StorageWriter},
+    storage::level_db::DB,
+    storage::storage_schema::{traits::*, DbtSingleton, DbtVec, RustyKey, SimpleRustyStorage},
 };
 
 use super::monitored_utxo::MonitoredUtxo;
@@ -10,7 +9,7 @@ use super::monitored_utxo::MonitoredUtxo;
 pub struct RustyWalletDatabase {
     storage: SimpleRustyStorage,
 
-    pub monitored_utxos: DbtVec<MonitoredUtxo>,
+    monitored_utxos: DbtVec<MonitoredUtxo>,
 
     // records which block the database is synced to
     sync_label: DbtSingleton<Digest>,
@@ -21,7 +20,11 @@ pub struct RustyWalletDatabase {
 
 impl RustyWalletDatabase {
     pub fn connect(db: DB) -> Self {
-        let mut storage = SimpleRustyStorage::new(db);
+        let mut storage = SimpleRustyStorage::new_with_callback(
+            db,
+            "RustyWalletDatabase-Schema",
+            crate::LOG_LOCK_EVENT_CB,
+        );
 
         let monitored_utxos_storage = storage.schema.new_vec::<MonitoredUtxo>("monitored_utxos");
         let sync_label_storage = storage
@@ -30,6 +33,7 @@ impl RustyWalletDatabase {
         let counter_storage = storage
             .schema
             .new_singleton::<u64>(RustyKey("counter".into()));
+
         storage.restore_or_new();
 
         Self {
@@ -38,6 +42,13 @@ impl RustyWalletDatabase {
             sync_label: sync_label_storage,
             counter: counter_storage,
         }
+    }
+
+    /// get monitored_utxos.
+    ///
+    /// This is a cheap call as it just increments an Arc reference.
+    pub fn monitored_utxos(&self) -> DbtVec<MonitoredUtxo> {
+        self.monitored_utxos.clone()
     }
 
     pub fn get_sync_label(&self) -> Digest {
@@ -59,10 +70,10 @@ impl RustyWalletDatabase {
 
 impl StorageWriter for RustyWalletDatabase {
     fn persist(&mut self) {
-        self.storage.persist();
+        self.storage.persist()
     }
 
     fn restore_or_new(&mut self) {
-        self.storage.restore_or_new();
+        self.storage.restore_or_new()
     }
 }

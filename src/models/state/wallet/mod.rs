@@ -340,7 +340,7 @@ mod wallet_tests {
     use tracing_test::traced_test;
     use twenty_first::shared_math::tip5::DIGEST_LENGTH;
     use twenty_first::shared_math::x_field_element::EXTENSION_DEGREE;
-    use twenty_first::util_types::storage_vec::StorageVec;
+    use twenty_first::storage::storage_vec::traits::*;
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
@@ -361,13 +361,8 @@ mod wallet_tests {
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
-        let lock = wallet_state.wallet_db.lock().await;
-        let num_monitored_utxos = lock.monitored_utxos.len();
-        let mut monitored_utxos = vec![];
-        for i in 0..num_monitored_utxos {
-            monitored_utxos.push(lock.monitored_utxos.get(i));
-        }
-        monitored_utxos
+        // note: we could just return a DbtVec here and avoid cloning...
+        wallet_state.wallet_db.monitored_utxos().get_all()
     }
 
     #[tokio::test]
@@ -375,7 +370,7 @@ mod wallet_tests {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
         let network = Network::Testnet;
-        let wallet_state_premine_recipient = get_mock_wallet_state(None, network).await;
+        let mut wallet_state_premine_recipient = get_mock_wallet_state(None, network).await;
         let monitored_utxos_premine_wallet =
             get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
@@ -417,10 +412,9 @@ mod wallet_tests {
             let (nb, _coinbase_utxo, _sender_randomness) =
                 make_mock_block(&previous_block, None, other_receiver_address);
             next_block = nb;
-            wallet_state_premine_recipient.update_wallet_state_with_new_block(
-                &next_block,
-                &mut wallet_state_premine_recipient.wallet_db.lock().await,
-            )?;
+            wallet_state_premine_recipient
+                .update_wallet_state_with_new_block(&next_block)
+                .await?;
         }
 
         let monitored_utxos = get_monitored_utxos(&wallet_state_premine_recipient).await;
@@ -449,7 +443,7 @@ mod wallet_tests {
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
         let network = Network::Testnet;
         let own_wallet_secret = WalletSecret::new_random();
-        let own_wallet_state =
+        let mut own_wallet_state =
             get_mock_wallet_state(Some(own_wallet_secret.clone()), network).await;
         let other_wallet_secret = WalletSecret::new_random();
         let other_recipient_address = other_wallet_secret
@@ -470,8 +464,6 @@ mod wallet_tests {
 
         own_wallet_state
             .expected_utxos
-            .write()
-            .unwrap()
             .add_expected_utxo(
                 block_1_coinbase_utxo.clone(),
                 block_1_coinbase_sender_randomness,
@@ -481,22 +473,17 @@ mod wallet_tests {
             .unwrap();
         assert_eq!(
             1,
-            own_wallet_state.expected_utxos.read().unwrap().len(),
+            own_wallet_state.expected_utxos.len(),
             "Expected UTXO list must have length 1 before block registration"
         );
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_1,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
         assert_eq!(
             1,
-            own_wallet_state.expected_utxos.read().unwrap().len(),
+            own_wallet_state.expected_utxos.len(),
             "A: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
-        let expected_utxos = own_wallet_state
-            .expected_utxos
-            .read()
-            .unwrap()
-            .get_all_expected_utxos();
+        let expected_utxos = own_wallet_state.expected_utxos.get_all_expected_utxos();
         assert_eq!(1, expected_utxos.len(), "B: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
         assert_eq!(
             block_1.hash,
@@ -543,14 +530,12 @@ mod wallet_tests {
             );
         }
         // Verify that the membership proof is valid *after* running the updater
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_2,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_3,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_2)
+            .await?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_3)
+            .await?;
         monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
 
         {
@@ -576,7 +561,7 @@ mod wallet_tests {
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
         let own_wallet_secret = WalletSecret::new_random();
         let network = Network::Testnet;
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
+        let mut own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -588,8 +573,6 @@ mod wallet_tests {
         // Add block to wallet state
         own_wallet_state
             .expected_utxos
-            .write()
-            .unwrap()
             .add_expected_utxo(
                 cb_utxo,
                 cb_output_randomness,
@@ -597,10 +580,9 @@ mod wallet_tests {
                 UtxoNotifier::OwnMiner,
             )
             .unwrap();
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_1,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
 
         // Verify that the allocater returns a sane amount
         assert_eq!(
@@ -645,8 +627,6 @@ mod wallet_tests {
                 make_mock_block(&previous_block, None, own_spending_key.to_address());
             own_wallet_state
                 .expected_utxos
-                .write()
-                .unwrap()
                 .add_expected_utxo(
                     cb_utxo_prime,
                     cb_output_randomness_prime,
@@ -654,10 +634,9 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 )
                 .unwrap();
-            own_wallet_state.update_wallet_state_with_new_block(
-                &next_block_prime,
-                &mut own_wallet_state.wallet_db.lock().await,
-            )?;
+            own_wallet_state
+                .update_wallet_state_with_new_block(&next_block_prime)
+                .await?;
             next_block = next_block_prime;
         }
 
@@ -742,10 +721,9 @@ mod wallet_tests {
         );
         next_block.accumulate_transaction(tx);
 
-        own_wallet_state.update_wallet_state_with_new_block(
-            &next_block,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&next_block)
+            .await?;
 
         assert_eq!(
             20,
@@ -773,15 +751,17 @@ mod wallet_tests {
         // actually tested.
         let network = Network::Alpha;
         let own_wallet_secret = WalletSecret::new_random();
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
+        let mut own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
         let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block();
         let premine_wallet = get_mock_wallet_state(None, network).await.wallet_secret;
-        let premine_receiver_global_state =
+        let premine_receiver_global_state_lock =
             get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
+        let mut premine_receiver_global_state =
+            premine_receiver_global_state_lock.lock_guard_mut().await;
         let preminers_original_balance = premine_receiver_global_state
             .get_wallet_status_for_tip()
             .await
@@ -847,8 +827,6 @@ mod wallet_tests {
         for receive_data in receiver_data_to_other {
             own_wallet_state
                 .expected_utxos
-                .write()
-                .unwrap()
                 .add_expected_utxo(
                     receive_data.utxo,
                     receive_data.sender_randomness,
@@ -857,23 +835,16 @@ mod wallet_tests {
                 )
                 .unwrap();
         }
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_1,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
-        add_block(&premine_receiver_global_state, block_1.clone())
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
+        add_block(&mut premine_receiver_global_state, block_1.clone())
             .await
             .unwrap();
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut premine_receiver_global_state
-                    .wallet_state
-                    .wallet_db
-                    .lock()
-                    .await,
-            )?;
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
         assert_eq!(
             preminers_original_balance
                 .checked_sub(&Into::<Amount>::into(15))
@@ -916,8 +887,6 @@ mod wallet_tests {
             next_block = ret.0;
             own_wallet_state
                 .expected_utxos
-                .write()
-                .unwrap()
                 .add_expected_utxo(
                     ret.1,
                     ret.2,
@@ -925,23 +894,16 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 )
                 .unwrap();
-            own_wallet_state.update_wallet_state_with_new_block(
-                &next_block,
-                &mut own_wallet_state.wallet_db.lock().await,
-            )?;
-            add_block(&premine_receiver_global_state, block_1.clone())
+            own_wallet_state
+                .update_wallet_state_with_new_block(&next_block)
+                .await?;
+            add_block(&mut premine_receiver_global_state, block_1.clone())
                 .await
                 .unwrap();
             premine_receiver_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &next_block,
-                    &mut premine_receiver_global_state
-                        .wallet_state
-                        .wallet_db
-                        .lock()
-                        .await,
-                )?;
+                .update_wallet_state_with_new_block(&next_block)
+                .await?;
         }
 
         let block_18 = next_block;
@@ -971,10 +933,7 @@ mod wallet_tests {
         );
 
         // Check that `WalletStatus` is returned correctly
-        let wallet_status = {
-            let mut wallet_db_lock = own_wallet_state.wallet_db.lock().await;
-            own_wallet_state.get_wallet_status_from_lock(&mut wallet_db_lock, block_18.hash)
-        };
+        let wallet_status = { own_wallet_state.get_wallet_status_from_lock(block_18.hash) };
         assert_eq!(
             19,
             wallet_status.synced_unspent.len(),
@@ -1000,23 +959,16 @@ mod wallet_tests {
             .nth_generation_spending_key(0);
         let (block_2_b, _, _) =
             make_mock_block(&block_1, None, premine_wallet_spending_key.to_address());
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_2_b,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
-        add_block(&premine_receiver_global_state, block_2_b.clone())
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_2_b)
+            .await?;
+        add_block(&mut premine_receiver_global_state, block_2_b.clone())
             .await
             .unwrap();
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_2_b,
-                &mut premine_receiver_global_state
-                    .wallet_state
-                    .wallet_db
-                    .lock()
-                    .await,
-            )
+            .update_wallet_state_with_new_block(&block_2_b)
+            .await
             .unwrap();
         let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
@@ -1046,10 +998,9 @@ mod wallet_tests {
         // all work again
         let (block_19, _, _) =
             make_mock_block(&block_18, None, premine_wallet_spending_key.to_address());
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_19,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_19)
+            .await?;
         let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
@@ -1104,8 +1055,6 @@ mod wallet_tests {
         );
         own_wallet_state
             .expected_utxos
-            .write()
-            .unwrap()
             .add_expected_utxo(
                 cb_utxo,
                 cb_sender_randomness,
@@ -1115,8 +1064,6 @@ mod wallet_tests {
             .unwrap();
         own_wallet_state
             .expected_utxos
-            .write()
-            .unwrap()
             .add_expected_utxo(
                 receiver_data_six.utxo,
                 receiver_data_six.sender_randomness,
@@ -1124,10 +1071,9 @@ mod wallet_tests {
                 UtxoNotifier::Cli,
             )
             .unwrap();
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_3_b,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_3_b)
+            .await?;
 
         let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
@@ -1165,10 +1111,9 @@ mod wallet_tests {
         // Then fork back to A-chain
         let (block_20, _, _) =
             make_mock_block(&block_19, None, premine_wallet_spending_key.to_address());
-        own_wallet_state.update_wallet_state_with_new_block(
-            &block_20,
-            &mut own_wallet_state.wallet_db.lock().await,
-        )?;
+        own_wallet_state
+            .update_wallet_state_with_new_block(&block_20)
+            .await?;
 
         // Verify that we have two membership proofs of `forked_utxo`: one matching block20 and one matching block_3b
         let monitored_utxos_20: Vec<_> = get_monitored_utxos(&own_wallet_state)

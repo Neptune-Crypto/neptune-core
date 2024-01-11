@@ -35,7 +35,7 @@ pub struct Args {
     ///
     /// This sets the threshold for when a peer should be automatically refused.
     ///
-    /// For a list of reasons that cause bad standing, see <MISSING>.
+    /// For a list of reasons that cause bad standing, see [PeerSanctionReason](crate::models::peer::PeerSanctionReason).
     #[clap(long, default_value = "100", value_name = "VALUE")]
     pub peer_tolerance: u16,
 

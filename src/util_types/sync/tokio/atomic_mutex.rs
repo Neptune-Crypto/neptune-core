@@ -143,7 +143,7 @@ impl<T> From<Mutex<T>> for AtomicMutex<T> {
     }
 }
 impl<T> From<(Mutex<T>, Option<String>, Option<LockCallbackFn>)> for AtomicMutex<T> {
-    /// Create from an Mutex<T> plus an optional name
+    /// Create from a `Mutex<T>` plus an optional name
     /// and an optional callback function, which is called
     /// when a lock event occurs.
     #[inline]
@@ -194,7 +194,7 @@ impl<T> From<AtomicMutex<T>> for Arc<Mutex<T>> {
 // note: we impl the Atomic trait methods here also so they
 // can be used without caller having to use the trait.
 impl<T> AtomicMutex<T> {
-    /// Acquire lock and return a `MutexGuard`
+    /// Acquire read lock and return an `AtomicMutexGuard`
     ///
     /// # Examples
     /// ```

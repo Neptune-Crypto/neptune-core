@@ -19,8 +19,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// # })
 /// ```
 ///
-/// It is also possible to provide a name and callback fn
-/// during instantiation.  In this way, the application
+/// It is also possible to provide a name and callback fn/// during instantiation.  In this way, the application
 /// can easily trace lock acquisitions.
 ///
 /// # Examples
@@ -143,7 +142,7 @@ impl<T> From<RwLock<T>> for AtomicRw<T> {
     }
 }
 impl<T> From<(RwLock<T>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
-    /// Create from an RwLock<T> plus an optional name
+    /// Create from a `RwLock<T>` plus an optional name
     /// and an optional callback function, which is called
     /// when a lock event occurs.
     #[inline]

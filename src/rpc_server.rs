@@ -1,5 +1,5 @@
 use anyhow::Result;
-use futures::executor;
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -25,7 +25,7 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalState, UtxoReceiverData};
+use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DashBoardOverviewDataFromClient {
@@ -65,7 +65,7 @@ pub trait RPC {
 
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
-    /// returns Option<BlockHeight>
+    /// returns `Option<BlockHeight>`
     ///
     /// return value will be None if wallet has not received any incoming funds.
     async fn confirmations() -> Option<BlockHeight>;
@@ -153,16 +153,17 @@ pub trait RPC {
 #[derive(Clone)]
 pub struct NeptuneRPCServer {
     pub socket_address: SocketAddr,
-    pub state: GlobalState,
+    pub state: GlobalStateLock,
     pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
 impl NeptuneRPCServer {
-    fn confirmations_internal(&self) -> Option<BlockHeight> {
-        match executor::block_on(self.state.get_latest_balance_height()) {
+    async fn confirmations_internal(&self) -> Option<BlockHeight> {
+        let state = self.state.lock_guard().await;
+
+        match state.get_latest_balance_height().await {
             Some(latest_balance_height) => {
-                let tip_block_header =
-                    executor::block_on(self.state.chain.light_state.get_latest_block_header());
+                let tip_block_header = state.chain.light_state().header();
 
                 assert!(tip_block_header.height >= latest_balance_height);
 
@@ -179,66 +180,61 @@ impl NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
-    /******** READ DATA ********/
     async fn network(self, _: context::Context) -> Network {
-        self.state.cli.network
+        self.state.lock_guard().await.cli.network
     }
 
     async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
-        let listen_for_peers_ip = self.state.cli.listen_addr;
-        let listen_for_peers_socket = self.state.cli.peer_port;
+        let state = self.state.lock_guard().await;
+        let listen_for_peers_ip = state.cli.listen_addr;
+        let listen_for_peers_socket = state.cli.peer_port;
         let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
         Some(socket_address)
     }
 
     async fn own_instance_id(self, _context: context::Context) -> InstanceId {
-        self.state.net.instance_id
+        self.state.lock_guard().await.net.instance_id
     }
 
     async fn block_height(self, _: context::Context) -> BlockHeight {
-        // let mut databases = executor::block_on(self.state.block_databases.lock());
-        // let lookup_res = databases.latest_block_header.get(());
-        let latest_block_header =
-            executor::block_on(self.state.chain.light_state.get_latest_block_header());
-        latest_block_header.height
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header
+            .height
     }
 
     async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
-        self.confirmations_internal()
+        self.confirmations_internal().await
     }
 
     async fn tip_digest(self, _: context::Context) -> Digest {
-        let latest_block = executor::block_on(self.state.chain.light_state.get_latest_block());
-        latest_block.hash
+        self.state.lock_guard().await.chain.light_state().hash()
     }
 
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
-        let latest_block_digest =
-            executor::block_on(self.state.chain.light_state.get_latest_block()).hash;
+        let state = self.state.lock_guard().await;
 
-        let head_hashes = executor::block_on(
-            self.state
-                .chain
-                .archival_state
-                .as_ref()
-                .expect("Can not give multiple ancestor hashes unless there is an archival state.")
-                .get_ancestor_block_digests(latest_block_digest, n),
-        );
+        let latest_block_digest = state.chain.light_state().hash();
 
-        head_hashes
+        state
+            .chain
+            .archival_state()
+            .get_ancestor_block_digests(latest_block_digest, n)
+            .await
     }
 
     async fn peer_info(self, _: context::Context) -> Vec<PeerInfo> {
-        let peer_map = self
-            .state
+        self.state
+            .lock_guard()
+            .await
             .net
             .peer_map
-            .lock()
-            .unwrap()
             .values()
             .cloned()
-            .collect();
-        peer_map
+            .collect()
     }
 
     #[doc = r" Return info about all peers that have been sanctioned"]
@@ -248,22 +244,16 @@ impl RPC for NeptuneRPCServer {
     ) -> HashMap<IpAddr, PeerStanding> {
         let mut sanctions_in_memory = HashMap::default();
 
-        // Get all connected peers
-        let peers = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
-            .to_owned();
+        let global_state = self.state.lock_guard().await;
 
-        for (socket_address, peer_info) in peers {
+        // Get all connected peers
+        for (socket_address, peer_info) in global_state.net.peer_map.iter() {
             if peer_info.standing.is_negative() {
                 sanctions_in_memory.insert(socket_address.ip(), peer_info.standing);
             }
         }
 
-        let sanctions_in_db = self.state.net.all_peer_sanctions_in_database().await;
+        let sanctions_in_db = global_state.net.all_peer_sanctions_in_database().await;
 
         // Combine result for currently connected peers and previously connected peers but
         // use result for currently connected peer if there is an overlap
@@ -313,24 +303,41 @@ impl RPC for NeptuneRPCServer {
 
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: Amount) -> bool {
         // test inequality
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
+        let wallet_status = self
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
         amount <= wallet_status.synced_unspent_amount
     }
 
     async fn synced_balance(self, _context: tarpc::context::Context) -> Amount {
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
+        let wallet_status = self
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
         wallet_status.synced_unspent_amount
     }
 
     async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
-        wallet_status
+        self.state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await
     }
 
     async fn tip_header(self, _: context::Context) -> BlockHeader {
-        let latest_block_block_header =
-            executor::block_on(self.state.chain.light_state.get_latest_block_header());
-        latest_block_block_header
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header
+            .clone()
     }
 
     async fn header(
@@ -338,15 +345,13 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         block_digest: Digest,
     ) -> Option<BlockHeader> {
-        let res = executor::block_on(
-            self.state
-                .chain
-                .archival_state
-                .as_ref()
-                .expect("Can not give ancestor hash unless there is an archival state.")
-                .get_block_header(block_digest),
-        );
-        res
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .get_block_header(block_digest)
+            .await
     }
 
     async fn own_receiving_address(
@@ -354,6 +359,8 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
     ) -> generation_address::ReceivingAddress {
         self.state
+            .lock_guard()
+            .await
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0)
@@ -361,18 +368,18 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
-        self.state.mempool.len()
+        self.state.lock_guard().await.mempool.len()
     }
 
     async fn mempool_size(self, _context: tarpc::context::Context) -> usize {
-        self.state.mempool.get_size()
+        self.state.lock_guard().await.mempool.get_size()
     }
 
     async fn history(
         self,
         _context: tarpc::context::Context,
     ) -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)> {
-        let history = executor::block_on(self.state.get_balance_history());
+        let history = self.state.lock_guard().await.get_balance_history().await;
 
         // sort
         let mut display_history: Vec<(Digest, BlockHeight, Duration, Amount, Sign)> = history
@@ -389,24 +396,19 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
-        let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
-        let syncing = self.state.net.syncing.read().unwrap().to_owned();
-        let mempool_size = self.state.mempool.get_size();
-        let mempool_tx_count = self.state.mempool.len();
+        let state = self.state.lock_guard().await;
+        let tip_header = state.chain.light_state().header().clone();
+        let wallet_status = state.get_wallet_status_for_tip().await;
+        let syncing = state.net.syncing;
+        let mempool_size = state.mempool.get_size();
+        let mempool_tx_count = state.mempool.len();
 
-        // Return `None` if we fail to acquire the lock
-        let peer_count = match self.state.net.peer_map.try_lock() {
-            Ok(pm) => Some(pm.len()),
-            Err(_) => None,
-        };
+        let peer_count = Some(state.net.peer_map.len());
 
-        let is_mining = match self.state.mining.read() {
-            Ok(is_mining) => Some(is_mining.to_owned()),
-            Err(_) => None,
-        };
+        let is_mining = Some(state.mining);
+        drop(state);
 
-        let confirmations = self.confirmations_internal();
+        let confirmations = self.confirmations_internal().await;
 
         DashBoardOverviewDataFromClient {
             tip_header,
@@ -421,44 +423,42 @@ impl RPC for NeptuneRPCServer {
     }
 
     /******** CHANGE THINGS ********/
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
     async fn clear_all_standings(self, _: context::Context) {
-        {
-            let mut peers = self
-                .state
-                .net
-                .peer_map
-                .lock()
-                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-
-            // iterates and modifies standing field for all connected peers
-            peers.iter_mut().for_each(|(_, peerinfo)| {
+        let mut global_state_mut = self.state.lock_guard_mut().await;
+        global_state_mut
+            .net
+            .peer_map
+            .iter_mut()
+            .for_each(|(_, peerinfo)| {
                 peerinfo.standing.clear_standing();
             });
-        }
 
-        // Clear standings from database
-        executor::block_on(self.state.net.clear_all_standings_in_database());
+        // iterates and modifies standing field for all connected peers
+        global_state_mut.net.clear_all_standings_in_database().await;
     }
 
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
     async fn clear_standing_by_ip(self, _: context::Context, ip: IpAddr) {
-        {
-            let mut peers = self
-                .state
-                .net
-                .peer_map
-                .lock()
-                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-            peers.iter_mut().for_each(|(socketaddr, peerinfo)| {
+        let mut global_state_mut = self.state.lock_guard_mut().await;
+        global_state_mut
+            .net
+            .peer_map
+            .iter_mut()
+            .for_each(|(socketaddr, peerinfo)| {
                 if socketaddr.ip() == ip {
                     peerinfo.standing.clear_standing();
                 }
             });
-        }
 
-        // Clear standing from database
-        executor::block_on(self.state.net.clear_ip_standing_in_database(ip));
+        //Also clears this IP's standing in database, whether it is connected or not.
+        global_state_mut.net.clear_ip_standing_in_database(ip).await;
     }
 
+    /// Locking:
+    ///   * acquires `global_state_lock` for write
     async fn send(
         self,
         _ctx: context::Context,
@@ -471,15 +471,15 @@ impl RPC for NeptuneRPCServer {
 
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
-        let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
-            .header
-            .height;
+
+        let state = self.state.lock_guard().await;
+        let block_height = state.chain.light_state().header().height;
         let receiver_privacy_digest = address.privacy_digest;
-        let sender_randomness = self
-            .state
+        let sender_randomness = state
             .wallet_state
             .wallet_secret
             .generate_sender_randomness(block_height, receiver_privacy_digest);
+        drop(state);
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
@@ -505,14 +505,20 @@ impl RPC for NeptuneRPCServer {
         .to_vec();
 
         // Pause miner if we are mining
-        let was_mining = self.state.mining.read().unwrap().to_owned();
+        let was_mining = self.state.mining().await;
         if was_mining {
-            let _ =
-                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::PauseMiner)
+                .await;
         }
 
-        let transaction_result =
-            executor::block_on(self.state.create_transaction(receiver_data, fee));
+        let transaction_result = self
+            .state
+            .lock_guard_mut()
+            .await
+            .create_transaction(receiver_data, fee)
+            .await;
 
         let transaction = match transaction_result {
             Ok(tx) => tx,
@@ -523,17 +529,17 @@ impl RPC for NeptuneRPCServer {
         };
 
         // 2. Send transaction message to main
-        let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
-            self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(Box::new(transaction.clone()))),
-        );
+        let response: Result<(), SendError<RPCServerToMain>> = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::Send(Box::new(transaction.clone())))
+            .await;
 
         // Restart mining if it was paused
         if was_mining {
-            let _ = executor::block_on(
-                self.rpc_server_to_main_tx
-                    .send(RPCServerToMain::RestartMiner),
-            );
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::RestartMiner)
+                .await;
         }
 
         if response.is_ok() {
@@ -545,54 +551,50 @@ impl RPC for NeptuneRPCServer {
 
     async fn shutdown(self, _: context::Context) -> bool {
         // 1. Send shutdown message to main
-        let response =
-            executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::Shutdown));
+        let response = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::Shutdown)
+            .await;
 
         // 2. Send acknowledgement to client.
         response.is_ok()
     }
 
     async fn pause_miner(self, _context: tarpc::context::Context) {
-        if self.state.cli.mine {
-            let _ =
-                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
+        if self.state.lock_guard().await.cli.mine {
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::PauseMiner)
+                .await;
         } else {
             info!("Cannot pause miner since it was never started");
         }
     }
 
     async fn restart_miner(self, _context: tarpc::context::Context) {
-        if self.state.cli.mine {
-            let _ = executor::block_on(
-                self.rpc_server_to_main_tx
-                    .send(RPCServerToMain::RestartMiner),
-            );
+        if self.state.lock_guard().await.cli.mine {
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::RestartMiner)
+                .await;
         } else {
             info!("Cannot restart miner since it was never started");
         }
     }
 
     async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
-        let prune_count_res = {
-            // Hold lock on wallet_db
-            let mut wallet_db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
-            let tip_block_header =
-                executor::block_on(self.state.chain.light_state.get_latest_block_header());
-            const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
+        let state = self.state.lock_guard().await;
+        let tip_block_header = state.chain.light_state().header();
+        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
-            let prune_count_res = executor::block_on(
-                self.state
-                    .wallet_state
-                    .prune_abandoned_monitored_utxos_with_lock(
-                        DEFAULT_MUTXO_PRUNE_DEPTH,
-                        &mut wallet_db_lock,
-                        &tip_block_header,
-                        &self.state.chain.archival_state.unwrap(),
-                    ),
-            );
-
-            prune_count_res
-        };
+        let prune_count_res = state
+            .wallet_state
+            .prune_abandoned_monitored_utxos(
+                DEFAULT_MUTXO_PRUNE_DEPTH,
+                tip_block_header,
+                state.chain.archival_state(),
+            )
+            .await;
 
         match prune_count_res {
             Ok(prune_count) => {
@@ -619,11 +621,7 @@ mod rpc_server_tests {
     };
     use anyhow::Result;
     use num_traits::{One, Zero};
-    use std::{
-        collections::HashMap,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        sync::MutexGuard,
-    };
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
@@ -631,16 +629,17 @@ mod rpc_server_tests {
         network: Network,
         wallet_secret: WalletSecret,
         peer_count: u8,
-    ) -> (NeptuneRPCServer, GlobalState) {
-        let state = get_mock_global_state(network, peer_count, Some(wallet_secret)).await;
+    ) -> (NeptuneRPCServer, GlobalStateLock) {
+        let global_state_lock =
+            get_mock_global_state(network, peer_count, Some(wallet_secret)).await;
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         (
             NeptuneRPCServer {
                 socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                state: state.clone(),
+                state: global_state_lock.clone(),
                 rpc_server_to_main_tx: dummy_tx,
             },
-            state,
+            global_state_lock,
         )
     }
 
@@ -714,29 +713,19 @@ mod rpc_server_tests {
         Ok(())
     }
 
+    #[allow(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
-        let (rpc_server, state) =
+        let (rpc_server, state_lock) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let rpc_request_context = context::current();
-
-        let peer_address_0 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .connected_address;
-        let peer_address_1 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[1]
-            .connected_address;
+        let global_state = state_lock.lock_guard().await;
+        let peer_address_0 =
+            global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
+        let peer_address_1 =
+            global_state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
+        drop(global_state);
 
         // Verify that sanctions list is empty
         let sanctioned_peers_startup = rpc_server
@@ -750,19 +739,24 @@ mod rpc_server_tests {
 
         // sanction both
         let (standing_0, standing_1) = {
-            let mut peers = state
+            let mut global_state_mut = state_lock.lock_guard_mut().await;
+
+            global_state_mut
                 .net
                 .peer_map
-                .lock()
-                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-            peers.entry(peer_address_0).and_modify(|p| {
-                p.standing.sanction(PeerSanctionReason::DifferentGenesis);
-            });
-            peers.entry(peer_address_1).and_modify(|p| {
-                p.standing.sanction(PeerSanctionReason::DifferentGenesis);
-            });
-            let standing_0 = peers[&peer_address_0].standing;
-            let standing_1 = peers[&peer_address_1].standing;
+                .entry(peer_address_0)
+                .and_modify(|p| {
+                    p.standing.sanction(PeerSanctionReason::DifferentGenesis);
+                });
+            global_state_mut
+                .net
+                .peer_map
+                .entry(peer_address_1)
+                .and_modify(|p| {
+                    p.standing.sanction(PeerSanctionReason::DifferentGenesis);
+                });
+            let standing_0 = global_state_mut.net.peer_map[&peer_address_0].standing;
+            let standing_1 = global_state_mut.net.peer_map[&peer_address_1].standing;
             (standing_0, standing_1)
         };
 
@@ -777,14 +771,18 @@ mod rpc_server_tests {
             "Sanctions list must have to elements after sanctionings"
         );
 
-        state
-            .net
-            .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
-            .await;
-        state
-            .net
-            .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
-            .await;
+        {
+            let global_state = state_lock.lock_guard().await;
+
+            global_state
+                .net
+                .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
+                .await;
+            global_state
+                .net
+                .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
+                .await;
+        }
 
         // Verify expected sanctions reading, after DB-write
         let sanction_peers_from_memory_and_db = rpc_server
@@ -799,18 +797,20 @@ mod rpc_server_tests {
 
         // Verify expected initial conditions
         {
-            let peer_standing_0 = state
+            let global_state = state_lock.lock_guard().await;
+            let peer_standing_0 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_ne!(0, peer_standing_0.unwrap().standing);
             assert_ne!(None, peer_standing_0.unwrap().latest_sanction);
-            let peer_standing_1 = state
+            let peer_standing_1 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
             assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
+            drop(global_state);
 
             // Clear standing of #0
             rpc_server
@@ -821,13 +821,14 @@ mod rpc_server_tests {
 
         // Verify expected resulting conditions in database
         {
-            let peer_standing_0 = state
+            let global_state = state_lock.lock_guard().await;
+            let peer_standing_0 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_eq!(0, peer_standing_0.unwrap().standing);
             assert_eq!(None, peer_standing_0.unwrap().latest_sanction);
-            let peer_standing_1 = state
+            let peer_standing_1 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
@@ -835,11 +836,9 @@ mod rpc_server_tests {
             assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
 
             // Verify expected resulting conditions in peer map
-            let peer_standing_0_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_0].clone();
+            let peer_standing_0_from_memory = global_state.net.peer_map[&peer_address_0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
-            let peer_standing_1_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
+            let peer_standing_1_from_memory = global_state.net.peer_map[&peer_address_1].clone();
             assert_ne!(0, peer_standing_1_from_memory.standing.standing);
         }
 
@@ -855,45 +854,28 @@ mod rpc_server_tests {
 
         Ok(())
     }
+
+    #[allow(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (rpc_server, state) =
+        let (rpc_server, state_lock) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
-        let peer_address_0 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .connected_address;
-        let peer_address_1 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[1]
-            .connected_address;
+        let mut state = state_lock.lock_guard_mut().await;
+        let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
+        let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
 
         // sanction both peers
         let (standing_0, standing_1) = {
-            let mut peers: MutexGuard<HashMap<SocketAddr, PeerInfo>> = state
-                .net
-                .peer_map
-                .lock()
-                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-
-            peers.entry(peer_address_0).and_modify(|p| {
+            state.net.peer_map.entry(peer_address_0).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
             });
-            peers.entry(peer_address_1).and_modify(|p| {
+            state.net.peer_map.entry(peer_address_1).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
             });
-            let standing_0 = peers[&peer_address_0].standing;
-            let standing_1 = peers[&peer_address_1].standing;
+            let standing_0 = state.net.peer_map[&peer_address_0].standing;
+            let standing_1 = state.net.peer_map[&peer_address_1].standing;
             (standing_0, standing_1)
         };
 
@@ -906,9 +888,13 @@ mod rpc_server_tests {
             .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
 
+        drop(state);
+
         // Verify expected initial conditions
         {
-            let peer_standing_0 = state
+            let peer_standing_0 = state_lock
+                .lock_guard_mut()
+                .await
                 .net
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
@@ -917,7 +903,9 @@ mod rpc_server_tests {
         }
 
         {
-            let peer_standing_1 = state
+            let peer_standing_1 = state_lock
+                .lock_guard_mut()
+                .await
                 .net
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
@@ -938,6 +926,8 @@ mod rpc_server_tests {
             .clone()
             .clear_all_standings(rpc_request_context)
             .await;
+
+        let state = state_lock.lock_guard().await;
 
         // Verify expected resulting conditions in database
         {
@@ -960,14 +950,12 @@ mod rpc_server_tests {
 
         // Verify expected resulting conditions in peer map
         {
-            let peer_standing_0_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_0].clone();
+            let peer_standing_0_from_memory = state.net.peer_map[&peer_address_0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
         }
 
         {
-            let peer_still_standing_1_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
+            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_address_1].clone();
             assert_eq!(0, peer_still_standing_1_from_memory.standing.standing);
         }
 
