@@ -1,12 +1,30 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use triton_vm::{BFieldElement, NonDeterminism};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use super::{SupportedClaim, ValidationLogic};
+use crate::models::blockchain::transaction::utxo::TypeScript;
+
+use super::{SecretWitness, SupportedClaim, ValidationLogic};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+struct TypeScriptHaltsWitness {
+    type_script: TypeScript,
+}
+
+impl SecretWitness for TypeScriptHaltsWitness {
+    fn nondeterminism(&self) -> triton_vm::NonDeterminism<BFieldElement> {
+        NonDeterminism::default()
+    }
+
+    fn program(&self) -> triton_vm::Program {
+        self.type_script.program.clone()
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScriptsHalt {
-    pub supported_claims: Vec<SupportedClaim>,
+    pub supported_claims: Vec<SupportedClaim<TypeScriptHaltsWitness>>,
 }
 
 impl TypeScriptsHalt {

@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::bail;
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -21,9 +20,8 @@ use tasm_lib::{
     mmr::bag_peaks::BagPeaks,
     DIGEST_LENGTH,
 };
-use tracing::{debug, warn};
-use triton_vm::{instruction::LabelledInstruction, BFieldElement, StarkParameters};
-use triton_vm::{triton_asm, NonDeterminism, PublicInput};
+use triton_vm::{instruction::LabelledInstruction, BFieldElement};
+use triton_vm::{triton_asm, NonDeterminism, Program, PublicInput};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
@@ -112,14 +110,14 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         NonDeterminism::default().with_ram(memory)
     }
 
-    fn program(&self) -> Option<triton_vm::Program> {
-        None
+    fn program(&self) -> Program {
+        RemovalRecordsIntegrity::program()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct RemovalRecordsIntegrity {
-    pub supported_claim: SupportedClaim,
+    pub supported_claim: SupportedClaim<RemovalRecordsIntegrityWitness>,
 }
 
 impl ValidationLogic for RemovalRecordsIntegrity {
@@ -458,11 +456,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
 mod tests {
     use super::*;
-    use crate::{
-        models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel,
-        tests::shared::pseudorandom_removal_record_integrity_witness,
-    };
-    use rand::{rngs::StdRng, thread_rng, Rng, SeedableRng};
+    use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::traits::compiled_program::test_rust_shadow;
     use triton_vm::{Claim, StarkParameters};
 

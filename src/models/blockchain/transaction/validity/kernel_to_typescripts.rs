@@ -1,15 +1,32 @@
-use super::{SupportedClaim, ValidationLogic};
+use crate::models::blockchain::transaction::utxo::TypeScript;
+
+use super::{SecretWitness, SupportedClaim, ValidationLogic};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use triton_vm::instruction::LabelledInstruction;
-use triton_vm::{BFieldElement, NonDeterminism, PublicInput};
+use triton_vm::{BFieldElement, Digest, NonDeterminism, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+struct KernelToTypeScriptsWitness {
+    type_scripts: Vec<TypeScript>,
+    mast_path: Vec<Digest>,
+}
+
+impl SecretWitness for KernelToTypeScriptsWitness {
+    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+        todo!()
+    }
+
+    fn program(&self) -> triton_vm::Program {
+        todo!()
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToTypeScripts {
-    pub supported_claim: SupportedClaim,
+    pub supported_claim: SupportedClaim<KernelToTypeScriptsWitness>,
 }
 
 impl KernelToTypeScripts {

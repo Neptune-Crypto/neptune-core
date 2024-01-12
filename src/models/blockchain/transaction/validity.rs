@@ -4,8 +4,6 @@ pub mod lockscripts_halt;
 pub mod tasm;
 pub mod typescripts_halt;
 
-use std::collections::HashMap;
-
 use crate::models::blockchain::shared::Hash;
 use anyhow::{bail, Ok, Result};
 use get_size::GetSize;
@@ -40,23 +38,23 @@ pub trait SecretWitness:
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub enum ClaimSupport {
+pub enum ClaimSupport<SubprogramWitness: SecretWitness> {
     Proof(Proof),
-    SecretWitness(dyn SecretWitness),
+    SecretWitness(SubprogramWitness),
     DummySupport, // TODO: Remove this when all claims are implemented
 }
 
 /// SupportedClaim is a helper struct for ValiditySequence. It
 /// encodes a Claim with an optional witness.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct SupportedClaim {
+pub struct SupportedClaim<SubprogramWitness: SecretWitness> {
     pub claim: triton_vm::Claim,
-    pub support: ClaimSupport,
+    pub support: ClaimSupport<SubprogramWitness>,
 }
 
-impl SupportedClaim {
+impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
     // TODO: REMOVE when all validity logic is implemented
-    pub fn dummy() -> SupportedClaim {
+    pub fn dummy() -> Self {
         let dummy_claim = triton_vm::Claim {
             input: Default::default(),
             output: Default::default(),

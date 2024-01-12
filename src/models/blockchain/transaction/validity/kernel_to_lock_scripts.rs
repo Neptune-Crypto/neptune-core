@@ -1,14 +1,30 @@
-use super::{SupportedClaim, ValidationLogic};
+use super::{SecretWitness, SupportedClaim, ValidationLogic};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
-use triton_vm::{BFieldElement, NonDeterminism, PublicInput};
+use triton_vm::{BFieldElement, Digest, NonDeterminism, Program, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+struct KernelToLockScriptsWitness {
+    lock_scripts: Vec<Program>,
+    mast_path: Vec<Digest>,
+}
+
+impl SecretWitness for KernelToLockScriptsWitness {
+    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+        todo!()
+    }
+
+    fn program(&self) -> Program {
+        todo!()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToLockScripts {
-    pub supported_claim: SupportedClaim,
+    pub supported_claim: SupportedClaim<KernelToLockScriptsWitness>,
 }
 
 impl KernelToLockScripts {
