@@ -1,7 +1,7 @@
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use triton_vm::{Digest, NonDeterminism};
+use triton_vm::{BFieldElement, Claim, NonDeterminism};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
@@ -9,19 +9,19 @@ use crate::models::blockchain::transaction::{
     transaction_kernel::TransactionKernel, utxo::LockScript, PrimitiveWitness,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, Default, BFieldCodec)]
-struct LockScriptHaltsWitness {
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+pub struct LockScriptHaltsWitness {
     lock_script: LockScript,
-    preimage: Digest,
+    preimage: Vec<BFieldElement>,
 }
 
 impl SecretWitness for LockScriptHaltsWitness {
     fn nondeterminism(&self) -> triton_vm::NonDeterminism<triton_vm::BFieldElement> {
-        NonDeterminism::new(self.preimage.reversed().values())
+        NonDeterminism::new(self.preimage.clone().into_iter().rev().collect_vec())
     }
 
-    fn program(&self) -> triton_vm::Program {
-        self.lock_script.clone()
+    fn subprogram(&self) -> triton_vm::Program {
+        self.lock_script.program.clone()
     }
 }
 
@@ -30,8 +30,8 @@ pub struct LockScriptsHalt {
     pub supported_claims: Vec<SupportedClaim<LockScriptHaltsWitness>>,
 }
 
-impl ValidationLogic for LockScriptsHalt {
-    fn new_from_witness(
+impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
+    fn new_from_primitive_witness(
         primitive_witness: &PrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> LockScriptsHalt {
@@ -52,12 +52,41 @@ impl ValidationLogic for LockScriptsHalt {
                         input: tx_kernel_mast_hash.values().to_vec(),
                         output: empty_string.clone(),
                     },
-                    support: ClaimSupport::SecretWitness(SecretWitness::new(
-                        spendkey.to_owned(),
-                        Some(lockscript.program.clone()),
-                    )),
+                    support: ClaimSupport::SecretWitness(LockScriptHaltsWitness {
+                        lock_script: lockscript.to_owned(),
+                        preimage: spendkey.to_owned(),
+                    }),
                 })
                 .collect(),
+        }
+    }
+
+    fn subprogram(&self) -> triton_vm::Program {
+        todo!()
+    }
+
+    fn support(&self) -> ClaimSupport<LockScriptHaltsWitness> {
+        let supports = self
+            .supported_claims
+            .iter()
+            .map(|sc| sc.support.clone())
+            .collect_vec();
+        ClaimSupport::MultipleSupports(supports)
+    }
+
+    fn claim(&self) -> Claim {
+        let input = self
+            .supported_claims
+            .iter()
+            .flat_map(|sc| sc.claim.program_digest.values().to_vec())
+            .collect_vec();
+        let output = vec![];
+        // let program_hash = AllLockScriptsHalt::program().hash();
+        let program_digest = Default::default();
+        Claim {
+            program_digest,
+            input,
+            output,
         }
     }
 }

@@ -553,7 +553,7 @@ impl GlobalState {
         // Convert the secret-supported claim to a proof, several proofs, or
         // at the very least hide sensitive data.
         let mut transaction_validity_logic =
-            TransactionValidityLogic::new_from_witness(&primitive_witness, &kernel);
+            TransactionValidityLogic::new_from_primitive_witness(&primitive_witness, &kernel);
 
         if self.cli.privacy {
             transaction_validity_logic

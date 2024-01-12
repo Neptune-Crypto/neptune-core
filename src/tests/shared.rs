@@ -53,7 +53,7 @@ use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_pub
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::validity::tasm::removal_records_integrity::RemovalRecordsIntegrityWitness;
+use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidityLogic;
 use crate::models::blockchain::transaction::validity::ValidationLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
@@ -811,7 +811,8 @@ pub fn make_mock_transaction_with_generation_key(
         pubscripts,
         mutator_set_accumulator: tip_msa,
     };
-    let validity_logic = TransactionValidityLogic::new_from_witness(&primitive_witness, &kernel);
+    let validity_logic =
+        TransactionValidityLogic::new_from_primitive_witness(&primitive_witness, &kernel);
 
     Transaction {
         kernel,
@@ -934,7 +935,8 @@ pub fn make_mock_block(
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
     };
-    let validity_logic = TransactionValidityLogic::new_from_witness(&primitive_witness, &tx_kernel);
+    let validity_logic =
+        TransactionValidityLogic::new_from_primitive_witness(&primitive_witness, &tx_kernel);
 
     let transaction = Transaction {
         witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),

@@ -1,15 +1,22 @@
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use triton_vm::{BFieldElement, NonDeterminism};
+use triton_vm::{BFieldElement, Claim, NonDeterminism};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use crate::models::blockchain::transaction::utxo::TypeScript;
+use crate::models::blockchain::transaction::{
+    transaction_kernel::TransactionKernel,
+    utxo::{TypeScript, Utxo},
+    PrimitiveWitness,
+};
 
-use super::{SecretWitness, SupportedClaim, ValidationLogic};
+use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-struct TypeScriptHaltsWitness {
+pub struct TypeScriptHaltsWitness {
     type_script: TypeScript,
+    input_utxos: Vec<Utxo>,
+    output_utxos: Vec<Utxo>,
 }
 
 impl SecretWitness for TypeScriptHaltsWitness {
@@ -17,7 +24,7 @@ impl SecretWitness for TypeScriptHaltsWitness {
         NonDeterminism::default()
     }
 
-    fn program(&self) -> triton_vm::Program {
+    fn subprogram(&self) -> triton_vm::Program {
         self.type_script.program.clone()
     }
 }
@@ -36,19 +43,56 @@ impl TypeScriptsHalt {
     }
 }
 
-impl ValidationLogic for TypeScriptsHalt {
-    fn new_from_witness(
-        _primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
-        _tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
+impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
+    fn new_from_primitive_witness(
+        primitive_witness: &PrimitiveWitness,
+        tx_kernel: &TransactionKernel,
     ) -> Self {
+        let claim = Claim {
+            input: tx_kernel.mast_hash().values().to_vec(),
+            output: vec![],
+            program_digest: TypeScript::native_coin().hash(),
+        };
+        let witness = TypeScriptHaltsWitness {
+            type_script: TypeScript::native_coin(),
+            input_utxos: primitive_witness.input_utxos.clone(),
+            output_utxos: primitive_witness.output_utxos.clone(),
+        };
+        let amount_logic: SupportedClaim<TypeScriptHaltsWitness> = SupportedClaim {
+            claim,
+            support: ClaimSupport::SecretWitness(witness),
+        };
+        Self {
+            supported_claims: vec![amount_logic],
+        }
+    }
+
+    fn subprogram(&self) -> triton_vm::Program {
         todo!()
     }
 
-    fn prove(&mut self) -> anyhow::Result<()> {
-        todo!()
+    fn support(&self) -> ClaimSupport<TypeScriptHaltsWitness> {
+        let supports = self
+            .supported_claims
+            .iter()
+            .map(|sc| sc.support.clone())
+            .collect_vec();
+        ClaimSupport::MultipleSupports(supports)
     }
 
-    fn verify(&self) -> bool {
-        todo!()
+    fn claim(&self) -> Claim {
+        let input = self
+            .supported_claims
+            .iter()
+            .flat_map(|sc| sc.claim.program_digest.values().to_vec())
+            .collect_vec();
+        let output = vec![];
+        // let program_hash = AllLockScriptsHalt::program().hash();
+        let program_digest = Default::default();
+        Claim {
+            program_digest,
+            input,
+            output,
+        }
     }
 }

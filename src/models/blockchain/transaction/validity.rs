@@ -1,16 +1,13 @@
 pub mod kernel_to_lock_scripts;
 pub mod kernel_to_typescripts;
 pub mod lockscripts_halt;
+pub mod removal_records_integrity;
 pub mod tasm;
 pub mod typescripts_halt;
 
-use crate::models::blockchain::shared::Hash;
-use anyhow::{bail, Ok, Result};
+use anyhow::{Ok, Result};
 use get_size::GetSize;
-use itertools::Itertools;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tasm_lib::traits::compiled_program::CompiledProgram;
 use tracing::{debug, info, warn};
 use triton_vm::program::Program;
 use triton_vm::{proof::Proof, Claim};
@@ -18,28 +15,28 @@ use triton_vm::{NonDeterminism, PublicInput, StarkParameters};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
+use self::lockscripts_halt::LockScriptsHalt;
+use self::removal_records_integrity::RemovalRecordsIntegrity;
 use self::{
-    kernel_to_lock_scripts::KernelToLockScripts,
-    kernel_to_typescripts::KernelToTypeScripts,
-    lockscripts_halt::LockScriptsHalt,
-    tasm::removal_records_integrity::{RemovalRecordsIntegrity, RemovalRecordsIntegrityWitness},
+    kernel_to_lock_scripts::KernelToLockScripts, kernel_to_typescripts::KernelToTypeScripts,
     typescripts_halt::TypeScriptsHalt,
 };
 use super::{transaction_kernel::TransactionKernel, PrimitiveWitness};
 
 pub trait SecretWitness:
-    Clone + Serialize + DeserializeOwned + PartialEq + Eq + GetSize + BFieldCodec
+    Clone + Serialize + PartialEq + Eq + GetSize + BFieldCodec + Sized
 {
     /// The non-determinism for the VM that this witness corresponds to
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement>;
 
     /// Returns the subprogram
-    fn program(&self) -> Program;
+    fn subprogram(&self) -> Program;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum ClaimSupport<SubprogramWitness: SecretWitness> {
     Proof(Proof),
+    MultipleSupports(Vec<ClaimSupport<SubprogramWitness>>),
     SecretWitness(SubprogramWitness),
     DummySupport, // TODO: Remove this when all claims are implemented
 }
@@ -89,47 +86,54 @@ pub struct TransactionValidityLogic {
     pub type_scripts_halt: TypeScriptsHalt,
 }
 
-pub trait ValidationLogic {
-    fn new_from_witness(
+pub trait ValidationLogic<T: SecretWitness> {
+    fn subprogram(&self) -> Program;
+    fn support(&self) -> ClaimSupport<T>;
+    fn claim(&self) -> Claim;
+
+    /// Update witness secret witness to proof
+    fn upgrade(&mut self, _proof: Proof) {
+        todo!()
+    }
+
+    fn new_from_primitive_witness(
         primitive_witness: &PrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> Self;
 
     /// Prove the claim.
     fn prove(&mut self) -> Result<()> {
-        match &self.supported_claim.support {
+        match &self.support() {
             ClaimSupport::Proof(_) => {
                 // nothing to do; proof already exists
                 Ok(())
             }
-            ClaimSupport::SecretWitness(rriw) => {
-                if rriw.program().is_some() {
-                    bail!("Protocol defines program of removal record integrity check. Must be None here.")
-                }
-
+            ClaimSupport::SecretWitness(witness) => {
                 // Run program before proving
-                Self::program()
+                self.subprogram()
                     .run(
-                        self.supported_claim.claim.public_input().into(),
-                        rriw.nondeterminism().clone(),
+                        self.claim().public_input().into(),
+                        witness.nondeterminism().clone(),
                     )
                     .expect("Program execution prior to proving must succeed");
 
                 let proof = triton_vm::prove(
                     StarkParameters::default(),
-                    &self.supported_claim.claim,
-                    &Self::program(),
-                    rriw.nondeterminism().clone(),
+                    &self.claim(),
+                    &self.subprogram(),
+                    witness.nondeterminism().clone(),
                 )
                 .expect("Proving integrity of removal records must succeed.");
-                self.supported_claim.support = ClaimSupport::Proof(proof);
+                self.upgrade(proof);
                 Ok(())
             }
             ClaimSupport::DummySupport => {
                 // nothing to do
-                warn!(
-                    "Trying to prove removal record integrity for claim supported by dummy support"
-                );
+                warn!("Trying to prove claim supported by dummy support");
+                Ok(())
+            }
+            ClaimSupport::MultipleSupports(_supports) => {
+                warn!("Trying to prove claim with multiple supports; not supported yet");
                 Ok(())
             }
         }
@@ -138,20 +142,19 @@ pub trait ValidationLogic {
     /// Verify the claim.
     fn verify(&self) -> bool {
         use std::result::Result::Ok;
-        match &self.supported_claim.support {
-            ClaimSupport::Proof(proof) => triton_vm::verify(
-                StarkParameters::default(),
-                &self.supported_claim.claim,
-                proof,
-            ),
+        match &self.support() {
+            ClaimSupport::Proof(proof) => {
+                triton_vm::verify(StarkParameters::default(), &self.claim(), proof)
+            }
             ClaimSupport::SecretWitness(w) => {
                 let nondeterminism = w.nondeterminism();
-                let input = &self.supported_claim.claim.input;
-                let vm_result = w.program().run(PublicInput::new(input), nondeterminism);
+                let input = &self.claim().input;
+                let vm_result = w
+                    .subprogram()
+                    .run(PublicInput::new(input.to_vec()), nondeterminism);
                 match vm_result {
                     Ok(observed_output) => {
-                        let found_expected_output =
-                            observed_output == self.supported_claim.claim.output;
+                        let found_expected_output = observed_output == self.claim().output;
                         if !found_expected_output {
                             warn!("Observed output does not match claimed output for RRI");
                             debug!("Got output: {found_expected_output}");
@@ -170,63 +173,41 @@ pub trait ValidationLogic {
                 warn!("removal record integrity support must be supplied");
                 false
             }
+            ClaimSupport::MultipleSupports(_multiple_supports) => {
+                warn!(
+                    "Verifying claim with multiple supports ... returning true without checking."
+                );
+                true
+            }
         }
     }
 }
 
-impl ValidationLogic for TransactionValidityLogic {
-    fn new_from_witness(
+impl SecretWitness for PrimitiveWitness {
+    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
+        todo!()
+    }
+
+    fn subprogram(&self) -> Program {
+        todo!()
+    }
+}
+
+impl ValidationLogic<PrimitiveWitness> for TransactionValidityLogic {
+    fn new_from_primitive_witness(
         primitive_witness: &PrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> Self {
-        let kernel_hash = tx_kernel.mast_hash().reversed().values().to_vec();
-        let lock_scripts_halt = LockScriptsHalt {
-            supported_claims: primitive_witness
-                .input_utxos
-                .iter()
-                .zip(primitive_witness.input_lock_scripts.iter())
-                .zip(primitive_witness.lock_script_witnesses.iter())
-                .map(
-                    |((_utxo, lock_script), lock_script_witness)| SupportedClaim {
-                        claim: Claim {
-                            program_digest: lock_script.hash(),
-                            input: kernel_hash.clone(),
-                            output: vec![],
-                        },
-                        support: ClaimSupport::SecretWitness(SecretWitness::new(
-                            lock_script_witness.clone(),
-                            Some(lock_script.program.clone()),
-                        )),
-                    },
-                )
-                .collect_vec(),
-        };
-        let kernel_to_lock_scripts = KernelToLockScripts {
-            supported_claim: SupportedClaim::dummy(),
-        };
-        debug!(
-            "Removal Records Integrity program digest: ({})",
-            RemovalRecordsIntegrity::program().hash::<Hash>()
-        );
-        let removal_records_integrity = RemovalRecordsIntegrity {
-            supported_claim: SupportedClaim {
-                claim: Claim {
-                    program_digest: RemovalRecordsIntegrity::program().hash::<Hash>(),
-                    input: kernel_hash,
-                    output: vec![],
-                },
-                support: ClaimSupport::SecretWitness(SecretWitness::new(
-                    RemovalRecordsIntegrityWitness::new(primitive_witness, tx_kernel).encode(),
-                    None,
-                )),
-            },
-        };
-        let kernel_to_typescripts = KernelToTypeScripts {
-            supported_claim: SupportedClaim::dummy(),
-        };
-        let type_scripts_halt = TypeScriptsHalt {
-            supported_claims: vec![SupportedClaim::dummy()],
-        };
+        let lock_scripts_halt =
+            LockScriptsHalt::new_from_primitive_witness(primitive_witness, tx_kernel);
+        let kernel_to_lock_scripts =
+            KernelToLockScripts::new_from_primitive_witness(primitive_witness, tx_kernel);
+        let removal_records_integrity =
+            RemovalRecordsIntegrity::new_from_primitive_witness(primitive_witness, tx_kernel);
+        let kernel_to_typescripts =
+            KernelToTypeScripts::new_from_primitive_witness(primitive_witness, tx_kernel);
+        let type_scripts_halt =
+            TypeScriptsHalt::new_from_primitive_witness(primitive_witness, tx_kernel);
         Self {
             lock_scripts_halt,
             kernel_to_lock_scripts,
@@ -255,5 +236,26 @@ impl ValidationLogic for TransactionValidityLogic {
             && self.removal_records_integrity.verify()
         // && self.kernel_to_typescripts.verify()
         // && self.type_scripts_halt.verify()
+    }
+
+    fn subprogram(&self) -> Program {
+        todo!()
+    }
+
+    fn support(&self) -> ClaimSupport<PrimitiveWitness> {
+        // let supports = vec![
+        //     self.lock_scripts_halt.supported_claims,
+        //     vec![self.kernel_to_lock_scripts.supported_claim],
+        //     vec![self.removal_records_integrity.supported_claim],
+        //     vec![self.kernel_to_typescripts.supported_claim],
+        //     self.type_scripts_halt.supported_claims,
+        // ]
+        // .concat();
+        // ClaimSupport::MultipleSupports(supports)
+        todo!()
+    }
+
+    fn claim(&self) -> Claim {
+        todo!()
     }
 }
