@@ -72,12 +72,18 @@ impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
     }
 
     fn support(&self) -> ClaimSupport<TypeScriptHaltsWitness> {
-        let supports = self
-            .supported_claims
-            .iter()
-            .map(|sc| sc.support.clone())
-            .collect_vec();
-        ClaimSupport::MultipleSupports(supports)
+        ClaimSupport::MultipleSupports(
+            self.supported_claims
+                .clone()
+                .into_iter()
+                .map(|sc| match sc.support {
+                    ClaimSupport::Proof(_) => todo!(),
+                    ClaimSupport::MultipleSupports(_) => todo!(),
+                    ClaimSupport::SecretWitness(sw) => sw.to_owned(),
+                    ClaimSupport::DummySupport => todo!(),
+                })
+                .collect(),
+        )
     }
 
     fn claim(&self) -> Claim {

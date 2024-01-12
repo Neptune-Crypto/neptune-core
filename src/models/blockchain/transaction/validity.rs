@@ -36,7 +36,7 @@ pub trait SecretWitness:
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum ClaimSupport<SubprogramWitness: SecretWitness> {
     Proof(Proof),
-    MultipleSupports(Vec<ClaimSupport<SubprogramWitness>>),
+    MultipleSupports(Vec<SubprogramWitness>),
     SecretWitness(SubprogramWitness),
     DummySupport, // TODO: Remove this when all claims are implemented
 }
@@ -170,31 +170,33 @@ pub trait ValidationLogic<T: SecretWitness> {
                 }
             }
             ClaimSupport::DummySupport => {
-                warn!("removal record integrity support must be supplied");
+                warn!("dummy support encountered");
                 false
             }
-            ClaimSupport::MultipleSupports(_multiple_supports) => {
-                warn!(
-                    "Verifying claim with multiple supports ... returning true without checking."
-                );
+            ClaimSupport::MultipleSupports(secret_witnesses) => {
+                let claim = self.claim();
+                for witness in secret_witnesses.iter() {
+                    let vm_result = witness.subprogram().run(
+                        PublicInput::new(claim.input.to_vec()),
+                        witness.nondeterminism(),
+                    );
+                    match vm_result {
+                        Ok(_) => (),
+                        Err(err) => {
+                            warn!("Multiple-support witness failed to validate: {err}");
+                            return false;
+                        }
+                    }
+                }
+
                 true
             }
         }
     }
 }
 
-impl SecretWitness for PrimitiveWitness {
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
-        todo!()
-    }
-
-    fn subprogram(&self) -> Program {
-        todo!()
-    }
-}
-
-impl ValidationLogic<PrimitiveWitness> for TransactionValidityLogic {
-    fn new_from_primitive_witness(
+impl TransactionValidityLogic {
+    pub fn new_from_primitive_witness(
         primitive_witness: &PrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> Self {
@@ -217,7 +219,7 @@ impl ValidationLogic<PrimitiveWitness> for TransactionValidityLogic {
         }
     }
 
-    fn prove(&mut self) -> Result<()> {
+    pub fn prove(&mut self) -> Result<()> {
         self.lock_scripts_halt.prove()?;
 
         self.removal_records_integrity.prove()?;
@@ -229,33 +231,12 @@ impl ValidationLogic<PrimitiveWitness> for TransactionValidityLogic {
         Ok(())
     }
 
-    fn verify(&self) -> bool {
+    pub fn verify(&self) -> bool {
         info!("validity logic for 'kernel_to_lock_scripts', 'kernel_to_type_scripts', 'type_scripts_halt' not implemented yet.");
         self.lock_scripts_halt.verify()
             // && self.kernel_to_lock_scripts.verify()
             && self.removal_records_integrity.verify()
         // && self.kernel_to_typescripts.verify()
         // && self.type_scripts_halt.verify()
-    }
-
-    fn subprogram(&self) -> Program {
-        todo!()
-    }
-
-    fn support(&self) -> ClaimSupport<PrimitiveWitness> {
-        // let supports = vec![
-        //     self.lock_scripts_halt.supported_claims,
-        //     vec![self.kernel_to_lock_scripts.supported_claim],
-        //     vec![self.removal_records_integrity.supported_claim],
-        //     vec![self.kernel_to_typescripts.supported_claim],
-        //     self.type_scripts_halt.supported_claims,
-        // ]
-        // .concat();
-        // ClaimSupport::MultipleSupports(supports)
-        todo!()
-    }
-
-    fn claim(&self) -> Claim {
-        todo!()
     }
 }

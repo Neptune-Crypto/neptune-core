@@ -23,19 +23,18 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
+use self::amount::Amount;
+use self::native_coin::native_coin_program;
+use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
+use self::utxo::{LockScript, Utxo};
+use self::validity::TransactionValidityLogic;
+use super::block::Block;
+use super::shared::Hash;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-
-use self::amount::Amount;
-use self::native_coin::native_coin_program;
-use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
-use self::utxo::{LockScript, Utxo};
-use self::validity::{TransactionValidityLogic, ValidationLogic};
-use super::block::Block;
-use super::shared::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PubScript {

@@ -17,7 +17,7 @@ pub struct LockScriptHaltsWitness {
 
 impl SecretWitness for LockScriptHaltsWitness {
     fn nondeterminism(&self) -> triton_vm::NonDeterminism<triton_vm::BFieldElement> {
-        NonDeterminism::new(self.preimage.clone().into_iter().rev().collect_vec())
+        NonDeterminism::new(self.preimage.clone().into_iter().collect_vec())
     }
 
     fn subprogram(&self) -> triton_vm::Program {
@@ -66,13 +66,28 @@ impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
     }
 
     fn support(&self) -> ClaimSupport<LockScriptHaltsWitness> {
-        let supports = self
-            .supported_claims
-            .iter()
-            .map(|sc| sc.support.clone())
-            .collect_vec();
-        ClaimSupport::MultipleSupports(supports)
+        ClaimSupport::MultipleSupports(
+            self.supported_claims
+                .clone()
+                .into_iter()
+                .map(|sc| match sc.support {
+                    ClaimSupport::Proof(_) => todo!(),
+                    ClaimSupport::MultipleSupports(_) => todo!(),
+                    ClaimSupport::SecretWitness(sw) => sw.to_owned(),
+                    ClaimSupport::DummySupport => todo!(),
+                })
+                .collect(),
+        )
     }
+
+    // fn support(&self) -> ClaimSupport<LockScriptHaltsWitness> {
+    // let supports = self
+    //     .supported_claims
+    //     .iter()
+    //     .map(|sc| sc.support.clone())
+    //     .collect_vec();
+    // ClaimSupport::MultipleSupports(supports)
+    // }
 
     fn claim(&self) -> Claim {
         let input = self

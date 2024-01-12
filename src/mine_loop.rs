@@ -8,7 +8,6 @@ use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::validity::TransactionValidityLogic;
-use crate::models::blockchain::transaction::validity::ValidationLogic;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
 use crate::models::shared::SIZE_20MB_IN_BYTES;

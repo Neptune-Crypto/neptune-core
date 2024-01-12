@@ -55,7 +55,6 @@ use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAnd
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidityLogic;
-use crate::models::blockchain::transaction::validity::ValidationLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::Witness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
