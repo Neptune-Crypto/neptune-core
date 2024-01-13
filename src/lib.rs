@@ -285,7 +285,7 @@ where
     (output, total_time)
 }
 
-/// Converts a UTC timestamp (seconds since 1970 UTC) into
+/// Converts a UTC millisecond timestamp (millis since 1970 UTC) into
 /// a `DateTime<Local>`, ie local-time.
 pub fn utc_timestamp_to_localtime<T>(timestamp: T) -> DateTime<Local>
 where

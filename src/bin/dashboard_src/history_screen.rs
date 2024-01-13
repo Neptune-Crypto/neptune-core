@@ -1,11 +1,10 @@
 use std::{
     cmp::{max, min},
     sync::{Arc, Mutex},
-    time::{Duration, UNIX_EPOCH},
+    time::Duration,
 };
 
 use super::{dashboard_app::DashboardEvent, screen::Screen};
-use chrono::{DateTime, Utc};
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use itertools::Itertools;
 use neptune_core::{
@@ -265,10 +264,10 @@ impl Widget for HistoryScreen {
             .iter()
             .rev()
             .map(|bu| {
-                let (height, duration, amount, sign, balance) = *bu;
+                let (height, timestamp, amount, sign, balance) = *bu;
                 vec![
                     height.to_string(),
-                    DateTime::<Utc>::from(UNIX_EPOCH + duration).to_string(),
+                    neptune_core::utc_timestamp_to_localtime(timestamp.as_millis()).to_string(),
                     if sign == Sign::NonNegative {
                         "↘".to_string()
                     } else {
