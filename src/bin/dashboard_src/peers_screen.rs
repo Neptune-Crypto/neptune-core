@@ -5,7 +5,6 @@ use std::{
 };
 
 use super::{dashboard_app::DashboardEvent, screen::Screen};
-use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use neptune_core::{models::peer::PeerInfo, rpc_server::RPCClient};
 use ratatui::{
@@ -177,12 +176,12 @@ impl Widget for PeersScreen {
             .map(|pi| {
                 let latest_violation: Option<String> =
                     pi.standing.latest_sanction.map(|x| x.to_string());
-                let formatted_datetime = DateTime::<Utc>::from(pi.last_seen)
-                    .format("%Y-%m-%d %H:%M")
-                    .to_string();
+                let last_seen_timestamp =
+                    pi.last_seen.duration_since(std::time::UNIX_EPOCH).unwrap();
                 vec![
                     pi.connected_address.to_string(),
-                    formatted_datetime,
+                    neptune_core::utc_timestamp_to_localtime(last_seen_timestamp.as_millis())
+                        .to_string(),
                     pi.standing.standing.to_string(),
                     if pi.is_archival_node {
                         "✓".to_string()
