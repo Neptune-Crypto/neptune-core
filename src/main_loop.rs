@@ -7,7 +7,6 @@ use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
 
-use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::GlobalStateLock;
 use anyhow::Result;
 use itertools::Itertools;
@@ -310,77 +309,34 @@ impl MainLoopHandler {
 
                 // Store block in database
                 // This block spans global state write lock for updating.
-                {
-                    let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
-                    let (tip_hash, tip_proof_of_work_family) = (
-                        global_state_mut.chain.light_state().hash,
-                        global_state_mut
-                            .chain
-                            .light_state()
-                            .header
-                            .proof_of_work_family,
-                    );
-
-                    // If we received a new block from a peer and updated the global state before this message from the miner was handled,
-                    // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
-                    // node considered the most canonical block.
-                    let block_is_new = tip_proof_of_work_family
-                        < new_block.header.proof_of_work_family
-                        && new_block.header.prev_block_digest == tip_hash;
-                    if !block_is_new {
-                        warn!("Got new block from miner thread that was not child of tip. Discarding.");
-                        return Ok(());
-                    }
-
-                    // Apply the updates
+                let (tip_hash, tip_proof_of_work_family) = (
+                    global_state_mut.chain.light_state().hash,
                     global_state_mut
                         .chain
-                        .archival_state()
-                        .write_block(
-                            new_block.clone(), // todo: avoid clone
-                            Some(tip_proof_of_work_family),
-                        )
-                        .await?;
+                        .light_state()
+                        .header
+                        .proof_of_work_family,
+                );
 
-                    // update the mutator set with the UTXOs from this block
-                    global_state_mut
-                        .chain
-                        .archival_state_mut()
-                        .update_mutator_set(&new_block)
-                        .await
-                        .expect("Updating mutator set must succeed");
-
-                    // Notify wallet to expect the coinbase UTXO, as we mined this block
-                    global_state_mut
-                        .wallet_state
-                        .expected_utxos
-                        .add_expected_utxo(
-                            new_block_info.coinbase_utxo_info.utxo,
-                            new_block_info.coinbase_utxo_info.sender_randomness,
-                            new_block_info.coinbase_utxo_info.receiver_preimage,
-                            UtxoNotifier::OwnMiner,
-                        )
-                        .expect("UTXO notification from miner must be accepted");
-
-                    // update wallet state with relevant UTXOs from this block
-                    global_state_mut
-                        .wallet_state
-                        .update_wallet_state_with_new_block(&new_block)
-                        .await?;
-
-                    // Update mempool with UTXOs from this block. This is done by removing all transaction
-                    // that became invalid/was mined by this block.
-                    global_state_mut.mempool.update_with_block(&new_block);
-
-                    global_state_mut
-                        .chain
-                        .light_state_mut()
-                        .set_block(*new_block.clone());
-
-                    // Flush databases
-                    global_state_mut.flush_databases().await?;
+                // If we received a new block from a peer and updated the global state before this message from the miner was handled,
+                // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
+                // node considered the most canonical block.
+                let block_is_new = tip_proof_of_work_family < new_block.header.proof_of_work_family
+                    && new_block.header.prev_block_digest == tip_hash;
+                if !block_is_new {
+                    warn!("Got new block from miner thread that was not child of tip. Discarding.");
+                    return Ok(());
                 }
+
+                global_state_mut
+                    .store_coinbase_block(
+                        new_block.as_ref().clone(),
+                        new_block_info.coinbase_utxo_info.as_ref().clone(),
+                    )
+                    .await?;
+                drop(global_state_mut);
 
                 // Inform miner that mempool has been updated and that it is safe
                 // to mine the next block
@@ -457,41 +413,9 @@ impl MainLoopHandler {
                             crate::utc_timestamp_to_localtime(new_block.header.timestamp.value())
                                 .to_string()
                         );
-                        global_state_mut
-                            .chain
-                            .archival_state_mut()
-                            .write_block(
-                                Box::new(new_block.clone()),
-                                Some(tip_proof_of_work_family),
-                            )
-                            .await?;
 
-                        // update the mutator set with the UTXOs from this block
-                        global_state_mut
-                            .chain
-                            .archival_state_mut()
-                            .update_mutator_set(&new_block)
-                            .await?;
-
-                        // update wallet state with relevant UTXOs from this block
-                        global_state_mut
-                            .wallet_state
-                            .update_wallet_state_with_new_block(&new_block)
-                            .await?;
-
-                        // Update mempool with UTXOs from this block. This is done by removing all transaction
-                        // that became invalid/was mined by this block.
-                        global_state_mut.mempool.update_with_block(&new_block);
+                        global_state_mut.store_block(new_block).await?;
                     }
-
-                    // Update information about latest block
-                    global_state_mut
-                        .chain
-                        .light_state_mut()
-                        .set_block(last_block.clone());
-
-                    // Flush databases
-                    global_state_mut.flush_databases().await?;
                 }
 
                 // Inform miner to work on a new block

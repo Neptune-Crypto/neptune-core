@@ -21,6 +21,7 @@ use self::wallet::utxo_notification_pool::UtxoNotifier;
 use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::block::block_height::BlockHeight;
+use super::blockchain::block::Block;
 use super::blockchain::transaction::transaction_kernel::{
     PubScriptHashAndInput, TransactionKernel,
 };
@@ -34,12 +35,14 @@ use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
 use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::sync::tokio as sync_tokio;
+
 use crate::{Hash, VERSION};
 
 pub mod archival_state;
@@ -145,6 +148,23 @@ impl GlobalStateLock {
     // flush databases (persist to disk)
     pub async fn flush_databases(&self) -> Result<()> {
         self.lock_guard_mut().await.flush_databases().await
+    }
+
+    /// store a coinbase (self-mined) block
+    pub async fn store_coinbase_block(
+        &self,
+        new_block: Block,
+        coinbase_utxo_info: ExpectedUtxo,
+    ) -> Result<()> {
+        self.lock_guard_mut()
+            .await
+            .store_coinbase_block(new_block, coinbase_utxo_info)
+            .await
+    }
+
+    /// store a block (non coinbase)
+    pub async fn store_block(&self, new_block: Block) -> Result<()> {
+        self.lock_guard_mut().await.store_block(new_block).await
     }
 }
 
@@ -845,6 +865,72 @@ impl GlobalState {
         self.net.peer_databases.peer_standings.flush().await;
 
         debug!("Flushed all databases");
+
+        Ok(())
+    }
+
+    /// store a block (non-coinbase)
+    pub async fn store_block(&mut self, new_block: Block) -> Result<()> {
+        self.store_block_internal(new_block, None).await
+    }
+
+    /// store a coinbase (self-mined) block
+    pub async fn store_coinbase_block(
+        &mut self,
+        new_block: Block,
+        coinbase_utxo_info: ExpectedUtxo,
+    ) -> Result<()> {
+        self.store_block_internal(new_block, Some(coinbase_utxo_info))
+            .await
+    }
+
+    async fn store_block_internal(
+        &mut self,
+        new_block: Block,
+        coinbase_utxo_info: Option<ExpectedUtxo>,
+    ) -> Result<()> {
+        // get proof_of_work_family for tip
+        let tip_proof_of_work_family = self.chain.light_state().header.proof_of_work_family;
+
+        // Apply the updates
+        self.chain
+            .archival_state()
+            .write_block(&new_block, Some(tip_proof_of_work_family))
+            .await?;
+
+        // update the mutator set with the UTXOs from this block
+        self.chain
+            .archival_state_mut()
+            .update_mutator_set(&new_block)
+            .await
+            .expect("Updating mutator set must succeed");
+
+        if let Some(coinbase_info) = coinbase_utxo_info {
+            // Notify wallet to expect the coinbase UTXO, as we mined this block
+            self.wallet_state
+                .expected_utxos
+                .add_expected_utxo(
+                    coinbase_info.utxo,
+                    coinbase_info.sender_randomness,
+                    coinbase_info.receiver_preimage,
+                    UtxoNotifier::OwnMiner,
+                )
+                .expect("UTXO notification from miner must be accepted");
+        }
+
+        // update wallet state with relevant UTXOs from this block
+        self.wallet_state
+            .update_wallet_state_with_new_block(&new_block)
+            .await?;
+
+        // Update mempool with UTXOs from this block. This is done by removing all transaction
+        // that became invalid/was mined by this block.
+        self.mempool.update_with_block(&new_block);
+
+        self.chain.light_state_mut().set_block(new_block);
+
+        // Flush databases
+        self.flush_databases().await?;
 
         Ok(())
     }

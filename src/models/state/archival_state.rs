@@ -216,7 +216,7 @@ impl ArchivalState {
     /// Write a newly found block to database and to disk.
     pub async fn write_block(
         &self,
-        new_block: Box<Block>,
+        new_block: &Block,
         current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
         // Fetch last file record to find disk location to store block.
@@ -234,7 +234,7 @@ impl ArchivalState {
 
         // Open the file that was last used for storing a block
         let mut block_file_path = self.data_dir.block_file_path(last_rec.last_file);
-        let serialized_block: Vec<u8> = bincode::serialize(&new_block)?;
+        let serialized_block: Vec<u8> = bincode::serialize(new_block)?;
         let serialized_block_size: u64 = serialized_block.len() as u64;
 
         // todo: make following file operations async friendly.
