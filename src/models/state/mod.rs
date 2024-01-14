@@ -166,6 +166,11 @@ impl GlobalStateLock {
     pub async fn store_block(&self, new_block: Block) -> Result<()> {
         self.lock_guard_mut().await.store_block(new_block).await
     }
+
+    /// resync membership proofs
+    pub async fn resync_membership_proofs(&self) -> Result<()> {
+        self.lock_guard_mut().await.resync_membership_proofs().await
+    }
 }
 
 impl Deref for GlobalStateLock {
@@ -934,6 +939,41 @@ impl GlobalState {
 
         Ok(())
     }
+
+    /// resync membership proofs
+    pub async fn resync_membership_proofs(&mut self) -> Result<()> {
+
+        // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
+        // have to sync many times, instead of just *one* time once we have caught up.
+        if self.net.syncing {
+            debug!("Not syncing MS membership proofs because we are syncing");
+            return Ok(());
+        }
+
+        // is it necessary?
+        let current_tip_digest = self.chain.light_state().hash();
+        if self
+            .wallet_state
+            .is_synced_to(current_tip_digest)
+            .await
+        {
+            debug!("Membership proof syncing not needed");
+            return Ok(());
+        }
+
+        // do we have blocks?
+        if self.chain.is_archival_node() {
+            return self
+                .resync_membership_proofs_from_stored_blocks(current_tip_digest)
+                .await;
+        }
+
+        // request blocks from peers
+        todo!("We don't yet support non-archival nodes");
+
+        // Ok(())
+    }
+
 }
 
 #[cfg(test)]
@@ -1158,7 +1198,7 @@ mod global_state_tests {
                 .chain
                 .archival_state()
                 .write_block(
-                    Box::new(mock_block_1a.clone()),
+                    &mock_block_1a,
                     Some(mock_block_1a.header.proof_of_work_family),
                 )
                 .await?;
@@ -1225,7 +1265,7 @@ mod global_state_tests {
                 .chain
                 .archival_state()
                 .write_block(
-                    Box::new(mock_block_1a.clone()),
+                    &mock_block_1a,
                     Some(mock_block_1a.header.proof_of_work_family),
                 )
                 .await?;
@@ -1263,10 +1303,7 @@ mod global_state_tests {
             global_state
                 .chain
                 .archival_state()
-                .write_block(
-                    Box::new(next_block.clone()),
-                    Some(next_block.header.proof_of_work_family),
-                )
+                .write_block(&next_block, Some(next_block.header.proof_of_work_family))
                 .await?;
             global_state
                 .wallet_state
@@ -1332,7 +1369,7 @@ mod global_state_tests {
                 .chain
                 .archival_state()
                 .write_block(
-                    Box::new(mock_block_1a.clone()),
+                    &mock_block_1a,
                     Some(mock_block_1a.header.proof_of_work_family),
                 )
                 .await?;
@@ -1368,7 +1405,7 @@ mod global_state_tests {
                 .chain
                 .archival_state()
                 .write_block(
-                    Box::new(next_a_block.clone()),
+                    &next_a_block,
                     Some(next_a_block.header.proof_of_work_family),
                 )
                 .await?;
@@ -1396,7 +1433,7 @@ mod global_state_tests {
                 .chain
                 .archival_state()
                 .write_block(
-                    Box::new(next_b_block.clone()),
+                    &next_b_block,
                     Some(next_b_block.header.proof_of_work_family),
                 )
                 .await?;
@@ -1446,7 +1483,7 @@ mod global_state_tests {
                 .chain
                 .archival_state()
                 .write_block(
-                    Box::new(next_c_block.clone()),
+                    &next_c_block,
                     Some(next_c_block.header.proof_of_work_family),
                 )
                 .await?;
