@@ -834,10 +834,7 @@ mod tests {
             own_global_state
                 .chain
                 .archival_state()
-                .write_block(
-                    Box::new(new_block.clone()),
-                    Some(latest_block.header.proof_of_work_family),
-                )
+                .write_block(&new_block, Some(latest_block.header.proof_of_work_family))
                 .await
                 .unwrap();
             own_global_state
@@ -883,10 +880,7 @@ mod tests {
         own_global_state
             .chain
             .archival_state()
-            .write_block(
-                Box::new(block_3a.clone()),
-                Some(latest_block.header.proof_of_work_family),
-            )
+            .write_block(&block_3a, Some(latest_block.header.proof_of_work_family))
             .await
             .unwrap();
         own_global_state
@@ -930,10 +924,7 @@ mod tests {
         own_global_state
             .chain
             .archival_state()
-            .write_block(
-                Box::new(block_3b.clone()),
-                Some(latest_block.header.proof_of_work_family),
-            )
+            .write_block(&block_3b, Some(latest_block.header.proof_of_work_family))
             .await
             .unwrap();
         own_global_state
@@ -980,10 +971,7 @@ mod tests {
             own_global_state
                 .chain
                 .archival_state()
-                .write_block(
-                    Box::new(new_block.clone()),
-                    Some(latest_block.header.proof_of_work_family),
-                )
+                .write_block(&new_block, Some(latest_block.header.proof_of_work_family))
                 .await
                 .unwrap();
             own_global_state
@@ -1029,10 +1017,7 @@ mod tests {
         own_global_state
             .chain
             .archival_state()
-            .write_block(
-                Box::new(block_12.clone()),
-                Some(latest_block.header.proof_of_work_family),
-            )
+            .write_block(&block_12, Some(latest_block.header.proof_of_work_family))
             .await
             .unwrap();
         own_global_state

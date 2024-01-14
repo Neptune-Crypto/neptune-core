@@ -292,10 +292,7 @@ pub async fn add_block_to_archival_state(
         None => None,
     };
     archival_state
-        .write_block(
-            Box::new(new_block.clone()),
-            tip_header.map(|x| x.proof_of_work_family),
-        )
+        .write_block(&new_block, tip_header.map(|x| x.proof_of_work_family))
         .await?;
 
     archival_state.update_mutator_set(&new_block).await.unwrap();
@@ -323,7 +320,7 @@ pub async fn add_block(state: &mut GlobalState, new_block: Block) -> Result<()> 
     state
         .chain
         .archival_state()
-        .write_block(Box::new(new_block.clone()), Some(previous_pow_family))
+        .write_block(&new_block, Some(previous_pow_family))
         .await?;
     if previous_pow_family < new_block.header.proof_of_work_family {
         state.chain.light_state_mut().set_block(new_block);

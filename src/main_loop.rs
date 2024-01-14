@@ -976,7 +976,7 @@ impl MainLoopHandler {
                 // Handle membership proof resynchronization
                 _ = &mut mp_resync_timer => {
                     debug!("Timer: Membership proof resync job");
-                    self.resync_membership_proofs().await?;
+                    self.global_state_lock.resync_membership_proofs().await?;
 
                     mp_resync_timer.as_mut().reset(tokio::time::Instant::now() + mp_resync_timer_interval);
                 }
@@ -986,45 +986,7 @@ impl MainLoopHandler {
         self.graceful_shutdown(main_loop_state.thread_handles)
             .await?;
         info!("Shutdown completed.");
-
         Ok(())
-    }
-
-    /// Locking:
-    ///   * acquires `global_state_lock` for write
-    async fn resync_membership_proofs(&self) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-
-        // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
-        // have to sync many times, instead of just *one* time once we have caught up.
-        if global_state_mut.net.syncing {
-            debug!("Not syncing MS membership proofs because we are syncing");
-            return Ok(());
-        }
-
-        // is it necessary?
-        let current_tip_digest = global_state_mut.chain.light_state().hash();
-        if global_state_mut
-            .wallet_state
-            .is_synced_to(current_tip_digest)
-            .await
-        {
-            debug!("Membership proof syncing not needed");
-            return Ok(());
-        }
-
-        // do we have blocks?
-        let we_have_blocks = global_state_mut.chain.is_archival_node();
-        if we_have_blocks {
-            return global_state_mut
-                .resync_membership_proofs_from_stored_blocks(current_tip_digest)
-                .await;
-        }
-
-        // request blocks from peers
-        todo!("We don't yet support non-archival nodes");
-
-        // Ok(())
     }
 
     /// Handle messages from the RPC server. Returns `true` iff the client should shut down

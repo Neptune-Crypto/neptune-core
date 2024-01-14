@@ -911,7 +911,7 @@ mod archival_state_tests {
         );
         archival_state
             .write_block(
-                Box::new(mock_block_1a.clone()),
+                &mock_block_1a,
                 Some(mock_block_1a.header.proof_of_work_family),
             )
             .await?;
@@ -930,7 +930,7 @@ mod archival_state_tests {
         );
         archival_state
             .write_block(
-                Box::new(mock_block_1a.clone()),
+                &mock_block_1a,
                 Some(mock_block_1b.header.proof_of_work_family),
             )
             .await?;
@@ -1005,10 +1005,7 @@ mod archival_state_tests {
 
         {
             archival_state
-                .write_block(
-                    Box::new(block_1a.clone()),
-                    Some(block_1a.header.proof_of_work_family),
-                )
+                .write_block(&block_1a, Some(block_1a.header.proof_of_work_family))
                 .await
                 .unwrap();
 
@@ -1022,10 +1019,7 @@ mod archival_state_tests {
                 own_receiving_address,
             );
             archival_state
-                .write_block(
-                    Box::new(block_1a.clone()),
-                    Some(mock_block_1b.header.proof_of_work_family),
-                )
+                .write_block(&block_1a, Some(mock_block_1b.header.proof_of_work_family))
                 .await
                 .unwrap();
 
@@ -1128,10 +1122,7 @@ mod archival_state_tests {
                 global_state
                     .chain
                     .archival_state()
-                    .write_block(
-                        Box::new(next_block.clone()),
-                        Some(next_block.header.proof_of_work_family),
-                    )
+                    .write_block(&next_block, Some(next_block.header.proof_of_work_family))
                     .await?;
                 global_state
                     .chain
@@ -1174,7 +1165,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .write_block(
-                    Box::new(mock_block_1b.clone()),
+                    &mock_block_1b,
                     Some(mock_block_1b.header.proof_of_work_family),
                 )
                 .await?;
@@ -2391,10 +2382,7 @@ mod archival_state_tests {
         let (mock_block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis.clone(), None, own_receiving_address);
         archival_state
-            .write_block(
-                Box::new(mock_block_1.clone()),
-                Some(genesis.header.proof_of_work_family),
-            )
+            .write_block(&mock_block_1, Some(genesis.header.proof_of_work_family))
             .await?;
 
         // Verify that `LastFile` value is stored correctly
@@ -2480,7 +2468,7 @@ mod archival_state_tests {
             make_mock_block_with_valid_pow(&mock_block_1.clone(), None, own_receiving_address);
         archival_state
             .write_block(
-                Box::new(mock_block_2.clone()),
+                &mock_block_2,
                 Some(mock_block_1.header.proof_of_work_family),
             )
             .await?;
