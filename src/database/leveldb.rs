@@ -16,4 +16,5 @@ where
     fn get(&self, key: Key) -> Option<Value>;
     fn put(&self, key: Key, value: Value);
     fn delete(&self, key: Key) -> Option<Value>;
+    fn flush(&self);
 }
