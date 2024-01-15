@@ -9,7 +9,7 @@ use tokio::task;
 use twenty_first::leveldb::{
     batch::WriteBatch,
     iterator::Iterable,
-    options::{Options, ReadOptions},
+    options::{Options, ReadOptions, WriteOptions},
 };
 use twenty_first::leveldb_sys::Compression;
 use twenty_first::storage::level_db::DB;
@@ -53,7 +53,14 @@ where
 {
     /// Open or create a new or existing database
     fn new(db_path: &Path, options: &Options) -> Result<Self> {
-        let database = DB::open(db_path, options)?;
+        let mut write_options = WriteOptions::new();
+        write_options.sync = true;
+
+        let mut read_options = ReadOptions::new();
+        read_options.verify_checksums = true;
+        read_options.fill_cache = true;
+
+        let database = DB::open_with_options(db_path, options, read_options, write_options)?;
         let database = Self {
             database,
             _key: PhantomData,
