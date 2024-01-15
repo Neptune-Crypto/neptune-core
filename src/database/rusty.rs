@@ -103,6 +103,12 @@ where
             Err(err) => panic!("database failure: {}", err),
         }
     }
+
+    fn flush(&self) {
+        self.database
+            .write(&WriteBatch::new(), true)
+            .expect("Database flushing to disk must succeed");
+    }
 }
 
 /// `RustyLevelDbAsync` provides an async-friendly and clone-friendly wrapper
@@ -213,6 +219,12 @@ where
         task::spawn_blocking(move || inner.delete(key))
             .await
             .unwrap()
+    }
+
+    /// Delete database value asynchronously
+    pub async fn flush(&self) {
+        let inner = self.0.clone();
+        task::spawn_blocking(move || inner.flush()).await.unwrap()
     }
 }
 

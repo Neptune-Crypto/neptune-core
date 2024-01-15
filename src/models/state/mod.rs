@@ -826,19 +826,25 @@ impl GlobalState {
         // flush wallet databases
         self.wallet_state.wallet_db.persist();
 
-        let hash = self.chain.archival_state().get_latest_block().await.hash;
+        // flush block_index database
+        self.chain.archival_state().block_index_db.flush().await;
 
         // persist archival_mutator_set, with sync label
+        let hash = self.chain.archival_state().get_latest_block().await.hash;
         self.chain
             .archival_state_mut()
             .archival_mutator_set
             .set_sync_label(hash);
+
         self.chain
             .archival_state_mut()
             .archival_mutator_set
             .persist();
 
-        debug!("Persisted all databases");
+        // flush peer_standings
+        self.net.peer_databases.peer_standings.flush().await;
+
+        debug!("Flushed all databases");
 
         Ok(())
     }
