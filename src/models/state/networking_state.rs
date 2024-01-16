@@ -1,5 +1,5 @@
 use crate::config_models::data_directory::DataDirectory;
-use crate::database::rusty::{create_db_if_missing, RustyLevelDbAsync};
+use crate::database::{create_db_if_missing, NeptuneLevelDb};
 use crate::models::database::PeerDatabases;
 use crate::models::peer::{self, PeerStanding};
 use anyhow::Result;
@@ -46,7 +46,7 @@ impl NetworkingState {
         let database_dir_path = data_dir.database_dir_path();
         DataDirectory::create_dir_if_not_exists(&database_dir_path)?;
 
-        let peer_standings = RustyLevelDbAsync::<IpAddr, PeerStanding>::new(
+        let peer_standings = NeptuneLevelDb::<IpAddr, PeerStanding>::new(
             &data_dir.banned_ips_database_dir_path(),
             &create_db_if_missing(),
         )
@@ -73,7 +73,7 @@ impl NetworkingState {
         self.peer_databases.peer_standings.get(ip).await
     }
 
-    pub async fn clear_ip_standing_in_database(&self, ip: IpAddr) {
+    pub async fn clear_ip_standing_in_database(&mut self, ip: IpAddr) {
         let old_standing = self.peer_databases.peer_standings.get(ip).await;
 
         if old_standing.is_some() {
@@ -84,7 +84,7 @@ impl NetworkingState {
         }
     }
 
-    pub async fn clear_all_standings_in_database(&self) {
+    pub async fn clear_all_standings_in_database(&mut self) {
         let new_entries: Vec<_> = self
             .peer_databases
             .peer_standings
@@ -102,7 +102,7 @@ impl NetworkingState {
     // https://law.stackexchange.com/a/28609/45846
     // Wayback machine: https://web.archive.org/web/20220708143841/https://law.stackexchange.com/questions/28603/how-to-satisfy-gdprs-consent-requirement-for-ip-logging/28609
     pub async fn write_peer_standing_on_decrease(
-        &self,
+        &mut self,
         ip: IpAddr,
         current_standing: PeerStanding,
     ) {

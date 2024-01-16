@@ -623,7 +623,7 @@ mod connect_tests {
         };
 
         state_lock
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .net
             .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)

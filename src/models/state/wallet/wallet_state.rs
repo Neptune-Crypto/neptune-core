@@ -156,7 +156,7 @@ impl WalletState {
         DataDirectory::create_dir_if_not_exists(&data_dir.wallet_database_dir_path()).unwrap();
         let wallet_db = DB::open(
             &data_dir.wallet_database_dir_path(),
-            &crate::database::rusty::create_db_if_missing(),
+            &crate::database::create_db_if_missing(),
         );
         let wallet_db = match wallet_db {
             Ok(wdb) => wdb,
@@ -833,7 +833,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(&new_block, Some(latest_block.header.proof_of_work_family))
                 .await
                 .unwrap();
@@ -879,7 +879,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .archival_state()
+            .archival_state_mut()
             .write_block(&block_3a, Some(latest_block.header.proof_of_work_family))
             .await
             .unwrap();
@@ -923,7 +923,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .archival_state()
+            .archival_state_mut()
             .write_block(&block_3b, Some(latest_block.header.proof_of_work_family))
             .await
             .unwrap();
@@ -970,7 +970,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(&new_block, Some(latest_block.header.proof_of_work_family))
                 .await
                 .unwrap();
@@ -1016,7 +1016,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .archival_state()
+            .archival_state_mut()
             .write_block(&block_12, Some(latest_block.header.proof_of_work_family))
             .await
             .unwrap();

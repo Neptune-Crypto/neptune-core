@@ -852,7 +852,7 @@ impl GlobalState {
         self.wallet_state.wallet_db.persist();
 
         // flush block_index database
-        self.chain.archival_state().block_index_db.flush().await;
+        self.chain.archival_state_mut().block_index_db.flush().await;
 
         // persist archival_mutator_set, with sync label
         let hash = self.chain.archival_state().get_latest_block().await.hash;
@@ -899,7 +899,7 @@ impl GlobalState {
 
         // Apply the updates
         self.chain
-            .archival_state()
+            .archival_state_mut()
             .write_block(&new_block, Some(tip_proof_of_work_family))
             .await?;
 
@@ -942,7 +942,6 @@ impl GlobalState {
 
     /// resync membership proofs
     pub async fn resync_membership_proofs(&mut self) -> Result<()> {
-
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
         if self.net.syncing {
@@ -952,11 +951,7 @@ impl GlobalState {
 
         // is it necessary?
         let current_tip_digest = self.chain.light_state().hash();
-        if self
-            .wallet_state
-            .is_synced_to(current_tip_digest)
-            .await
-        {
+        if self.wallet_state.is_synced_to(current_tip_digest).await {
             debug!("Membership proof syncing not needed");
             return Ok(());
         }
@@ -973,7 +968,6 @@ impl GlobalState {
 
         // Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -1196,7 +1190,7 @@ mod global_state_tests {
         {
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(
                     &mock_block_1a,
                     Some(mock_block_1a.header.proof_of_work_family),
@@ -1263,7 +1257,7 @@ mod global_state_tests {
         {
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(
                     &mock_block_1a,
                     Some(mock_block_1a.header.proof_of_work_family),
@@ -1302,7 +1296,7 @@ mod global_state_tests {
             let (next_block, _, _) = make_mock_block(&parent_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(&next_block, Some(next_block.header.proof_of_work_family))
                 .await?;
             global_state
@@ -1367,7 +1361,7 @@ mod global_state_tests {
         {
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(
                     &mock_block_1a,
                     Some(mock_block_1a.header.proof_of_work_family),
@@ -1403,7 +1397,7 @@ mod global_state_tests {
                 make_mock_block(&fork_a_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(
                     &next_a_block,
                     Some(next_a_block.header.proof_of_work_family),
@@ -1431,7 +1425,7 @@ mod global_state_tests {
                 make_mock_block(&fork_b_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(
                     &next_b_block,
                     Some(next_b_block.header.proof_of_work_family),
@@ -1481,7 +1475,7 @@ mod global_state_tests {
                 make_mock_block(&fork_c_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(
                     &next_c_block,
                     Some(next_c_block.header.proof_of_work_family),
