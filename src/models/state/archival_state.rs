@@ -15,7 +15,7 @@ use twenty_first::util_types::storage_schema::traits::*;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
-use crate::database::rusty::{create_db_if_missing, RustyLevelDbAsync};
+use crate::database::{create_db_if_missing, NeptuneLevelDb};
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::shared::Hash;
@@ -50,7 +50,7 @@ pub struct ArchivalState {
     /// ```
     ///
     /// So this is effectively 5 logical indexes.
-    pub block_index_db: RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
+    pub block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
 
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker thread.
@@ -77,11 +77,11 @@ impl ArchivalState {
     /// Create databases for block persistence
     pub async fn initialize_block_index_database(
         data_dir: &DataDirectory,
-    ) -> Result<RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>> {
+    ) -> Result<NeptuneLevelDb<BlockIndexKey, BlockIndexValue>> {
         let block_index_db_dir_path = data_dir.block_index_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&block_index_db_dir_path)?;
 
-        let block_index = RustyLevelDbAsync::<BlockIndexKey, BlockIndexValue>::new(
+        let block_index = NeptuneLevelDb::<BlockIndexKey, BlockIndexValue>::new(
             &block_index_db_dir_path,
             &create_db_if_missing(),
         )
@@ -187,7 +187,7 @@ impl ArchivalState {
 
     pub async fn new(
         data_dir: DataDirectory,
-        block_index_db: RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
+        block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
         mut archival_mutator_set: RustyArchivalMutatorSet<Hash>,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block());
@@ -215,7 +215,7 @@ impl ArchivalState {
 
     /// Write a newly found block to database and to disk.
     pub async fn write_block(
-        &self,
+        &mut self,
         new_block: &Block,
         current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
@@ -1121,7 +1121,7 @@ mod archival_state_tests {
             {
                 global_state
                     .chain
-                    .archival_state()
+                    .archival_state_mut()
                     .write_block(&next_block, Some(next_block.header.proof_of_work_family))
                     .await?;
                 global_state
@@ -1163,7 +1163,7 @@ mod archival_state_tests {
                 make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address);
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .write_block(
                     &mock_block_1b,
                     Some(mock_block_1b.header.proof_of_work_family),
@@ -2374,7 +2374,7 @@ mod archival_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn write_block_db_test() -> Result<()> {
-        let archival_state = make_test_archival_state(Network::Alpha).await;
+        let mut archival_state = make_test_archival_state(Network::Alpha).await;
         let genesis = *archival_state.genesis_block.clone();
         let own_wallet = WalletSecret::new_random();
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();

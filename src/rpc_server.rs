@@ -789,13 +789,13 @@ mod rpc_server_tests {
         );
 
         {
-            let global_state = state_lock.lock_guard().await;
+            let mut global_state_mut = state_lock.lock_guard_mut().await;
 
-            global_state
+            global_state_mut
                 .net
                 .write_peer_standing_on_decrease(peer_address_0.ip(), standing_0)
                 .await;
-            global_state
+            global_state_mut
                 .net
                 .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
                 .await;

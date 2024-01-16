@@ -1,4 +1,3 @@
-use super::leveldb::LevelDB;
 use anyhow::Result;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -14,7 +13,7 @@ use twenty_first::leveldb::{
 use twenty_first::leveldb_sys::Compression;
 use twenty_first::storage::level_db::DB;
 
-pub struct RustyLevelDB<Key, Value>
+struct NeptuneLevelDbInternal<Key, Value>
 where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned,
@@ -24,13 +23,13 @@ where
     _value: PhantomData<Value>,
 }
 
-// We have to implement `Debug` for `RustyLevelDB` as the `State` struct
+// We have to implement `Debug` for `NeptuneLevelDbInternal` as the `State` struct
 // contains a database object, and `State` is used as input argument
 // to multiple functions where logging is enabled with the `instrument`
 // attributes from the `tracing` crate, and this requires all input
 // arguments to the function to implement the `Debug` trait as this
 // info is written on all logging events.
-impl<Key, Value> core::fmt::Debug for RustyLevelDB<Key, Value>
+impl<Key, Value> core::fmt::Debug for NeptuneLevelDbInternal<Key, Value>
 where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned,
@@ -46,7 +45,7 @@ pub fn create_db_if_missing() -> Options {
     opts
 }
 
-impl<Key, Value> LevelDB<Key, Value> for RustyLevelDB<Key, Value>
+impl<Key, Value> NeptuneLevelDbInternal<Key, Value>
 where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned,
@@ -111,8 +110,8 @@ where
     }
 }
 
-/// `RustyLevelDbAsync` provides an async-friendly and clone-friendly wrapper
-/// around [`RustyLevelDB`].
+/// `NeptuneLevelDb` provides an async-friendly and clone-friendly wrapper
+/// around [`NeptuneLevelDbInternal`].
 ///
 /// Methods in the underlying struct `LevelDB` from `rs-leveldb` crate are all sync
 /// and they sometimes perfom blocking file IO.  It is discouraged to
@@ -129,42 +128,31 @@ where
 ///  * <https://internals.rust-lang.org/t/warning-when-calling-a-blocking-function-in-an-async-context/11440/5>
 ///  * <https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html>
 ///
-/// Therefore `RustyLevelDbAsync` wraps the sync methods with `spawn_blocking()`
+/// Therefore `NeptuneLevelDb` wraps the sync methods with `spawn_blocking()`
 /// so that the tokio runtime can run the blocking IO on a thread where blocking
 /// is acceptable
 #[derive(Clone)]
-pub struct RustyLevelDbAsync<Key, Value>(Arc<RustyLevelDB<Key, Value>>)
+pub struct NeptuneLevelDb<Key, Value>(Arc<NeptuneLevelDbInternal<Key, Value>>)
 where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned;
 
-impl<Key, Value> core::fmt::Debug for RustyLevelDbAsync<Key, Value>
+impl<Key, Value> core::fmt::Debug for NeptuneLevelDb<Key, Value>
 where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RustyLevelDBAsync").finish()
+        f.debug_struct("NeptuneLevelDb").finish()
     }
 }
 
-impl<Key, Value> RustyLevelDbAsync<Key, Value>
+impl<Key, Value> NeptuneLevelDb<Key, Value>
 where
     Key: Serialize + DeserializeOwned + Send + Sync + 'static,
     Value: Serialize + DeserializeOwned + Send + Sync + 'static,
 {
-    /// Open or create a new or existing database asynchronously
-    pub async fn new(db_path: &Path, options: &Options) -> Result<Self> {
-        let options_async = OptionsAsync::from(options);
-        let path = db_path.to_path_buf();
-
-        let db =
-            task::spawn_blocking(move || RustyLevelDB::new(&path, &options_async.into())).await??;
-
-        Ok(Self(Arc::new(db)))
-    }
-
-    /// IMPORTANT:  the returne iterator is NOT async.  The database is queried
+    /// IMPORTANT:  the returned iterator is NOT async.  The database is queried
     /// synchrously so the caller will block.  Consider using
     /// `spawn_blocking()` task when using this iterator in async code.
     ///
@@ -188,6 +176,18 @@ where
         }))
     }
 
+    /// Open or create a new or existing database asynchronously
+    pub async fn new(db_path: &Path, options: &Options) -> Result<Self> {
+        let options_async = OptionsAsync::from(options);
+        let path = db_path.to_path_buf();
+
+        let db =
+            task::spawn_blocking(move || NeptuneLevelDbInternal::new(&path, &options_async.into()))
+                .await??;
+
+        Ok(Self(Arc::new(db)))
+    }
+
     /// Get database value asynchronously
     pub async fn get(&self, key: Key) -> Option<Value> {
         let inner = self.0.clone();
@@ -195,7 +195,7 @@ where
     }
 
     /// Set database value asynchronously
-    pub async fn put(&self, key: Key, value: Value) {
+    pub async fn put(&mut self, key: Key, value: Value) {
         let inner = self.0.clone();
         task::spawn_blocking(move || inner.put(key, value))
             .await
@@ -204,7 +204,7 @@ where
 
     /// Write database values as a batch asynchronously
     pub async fn batch_write(
-        &self,
+        &mut self,
         entries: impl IntoIterator<Item = (Key, Value)> + Send + Sync + 'static,
     ) {
         let inner = self.0.clone();
@@ -214,7 +214,7 @@ where
     }
 
     /// Delete database value asynchronously
-    pub async fn delete(&self, key: Key) -> Option<Value> {
+    pub async fn delete(&mut self, key: Key) -> Option<Value> {
         let inner = self.0.clone();
         task::spawn_blocking(move || inner.delete(key))
             .await
@@ -222,7 +222,7 @@ where
     }
 
     /// Delete database value asynchronously
-    pub async fn flush(&self) {
+    pub async fn flush(&mut self) {
         let inner = self.0.clone();
         task::spawn_blocking(move || inner.flush()).await.unwrap()
     }
@@ -247,7 +247,7 @@ struct OptionsAsync {
 impl From<&Options> for OptionsAsync {
     fn from(o: &Options) -> Self {
         if o.cache.is_some() {
-            panic!("cache option not supported for RustyLevelDbAsync");
+            panic!("cache option not supported for NeptuneLevelDb");
         }
 
         Self {

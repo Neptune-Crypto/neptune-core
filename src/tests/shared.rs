@@ -40,7 +40,7 @@ use twenty_first::shared_math::other::random_elements_array;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
-use crate::database::rusty::RustyLevelDbAsync;
+use crate::database::NeptuneLevelDb;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
@@ -102,7 +102,7 @@ pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
 pub async fn unit_test_databases(
     network: Network,
 ) -> Result<(
-    RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
+    NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
     PeerDatabases,
     DataDirectory,
 )> {
@@ -319,7 +319,7 @@ pub async fn add_block(state: &mut GlobalState, new_block: Block) -> Result<()> 
     let previous_pow_family = state.chain.light_state().header.proof_of_work_family;
     state
         .chain
-        .archival_state()
+        .archival_state_mut()
         .write_block(&new_block, Some(previous_pow_family))
         .await?;
     if previous_pow_family < new_block.header.proof_of_work_family {
