@@ -437,6 +437,11 @@ impl RPC for NeptuneRPCServer {
 
         // iterates and modifies standing field for all connected peers
         global_state_mut.net.clear_all_standings_in_database().await;
+
+        global_state_mut
+            .flush_databases()
+            .await
+            .expect("flushed DBs");
     }
 
     /// Locking:
@@ -455,6 +460,11 @@ impl RPC for NeptuneRPCServer {
 
         //Also clears this IP's standing in database, whether it is connected or not.
         global_state_mut.net.clear_ip_standing_in_database(ip).await;
+
+        global_state_mut
+            .flush_databases()
+            .await
+            .expect("flushed DBs");
     }
 
     /// Locking:
@@ -542,6 +552,8 @@ impl RPC for NeptuneRPCServer {
                 .await;
         }
 
+        self.state.flush_databases().await.expect("flushed DBs");
+
         if response.is_ok() {
             Some(Hash::hash(&transaction))
         } else {
@@ -583,18 +595,23 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
-        let state = self.state.lock_guard().await;
-        let tip_block_header = state.chain.light_state().header();
+        let mut global_state_mut = self.state.lock_guard_mut().await;
+        let tip_block_header = global_state_mut.chain.light_state().header();
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
-        let prune_count_res = state
+        let prune_count_res = global_state_mut
             .wallet_state
             .prune_abandoned_monitored_utxos(
                 DEFAULT_MUTXO_PRUNE_DEPTH,
                 tip_block_header,
-                state.chain.archival_state(),
+                global_state_mut.chain.archival_state(),
             )
             .await;
+
+        global_state_mut
+            .flush_databases()
+            .await
+            .expect("flushed DBs");
 
         match prune_count_res {
             Ok(prune_count) => {
