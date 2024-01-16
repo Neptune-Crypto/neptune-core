@@ -301,66 +301,47 @@ impl WalletState {
             current_tip.height,
         );
 
-        // note: using monitored_utxos.iter_mut() makes the
-        // entire update loop atomic.  (though redundant now because
-        // WalletState is inside GlobalStateLock).
-        //
-        // Also though compared to .get_all()+set_many(), we avoid
-        // two extra loops and allocating a Vec copy of all elems.
+        let mut updates = std::collections::BTreeMap::new();
 
-        let monitored_utxos = self.wallet_db.monitored_utxos();
-        let mut removed_count = 0;
-
-        // note: write lock acquired by iter, and not released until
-        //       iter is dropped.
-        let mut iter_mut = monitored_utxos.iter_mut();
-
-        while let Some(mut setter) = iter_mut.next() {
-            let monitored_utxo = setter.value();
-
-            // Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
-            // once the spending block is buried sufficiently deep
-            if monitored_utxo.spent_in_block.is_some() {
+        // Find monitored_utxo for updating
+        for (i, mut mutxo) in self
+            .wallet_db
+            .monitored_utxos()
+            .get_all()
+            .into_iter()
+            .enumerate()
+        {
+            // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
+            //    once the spending block is buried sufficiently deep
+            // 2. If synced to current tip, there is nothing more to do with this MUTXO
+            // 3. If already marked as abandoned, we don't do that again
+            if mutxo.spent_in_block.is_some()
+                || mutxo.is_synced_to(current_tip_info.0)
+                || mutxo.abandoned_at.is_some()
+            {
                 continue;
             }
 
-            // If synced to current tip, there is nothing more to do with this MUTXO
-            if monitored_utxo.is_synced_to(current_tip_info.0) {
-                continue;
-            }
+            // MUTXO is neither spent nor synced. Mark as abandoned
+            // if it was confirmed in block that is now abandoned,
+            // and if that block is older than threshold.
+            if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
+                let depth = current_tip.height - block_height_confirmed + 1;
 
-            // If already marked as abandoned, we don't do that again
-            if monitored_utxo.abandoned_at.is_some() {
-                continue;
-            }
+                let abandoned = depth >= block_depth_threshhold as i128
+                    && mutxo.was_abandoned(current_tip, archival_state).await;
 
-            // MUTXO is neither spent nor synced. Mark as abandoned if it was confirmed in block that is now
-            // abandoned, and if that block is older than threshold.
-            let mark_as_abandoned = match monitored_utxo.confirmed_in_block {
-                Some((
-                    _block_digest_confirmed,
-                    _block_timestamp_confirmed,
-                    block_height_confirmed,
-                )) => {
-                    // note: we use block_on() when calling the async fn because
-                    // iter_mut is holding a sync lock, which can't span async calls.
-
-                    let depth = current_tip.height - block_height_confirmed + 1;
-                    depth >= block_depth_threshhold as i128
-                        && futures::executor::block_on(
-                            monitored_utxo.was_abandoned(current_tip, archival_state),
-                        )
+                if abandoned {
+                    mutxo.abandoned_at = Some(current_tip_info);
+                    updates.insert(i as u64, mutxo);
                 }
-                None => false,
-            };
-
-            if mark_as_abandoned {
-                let mut monitored_utxo = monitored_utxo.clone();
-                monitored_utxo.abandoned_at = Some(current_tip_info);
-                setter.set(monitored_utxo);
-                removed_count += 1;
             }
         }
+
+        let removed_count = updates.iter().len();
+
+        // apply updates
+        self.wallet_db.monitored_utxos().set_many(updates);
 
         Ok(removed_count)
     }
