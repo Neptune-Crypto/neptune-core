@@ -651,7 +651,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 
 //     // Sanity check that restored membership proof agrees with AMS
 //     assert!(
-//         ams.lock().await.ams.verify(item, &input_membership_proof),
+//         ams.lock().await.ams().verify(item, &input_membership_proof),
 //         "Restored MS membership proof must validate against own AMS"
 //     );
 

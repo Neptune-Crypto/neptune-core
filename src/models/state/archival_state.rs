@@ -197,9 +197,9 @@ impl ArchivalState {
         // We could have populated the archival mutator set with the genesis block UTXOs earlier in
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
-        if archival_mutator_set.ams.kernel.aocl.is_empty() {
+        if archival_mutator_set.ams().kernel.aocl.is_empty() {
             for addition_record in genesis_block.body.transaction.kernel.outputs.iter() {
-                archival_mutator_set.ams.add(addition_record);
+                archival_mutator_set.ams_mut().add(addition_record);
             }
             archival_mutator_set.set_sync_label(genesis_block.hash);
             archival_mutator_set.persist();
@@ -607,16 +607,20 @@ impl ArchivalState {
             for addition_record in roll_back_block.body.transaction.kernel.outputs.iter().rev() {
                 assert!(
                     self.archival_mutator_set
-                        .ams
+                        .ams_mut()
                         .add_is_reversible(addition_record),
                     "Addition record must be in sync with block being rolled back."
                 );
-                self.archival_mutator_set.ams.revert_add(addition_record);
+                self.archival_mutator_set
+                    .ams_mut()
+                    .revert_add(addition_record);
             }
 
             // Roll back all removal records contained in block
             for removal_record in roll_back_block.body.transaction.kernel.inputs.iter() {
-                self.archival_mutator_set.ams.revert_remove(removal_record);
+                self.archival_mutator_set
+                    .ams_mut()
+                    .revert_remove(removal_record);
             }
         }
 
@@ -650,11 +654,11 @@ impl ArchivalState {
                 // Batch-update all removal records to keep them valid after next addition
                 RemovalRecord::batch_update_from_addition(
                     &mut removal_records,
-                    &mut self.archival_mutator_set.ams.kernel,
+                    &mut self.archival_mutator_set.ams_mut().kernel,
                 ).expect("MS removal record update from add must succeed in update_mutator_set as block should already be verified");
 
                 // Add the element to the mutator set
-                self.archival_mutator_set.ams.add(&addition_record);
+                self.archival_mutator_set.ams_mut().add(&addition_record);
             }
 
             // Remove items, thus removing the input UTXOs from the mutator set
@@ -666,7 +670,7 @@ impl ArchivalState {
                 ).expect("MS removal record update from remove must succeed in update_mutator_set as block should already be verified");
 
                 // Remove the element from the mutator set
-                self.archival_mutator_set.ams.remove(removal_record);
+                self.archival_mutator_set.ams_mut().remove(removal_record);
             }
         }
 
@@ -677,7 +681,7 @@ impl ArchivalState {
                 .body
                 .next_mutator_set_accumulator
                 .hash(),
-            self.archival_mutator_set.ams.hash(),
+            self.archival_mutator_set.ams().hash(),
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash
         );
 
@@ -758,7 +762,7 @@ mod archival_state_tests {
             Block::genesis_block().body.transaction.kernel.outputs.len() as u64,
             archival_state
                 .archival_mutator_set
-                .ams
+                .ams()
                 .kernel
                 .aocl
                 .count_leaves(),
@@ -849,7 +853,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams.kernel.aocl.count_leaves());
+            assert_ne!(0, ams_ref.ams().kernel.aocl.count_leaves());
         }
 
         // Add an input to the next block's transaction. This will add a removal record
@@ -888,7 +892,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams.kernel.swbf_active.sbf.len());
+            assert_ne!(0, ams_ref.ams().kernel.swbf_active.sbf.len());
         }
 
         Ok(())
@@ -1037,7 +1041,7 @@ mod archival_state_tests {
         assert!(
             archival_state
                 .archival_mutator_set
-                .ams
+                .ams()
                 .kernel
                 .swbf_active
                 .sbf
@@ -1049,7 +1053,7 @@ mod archival_state_tests {
             2,
             archival_state
                 .archival_mutator_set
-                .ams
+                .ams()
                 .kernel
                 .aocl
                 .count_leaves(),
@@ -1188,7 +1192,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set
-                .ams
+                .ams()
                 .kernel
                 .swbf_active
                 .sbf
@@ -1202,7 +1206,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set
-                .ams
+                .ams()
                 .kernel
                 .aocl
                 .count_leaves(),
@@ -1644,7 +1648,7 @@ mod archival_state_tests {
                     .chain
                     .archival_state()
                     .archival_mutator_set
-                    .ams
+                    .ams()
                     .accumulator(),
                 "AMS must be correctly updated"
             );

@@ -553,9 +553,7 @@ mod accumulation_scheme_tests {
 
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-    use twenty_first::util_types::storage_schema::DbtVec;
 
-    use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::commit;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -699,8 +697,8 @@ mod accumulation_scheme_tests {
         type H = Tip5;
 
         let accumulator = MutatorSetAccumulator::<H>::default();
-        let (archival, _): (ArchivalMutatorSet<H, DbtVec<Digest>, DbtVec<Chunk>>, _) =
-            empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival = rms.ams_mut();
 
         // Verify that function to get batch index does not overflow for the empty MS
         assert_eq!(

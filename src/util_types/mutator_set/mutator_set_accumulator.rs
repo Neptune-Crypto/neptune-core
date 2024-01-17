@@ -183,8 +183,10 @@ mod ms_accumulator_tests {
         type H = Tip5;
 
         let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let (mut archival_after_remove, _) = empty_rustyleveldbvec_ams();
-        let (mut archival_before_remove, _) = empty_rustyleveldbvec_ams();
+        let mut rms_after = empty_rusty_mutator_set::<H>();
+        let archival_after_remove = rms_after.ams_mut();
+        let mut rms_before = empty_rusty_mutator_set::<H>();
+        let archival_before_remove = rms_before.ams_mut();
         let number_of_interactions = 100;
         let mut rng = rand::thread_rng();
 
