@@ -39,6 +39,17 @@ impl BlockchainState {
         }
     }
 
+    /// retrieve blockchain archival state.
+    ///
+    /// panics if called by a light node.
+    #[inline]
+    pub fn blockchain_archival_state(&self) -> &BlockchainArchivalState {
+        match self {
+            Self::Archival(bac) => bac,
+            Self::Light(_) => panic!("archival_state not available in LightState mode"),
+        }
+    }
+
     /// retrieve mutable archival state.
     ///
     /// panics if called by a light node.

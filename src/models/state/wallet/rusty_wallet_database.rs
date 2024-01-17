@@ -45,10 +45,13 @@ impl RustyWalletDatabase {
     }
 
     /// get monitored_utxos.
-    ///
-    /// This is a cheap call as it just increments an Arc reference.
-    pub fn monitored_utxos(&self) -> DbtVec<MonitoredUtxo> {
-        self.monitored_utxos.clone()
+    pub fn monitored_utxos(&self) -> &DbtVec<MonitoredUtxo> {
+        &self.monitored_utxos
+    }
+
+    /// get mutable monitored_utxos.
+    pub fn monitored_utxos_mut(&mut self) -> &mut DbtVec<MonitoredUtxo> {
+        &mut self.monitored_utxos
     }
 
     pub fn get_sync_label(&self) -> Digest {

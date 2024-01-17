@@ -171,6 +171,16 @@ impl GlobalStateLock {
     pub async fn resync_membership_proofs(&self) -> Result<()> {
         self.lock_guard_mut().await.resync_membership_proofs().await
     }
+
+    pub async fn prune_abandoned_monitored_utxos(
+        &self,
+        block_depth_threshhold: usize,
+    ) -> Result<usize> {
+        self.lock_guard_mut()
+            .await
+            .prune_abandoned_monitored_utxos(block_depth_threshhold)
+            .await
+    }
 }
 
 impl Deref for GlobalStateLock {
@@ -672,7 +682,7 @@ impl GlobalState {
 
             self.wallet_state
                 .wallet_db
-                .monitored_utxos()
+                .monitored_utxos_mut()
                 .push(restored_mutxo);
             restored_mutxos += 1;
         }
@@ -690,7 +700,7 @@ impl GlobalState {
         tip_hash: Digest,
     ) -> Result<()> {
         // loop over all monitored utxos
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos_mut();
 
         // note: iter_mut_lock holds a write-lock, so it should be dropped
         // immediately after use.
@@ -845,6 +855,85 @@ impl GlobalState {
         self.wallet_state.wallet_db.persist();
 
         Ok(())
+    }
+
+    /// Delete from the database all monitored UTXOs from abandoned chains with a depth deeper than
+    /// `block_depth_threshhold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
+    /// abandoned chains of unknown depth.
+    /// Returns the number of monitored UTXOs removed from the database.
+    ///
+    /// Locking:
+    ///  * acquires `monitored_utxos` lock for write
+    pub async fn prune_abandoned_monitored_utxos<'a>(
+        &mut self,
+        block_depth_threshhold: usize,
+    ) -> Result<usize> {
+        const MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING: usize = 10;
+        if block_depth_threshhold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
+            bail!(
+                "
+                Cannot prune monitored UTXOs with a depth threshold less than
+                {MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING}. Got threshold {block_depth_threshhold}"
+            )
+        }
+
+        let current_tip = self.chain.light_state().header();
+
+        let current_tip_info: (Digest, Duration, BlockHeight) = (
+            Hash::hash(current_tip),
+            Duration::from_millis(current_tip.timestamp.value()),
+            current_tip.height,
+        );
+
+        let mut updates = std::collections::BTreeMap::new();
+
+        // Find monitored_utxo for updating
+        for (i, mut mutxo) in self
+            .wallet_state
+            .wallet_db
+            .monitored_utxos()
+            .get_all()
+            .into_iter()
+            .enumerate()
+        {
+            // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
+            //    once the spending block is buried sufficiently deep
+            // 2. If synced to current tip, there is nothing more to do with this MUTXO
+            // 3. If already marked as abandoned, we don't do that again
+            if mutxo.spent_in_block.is_some()
+                || mutxo.is_synced_to(current_tip_info.0)
+                || mutxo.abandoned_at.is_some()
+            {
+                continue;
+            }
+
+            // MUTXO is neither spent nor synced. Mark as abandoned
+            // if it was confirmed in block that is now abandoned,
+            // and if that block is older than threshold.
+            if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
+                let depth = current_tip.height - block_height_confirmed + 1;
+
+                let abandoned = depth >= block_depth_threshhold as i128
+                    && mutxo
+                        .was_abandoned(current_tip, self.chain.archival_state())
+                        .await;
+
+                if abandoned {
+                    mutxo.abandoned_at = Some(current_tip_info);
+                    updates.insert(i as u64, mutxo);
+                }
+            }
+        }
+
+        let removed_count = updates.iter().len();
+
+        // apply updates
+        self.wallet_state
+            .wallet_db
+            .monitored_utxos_mut()
+            .set_many(updates);
+
+        Ok(removed_count)
     }
 
     pub async fn flush_databases(&mut self) -> Result<()> {
@@ -1121,7 +1210,7 @@ mod global_state_tests {
 
         // Delete everything from monitored UTXO (the premined UTXO)
         {
-            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
+            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos_mut();
             assert!(
                 monitored_utxos.len().is_one(),
                 "MUTXO must have genesis element before emptying it"
