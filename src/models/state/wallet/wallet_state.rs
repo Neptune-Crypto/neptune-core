@@ -24,13 +24,10 @@ use super::wallet_status::{WalletStatus, WalletStatusElement};
 use super::{WalletSecret, WALLET_INCOMING_SECRETS_FILE_NAME};
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
-use crate::models::blockchain::block::block_header::BlockHeader;
-use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{amount::Amount, Transaction};
-use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -273,79 +270,6 @@ impl WalletState {
             .collect_vec()
     }
 
-    /// Delete from the database all monitored UTXOs from abandoned chains with a depth deeper than
-    /// `block_depth_threshhold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
-    /// abandoned chains of unknown depth.
-    /// Returns the number of monitored UTXOs removed from the database.
-    ///
-    /// Locking:
-    ///  * acquires `monitored_utxos` lock for write
-    pub async fn prune_abandoned_monitored_utxos<'a>(
-        &self,
-        block_depth_threshhold: usize,
-        current_tip: &BlockHeader,
-        archival_state: &ArchivalState,
-    ) -> Result<usize> {
-        const MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING: usize = 10;
-        if block_depth_threshhold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
-            bail!(
-                "
-                Cannot prune monitored UTXOs with a depth threshold less than
-                {MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING}. Got threshold {block_depth_threshhold}"
-            )
-        }
-
-        let current_tip_info: (Digest, Duration, BlockHeight) = (
-            Hash::hash(current_tip),
-            Duration::from_millis(current_tip.timestamp.value()),
-            current_tip.height,
-        );
-
-        let mut updates = std::collections::BTreeMap::new();
-
-        // Find monitored_utxo for updating
-        for (i, mut mutxo) in self
-            .wallet_db
-            .monitored_utxos()
-            .get_all()
-            .into_iter()
-            .enumerate()
-        {
-            // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
-            //    once the spending block is buried sufficiently deep
-            // 2. If synced to current tip, there is nothing more to do with this MUTXO
-            // 3. If already marked as abandoned, we don't do that again
-            if mutxo.spent_in_block.is_some()
-                || mutxo.is_synced_to(current_tip_info.0)
-                || mutxo.abandoned_at.is_some()
-            {
-                continue;
-            }
-
-            // MUTXO is neither spent nor synced. Mark as abandoned
-            // if it was confirmed in block that is now abandoned,
-            // and if that block is older than threshold.
-            if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
-                let depth = current_tip.height - block_height_confirmed + 1;
-
-                let abandoned = depth >= block_depth_threshhold as i128
-                    && mutxo.was_abandoned(current_tip, archival_state).await;
-
-                if abandoned {
-                    mutxo.abandoned_at = Some(current_tip_info);
-                    updates.insert(i as u64, mutxo);
-                }
-            }
-        }
-
-        let removed_count = updates.iter().len();
-
-        // apply updates
-        self.wallet_db.monitored_utxos().set_many(updates);
-
-        Ok(removed_count)
-    }
-
     /// Update wallet state with new block. Assumes the given block
     /// is valid and that the wallet state is not up to date yet.
     pub async fn update_wallet_state_with_new_block(&mut self, block: &Block) -> Result<()> {
@@ -376,7 +300,8 @@ impl WalletState {
         // the process update existing membership proofs with
         // updates from this block
 
-        let monitored_utxos = self.wallet_db.monitored_utxos();
+        let monitored_utxos = self.wallet_db.monitored_utxos_mut();
+        let mut incoming_utxo_recovery_data_list = vec![];
 
         // return early if there are no monitored utxos and this
         // block does not affect our balance
@@ -501,14 +426,16 @@ impl WalletState {
                     receiver_preimage,
                     aocl_index: new_own_membership_proof.auth_path_aocl.leaf_index,
                 };
-                self.store_utxo_ms_recovery_data(utxo_ms_recovery_data)?;
+                incoming_utxo_recovery_data_list.push(utxo_ms_recovery_data);
+
+                let mutxos_len = monitored_utxos.len();
 
                 valid_membership_proofs_and_own_utxo_count.insert(
                     StrongUtxoKey::new(
                         utxo_digest,
                         new_own_membership_proof.auth_path_aocl.leaf_index,
                     ),
-                    (new_own_membership_proof, monitored_utxos.len()),
+                    (new_own_membership_proof, mutxos_len),
                 );
 
                 // Add the new UTXO to the list of monitored UTXOs
@@ -629,6 +556,11 @@ impl WalletState {
             // How do we ensure that this transaction is not counted twice?
             // One option is to only count UTXOs that are synced as valid.
             // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
+        }
+
+        // write these to disk.
+        for item in incoming_utxo_recovery_data_list.into_iter() {
+            self.store_utxo_ms_recovery_data(item)?;
         }
 
         self.wallet_db.set_sync_label(block.hash);
@@ -948,12 +880,7 @@ mod tests {
             "Latest balance height must be None at block 3b"
         );
         let prune_count_3b = own_global_state
-            .wallet_state
-            .prune_abandoned_monitored_utxos(
-                10,
-                &block_3b.header,
-                own_global_state.chain.archival_state(),
-            )
+            .prune_abandoned_monitored_utxos(10)
             .await
             .unwrap();
         assert!(prune_count_3b.is_zero());
@@ -983,12 +910,7 @@ mod tests {
         }
 
         let prune_count_11 = own_global_state
-            .wallet_state
-            .prune_abandoned_monitored_utxos(
-                10,
-                &latest_block.header,
-                own_global_state.chain.archival_state(),
-            )
+            .prune_abandoned_monitored_utxos(10)
             .await
             .unwrap();
         assert!(prune_count_11.is_zero());
@@ -1036,12 +958,7 @@ mod tests {
             "MUTXO must *not* be marked as abandoned at height 12, prior to pruning"
         );
         let prune_count_12 = own_global_state
-            .wallet_state
-            .prune_abandoned_monitored_utxos(
-                10,
-                &block_12.header,
-                own_global_state.chain.archival_state(),
-            )
+            .prune_abandoned_monitored_utxos(10)
             .await
             .unwrap();
         assert!(prune_count_12.is_one());
