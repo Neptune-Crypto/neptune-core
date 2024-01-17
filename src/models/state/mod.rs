@@ -648,7 +648,7 @@ impl GlobalState {
             "Attempting to restore {} missing monitored UTXOs to wallet database",
             recovery_data_for_missing_mutxos.len()
         );
-        let current_aocl_leaf_count = ams_ref.ams.kernel.aocl.count_leaves();
+        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves();
         let mut restored_mutxos = 0;
         for incoming_utxo in recovery_data_for_missing_mutxos {
             // If the referenced UTXO is in the future from our tip, do not attempt to recover it. Instead: warn the user of this.
@@ -657,7 +657,7 @@ impl GlobalState {
                 continue;
             }
             let ms_item = Hash::hash(&incoming_utxo.utxo);
-            let restored_msmp_res = ams_ref.ams.restore_membership_proof(
+            let restored_msmp_res = ams_ref.ams().restore_membership_proof(
                 ms_item,
                 incoming_utxo.sender_randomness,
                 incoming_utxo.receiver_preimage,
@@ -666,7 +666,7 @@ impl GlobalState {
             let restored_msmp = match restored_msmp_res {
                 Ok(msmp) => {
                     // Verify that the restored MSMP is valid
-                    if !ams_ref.ams.verify(ms_item, &msmp) {
+                    if !ams_ref.ams().verify(ms_item, &msmp) {
                         warn!("Restored MSMP is invalid. Skipping restoration of UTXO with AOCL index {}. Maybe this UTXO is on an abandoned chain?", incoming_utxo.aocl_index);
                         continue;
                     }

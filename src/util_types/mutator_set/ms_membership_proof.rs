@@ -540,12 +540,13 @@ pub fn pseudorandom_mmr_membership_proof<H: AlgebraicHasher>(
 #[cfg(test)]
 mod ms_proof_tests {
 
-    use super::*;
-    use crate::util_types::mutator_set::archival_mutator_set::ArchivalMutatorSet;
     use crate::util_types::mutator_set::chunk::Chunk;
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
-    use crate::util_types::test_shared::mutator_set::*;
+    use crate::util_types::test_shared::mutator_set::{
+        empty_rusty_mutator_set, make_item_and_randomnesses, random_mutator_set_membership_proof,
+    };
+
+    use super::*;
     use itertools::{Either, Itertools};
     use rand::rngs::StdRng;
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
@@ -653,8 +654,8 @@ mod ms_proof_tests {
         let mut own_item = None;
 
         // set up mutator set
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
         let mut membership_proofs: Vec<(Digest, MsMembershipProof<Tip5>)> = vec![];
 
         // add items
@@ -779,7 +780,8 @@ mod ms_proof_tests {
     #[test]
     fn revert_update_single_remove_test() {
         type H = Tip5;
-        let (mut ams, _): (ArchivalMutatorSet<H, _, _>, _) = empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let ams = rms.ams_mut();
         let mut mps = vec![];
         let mut items = vec![];
         let mut addition_records = vec![];
@@ -861,7 +863,8 @@ mod ms_proof_tests {
         type H = Tip5;
 
         for j in 2..30 {
-            let (mut ams, _): (ArchivalMutatorSet<H, _, _>, _) = empty_rustyleveldbvec_ams();
+            let mut rms = empty_rusty_mutator_set::<H>();
+            let ams = rms.ams_mut();
 
             // Add `j` items to MSA
             let mut mps = vec![];
@@ -1000,8 +1003,8 @@ mod ms_proof_tests {
         let mut own_item = None;
 
         // set up mutator set
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams::<H>();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
 
         // add items
         let mut addition_records = vec![];
@@ -1095,8 +1098,8 @@ mod ms_proof_tests {
 
         let mut rng = StdRng::from_seed(seed_as_bytes);
 
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams::<H>();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
 
         let own_index = rng.next_u32() as usize % 10;
         let mut own_item = Digest::default();

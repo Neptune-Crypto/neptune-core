@@ -358,7 +358,7 @@ mod archival_mutator_set_tests {
     use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
     use crate::util_types::mutator_set::shared::{BATCH_SIZE, NUM_TRIALS};
     use crate::util_types::test_shared::mutator_set::{
-        empty_rustyleveldbvec_ams, make_item_and_randomnesses,
+        empty_rusty_mutator_set, make_item_and_randomnesses,
     };
 
     use super::*;
@@ -366,9 +366,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_commitment_test() {
         type H = Tip5;
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
-
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
         let num_additions = 65;
 
         let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
@@ -427,8 +426,8 @@ mod archival_mutator_set_tests {
     fn archival_mutator_set_revert_add_test() {
         type H = Tip5;
 
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
 
         // Repeatedly insert `AdditionRecord` into empty MutatorSet and revert it
         //
@@ -436,7 +435,7 @@ mod archival_mutator_set_tests {
         // to being empty on every iteration.
         for _ in 0..2 * BATCH_SIZE {
             let (item, addition_record, membership_proof) =
-                prepare_random_addition(&mut archival_mutator_set);
+                prepare_random_addition(archival_mutator_set);
 
             let commitment_before_add = archival_mutator_set.hash();
             archival_mutator_set.add(&addition_record);
@@ -454,7 +453,7 @@ mod archival_mutator_set_tests {
 
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
-            let record = prepare_random_addition(&mut archival_mutator_set);
+            let record = prepare_random_addition(archival_mutator_set);
             let (item, addition_record, membership_proof) = record.clone();
             records.push(record);
             commitments_before.push(archival_mutator_set.hash());
@@ -495,8 +494,8 @@ mod archival_mutator_set_tests {
 
         let mut seeded_rng = StdRng::from_seed(seed_as_bytes);
 
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
 
         // Also keep track of a mutator set accumulator to verify that this uses an invertible Bloom filter
         let mut msa = MutatorSetAccumulator::<H>::default();
@@ -508,7 +507,7 @@ mod archival_mutator_set_tests {
         let added_items = 50;
         for current_item in 0..added_items {
             let (item, addition_record, membership_proof) =
-                prepare_seeded_prng_addition(&mut archival_mutator_set, &mut seeded_rng);
+                prepare_seeded_prng_addition(archival_mutator_set, &mut seeded_rng);
 
             // Update all MPs
             MsMembershipProof::batch_update_from_addition(
@@ -546,7 +545,7 @@ mod archival_mutator_set_tests {
         // Verify that the MPs with colliding indices are still valid
         for ms in [
             &msa as &dyn MutatorSet<H>,
-            &archival_mutator_set as &dyn MutatorSet<H>,
+            archival_mutator_set as &dyn MutatorSet<H>,
         ] {
             assert!(
                 ms.verify(
@@ -584,7 +583,7 @@ mod archival_mutator_set_tests {
             .unwrap();
         for ms in [
             &msa as &dyn MutatorSet<H>,
-            &archival_mutator_set as &dyn MutatorSet<H>,
+            archival_mutator_set as &dyn MutatorSet<H>,
         ] {
             assert!(
                 !ms.verify(
@@ -610,7 +609,7 @@ mod archival_mutator_set_tests {
             .unwrap();
         for ms in [
             &msa as &dyn MutatorSet<H>,
-            &archival_mutator_set as &dyn MutatorSet<H>,
+            archival_mutator_set as &dyn MutatorSet<H>,
         ] {
             assert!(
                 !ms.verify(
@@ -670,9 +669,9 @@ mod archival_mutator_set_tests {
     fn revert_remove_from_active_bloom_filter_panic() {
         type H = Tip5;
 
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
-        let record = prepare_random_addition(&mut archival_mutator_set);
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
+        let record = prepare_random_addition(archival_mutator_set);
         let (item, addition_record, membership_proof) = record;
         archival_mutator_set.add(&addition_record);
 
@@ -688,12 +687,12 @@ mod archival_mutator_set_tests {
     fn revert_remove_invalid_panic() {
         type H = Tip5;
 
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
 
         for _ in 0..2 * BATCH_SIZE {
             let (_item, addition_record, _membership_proof) =
-                prepare_random_addition(&mut archival_mutator_set);
+                prepare_random_addition(archival_mutator_set);
             archival_mutator_set.add(&addition_record);
         }
 
@@ -713,15 +712,14 @@ mod archival_mutator_set_tests {
     fn archival_mutator_set_revert_remove_test() {
         type H = Tip5;
 
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
-
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
         let n_iterations = 11 * BATCH_SIZE as usize;
         let mut records = Vec::with_capacity(n_iterations);
 
         // Insert a number of `AdditionRecord`s into MutatorSet and assert their membership.
         for _ in 0..n_iterations {
-            let record = prepare_random_addition(&mut archival_mutator_set);
+            let record = prepare_random_addition(archival_mutator_set);
             let (item, addition_record, membership_proof) = record.clone();
             records.push(record);
             archival_mutator_set.add(&addition_record);
@@ -757,8 +755,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_batch_remove_simple_test() {
         type H = Tip5;
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
 
         let num_additions = 130;
 
@@ -804,8 +802,8 @@ mod archival_mutator_set_tests {
     #[test]
     fn archival_set_batch_remove_dynamic_test() {
         type H = Tip5;
-        let (mut archival_mutator_set, _): (ArchivalMutatorSet<H, _, _>, _) =
-            empty_rustyleveldbvec_ams();
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let archival_mutator_set = rms.ams_mut();
 
         let num_additions = 4 * BATCH_SIZE;
 

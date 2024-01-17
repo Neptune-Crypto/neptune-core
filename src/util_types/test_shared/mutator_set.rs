@@ -14,7 +14,6 @@ use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use twenty_first::util_types::storage_schema::DbtVec;
 use twenty_first::util_types::storage_vec::StorageVec;
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
@@ -71,13 +70,10 @@ pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher + BFieldCodec>(
-) -> (ArchivalMutatorSet<H, DbtVec<Digest>, DbtVec<Chunk>>, DB) {
-    // TODO: Reconsider return type for this helper function: What do we need for the tests?
+pub fn empty_rusty_mutator_set<H: AlgebraicHasher + BFieldCodec>() -> RustyArchivalMutatorSet<H> {
     let db = DB::open_new_test_database(true, None, None, None).unwrap();
-    let rusty_mutator_set: RustyArchivalMutatorSet<H> =
-        RustyArchivalMutatorSet::connect(db.clone());
-    (rusty_mutator_set.ams, db)
+    let rusty_mutator_set: RustyArchivalMutatorSet<H> = RustyArchivalMutatorSet::connect(db);
+    rusty_mutator_set
 }
 
 pub fn insert_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
@@ -403,8 +399,9 @@ mod shared_tests_test {
         let rcd = random_chunk_dictionary::<H>();
         assert!(!rcd.dictionary.is_empty());
         let _ = random_removal_record::<H>();
-        let (mut ams, _) = empty_rustyleveldbvec_ams::<H>();
-        let _ = get_all_indices_with_duplicates(&mut ams);
+        let mut rms = empty_rusty_mutator_set::<H>();
+        let ams = rms.ams_mut();
+        let _ = get_all_indices_with_duplicates(ams);
         let _ = make_item_and_randomnesses();
         let _ = insert_mock_item(&mut ams.kernel);
     }
