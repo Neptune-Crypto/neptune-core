@@ -3,7 +3,6 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::Arc;
 use tokio::task;
 use twenty_first::leveldb::{
     batch::WriteBatch,
@@ -21,6 +20,20 @@ where
     database: DB,
     _key: PhantomData<Key>,
     _value: PhantomData<Value>,
+}
+
+impl<Key, Value> Clone for NeptuneLevelDbInternal<Key, Value>
+where
+    Key: Serialize + DeserializeOwned,
+    Value: Serialize + DeserializeOwned,
+{
+    fn clone(&self) -> Self {
+        Self {
+            database: self.database.clone(),
+            _key: Default::default(),
+            _value: Default::default(),
+        }
+    }
 }
 
 // We have to implement `Debug` for `NeptuneLevelDbInternal` as the `State` struct
@@ -74,13 +87,13 @@ where
         value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap())
     }
 
-    fn put(&self, key: Key, value: Value) {
+    fn put(&mut self, key: Key, value: Value) {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
         let value_bytes: Vec<u8> = bincode::serialize(&value).unwrap();
         self.database.put(&key_bytes, &value_bytes).unwrap();
     }
 
-    fn batch_write(&self, entries: impl IntoIterator<Item = (Key, Value)>) {
+    fn batch_write(&mut self, entries: impl IntoIterator<Item = (Key, Value)>) {
         let batch = WriteBatch::new();
         for (key, value) in entries.into_iter() {
             let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
@@ -91,7 +104,7 @@ where
         self.database.write(&batch, true).unwrap();
     }
 
-    fn delete(&self, key: Key) -> Option<Value> {
+    fn delete(&mut self, key: Key) -> Option<Value> {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap(); // add safety
         let value_bytes: Option<Vec<u8>> = self.database.get(&key_bytes).unwrap();
         let value_object = value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap());
@@ -103,7 +116,7 @@ where
         }
     }
 
-    fn flush(&self) {
+    fn flush(&mut self) {
         self.database
             .write(&WriteBatch::new(), true)
             .expect("Database flushing to disk must succeed");
@@ -132,7 +145,7 @@ where
 /// so that the tokio runtime can run the blocking IO on a thread where blocking
 /// is acceptable
 #[derive(Clone)]
-pub struct NeptuneLevelDb<Key, Value>(Arc<NeptuneLevelDbInternal<Key, Value>>)
+pub struct NeptuneLevelDb<Key, Value>(NeptuneLevelDbInternal<Key, Value>)
 where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned;
@@ -185,7 +198,7 @@ where
             task::spawn_blocking(move || NeptuneLevelDbInternal::new(&path, &options_async.into()))
                 .await??;
 
-        Ok(Self(Arc::new(db)))
+        Ok(Self(db))
     }
 
     /// Get database value asynchronously
@@ -196,7 +209,7 @@ where
 
     /// Set database value asynchronously
     pub async fn put(&mut self, key: Key, value: Value) {
-        let inner = self.0.clone();
+        let mut inner = self.0.clone();
         task::spawn_blocking(move || inner.put(key, value))
             .await
             .unwrap()
@@ -207,7 +220,7 @@ where
         &mut self,
         entries: impl IntoIterator<Item = (Key, Value)> + Send + Sync + 'static,
     ) {
-        let inner = self.0.clone();
+        let mut inner = self.0.clone();
         task::spawn_blocking(move || inner.batch_write(entries))
             .await
             .unwrap()
@@ -215,7 +228,7 @@ where
 
     /// Delete database value asynchronously
     pub async fn delete(&mut self, key: Key) -> Option<Value> {
-        let inner = self.0.clone();
+        let mut inner = self.0.clone();
         task::spawn_blocking(move || inner.delete(key))
             .await
             .unwrap()
@@ -223,7 +236,7 @@ where
 
     /// Delete database value asynchronously
     pub async fn flush(&mut self) {
-        let inner = self.0.clone();
+        let mut inner = self.0.clone();
         task::spawn_blocking(move || inner.flush()).await.unwrap()
     }
 }
