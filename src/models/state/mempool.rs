@@ -195,7 +195,6 @@ impl Mempool {
 
     /// Return a vector with copies of the transactions, in descending order, with
     /// the highest fee density not using more than `remaining_storage` bytes.
-    /// Typically a block is about 0MB, meaning that the return value of this function is also less than 1MB.
     pub fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
         let mut transactions = vec![];
         let mut _fee_acc = Amount::zero();
