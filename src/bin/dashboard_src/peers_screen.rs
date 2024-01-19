@@ -93,6 +93,8 @@ impl PeersScreen {
                     match rpc_client.peer_info(context::current()).await {
                         Ok(pi) => {
                             *peer_info.lock().unwrap() = pi;
+
+                            *escalatable_event_arc.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
                             reset_poller!(balance, Duration::from_secs(10));
                         },
                         Err(e) => {

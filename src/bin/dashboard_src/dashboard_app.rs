@@ -97,6 +97,7 @@ pub enum ConsoleIO {
 /// Events that widgets can pass to/from each other
 #[derive(Debug, Clone)]
 pub enum DashboardEvent {
+    RefreshScreen,
     ConsoleEvent(Event),
     ConsoleMode(ConsoleIO),
     Shutdown(String),
@@ -231,10 +232,14 @@ impl DashboardApp {
             app.current_screen().activate();
         }
 
+        // initial draw.
+        terminal.draw(|f| app.render(f))?;
+
         let mut continue_running = true;
         while continue_running {
             let mut console_input = None;
             {
+                let mut draw = false;
                 let mut console_queue = app.console_io.lock().await;
                 if !console_queue.is_empty() {
                     match console_queue.first().unwrap() {
@@ -247,6 +252,7 @@ impl DashboardApp {
                             io::stdin().read_line(&mut str)?;
 
                             terminal = Self::enable_raw_mode()?;
+                            draw = true;
                         }
                         ConsoleIO::InputRequested(string) => {
                             Self::disable_raw_mode(terminal)?;
@@ -258,6 +264,7 @@ impl DashboardApp {
                             console_input = Some(str);
 
                             terminal = Self::enable_raw_mode()?;
+                            draw = true;
                         }
                         _ => {
                             panic!("Should not get here.");
@@ -266,20 +273,25 @@ impl DashboardApp {
                     console_queue.remove(0);
                 }
                 drop(console_queue);
+                if draw {
+                    terminal.draw(|f| app.render(f))?;
+                }
             }
 
             if let Some(string) = console_input {
-                app.handle(DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(
-                    string,
-                )))
+                app.handle(
+                    &mut terminal,
+                    DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(string)),
+                )
                 .await?;
             }
 
-            terminal.draw(|f| app.render(f))?;
-
+            // note: setting a low duration like 100 can cause high CPU usage
             if event::poll(Duration::from_millis(100))? {
                 if let Ok(event) = event::read() {
-                    app.handle(DashboardEvent::ConsoleEvent(event)).await?;
+                    app.handle(&mut terminal, DashboardEvent::ConsoleEvent(event))
+                        .await?;
+                    terminal.draw(|f| app.render(f))?;
                 }
             }
 
@@ -288,10 +300,11 @@ impl DashboardApp {
                 let maybe_event_arc = app.current_screen().escalatable_event();
                 if maybe_event_arc.lock().unwrap().is_some() {
                     let event = maybe_event_arc.lock().unwrap().clone().unwrap();
-                    app.handle(event).await?;
+                    app.handle(&mut terminal, event).await?;
 
                     // mark handled
                     *maybe_event_arc.lock().unwrap() = None;
+                    // terminal.draw(|f| app.render(f))?;
                 };
             }
 
@@ -305,8 +318,14 @@ impl DashboardApp {
         Ok(app.output.to_string())
     }
 
-    async fn handle(&mut self, event: DashboardEvent) -> Result<Option<Event>, Box<dyn Error>> {
-        if let DashboardEvent::Shutdown(error_message) = event {
+    async fn handle(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+        event: DashboardEvent,
+    ) -> Result<Option<Event>, Box<dyn Error>> {
+        if let DashboardEvent::RefreshScreen = event {
+            terminal.draw(|f| self.render(f))?;
+        } else if let DashboardEvent::Shutdown(error_message) = event {
             self.stop();
             self.output = error_message + "\n";
         } else if self.menu_in_focus {
@@ -376,6 +395,9 @@ impl DashboardApp {
             };
 
             match escalated {
+                Some(DashboardEvent::RefreshScreen) => {
+                    terminal.draw(|f| self.render(f))?;
+                }
                 Some(DashboardEvent::ConsoleEvent(Event::Key(key)))
                     if key.kind == KeyEventKind::Press =>
                 {

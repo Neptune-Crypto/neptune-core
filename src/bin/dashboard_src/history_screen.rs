@@ -124,7 +124,7 @@ impl HistoryScreen {
     async fn run_polling_loop(
         rpc_client: Arc<RPCClient>,
         balance_updates: BalanceUpdateArc,
-        _escalatable_event_arc: DashboardEventArc,
+        escalatable_event: DashboardEventArc,
     ) -> ! {
         // use macros to reduce boilerplate
         macro_rules! setup_poller {
@@ -161,6 +161,9 @@ impl HistoryScreen {
                         history_builder.push((*block_height, *timestamp, *amount, *sign, balance));
                     }
                     *balance_updates.lock().unwrap() = history_builder;
+
+                    *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
+
                     reset_poller!(balance_history, Duration::from_secs(10));
                 },
             }
