@@ -53,6 +53,7 @@ use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_pub
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::utxo::TypeScript;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidityLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
@@ -783,6 +784,7 @@ pub fn make_mock_transaction_with_generation_key(
         .map(|(utxo, _mp, _)| utxo)
         .cloned()
         .collect_vec();
+    let type_scripts = vec![TypeScript::native_coin()];
     let input_membership_proofs = input_utxos_mps_keys
         .iter()
         .map(|(_utxo, mp, _)| mp)
@@ -803,6 +805,7 @@ pub fn make_mock_transaction_with_generation_key(
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = PrimitiveWitness {
         input_utxos,
+        type_scripts,
         input_lock_scripts,
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
@@ -927,6 +930,7 @@ pub fn make_mock_block(
 
     let primitive_witness = PrimitiveWitness {
         input_utxos: vec![],
+        type_scripts: vec![TypeScript::native_coin()],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
         output_utxos: vec![coinbase_utxo.clone()],

@@ -145,6 +145,13 @@ pub struct TypeScript {
     pub program: Program,
 }
 
+// Standard hash needed for filtering out duplicates.
+impl std::hash::Hash for TypeScript {
+    fn hash<H: StdHasher>(&self, state: &mut H) {
+        self.program.instructions.hash(state);
+    }
+}
+
 impl From<Vec<LabelledInstruction>> for TypeScript {
     fn from(instrs: Vec<LabelledInstruction>) -> Self {
         Self {

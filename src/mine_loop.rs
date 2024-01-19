@@ -214,6 +214,7 @@ fn make_coinbase_transaction(
 
     let primitive_witness = PrimitiveWitness {
         input_utxos: vec![],
+        type_scripts: vec![TypeScript::native_coin()],
         input_lock_scripts: vec![],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],

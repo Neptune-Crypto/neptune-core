@@ -26,7 +26,7 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 use self::amount::Amount;
 use self::native_coin::native_coin_program;
 use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
-use self::utxo::{LockScript, Utxo};
+use self::utxo::{LockScript, TypeScript, Utxo};
 use self::validity::TransactionValidityLogic;
 use super::block::Block;
 use super::shared::Hash;
@@ -71,6 +71,7 @@ impl From<&[LabelledInstruction]> for PubScript {
 pub struct PrimitiveWitness {
     pub input_utxos: Vec<Utxo>,
     pub input_lock_scripts: Vec<LockScript>,
+    pub type_scripts: Vec<TypeScript>,
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
     pub output_utxos: Vec<Utxo>,
@@ -295,6 +296,18 @@ impl Transaction {
                         other_witness.input_utxos.clone(),
                     ]
                     .concat(),
+                    input_lock_scripts: [
+                        self_witness.input_lock_scripts.clone(),
+                        other_witness.input_lock_scripts.clone(),
+                    ]
+                    .concat(),
+                    type_scripts: self_witness
+                        .type_scripts
+                        .iter()
+                        .cloned()
+                        .chain(other_witness.type_scripts.iter().cloned())
+                        .unique()
+                        .collect_vec(),
                     lock_script_witnesses: [
                         self_witness.lock_script_witnesses.clone(),
                         other_witness.lock_script_witnesses.clone(),
@@ -316,11 +329,6 @@ impl Transaction {
                     ]
                     .concat(),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
-                    input_lock_scripts: [
-                        self_witness.input_lock_scripts.clone(),
-                        other_witness.input_lock_scripts.clone(),
-                    ]
-                    .concat(),
                 })
             }
 
@@ -560,6 +568,7 @@ mod witness_tests {
     fn decode_encode_test_empty() {
         let primitive_witness = PrimitiveWitness {
             input_utxos: vec![],
+            type_scripts: vec![],
             input_lock_scripts: vec![],
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
