@@ -60,6 +60,8 @@ impl ReceiveScreen {
     ) {
         if data.lock().unwrap().is_none() {
             let network = self.network;
+            let escalatable_event = self.escalatable_event.clone();
+
             tokio::spawn(async move {
                 // TODO: change to receive most recent wallet
                 let receiving_address = rpc_client
@@ -67,6 +69,7 @@ impl ReceiveScreen {
                     .await
                     .unwrap();
                 *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
+                *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
             });
         }
     }
@@ -78,6 +81,7 @@ impl ReceiveScreen {
         generating: Arc<Mutex<bool>>,
     ) {
         let network = self.network;
+        let escalatable_event = self.escalatable_event.clone();
         tokio::spawn(async move {
             *generating.lock().unwrap() = true;
             let receiving_address = rpc_client
@@ -86,6 +90,7 @@ impl ReceiveScreen {
                 .unwrap();
             *data.lock().unwrap() = Some(receiving_address.to_bech32m(network).unwrap());
             *generating.lock().unwrap() = false;
+            *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
         });
     }
 
@@ -104,7 +109,7 @@ impl ReceiveScreen {
                                 self.data.clone(),
                                 self.generating.clone(),
                             );
-                            escalate_event = None;
+                            escalate_event = Some(DashboardEvent::RefreshScreen);
                         }
                         KeyCode::Char('c') => {
                             if let Some(address) = self.data.lock().unwrap().as_ref() {
@@ -130,6 +135,7 @@ impl Screen for ReceiveScreen {
         let server_arc = self.server.clone();
         let data_arc = self.data.clone();
         self.populate_receiving_address_async(server_arc, data_arc);
+        // *self.escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
     }
 
     fn deactivate(&mut self) {

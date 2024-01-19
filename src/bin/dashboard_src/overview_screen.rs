@@ -203,6 +203,8 @@ impl OverviewScreen {
                                 own_overview_data.confirmations = resp.confirmations;
                             }
 
+                            *escalatable_event.lock().unwrap() = Some(DashboardEvent::RefreshScreen);
+
                             reset_poller!(dashboard_overview_data, Duration::from_secs(3));
                         },
                         Err(e) => *escalatable_event.lock().unwrap() = Some(DashboardEvent::Shutdown(e.to_string())),

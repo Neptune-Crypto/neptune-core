@@ -179,7 +179,7 @@ impl SendScreen {
                                     }
                                     SendScreenWidget::Amount => {
                                         *own_focus = SendScreenWidget::Ok;
-                                        escalate_event = None;
+                                        escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
                                     SendScreenWidget::Ok => {
                                         // clone outside of async section
@@ -198,7 +198,7 @@ impl SendScreen {
                                             )
                                             .await;
                                         });
-                                        escalate_event = None;
+                                        escalate_event = Some(DashboardEvent::RefreshScreen);
                                     }
                                     _ => {
                                         escalate_event = None;
@@ -214,7 +214,7 @@ impl SendScreen {
                                     SendScreenWidget::Ok => SendScreenWidget::Amount,
                                     SendScreenWidget::Notice => SendScreenWidget::Notice,
                                 };
-                                escalate_event = None;
+                                escalate_event = Some(DashboardEvent::RefreshScreen);
                             } else {
                                 escalate_event = Some(event);
                             }
@@ -227,7 +227,7 @@ impl SendScreen {
                                     SendScreenWidget::Ok => SendScreenWidget::Address,
                                     SendScreenWidget::Notice => SendScreenWidget::Notice,
                                 };
-                                escalate_event = None;
+                                escalate_event = Some(DashboardEvent::RefreshScreen);
                             } else {
                                 escalate_event = Some(event);
                             }
@@ -236,7 +236,7 @@ impl SendScreen {
                             if let Ok(own_focus) = self.focus.try_lock() {
                                 if own_focus.to_owned() == SendScreenWidget::Amount {
                                     self.amount = format!("{}{}", self.amount, c);
-                                    escalate_event = None;
+                                    escalate_event = Some(DashboardEvent::RefreshScreen);
                                 } else {
                                     escalate_event = Some(event);
                                 }
@@ -250,7 +250,7 @@ impl SendScreen {
                                     if !self.amount.is_empty() {
                                         self.amount.drain(self.amount.len() - 1..);
                                     }
-                                    escalate_event = None;
+                                    escalate_event = Some(DashboardEvent::RefreshScreen);
                                 }
                             } else {
                                 escalate_event = Some(event);
@@ -265,7 +265,7 @@ impl SendScreen {
                     if let Ok(mut own_focus) = self.focus.try_lock() {
                         self.address = string.trim().to_owned();
                         *own_focus = SendScreenWidget::Amount;
-                        escalate_event = None;
+                        escalate_event = Some(DashboardEvent::RefreshScreen);
                     } else {
                         escalate_event = Some(DashboardEvent::ConsoleMode(
                             ConsoleIO::InputSupplied(string),
