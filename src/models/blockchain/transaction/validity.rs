@@ -69,7 +69,7 @@ impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
 /// claims with optional witnesses. If all claims a true, then the
 /// transaction is valid.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct TransactionValidityLogic {
+pub struct TransactionValidationLogic {
     // programs: [lock_script], input: hash of tx kernel (MAST hash), witness: secret spending key, output: []
     pub lock_scripts_halt: LockScriptsHalt,
 
@@ -195,7 +195,7 @@ pub trait ValidationLogic<T: SecretWitness> {
     }
 }
 
-impl TransactionValidityLogic {
+impl TransactionValidationLogic {
     pub fn new_from_primitive_witness(
         primitive_witness: &PrimitiveWitness,
         tx_kernel: &TransactionKernel,

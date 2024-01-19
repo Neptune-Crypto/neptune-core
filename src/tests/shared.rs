@@ -55,7 +55,7 @@ use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAnd
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::TypeScript;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
-use crate::models::blockchain::transaction::validity::TransactionValidityLogic;
+use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::Witness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
@@ -814,7 +814,7 @@ pub fn make_mock_transaction_with_generation_key(
         mutator_set_accumulator: tip_msa,
     };
     let validity_logic =
-        TransactionValidityLogic::new_from_primitive_witness(&primitive_witness, &kernel);
+        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
 
     Transaction {
         kernel,
@@ -939,7 +939,7 @@ pub fn make_mock_block(
         input_lock_scripts: vec![],
     };
     let validity_logic =
-        TransactionValidityLogic::new_from_primitive_witness(&primitive_witness, &tx_kernel);
+        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &tx_kernel);
 
     let transaction = Transaction {
         witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),

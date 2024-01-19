@@ -27,7 +27,7 @@ use self::amount::Amount;
 use self::native_coin::native_coin_program;
 use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
 use self::utxo::{LockScript, TypeScript, Utxo};
-use self::validity::TransactionValidityLogic;
+use self::validity::TransactionValidationLogic;
 use super::block::Block;
 use super::shared::Hash;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -107,7 +107,7 @@ impl GetSize for SingleProof {
 pub enum Witness {
     Primitive(PrimitiveWitness),
     SingleProof(SingleProof),
-    ValidityLogic((TransactionValidityLogic, PrimitiveWitness)),
+    ValidityLogic((TransactionValidationLogic, PrimitiveWitness)),
     Faith,
 }
 

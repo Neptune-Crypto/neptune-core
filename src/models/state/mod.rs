@@ -26,7 +26,7 @@ use super::blockchain::transaction::transaction_kernel::{
     PubScriptHashAndInput, TransactionKernel,
 };
 use super::blockchain::transaction::utxo::{LockScript, TypeScript, Utxo};
-use super::blockchain::transaction::validity::{TransactionValidityLogic, ValidationLogic};
+use super::blockchain::transaction::validity::{TransactionValidationLogic, ValidationLogic};
 use super::blockchain::transaction::{
     amount::{Amount, Sign},
     Transaction,
@@ -561,7 +561,7 @@ impl GlobalState {
         // Convert the secret-supported claim to a proof, several proofs, or
         // at the very least hide sensitive data.
         let mut transaction_validity_logic =
-            TransactionValidityLogic::new_from_primitive_witness(&primitive_witness, &kernel);
+            TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
 
         if self.cli.privacy {
             transaction_validity_logic
