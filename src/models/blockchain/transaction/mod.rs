@@ -92,7 +92,7 @@ impl GetSize for SingleProof {
 pub enum Witness {
     Primitive(PrimitiveWitness),
     SingleProof(SingleProof),
-    ValidityLogic((TransactionValidationLogic, PrimitiveWitness)),
+    ValidityLogic(TransactionValidationLogic),
     Faith,
 }
 
@@ -223,7 +223,7 @@ impl Transaction {
     /// isolation, without the context of the canonical chain.
     pub fn is_valid(&self) -> bool {
         match &self.witness {
-            Witness::ValidityLogic((validity_logic, _)) => validity_logic.verify(),
+            Witness::ValidityLogic(validity_logic) => validity_logic.verify(),
             Witness::Primitive(primitive_witness) => {
                 warn!("Verifying transaction by raw witness; unlock key might be exposed!");
                 self.validate_primitive_witness(primitive_witness)

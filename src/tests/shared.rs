@@ -817,7 +817,7 @@ pub fn make_mock_transaction_with_generation_key(
 
     Transaction {
         kernel,
-        witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
+        witness: Witness::ValidityLogic(validity_logic),
     }
 }
 
@@ -941,7 +941,7 @@ pub fn make_mock_block(
         TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &tx_kernel);
 
     let transaction = Transaction {
-        witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),
+        witness: transaction::Witness::ValidityLogic(validity_logic),
         kernel: tx_kernel,
     };
 
