@@ -213,7 +213,7 @@ fn make_coinbase_transaction(
         mutator_set_hash: mutator_set_accumulator.hash(),
     };
 
-    let primitive_witness = PrimitiveWitness {
+    let primitive_witness = TransactionPrimitiveWitness {
         input_utxos: vec![],
         type_scripts: vec![TypeScript::native_coin()],
         input_lock_scripts: vec![],
@@ -228,7 +228,7 @@ fn make_coinbase_transaction(
     (
         Transaction {
             kernel,
-            witness: Witness::ValidationLogic(validity_logic),
+            witness: TransactionWitness::ValidationLogic(validity_logic),
         },
         sender_randomness,
     )

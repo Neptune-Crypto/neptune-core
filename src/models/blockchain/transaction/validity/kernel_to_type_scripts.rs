@@ -1,8 +1,10 @@
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::transaction::utxo::TypeScript;
+use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
+use crate::models::consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
 
-use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -42,8 +44,12 @@ impl KernelToTypeScripts {
 }
 
 impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
+    type PrimitiveWitness = TransactionPrimitiveWitness;
+
+    type Kernel = TransactionKernel;
+
     fn new_from_primitive_witness(
-        primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
+        primitive_witness: &crate::models::blockchain::transaction::TransactionPrimitiveWitness,
         tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) -> Self {
         let mut type_script_digests = primitive_witness

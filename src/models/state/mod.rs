@@ -26,13 +26,15 @@ use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::{LockScript, TypeScript, Utxo};
-use super::blockchain::transaction::validity::{TransactionValidationLogic, ValidationLogic};
+use super::blockchain::transaction::validity::TransactionValidationLogic;
 use super::blockchain::transaction::{
     amount::{Amount, Sign},
     Transaction,
 };
-use super::blockchain::transaction::{PrimitiveWitness, PublicAnnouncement, Witness};
+use super::blockchain::transaction::{PublicAnnouncement, TransactionPrimitiveWitness};
+use super::consensus::ValidationLogic;
 use crate::config_models::cli_args;
+use crate::models::consensus::Witness;
 use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
@@ -538,7 +540,7 @@ impl GlobalState {
         // is here the spending key reversed.
         let mut secret_input = spending_key.unlock_key.encode();
         secret_input.reverse();
-        let mut primitive_witness = PrimitiveWitness {
+        let mut primitive_witness = TransactionPrimitiveWitness {
             input_utxos,
             input_lock_scripts,
             type_scripts,

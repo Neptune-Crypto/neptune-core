@@ -32,6 +32,7 @@ use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::{amount::Amount, Transaction};
 use crate::models::blockchain::shared::Hash;
+use crate::models::consensus::Witness;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::WalletSecret;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -120,7 +121,7 @@ impl Block {
                 coinbase: Some(total_premine_amount),
                 mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
             },
-            witness: super::transaction::Witness::Faith,
+            witness: Witness::Faith,
         };
 
         for (receiving_address, amount) in premine_distribution {

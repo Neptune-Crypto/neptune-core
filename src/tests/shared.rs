@@ -47,7 +47,6 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::pseudorandom_amount;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
@@ -57,9 +56,9 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::utxo::TypeScript;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
-use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::blockchain::transaction::Witness;
+use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
+use crate::models::blockchain::transaction::TransactionWitness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
@@ -802,7 +801,7 @@ pub fn make_mock_transaction_with_generation_key(
         .map(|rd| rd.public_announcement.clone())
         .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
-    let primitive_witness = PrimitiveWitness {
+    let primitive_witness = TransactionPrimitiveWitness {
         input_utxos,
         type_scripts,
         input_lock_scripts,
@@ -817,7 +816,7 @@ pub fn make_mock_transaction_with_generation_key(
 
     Transaction {
         kernel,
-        witness: Witness::ValidationLogic(validity_logic),
+        witness: TransactionWitness::ValidationLogic(validity_logic),
     }
 }
 
@@ -846,7 +845,7 @@ pub fn make_mock_transaction(
             coinbase: None,
             mutator_set_hash: random(),
         },
-        witness: transaction::Witness::Faith,
+        witness: TransactionWitness::Faith,
     }
 }
 
@@ -881,7 +880,7 @@ pub fn make_mock_transaction_with_wallet(
 
     Transaction {
         kernel,
-        witness: transaction::Witness::Faith,
+        witness: TransactionWitness::Faith,
     }
 }
 
@@ -927,7 +926,7 @@ pub fn make_mock_block(
         mutator_set_hash: previous_mutator_set.hash(),
     };
 
-    let primitive_witness = PrimitiveWitness {
+    let primitive_witness = TransactionPrimitiveWitness {
         input_utxos: vec![],
         type_scripts: vec![TypeScript::native_coin()],
         lock_script_witnesses: vec![],
@@ -937,11 +936,11 @@ pub fn make_mock_block(
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
     };
-    let validity_logic =
+    let validation_logic =
         TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &tx_kernel);
 
     let transaction = Transaction {
-        witness: transaction::Witness::ValidationLogic(validity_logic),
+        witness: TransactionWitness::ValidationLogic(validation_logic),
         kernel: tx_kernel,
     };
 

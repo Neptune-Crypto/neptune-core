@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
-use crate::models::blockchain::transaction::{
-    transaction_kernel::TransactionKernel, utxo::LockScript, PrimitiveWitness,
+use crate::models::{
+    blockchain::transaction::{
+        transaction_kernel::TransactionKernel, utxo::LockScript, TransactionPrimitiveWitness,
+    },
+    consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -33,8 +35,12 @@ pub struct LockScriptsHalt {
 }
 
 impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
+    type PrimitiveWitness = TransactionPrimitiveWitness;
+
+    type Kernel = TransactionKernel;
+
     fn new_from_primitive_witness(
-        primitive_witness: &PrimitiveWitness,
+        primitive_witness: &TransactionPrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> LockScriptsHalt {
         let program_and_program_digests_and_spending_keys = primitive_witness

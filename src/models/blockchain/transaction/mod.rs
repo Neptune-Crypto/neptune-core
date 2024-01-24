@@ -6,6 +6,7 @@ pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
+use crate::models::consensus::Witness;
 use anyhow::Result;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -16,11 +17,7 @@ use std::cmp::max;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::SystemTime;
 use tracing::{debug, error, warn};
-use triton_vm::proof::Proof;
-use triton_vm::{
-    prelude::{NonDeterminism, PublicInput},
-    triton_asm,
-};
+use triton_vm::prelude::NonDeterminism;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -39,6 +36,8 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
+pub type TransactionWitness = Witness<TransactionPrimitiveWitness, TransactionValidationLogic>;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
 pub struct PublicAnnouncement {
     pub message: Vec<BFieldElement>,
@@ -53,7 +52,7 @@ impl PublicAnnouncement {
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct PrimitiveWitness {
+pub struct TransactionPrimitiveWitness {
     pub input_utxos: Vec<Utxo>,
     pub input_lock_scripts: Vec<LockScript>,
     pub type_scripts: Vec<TypeScript>,
@@ -64,42 +63,11 @@ pub struct PrimitiveWitness {
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
 }
 
-/// Single proofs are the final abstaction layer for transaction
-/// witnesses. It represents the merger of a set of linked proofs
-/// into one. It hides information that linked proofs expose, but
-/// the downside is that it requires multiple runs of the recursive
-/// prover to produce.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
-pub struct SingleProof(pub Proof);
-
-impl GetSize for SingleProof {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
-
-    fn get_heap_size(&self) -> usize {
-        self.0.get_heap_size()
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub enum Witness {
-    Primitive(PrimitiveWitness),
-    SingleProof(SingleProof),
-    ValidationLogic(TransactionValidationLogic),
-    Faith,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
-    pub witness: Witness,
+    pub witness: TransactionWitness,
 }
 
 /// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
@@ -274,7 +242,7 @@ impl Transaction {
 
         let merged_witness = match (&self.witness, &other.witness) {
             (Witness::Primitive(self_witness), Witness::Primitive(other_witness)) => {
-                Witness::Primitive(PrimitiveWitness {
+                Witness::Primitive(TransactionPrimitiveWitness {
                     input_utxos: [
                         self_witness.input_utxos.clone(),
                         other_witness.input_utxos.clone(),
@@ -358,7 +326,7 @@ impl Transaction {
             .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
     }
 
-    fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
+    fn validate_primitive_witness(&self, primitive_witness: &TransactionPrimitiveWitness) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
             .input_lock_scripts
@@ -525,7 +493,7 @@ mod witness_tests {
 
     #[test]
     fn decode_encode_test_empty() {
-        let primitive_witness = PrimitiveWitness {
+        let primitive_witness = TransactionPrimitiveWitness {
             input_utxos: vec![],
             type_scripts: vec![],
             input_lock_scripts: vec![],
@@ -537,7 +505,7 @@ mod witness_tests {
         };
 
         let encoded = primitive_witness.encode();
-        let decoded = *PrimitiveWitness::decode(&encoded).unwrap();
+        let decoded = *TransactionPrimitiveWitness::decode(&encoded).unwrap();
         assert_eq!(primitive_witness, decoded);
     }
 }
