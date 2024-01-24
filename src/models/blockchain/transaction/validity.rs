@@ -1,7 +1,7 @@
 use crate::prelude::{triton_vm, twenty_first};
 
 pub mod kernel_to_lock_scripts;
-pub mod kernel_to_typescripts;
+pub mod kernel_to_type_scripts;
 pub mod lockscripts_halt;
 pub mod removal_records_integrity;
 pub mod tasm;
@@ -20,7 +20,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use self::lockscripts_halt::LockScriptsHalt;
 use self::removal_records_integrity::RemovalRecordsIntegrity;
 use self::{
-    kernel_to_lock_scripts::KernelToLockScripts, kernel_to_typescripts::KernelToTypeScripts,
+    kernel_to_lock_scripts::KernelToLockScripts, kernel_to_type_scripts::KernelToTypeScripts,
     typescripts_halt::TypeScriptsHalt,
 };
 use super::{transaction_kernel::TransactionKernel, PrimitiveWitness};
