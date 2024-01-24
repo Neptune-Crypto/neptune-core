@@ -14,7 +14,7 @@ use twenty_first::{
     },
 };
 
-use super::{amount::pseudorandom_amount, Amount};
+use super::{amount::pseudorandom_amount, Amount, PublicAnnouncement};
 use crate::{
     util_types::mutator_set::{
         addition_record::{pseudorandom_addition_record, AdditionRecord},
@@ -23,21 +23,11 @@ use crate::{
     Hash,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct PubScriptHashAndInput {
-    pub pubscript_hash: Digest,
-    pub pubscript_input: Vec<BFieldElement>,
-}
-
-pub fn pseudorandom_pubscript_struct(seed: [u8; 32]) -> PubScriptHashAndInput {
+pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let digest: Digest = rng.gen();
     let len = 10 + (rng.next_u32() % 50) as usize;
-    let input: Vec<BFieldElement> = (0..len).map(|_| rng.gen()).collect_vec();
-    PubScriptHashAndInput {
-        pubscript_hash: digest,
-        pubscript_input: input,
-    }
+    let message = (0..len).map(|_| rng.gen()).collect_vec();
+    PublicAnnouncement { message }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
@@ -47,7 +37,7 @@ pub struct TransactionKernel {
     // `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,
 
-    pub pubscript_hashes_and_inputs: Vec<PubScriptHashAndInput>,
+    pub public_announcements: Vec<PublicAnnouncement>,
     pub fee: Amount,
     pub coinbase: Option<Amount>,
 
@@ -88,7 +78,7 @@ impl TransactionKernel {
 
         let output_utxos_sequence = self.outputs.encode();
 
-        let pubscript_sequence = self.pubscript_hashes_and_inputs.encode();
+        let pubscript_sequence = self.public_announcements.encode();
 
         let fee_sequence = self.fee.encode();
 
@@ -161,7 +151,7 @@ pub fn pseudorandom_transaction_kernel(
         .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
         .collect_vec();
     let pubscripts = (0..num_pubscripts)
-        .map(|_| pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>()))
+        .map(|_| pseudorandom_public_announcement(rng.gen::<[u8; 32]>()))
         .collect_vec();
     let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
     let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
@@ -171,7 +161,7 @@ pub fn pseudorandom_transaction_kernel(
     TransactionKernel {
         inputs,
         outputs,
-        pubscript_hashes_and_inputs: pubscripts,
+        public_announcements: pubscripts,
         fee,
         coinbase,
         timestamp,
@@ -185,25 +175,25 @@ pub mod transaction_kernel_tests {
     use rand::{random, thread_rng, Rng, RngCore};
 
     use crate::{
-        tests::shared::{random_pubscript_struct, random_transaction_kernel},
+        tests::shared::{random_public_announcement, random_transaction_kernel},
         util_types::mutator_set::{removal_record::AbsoluteIndexSet, shared::NUM_TRIALS},
     };
 
     use super::*;
 
     #[test]
-    pub fn decode_pubscripthash_and_input() {
-        let pubscript = random_pubscript_struct();
+    pub fn decode_public_announcement() {
+        let pubscript = random_public_announcement();
         let encoded = pubscript.encode();
-        let decoded = *PubScriptHashAndInput::decode(&encoded).unwrap();
+        let decoded = *PublicAnnouncement::decode(&encoded).unwrap();
         assert_eq!(pubscript, decoded);
     }
 
     #[test]
-    pub fn decode_pubscripthashes_and_inputs() {
-        let pubscripts = vec![random_pubscript_struct(), random_pubscript_struct()];
+    pub fn decode_public_announcements() {
+        let pubscripts = vec![random_public_announcement(), random_public_announcement()];
         let encoded = pubscripts.encode();
-        let decoded = *Vec::<PubScriptHashAndInput>::decode(&encoded).unwrap();
+        let decoded = *Vec::<PublicAnnouncement>::decode(&encoded).unwrap();
         assert_eq!(pubscripts, decoded);
     }
 
@@ -234,7 +224,7 @@ pub mod transaction_kernel_tests {
             outputs: vec![AdditionRecord {
                 canonical_commitment: random(),
             }],
-            pubscript_hashes_and_inputs: Default::default(),
+            public_announcements: Default::default(),
             fee: Amount::one(),
             coinbase: None,
             timestamp: Default::default(),

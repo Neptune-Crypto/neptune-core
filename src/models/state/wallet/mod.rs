@@ -353,7 +353,7 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
     use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
-    use crate::models::blockchain::transaction::PubScript;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
@@ -708,8 +708,7 @@ mod wallet_tests {
             },
             sender_randomness: random(),
             receiver_privacy_digest: other_wallet_recipient_address.privacy_digest,
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
         }];
         let input_utxos_mps_keys = two_utxos
             .into_iter()
@@ -776,8 +775,7 @@ mod wallet_tests {
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
 
         let receiver_data_12_to_other = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
             sender_randomness: premine_receiver_global_state
                 .wallet_state
@@ -792,8 +790,7 @@ mod wallet_tests {
             },
         };
         let receiver_data_one_to_other = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
             sender_randomness: premine_receiver_global_state
                 .wallet_state
@@ -1037,8 +1034,7 @@ mod wallet_tests {
         );
 
         let receiver_data_six = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
             utxo: Utxo {
                 coins: Into::<Amount>::into(6).to_native_coins(),

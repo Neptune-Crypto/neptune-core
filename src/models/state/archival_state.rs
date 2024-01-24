@@ -701,7 +701,7 @@ mod archival_state_tests {
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::utxo::LockScript;
-    use crate::models::blockchain::transaction::PubScript;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
@@ -866,8 +866,7 @@ mod archival_state_tests {
             let sender_tx = genesis_receiver_global_state
                 .create_transaction(
                     vec![UtxoReceiverData {
-                        pubscript: PubScript::default(),
-                        pubscript_input: vec![],
+                        public_announcement: PublicAnnouncement::default(),
                         receiver_privacy_digest: random(),
                         sender_randomness: random(),
                         utxo: Utxo {
@@ -984,8 +983,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: random(),
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -994,8 +992,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: random(),
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
         ];
         let sender_tx = global_state_lock
@@ -1097,8 +1094,7 @@ mod archival_state_tests {
                     },
                     sender_randomness: random(),
                     receiver_privacy_digest: random(),
-                    pubscript: PubScript::default(),
-                    pubscript_input: vec![],
+                    public_announcement: PublicAnnouncement::default(),
                 },
                 UtxoReceiverData {
                     utxo: Utxo {
@@ -1107,8 +1103,7 @@ mod archival_state_tests {
                     },
                     sender_randomness: random(),
                     receiver_privacy_digest: random(),
-                    pubscript: PubScript::default(),
-                    pubscript_input: vec![],
+                    public_announcement: PublicAnnouncement::default(),
                 },
             ];
             let sender_tx = global_state
@@ -1237,8 +1232,7 @@ mod archival_state_tests {
         // Add a valid input to the block transaction
         let one_money: Amount = Into::<Amount>::into(1);
         let receiver_data = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: random(),
             sender_randomness: random(),
             utxo: Utxo {
@@ -1291,8 +1285,7 @@ mod archival_state_tests {
         let sender_randomness: Digest = random();
         let receiver_data_for_alice = vec![
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1301,8 +1294,7 @@ mod archival_state_tests {
                 },
             },
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1314,8 +1306,7 @@ mod archival_state_tests {
         // Two outputs for Bob
         let receiver_data_for_bob = vec![
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1324,8 +1315,7 @@ mod archival_state_tests {
                 },
             },
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1466,8 +1456,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -1476,8 +1465,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
         ];
         let tx_from_alice = alice_state_lock
@@ -1494,8 +1482,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -1504,8 +1491,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -1514,8 +1500,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
         ];
         let tx_from_bob = bob_state_lock

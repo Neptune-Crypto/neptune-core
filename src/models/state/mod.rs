@@ -24,16 +24,14 @@ use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
-use super::blockchain::transaction::transaction_kernel::{
-    PubScriptHashAndInput, TransactionKernel,
-};
+use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::{LockScript, TypeScript, Utxo};
 use super::blockchain::transaction::validity::{TransactionValidationLogic, ValidationLogic};
 use super::blockchain::transaction::{
     amount::{Amount, Sign},
     Transaction,
 };
-use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
+use super::blockchain::transaction::{PrimitiveWitness, PublicAnnouncement, Witness};
 use crate::config_models::cli_args;
 use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -228,8 +226,7 @@ pub struct UtxoReceiverData {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_privacy_digest: Digest,
-    pub pubscript: PubScript,
-    pub pubscript_input: Vec<BFieldElement>,
+    pub public_announcement: PublicAnnouncement,
 }
 
 impl GlobalState {
@@ -468,12 +465,9 @@ impl GlobalState {
                 .expect("Adding change UTXO to UTXO notification pool must succeed");
         }
 
-        let pubscript_hashes_and_inputs = receiver_data
+        let public_announcements = receiver_data
             .iter()
-            .map(|x| PubScriptHashAndInput {
-                pubscript_hash: Hash::hash(&x.pubscript),
-                pubscript_input: x.pubscript_input.clone(),
-            })
+            .map(|x| x.public_announcement.clone())
             .collect_vec();
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -483,7 +477,7 @@ impl GlobalState {
         let kernel = TransactionKernel {
             inputs,
             outputs: transaction_outputs,
-            pubscript_hashes_and_inputs,
+            public_announcements: public_announcements.clone(),
             fee,
             timestamp: BFieldElement::new(timestamp.try_into().unwrap()),
             coinbase: None,
@@ -532,11 +526,6 @@ impl GlobalState {
             );
         }
 
-        let pubscripts = receiver_data
-            .iter()
-            .map(|rd| rd.pubscript.clone())
-            .collect_vec();
-
         let mutator_set_accumulator = self
             .chain
             .light_state()
@@ -556,7 +545,7 @@ impl GlobalState {
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
             output_utxos: output_utxos.clone(),
-            pubscripts,
+            public_announcements,
             mutator_set_accumulator,
         };
 
@@ -1122,15 +1111,14 @@ mod global_state_tests {
         };
         let sender_randomness = Digest::default();
         let receiver_privacy_digest = recipient_address.privacy_digest;
-        let (pubscript, pubscript_input) = recipient_address
-            .generate_pubscript_and_input(&output_utxo, sender_randomness)
+        let public_announcement = recipient_address
+            .generate_public_announcement(&output_utxo, sender_randomness)
             .unwrap();
         let receiver_data = vec![UtxoReceiverData {
             utxo: output_utxo.clone(),
             sender_randomness,
             receiver_privacy_digest,
-            pubscript,
-            pubscript_input,
+            public_announcement,
         }];
         let tx: Transaction = global_state_lock
             .lock_guard_mut()
@@ -1165,16 +1153,15 @@ mod global_state_tests {
             };
             let other_sender_randomness = Digest::default();
             let other_receiver_digest = receiving_address.privacy_digest;
-            let (other_pubscript, other_pubscript_input) = receiving_address
-                .generate_pubscript_and_input(&utxo, other_sender_randomness)
+            let other_public_announcement = receiving_address
+                .generate_public_announcement(&utxo, other_sender_randomness)
                 .unwrap();
             output_utxos.push(utxo.clone());
             other_receiver_data.push(UtxoReceiverData {
                 utxo,
                 sender_randomness: other_sender_randomness,
                 receiver_privacy_digest: other_receiver_digest,
-                pubscript: other_pubscript,
-                pubscript_input: other_pubscript_input,
+                public_announcement: other_public_announcement,
             });
         }
 

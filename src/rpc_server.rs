@@ -497,9 +497,9 @@ impl RPC for NeptuneRPCServer {
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
         // to be in control of this. But we could add an endpoint to get recommended fee
         // density.
-        let (pubscript, pubscript_input) =
-            match address.generate_pubscript_and_input(&utxo, sender_randomness) {
-                Ok((ps, inp)) => (ps, inp),
+        let public_announcement =
+            match address.generate_public_announcement(&utxo, sender_randomness) {
+                Ok(pa) => pa,
                 Err(_) => {
                     tracing::error!(
                         "Failed to generate transaction because could not encrypt to address."
@@ -511,8 +511,7 @@ impl RPC for NeptuneRPCServer {
             utxo,
             sender_randomness,
             receiver_privacy_digest,
-            pubscript,
-            pubscript_input,
+            public_announcement,
         })]
         .to_vec();
 

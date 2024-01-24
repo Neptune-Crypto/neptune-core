@@ -1,7 +1,7 @@
 tasm_neptune_transaction_removal_records_integrity:
 
 # call graph
- tasm_neptune_transaction_transaction_kernel_mast_hash: 4642
+ tasm_neptune_transaction_transaction_kernel_mast_hash: 4658
    tasm_list_unsafeimplu32_new___digest: 36
      tasm_memory_dyn_malloc: 25
    tasm_list_unsafeimplu32_set_length___digest: 5
@@ -17,11 +17,11 @@ tasm_neptune_transaction_removal_records_integrity:
        tasm_hashing_absorb_pad_varnum_zeros: 93
        tasm_hashing_absorb_read_remainder: 14
    tasm_list_unsafeimplu32_set_element___digest: 8
-   tasm_hashing_hash_varlen: 196
-     tasm_hashing_absorb: 182
-       tasm_hashing_absorb_hash_all_full_chunks: 41
-       tasm_hashing_absorb_pad_varnum_zeros: 82
-       tasm_hashing_absorb_read_remainder: 23
+   tasm_hashing_hash_varlen: 212
+     tasm_hashing_absorb: 198
+       tasm_hashing_absorb_hash_all_full_chunks: 53
+       tasm_hashing_absorb_pad_varnum_zeros: 104
+       tasm_hashing_absorb_read_remainder: 5
    tasm_list_unsafeimplu32_set_element___digest: 8
    tasm_hashing_hash_varlen: 156
      tasm_hashing_absorb: 142
@@ -1486,18 +1486,18 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_eq: 6
          tasm_list_unsafeimplu32_get_element___digest: 8
          tasm_hashing_eq_digest: 15
- total: 29578
+ total: 29594
 
 # aggregated
- tasm_neptune_transaction_transaction_kernel_mast_hash: 4642
+ tasm_neptune_transaction_transaction_kernel_mast_hash: 4658
    tasm_list_unsafeimplu32_new___digest: 144
      tasm_memory_dyn_malloc: 350
    tasm_list_unsafeimplu32_set_length___digest: 5
-   tasm_hashing_hash_varlen: 6298
-     tasm_hashing_absorb: 6088
-       tasm_hashing_absorb_hash_all_full_chunks: 3987
-       tasm_hashing_absorb_pad_varnum_zeros: 1153
-       tasm_hashing_absorb_read_remainder: 408
+   tasm_hashing_hash_varlen: 6314
+     tasm_hashing_absorb: 6104
+       tasm_hashing_absorb_hash_all_full_chunks: 3999
+       tasm_hashing_absorb_pad_varnum_zeros: 1175
+       tasm_hashing_absorb_read_remainder: 390
    tasm_list_unsafeimplu32_set_element___digest: 168
    tasm_list_unsafeimplu32_get_element___digest: 1480
  tasm_memory_push_ram_to_stack___digest: 50
@@ -1586,4 +1586,4 @@ tasm_neptune_transaction_removal_records_integrity:
            tasm_arithmetic_u64_div2: 1764
            tasm_hashing_swap_digest: 784
          tasm_hashing_eq_digest: 30
- total: 29578
+ total: 29594

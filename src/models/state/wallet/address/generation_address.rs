@@ -26,7 +26,7 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
-use crate::models::blockchain::transaction::PubScript;
+use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::commit;
@@ -50,30 +50,32 @@ pub struct ReceivingAddress {
     pub spending_lock: Digest,
 }
 
-fn pubscript_input_is_marked(pubscript_input: &[BFieldElement]) -> bool {
-    matches!(pubscript_input.first(), Some(&GENERATION_FLAG))
+/// Determine if the public announcement is flagged to indicate it might be a generation
+/// address ciphertext.
+fn public_announcement_is_marked(announcement: &PublicAnnouncement) -> bool {
+    matches!(announcement.message.first(), Some(&GENERATION_FLAG))
 }
 
 fn derive_receiver_id(seed: Digest) -> BFieldElement {
     Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(2)]].concat()).values()[0]
 }
 
-fn receiver_identifier_from_pubscript_input(
-    public_script_input: &[BFieldElement],
+fn receiver_identifier_from_public_announcement(
+    announcement: &PublicAnnouncement,
 ) -> Result<BFieldElement> {
-    match public_script_input.get(1) {
+    match announcement.message.get(1) {
         Some(id) => Ok(*id),
-        None => bail!("Public script does not contain receiver ID"),
+        None => bail!("Public announcement does not contain receiver ID"),
     }
 }
 
-fn ciphertext_from_pubscript_input(
-    pubscript_input: &[BFieldElement],
+fn ciphertext_from_public_announcement(
+    announcement: &PublicAnnouncement,
 ) -> Result<Vec<BFieldElement>> {
-    if pubscript_input.len() <= 2 {
-        bail!("Public script does not contain ciphertext.");
+    if announcement.message.len() <= 2 {
+        bail!("Public announcement does not contain ciphertext.");
     }
-    Ok(pubscript_input[2..].to_vec())
+    Ok(announcement.message[2..].to_vec())
 }
 
 /// Encodes a slice of bytes to a vec of BFieldElements. This
@@ -162,13 +164,13 @@ impl SpendingKey {
         let mut received_utxos_with_randomnesses = vec![];
 
         // for all public scripts that contain a ciphertext for me,
-        for matching_script in transaction
+        for matching_announcement in transaction
             .kernel
-            .pubscript_hashes_and_inputs
+            .public_announcements
             .iter()
-            .filter(|psd| pubscript_input_is_marked(&psd.pubscript_input))
-            .filter(|psd| {
-                let receiver_id = receiver_identifier_from_pubscript_input(&psd.pubscript_input);
+            .filter(|pa| public_announcement_is_marked(pa))
+            .filter(|pa| {
+                let receiver_id = receiver_identifier_from_public_announcement(pa);
                 match receiver_id {
                     Ok(recid) => recid == self.receiver_identifier,
                     Err(_) => false,
@@ -176,7 +178,7 @@ impl SpendingKey {
             })
         {
             // decrypt it to obtain the utxo and sender randomness
-            let ciphertext = ciphertext_from_pubscript_input(&matching_script.pubscript_input);
+            let ciphertext = ciphertext_from_public_announcement(matching_announcement);
             let decryption_result = match ciphertext {
                 Ok(ctxt) => self.decrypt(&ctxt),
                 _ => {
@@ -339,23 +341,18 @@ impl ReceivingAddress {
         .concat())
     }
 
-    /// Generate a pubscript input, which is a ciphertext only the
+    /// Generate a public announcement, which is a ciphertext only the
     /// recipient can decrypt, along with a pubscript that reads
     /// some input of that length.
-    pub fn generate_pubscript_and_input(
+    pub fn generate_public_announcement(
         &self,
         utxo: &Utxo,
         sender_randomness: Digest,
-    ) -> Result<(PubScript, Vec<BFieldElement>)> {
+    ) -> Result<PublicAnnouncement> {
         let mut ciphertext = vec![GENERATION_FLAG, self.receiver_identifier];
         ciphertext.append(&mut self.encrypt(utxo, sender_randomness)?);
 
-        let pubscript = triton_asm!(
-            {&tasm_lib::io::InputSource::StdIn.read_words(ciphertext.len())}
-            halt
-        );
-
-        Ok((pubscript.into(), ciphertext))
+        Ok(PublicAnnouncement::new(ciphertext))
     }
 
     /// Generate a lock script from the spending lock. Satisfaction
@@ -363,27 +360,6 @@ impl ReceivingAddress {
     /// the transaction. The logic contained in here should be
     /// identical to `verify_unlock`.
     pub fn lock_script(&self) -> LockScript {
-        // currently this script is just a placeholder
-        // const DIVINE: BFieldElement = BFieldElement::new(8);
-        // const HASH: BFieldElement = BFieldElement::new(48);
-        // const POP: BFieldElement = BFieldElement::new(2);
-        // const PUSH: BFieldElement = BFieldElement::new(1);
-        // const ASSERT_VECTOR: BFieldElement = BFieldElement::new(64);
-        // const READ_IO: BFieldElement = BFieldElement::new(128);
-        // let mut push_digest = vec![];
-        // for elem in self.spending_lock.values().iter().rev() {
-        //     push_digest.append(&mut vec![PUSH, *elem]);
-        // }
-        // let instrs = vec![
-        //     vec![
-        //         DIVINE, DIVINE, DIVINE, DIVINE, DIVINE, HASH, POP, POP, POP, POP, POP,
-        //     ],
-        //     push_digest,
-        //     vec![ASSERT_VECTOR],
-        //     vec![READ_IO, READ_IO, READ_IO, READ_IO, READ_IO],
-        // ]
-        // .concat();
-
         let mut push_spending_lock_digest_to_stack = vec![];
         for elem in self.spending_lock.values().iter().rev() {
             push_spending_lock_digest_to_stack.push(triton_instr!(push elem.value()));
@@ -402,6 +378,7 @@ impl ReceivingAddress {
     }
 
     fn get_hrp(network: Network) -> String {
+        // NOLGA: Neptune lattice-based generation address
         let mut hrp = "nolga".to_string();
         let network_byte: char = match network {
             Network::Alpha => 'm',
@@ -468,7 +445,7 @@ mod test_generation_addresses {
         config_models::network::Network,
         models::blockchain::{
             shared::Hash,
-            transaction::{amount::Amount, transaction_kernel::PubScriptHashAndInput, utxo::Utxo},
+            transaction::{amount::Amount, utxo::Utxo},
         },
         tests::shared::make_mock_transaction,
     };
@@ -594,22 +571,19 @@ mod test_generation_addresses {
         };
         let sender_randomness: Digest = random();
 
-        let (pubscript, pubscript_input) = receiving_address
-            .generate_pubscript_and_input(&utxo, sender_randomness)
+        let public_announcement = receiving_address
+            .generate_public_announcement(&utxo, sender_randomness)
             .unwrap();
         let mut mock_tx = make_mock_transaction(vec![], vec![]);
 
         assert!(spending_key.scan_for_announced_utxos(&mock_tx).is_empty());
 
         // Add a pubscript for our keys and verify that they are recognized
-        assert!(pubscript_input_is_marked(&pubscript_input));
+        assert!(public_announcement_is_marked(&public_announcement));
         mock_tx
             .kernel
-            .pubscript_hashes_and_inputs
-            .push(PubScriptHashAndInput {
-                pubscript_hash: Hash::hash(&pubscript),
-                pubscript_input,
-            });
+            .public_announcements
+            .push(public_announcement);
 
         let announced_txs = spending_key.scan_for_announced_utxos(&mock_tx);
         assert_eq!(1, announced_txs.len());
