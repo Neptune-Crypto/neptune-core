@@ -25,8 +25,8 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction::transaction_kernel::{
     PubScriptHashAndInput, TransactionKernel,
 };
-use super::blockchain::transaction::utxo::{LockScript, Utxo};
-use super::blockchain::transaction::validity::{TransactionValidityLogic, ValidationLogic};
+use super::blockchain::transaction::utxo::{LockScript, TypeScript, Utxo};
+use super::blockchain::transaction::validity::{TransactionValidationLogic, ValidationLogic};
 use super::blockchain::transaction::{
     amount::{Amount, Sign},
     Transaction,
@@ -498,6 +498,13 @@ impl GlobalState {
             .map(|(utxo, _lock_script, _mp)| utxo)
             .cloned()
             .collect_vec();
+
+        // Right now we only have one type script, namely that for the native Neptune coin.
+        // Down the line we can and will have other type scripts and these will have to be
+        // stored and managed in some non-hardcoded database. See issue #92 [1].
+        //
+        // [1]: https://github.com/Neptune-Crypto/neptune-core/issues/92
+        let type_scripts = vec![TypeScript::native_coin()];
         let input_lock_scripts = spendable_utxos_and_mps
             .iter()
             .map(|(_utxo, lock_script, _mp)| lock_script.to_owned())
@@ -543,6 +550,7 @@ impl GlobalState {
         let mut primitive_witness = PrimitiveWitness {
             input_utxos,
             input_lock_scripts,
+            type_scripts,
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
             output_utxos: output_utxos.clone(),
@@ -553,7 +561,7 @@ impl GlobalState {
         // Convert the secret-supported claim to a proof, several proofs, or
         // at the very least hide sensitive data.
         let mut transaction_validity_logic =
-            TransactionValidityLogic::new_from_witness(&primitive_witness, &kernel);
+            TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
 
         if self.cli.privacy {
             transaction_validity_logic

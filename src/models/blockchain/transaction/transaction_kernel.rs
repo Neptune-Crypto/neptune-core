@@ -6,7 +6,8 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
-        algebraic_hasher::AlgebraicHasher, merkle_tree::CpuParallel,
+        algebraic_hasher::AlgebraicHasher,
+        merkle_tree::{CpuParallel, MerkleTree},
         merkle_tree_maker::MerkleTreeMaker,
     },
 };
@@ -54,7 +55,32 @@ pub struct TransactionKernel {
     pub mutator_set_hash: Digest,
 }
 
+pub enum TransactionKernelField {
+    InputUtxos,
+    OutputUtxos,
+    Pubscript,
+    Fee,
+    Coinbase,
+    Timestamp,
+    MutatorSetHash,
+}
+
+impl TransactionKernelField {
+    pub fn discriminant(&self) -> usize {
+        match self {
+            TransactionKernelField::InputUtxos => 0,
+            TransactionKernelField::OutputUtxos => 1,
+            TransactionKernelField::Pubscript => 2,
+            TransactionKernelField::Fee => 3,
+            TransactionKernelField::Coinbase => 4,
+            TransactionKernelField::Timestamp => 5,
+            TransactionKernelField::MutatorSetHash => 6,
+        }
+    }
+}
+
 impl TransactionKernel {
+    /// Return the sequences (= leaf preimages) of the kernel Merkle tree.
     pub fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
         let input_utxos_sequence = self.inputs.encode();
 
@@ -81,7 +107,7 @@ impl TransactionKernel {
         ]
     }
 
-    pub fn mast_hash(&self) -> Digest {
+    fn merkle_tree(&self) -> MerkleTree<Hash> {
         // get a sequence of BFieldElements for each field
         let sequences = self.mast_sequences();
 
@@ -96,7 +122,16 @@ impl TransactionKernel {
         }
 
         // compute Merkle tree and return hash
-        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs).get_root()
+        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs)
+    }
+
+    pub fn mast_path(&self, field: TransactionKernelField) -> Vec<Digest> {
+        self.merkle_tree()
+            .get_authentication_structure(&[field.discriminant()])
+    }
+
+    pub fn mast_hash(&self) -> Digest {
+        self.merkle_tree().get_root()
     }
 }
 
