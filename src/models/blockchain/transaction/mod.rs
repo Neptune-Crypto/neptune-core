@@ -86,13 +86,12 @@ impl GetSize for SingleProof {
     }
 }
 
-// TODO: Remove this allow once `ValidityLogic` is more sane
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub enum Witness {
     Primitive(PrimitiveWitness),
     SingleProof(SingleProof),
-    ValidityLogic(TransactionValidationLogic),
+    ValidationLogic(TransactionValidationLogic),
     Faith,
 }
 
@@ -223,7 +222,7 @@ impl Transaction {
     /// isolation, without the context of the canonical chain.
     pub fn is_valid(&self) -> bool {
         match &self.witness {
-            Witness::ValidityLogic(validity_logic) => validity_logic.verify(),
+            Witness::ValidationLogic(validity_logic) => validity_logic.verify(),
             Witness::Primitive(primitive_witness) => {
                 warn!("Verifying transaction by raw witness; unlock key might be exposed!");
                 self.validate_primitive_witness(primitive_witness)
@@ -318,7 +317,9 @@ impl Transaction {
             }
 
             // TODO: Merge with recursion
-            (Witness::ValidityLogic(_self_vl), Witness::ValidityLogic(_other_vl)) => Witness::Faith,
+            (Witness::ValidationLogic(_self_vl), Witness::ValidationLogic(_other_vl)) => {
+                Witness::Faith
+            }
             (Witness::Faith, _) => Witness::Faith,
             (_, Witness::Faith) => Witness::Faith,
             _ => {

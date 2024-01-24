@@ -228,7 +228,7 @@ fn make_coinbase_transaction(
     (
         Transaction {
             kernel,
-            witness: Witness::ValidityLogic(validity_logic),
+            witness: Witness::ValidationLogic(validity_logic),
         },
         sender_randomness,
     )

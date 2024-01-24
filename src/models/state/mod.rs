@@ -569,7 +569,7 @@ impl GlobalState {
 
         Ok(Transaction {
             kernel,
-            witness: Witness::ValidityLogic(transaction_validity_logic),
+            witness: Witness::ValidationLogic(transaction_validity_logic),
         })
     }
 
