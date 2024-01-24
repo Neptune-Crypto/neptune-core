@@ -49,14 +49,14 @@ use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::pseudorandom_amount;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
-use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_pubscript_struct;
+use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
-use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::TypeScript;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::PrimitiveWitness;
+use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Witness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
@@ -531,9 +531,9 @@ pub fn random_addition_record() -> AdditionRecord {
     pseudorandom_addition_record(rng.gen::<[u8; 32]>())
 }
 
-pub fn random_pubscript_struct() -> PubScriptHashAndInput {
+pub fn random_public_announcement() -> PublicAnnouncement {
     let mut rng = thread_rng();
-    pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>())
+    pseudorandom_public_announcement(rng.gen::<[u8; 32]>())
 }
 
 pub fn random_amount() -> Amount {
@@ -755,12 +755,9 @@ pub fn make_mock_transaction_with_generation_key(
         outputs.push(addition_record);
     }
 
-    let pubscript_hashes_and_inputs = receiver_data
+    let public_announcements = receiver_data
         .iter()
-        .map(|x| PubScriptHashAndInput {
-            pubscript_hash: Hash::hash(&x.pubscript),
-            pubscript_input: x.pubscript_input.clone(),
-        })
+        .map(|x| x.public_announcement.clone())
         .collect_vec();
     let timestamp: u64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -772,7 +769,7 @@ pub fn make_mock_transaction_with_generation_key(
     let kernel = TransactionKernel {
         inputs,
         outputs,
-        pubscript_hashes_and_inputs,
+        public_announcements,
         fee,
         timestamp: BFieldElement::new(timestamp),
         coinbase: None,
@@ -800,7 +797,7 @@ pub fn make_mock_transaction_with_generation_key(
         .collect_vec();
     let pubscripts = receiver_data
         .iter()
-        .map(|rd| rd.pubscript.to_owned())
+        .map(|rd| rd.public_announcement.clone())
         .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = PrimitiveWitness {
@@ -810,7 +807,7 @@ pub fn make_mock_transaction_with_generation_key(
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
         output_utxos,
-        pubscripts,
+        public_announcements: pubscripts,
         mutator_set_accumulator: tip_msa,
     };
     let validity_logic =
@@ -841,7 +838,7 @@ pub fn make_mock_transaction(
         kernel: TransactionKernel {
             inputs,
             outputs,
-            pubscript_hashes_and_inputs: vec![],
+            public_announcements: vec![],
             fee: 1.into(),
             timestamp,
             coinbase: None,
@@ -873,7 +870,7 @@ pub fn make_mock_transaction_with_wallet(
     let kernel = TransactionKernel {
         inputs,
         outputs,
-        pubscript_hashes_and_inputs: vec![],
+        public_announcements: vec![],
         fee,
         timestamp,
         coinbase: None,
@@ -921,7 +918,7 @@ pub fn make_mock_block(
     let tx_kernel = TransactionKernel {
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
-        pubscript_hashes_and_inputs: vec![],
+        public_announcements: vec![],
         fee: Amount::zero(),
         timestamp: BFieldElement::new(block_timestamp),
         coinbase: Some(coinbase_amount),
@@ -934,7 +931,7 @@ pub fn make_mock_block(
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
         output_utxos: vec![coinbase_utxo.clone()],
-        pubscripts: vec![],
+        public_announcements: vec![],
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
     };

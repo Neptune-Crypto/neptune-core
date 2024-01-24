@@ -114,7 +114,7 @@ impl Block {
                 outputs: vec![],
                 fee: 0u32.into(),
                 timestamp,
-                pubscript_hashes_and_inputs: vec![],
+                public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
                 mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
             },
@@ -477,7 +477,7 @@ mod block_tests {
     use crate::{
         config_models::network::Network,
         models::{
-            blockchain::transaction::PubScript, state::wallet::WalletSecret,
+            blockchain::transaction::PublicAnnouncement, state::wallet::WalletSecret,
             state::UtxoReceiverData,
         },
         tests::shared::{get_mock_global_state, make_mock_block},
@@ -518,8 +518,7 @@ mod block_tests {
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
         let new_utxo = Utxo::new_native_coin(other_address.lock_script(), 10.into());
         let reciever_data = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: other_address.privacy_digest,
             sender_randomness: random(),
             utxo: new_utxo,

@@ -382,7 +382,7 @@ mod tests {
         models::{
             blockchain::{
                 block::block_height::BlockHeight,
-                transaction::{amount::Amount, utxo::Utxo, PubScript, Transaction},
+                transaction::{amount::Amount, utxo::Utxo, PublicAnnouncement, Transaction},
             },
             shared::SIZE_20MB_IN_BYTES,
             state::{
@@ -580,8 +580,7 @@ mod tests {
             };
 
             output_utxos_generated_by_me.push(UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: premine_receiver_address.privacy_digest,
                 sender_randomness: random(),
                 utxo: new_utxo,
@@ -608,8 +607,7 @@ mod tests {
             },
             sender_randomness: random(),
             receiver_privacy_digest: other_receiver_address.privacy_digest,
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
         }];
         let tx_by_other_original = other_global_state
             .create_transaction(output_utxo_data_by_miner, 1.into())
@@ -710,8 +708,7 @@ mod tests {
             utxo,
             receiver_privacy_digest: premine_address.privacy_digest,
             sender_randomness: random(),
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
         };
         let tx_by_preminer_low_fee = preminer_state
             .create_transaction(vec![receiver_data.clone()], 1.into())

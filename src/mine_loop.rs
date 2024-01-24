@@ -205,7 +205,7 @@ fn make_coinbase_transaction(
     let kernel = TransactionKernel {
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
-        pubscript_hashes_and_inputs: vec![],
+        public_announcements: vec![],
         fee: Amount::zero(),
         timestamp,
         coinbase: Some(coinbase_amount),
@@ -219,7 +219,7 @@ fn make_coinbase_transaction(
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
         output_utxos: vec![coinbase_utxo.clone()],
-        pubscripts: vec![],
+        public_announcements: vec![],
         mutator_set_accumulator,
     };
     let validity_logic =
@@ -493,8 +493,7 @@ mod mine_loop_tests {
         let four_neptune_coins = Amount::from(4).to_native_coins();
         let receiver_privacy_digest = Digest::default();
         let sender_randomness = Digest::default();
-        let pubscript: PubScript = PubScript::default();
-        let pubscript_input: Vec<BFieldElement> = vec![];
+        let public_announcement = PublicAnnouncement::default();
         let tx_output = Utxo {
             coins: four_neptune_coins,
             lock_script_hash: LockScript::anyone_can_spend().hash(),
@@ -506,8 +505,7 @@ mod mine_loop_tests {
                         utxo: tx_output,
                         sender_randomness,
                         receiver_privacy_digest,
-                        pubscript,
-                        pubscript_input,
+                        public_announcement,
                     }),
                 ],
                 1.into(),

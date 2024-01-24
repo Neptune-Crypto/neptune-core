@@ -95,8 +95,8 @@ impl BasicSnippet for TransactionKernelMastHash {
 
         let kernel_to_inputs_with_size = tasm_lib::field_with_size!(TransactionKernel::inputs);
         let kernel_to_outputs_with_size = tasm_lib::field_with_size!(TransactionKernel::outputs);
-        let kernel_to_pubscripts_with_size =
-            tasm_lib::field_with_size!(TransactionKernel::pubscript_hashes_and_inputs);
+        let kernel_to_public_announcements =
+            tasm_lib::field_with_size!(TransactionKernel::public_announcements);
         let kernel_to_fee_with_size = tasm_lib::field_with_size!(TransactionKernel::fee);
         let kernel_to_coinbase_with_size = tasm_lib::field_with_size!(TransactionKernel::coinbase);
         let kernel_to_timestamp_with_size =
@@ -120,29 +120,29 @@ impl BasicSnippet for TransactionKernelMastHash {
             // populate list[8] with inputs digest
             dup 1                       // _ *kernel *list *kernel
             {&kernel_to_inputs_with_size}
-                                        // _ *kernel *list *inputs *inputs_size
+                                        // _ *kernel *list *inputs inputs_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 8                // _ *kernel *list d4 d3 d2 d1 d0 *list 8
             call {set_element}          // _ *kernel *list
 
             // populate list[9] with outputs digest
             dup 1                       // _ *kernel *list *kernel
-            {&kernel_to_outputs_with_size}  // _ *kernel *list *outputs *outputs_size
+            {&kernel_to_outputs_with_size}  // _ *kernel *list *outputs outputs_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 9                // _ *kernel *list d4 d3 d2 d1 d0 *list 9
             call {set_element}          // _ *kernel *list
 
-            // populate list[10] with pubscript_hashes_and_inputs digest
+            // populate list[10] with public_announcements digest
             dup 1                       // _ *kernel *list *kernel
-            {&kernel_to_pubscripts_with_size}
-                                        // _ *kernel *list *pubscript_hashes_and_inputs *pubscript_hashes_and_inputs_size_size
+            {&kernel_to_public_announcements}
+                                        // _ *kernel *list *kernel_to_public_announcements kernel_to_public_announcements_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 10               // _ *kernel *list d4 d3 d2 d1 d0 *list 10
             call {set_element}          // _ *kernel *list
 
             // populate list[11] with fee digest
             dup 1                       // _ *kernel *list *kernel
-            {&kernel_to_fee_with_size}   // _ *kernel *list *fee *fee_size
+            {&kernel_to_fee_with_size}   // _ *kernel *list *fee fee_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 11               // _ *kernel *list d4 d3 d2 d1 d0 *list 11
             call {set_element}          // _ *kernel *list
@@ -150,7 +150,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             // populate list[12] with coinbase digest
             dup 1                       // _ *kernel *list *kernel
             {&kernel_to_coinbase_with_size}
-                                        // _ *kernel *list *coinbase *coinbase_size
+                                        // _ *kernel *list *coinbase coinbase_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 12               // _ *kernel *list d4 d3 d2 d1 d0 *list 12
             call {set_element}          // _ *kernel *list
@@ -158,7 +158,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             // populate list[13] with timestamp digest
             dup 1                       // _ *kernel *list *kernel
             {&kernel_to_timestamp_with_size}
-                                        // _ *kernel *list *timestamp *timestamp_size
+                                        // _ *kernel *list *timestamp timestamp_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 13               // _ *kernel *list d4 d3 d2 d1 d0 *list 13
             call {set_element}          // _ *kernel *list
@@ -166,7 +166,7 @@ impl BasicSnippet for TransactionKernelMastHash {
             // populate list[14] with mutator set hash digest
             dup 1                       // _ *kernel *list *kernel
             {&kernel_to_mutator_set_hash_with_size}
-                                        // _ *kernel *list *mutator_set_hash *mutator_set_hash_size
+                                        // _ *kernel *list *mutator_set_hash mutator_set_hash_size
             call {hash_varlen}          // _ *kernel *list d4 d3 d2 d1 d0
             dup 5 push 14               // _ *kernel *list d4 d3 d2 d1 d0 *list 14
             call {set_element}          // _ *kernel *list
@@ -298,21 +298,20 @@ impl Function for TransactionKernelMastHash {
         let outputs_hash = Hash::hash_varlen(&outputs_encoded);
         // address += BFieldElement::one() + BFieldElement::new(outputs_size as u64);
 
-        // pubscript_hashes_and_inputs
-        // let pubscript_hashes_and_inputs_size = memory.get(&address).unwrap().value() as usize;
-        // let pubscript_hashes_and_inputs_encoded = (0..pubscript_hashes_and_inputs_size)
+        // public_announcements
+        // let public_announcements_size = memory.get(&address).unwrap().value() as usize;
+        // let public_announcements_encoded = (0..public_announcements_size)
         //     .map(|i| {
         //         *memory
         //             .get(&(address + BFieldElement::new(i as u64)))
         //             .unwrap()
         //     })
         //     .collect_vec();
-        let pubscript_hashes_and_inputs = kernel.pubscript_hashes_and_inputs;
-        let pubscript_hashes_and_inputs_encoded = pubscript_hashes_and_inputs.encode();
-        let pubscript_hashes_and_inputs_hash =
-            Hash::hash_varlen(&pubscript_hashes_and_inputs_encoded);
+        let public_announcements = kernel.public_announcements;
+        let public_announcements_encoded = public_announcements.encode();
+        let public_announcements_hash = Hash::hash_varlen(&public_announcements_encoded);
         // address +=
-        //     BFieldElement::one() + BFieldElement::new(pubscript_hashes_and_inputs_size as u64);
+        //     BFieldElement::one() + BFieldElement::new(public_announcements_size as u64);
 
         // fee
         // let fee_size = memory.get(&address).unwrap().value() as usize;
@@ -378,7 +377,7 @@ impl Function for TransactionKernelMastHash {
         let leafs = [
             inputs_hash,
             outputs_hash,
-            pubscript_hashes_and_inputs_hash,
+            public_announcements_hash,
             fee_hash,
             coinbase_hash,
             timestamp_hash,

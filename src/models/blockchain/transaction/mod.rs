@@ -14,10 +14,8 @@ use std::cmp::max;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::SystemTime;
 use tracing::{debug, error, warn};
-use triton_vm::instruction::LabelledInstruction;
-use triton_vm::program::Program;
 use triton_vm::proof::Proof;
-use triton_vm::{triton_asm, NonDeterminism, PublicInput};
+use triton_vm::NonDeterminism;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -25,7 +23,7 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use self::amount::Amount;
 use self::native_coin::native_coin_program;
-use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
+use self::transaction_kernel::TransactionKernel;
 use self::utxo::{LockScript, TypeScript, Utxo};
 use self::validity::TransactionValidationLogic;
 use super::block::Block;
@@ -36,32 +34,14 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct PubScript {
-    pub program: Program,
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
+pub struct PublicAnnouncement {
+    pub message: Vec<BFieldElement>,
 }
 
-impl Default for PubScript {
-    fn default() -> Self {
-        Self {
-            program: Program::new(&triton_asm!(halt)),
-        }
-    }
-}
-
-impl From<Vec<LabelledInstruction>> for PubScript {
-    fn from(instrs: Vec<LabelledInstruction>) -> Self {
-        Self {
-            program: Program::new(&instrs),
-        }
-    }
-}
-
-impl From<&[LabelledInstruction]> for PubScript {
-    fn from(instrs: &[LabelledInstruction]) -> Self {
-        Self {
-            program: Program::new(instrs),
-        }
+impl PublicAnnouncement {
+    pub fn new(message: Vec<BFieldElement>) -> Self {
+        Self { message }
     }
 }
 
@@ -75,7 +55,7 @@ pub struct PrimitiveWitness {
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
     pub output_utxos: Vec<Utxo>,
-    pub pubscripts: Vec<PubScript>,
+    pub public_announcements: Vec<PublicAnnouncement>,
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
 }
 
@@ -277,9 +257,9 @@ impl Transaction {
         let merged_kernel = TransactionKernel {
             inputs: [self.kernel.inputs, other.kernel.inputs].concat(),
             outputs: [self.kernel.outputs, other.kernel.outputs].concat(),
-            pubscript_hashes_and_inputs: [
-                self.kernel.pubscript_hashes_and_inputs,
-                other.kernel.pubscript_hashes_and_inputs,
+            public_announcements: [
+                self.kernel.public_announcements,
+                other.kernel.public_announcements,
             ]
             .concat(),
             fee: self.kernel.fee + other.kernel.fee,
@@ -323,9 +303,9 @@ impl Transaction {
                         other_witness.output_utxos.clone(),
                     ]
                     .concat(),
-                    pubscripts: [
-                        self_witness.pubscripts.clone(),
-                        other_witness.pubscripts.clone(),
+                    public_announcements: [
+                        self_witness.public_announcements.clone(),
+                        other_witness.public_announcements.clone(),
                     ]
                     .concat(),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
@@ -527,34 +507,7 @@ impl Transaction {
             return false;
         }
 
-        // verify pubscripts
-        for (
-            PubScriptHashAndInput {
-                pubscript_hash,
-                pubscript_input,
-            },
-            pubscript,
-        ) in self
-            .kernel
-            .pubscript_hashes_and_inputs
-            .iter()
-            .zip(primitive_witness.pubscripts.iter())
-        {
-            if *pubscript_hash != Hash::hash(pubscript) {
-                return false;
-            }
-
-            let secret_input: Vec<BFieldElement> = vec![];
-
-            // The pubscript is satisfied if it halts gracefully without crashing.
-            if let Err(err) = pubscript.program.run(
-                PublicInput::new(pubscript_input.to_vec()),
-                NonDeterminism::new(secret_input),
-            ) {
-                warn!("Could not verify pubscript for transaction; got err: \"{err}\".");
-                return false;
-            }
-        }
+        // in regards to public announcements: there isn't anything to verify
 
         true
     }
@@ -573,7 +526,7 @@ mod witness_tests {
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: vec![],
-            pubscripts: vec![],
+            public_announcements: vec![],
             mutator_set_accumulator: MutatorSetAccumulator::new(),
         };
 

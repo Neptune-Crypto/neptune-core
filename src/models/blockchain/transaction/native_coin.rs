@@ -41,7 +41,7 @@ pub fn native_coin_reference(
     // Kernel mast hash is the Merkle root whose leafs are
     //  - hash_varlen(input_sequence)
     //  - hash_varlen(output_sequence)
-    //  - hash_varlen(pubscript_hashes_and_inputs_sequence)
+    //  - hash_varlen(public_announcements_sequence)
     //  - hash_varlen(fee_sequence)
     //  - hash_varlen(coinbase_sequence)
     //  - hash_varlen(timestamp_sequence)
@@ -61,7 +61,7 @@ pub fn native_coin_reference(
         *Vec::<Vec<BFieldElement>>::decode(&read_secret_input)?;
     let input_sequence = &sequences[0];
     let output_sequence = &sequences[1];
-    let pubscript_sequence = &sequences[2];
+    let public_announcements_sequence = &sequences[2];
     let fee_sequence = &sequences[3];
     let coinbase_sequence = &sequences[4];
     let timestamp_sequence = &sequences[5];
@@ -114,7 +114,7 @@ pub fn native_coin_reference(
     let leafs = [
         Hash::hash_varlen(input_sequence),
         Hash::hash_varlen(output_sequence),
-        Hash::hash_varlen(pubscript_sequence),
+        Hash::hash_varlen(public_announcements_sequence),
         Hash::hash_varlen(fee_sequence),
         Hash::hash_varlen(coinbase_sequence),
         Hash::hash_varlen(timestamp_sequence),
