@@ -236,6 +236,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let kernel_to_inputs = tasm_lib::field!(TransactionKernel::inputs);
         let aocl_to_leaf_count = tasm_lib::field!(MmraH::leaf_count);
         let aocl_to_peaks = tasm_lib::field!(MmraH::peaks);
+        let get_hash_from_list = library.import(Box::new(UnsafeGet {
+            data_type: DataType::Digest,
+        }));
 
         let code = triton_asm! {
 
@@ -312,8 +315,16 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         call {get_pointer_list} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *[*tx_input]
         call {map_hash_removal_record_indices} // _  *[(*mp, item)] *witness *kernel *[witness_index_list_hash] *[kernel_index_list_hash]
 
+        swap 1
+        push 0
+        call {get_hash_from_list}
+        push 1340 assert
+
         call {multiset_equality} // _  *[(*mp, item)] *witness *kernel witness_inputs==kernel_inputs
+
         assert // _  *[(*mp, item)] *witness *kernel
+        push 1339 assert
+
 
         // 5. verify that all items' commitments live in the aocl
         // get aocl leaf count
@@ -327,6 +338,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         dup 2                   // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *aocl
         {&aocl_to_peaks}              // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
+        push 1338 assert
+
 
 
         swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(*mp, item)]
@@ -343,6 +356,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
 
         call {all_verify_aocl_membership}
                // _ *peaks leaf_count_hi leaf_count_lo all_live_in_aocl
+               push 1337 assert
 
         assert
 

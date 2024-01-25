@@ -509,6 +509,10 @@ pub fn pseudorandom_removal_record_integrity_witness(
         .map(|rr| Hash::hash(&rr.absolute_indices))
         .collect_vec();
     kernel_index_set_hashes.sort();
+    println!(
+        "kernel index set hashes:\n{}",
+        kernel_index_set_hashes.iter().join("\n")
+    );
 
     RemovalRecordsIntegrityWitness {
         input_utxos,
