@@ -393,11 +393,11 @@ impl GlobalState {
         // todo: accomodate a future change whereby this function also returns the matching spending keys
         let spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = self
             .wallet_state
-            .allocate_sufficient_input_funds_from_lock(total_spend, bc_tip.hash)
+            .allocate_sufficient_input_funds_from_lock(total_spend, bc_tip.hash())
             .await?;
 
         // Create all removal records. These must be relative to the block tip.
-        let msa_tip = &bc_tip.body.next_mutator_set_accumulator;
+        let msa_tip = &bc_tip.kernel.body.next_mutator_set_accumulator;
         let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
@@ -444,7 +444,7 @@ impl GlobalState {
             let change_sender_randomness = self
                 .wallet_state
                 .wallet_secret
-                .generate_sender_randomness(bc_tip.header.height, receiver_digest);
+                .generate_sender_randomness(bc_tip.kernel.header.height, receiver_digest);
             let change_addition_record = commit::<Hash>(
                 Hash::hash(&change_utxo),
                 change_sender_randomness,
@@ -774,10 +774,10 @@ impl GlobalState {
                     .await?
                     .unwrap();
 
-                debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.header.height);
+                debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
                 // revert removals
-                let removal_records = revert_block.body.transaction.kernel.inputs.clone();
+                let removal_records = revert_block.kernel.body.transaction.kernel.inputs.clone();
                 for removal_record in removal_records.iter().rev() {
                     // membership_proof.revert_update_from_removal(&removal);
                     membership_proof
@@ -786,8 +786,11 @@ impl GlobalState {
                 }
 
                 // revert additions
-                let previous_mutator_set =
-                    revert_block.body.previous_mutator_set_accumulator.clone();
+                let previous_mutator_set = revert_block
+                    .kernel
+                    .body
+                    .previous_mutator_set_accumulator
+                    .clone();
                 membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
 
                 // unset spent_in_block field if the UTXO was spent in this block
@@ -818,9 +821,13 @@ impl GlobalState {
                     .get_block(apply_block_hash)
                     .await?
                     .unwrap();
-                let addition_records = apply_block.body.transaction.kernel.outputs;
-                let removal_records = apply_block.body.transaction.kernel.inputs;
-                let mut block_msa = apply_block.body.previous_mutator_set_accumulator.clone();
+                let addition_records = apply_block.kernel.body.transaction.kernel.outputs;
+                let removal_records = apply_block.kernel.body.transaction.kernel.inputs;
+                let mut block_msa = apply_block
+                    .kernel
+                    .body
+                    .previous_mutator_set_accumulator
+                    .clone();
 
                 // apply additions
                 for addition_record in addition_records.iter() {
@@ -842,7 +849,10 @@ impl GlobalState {
                     block_msa.remove(removal_record);
                 }
 
-                assert_eq!(block_msa, apply_block.body.next_mutator_set_accumulator);
+                assert_eq!(
+                    block_msa,
+                    apply_block.kernel.body.next_mutator_set_accumulator
+                );
             }
 
             // store updated membership proof
@@ -945,7 +955,7 @@ impl GlobalState {
         self.chain.archival_state_mut().block_index_db.flush().await;
 
         // persist archival_mutator_set, with sync label
-        let hash = self.chain.archival_state().get_latest_block().await.hash;
+        let hash = self.chain.archival_state().get_latest_block().await.hash();
         self.chain
             .archival_state_mut()
             .archival_mutator_set
@@ -985,7 +995,7 @@ impl GlobalState {
         coinbase_utxo_info: Option<ExpectedUtxo>,
     ) -> Result<()> {
         // get proof_of_work_family for tip
-        let tip_proof_of_work_family = self.chain.light_state().header.proof_of_work_family;
+        let tip_proof_of_work_family = self.chain.light_state().kernel.header.proof_of_work_family;
 
         // Apply the updates
         self.chain
@@ -1078,11 +1088,12 @@ mod global_state_tests {
     ) -> bool {
         let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
         for (_idx, monitored_utxo) in monitored_utxos.iter() {
-            let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash);
+            let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
             match current_mp {
                 Some(mp) => {
                     if !tip_block
+                        .kernel
                         .body
                         .next_mutator_set_accumulator
                         .verify(Hash::hash(&monitored_utxo.utxo), &mp)
@@ -1250,7 +1261,7 @@ mod global_state_tests {
                         .1,
                 );
             assert_eq!(
-                mock_block_1.hash,
+                mock_block_1.hash(),
                 own_premine_mutxo
                     .get_latest_membership_proof_entry()
                     .unwrap()
@@ -1281,7 +1292,7 @@ mod global_state_tests {
                 .archival_state_mut()
                 .write_block(
                     &mock_block_1a,
-                    Some(mock_block_1a.header.proof_of_work_family),
+                    Some(mock_block_1a.kernel.header.proof_of_work_family),
                 )
                 .await?;
         }
@@ -1294,19 +1305,19 @@ mod global_state_tests {
         assert!(
             global_state
                 .wallet_state
-                .is_synced_to(genesis_block.hash)
+                .is_synced_to(genesis_block.hash())
                 .await
         );
         assert!(
             !global_state
                 .wallet_state
-                .is_synced_to(mock_block_1a.hash)
+                .is_synced_to(mock_block_1a.hash())
                 .await
         );
 
         // Call resync
         global_state
-            .resync_membership_proofs_from_stored_blocks(mock_block_1a.hash)
+            .resync_membership_proofs_from_stored_blocks(mock_block_1a.hash())
             .await
             .unwrap();
 
@@ -1314,7 +1325,7 @@ mod global_state_tests {
         assert!(
             global_state
                 .wallet_state
-                .is_synced_to(mock_block_1a.hash)
+                .is_synced_to(mock_block_1a.hash())
                 .await
         );
 
@@ -1348,7 +1359,7 @@ mod global_state_tests {
                 .archival_state_mut()
                 .write_block(
                     &mock_block_1a,
-                    Some(mock_block_1a.header.proof_of_work_family),
+                    Some(mock_block_1a.kernel.header.proof_of_work_family),
                 )
                 .await?;
             global_state
@@ -1371,7 +1382,7 @@ mod global_state_tests {
         // Verify that wallet has monitored UTXOs, from genesis and from block_1a
         let wallet_status = global_state
             .wallet_state
-            .get_wallet_status_from_lock(mock_block_1a.hash);
+            .get_wallet_status_from_lock(mock_block_1a.hash());
         assert_eq!(2, wallet_status.synced_unspent.len());
 
         // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
@@ -1385,7 +1396,10 @@ mod global_state_tests {
             global_state
                 .chain
                 .archival_state_mut()
-                .write_block(&next_block, Some(next_block.header.proof_of_work_family))
+                .write_block(
+                    &next_block,
+                    Some(next_block.kernel.header.proof_of_work_family),
+                )
                 .await?;
             global_state
                 .wallet_state
@@ -1397,14 +1411,14 @@ mod global_state_tests {
 
         // Call resync which fails to sync the UTXO that was abandoned when block 1a was abandoned
         global_state
-            .resync_membership_proofs_from_stored_blocks(parent_block.hash)
+            .resync_membership_proofs_from_stored_blocks(parent_block.hash())
             .await
             .unwrap();
 
         // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
         let wallet_status_after_forking = global_state
             .wallet_state
-            .get_wallet_status_from_lock(parent_block.hash);
+            .get_wallet_status_from_lock(parent_block.hash());
         assert_eq!(1, wallet_status_after_forking.synced_unspent.len());
         assert_eq!(1, wallet_status_after_forking.unsynced_unspent.len());
 
@@ -1414,13 +1428,19 @@ mod global_state_tests {
         assert!(
             !monitored_utxos
                 .get(0)
-                .was_abandoned(&parent_block.header, global_state.chain.archival_state())
+                .was_abandoned(
+                    &parent_block.kernel.header,
+                    global_state.chain.archival_state()
+                )
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
-                .was_abandoned(&parent_block.header, global_state.chain.archival_state())
+                .was_abandoned(
+                    &parent_block.kernel.header,
+                    global_state.chain.archival_state()
+                )
                 .await
         );
 
@@ -1443,7 +1463,7 @@ mod global_state_tests {
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = global_state.chain.archival_state().get_latest_block().await;
-        assert!(genesis_block.header.height.is_genesis());
+        assert!(genesis_block.kernel.header.height.is_genesis());
         let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
             make_mock_block(&genesis_block, None, own_receiving_address);
         {
@@ -1452,7 +1472,7 @@ mod global_state_tests {
                 .archival_state_mut()
                 .write_block(
                     &mock_block_1a,
-                    Some(mock_block_1a.header.proof_of_work_family),
+                    Some(mock_block_1a.kernel.header.proof_of_work_family),
                 )
                 .await?;
             global_state
@@ -1474,7 +1494,7 @@ mod global_state_tests {
             // Verify that UTXO was recorded
             let wallet_status_after_1a = global_state
                 .wallet_state
-                .get_wallet_status_from_lock(mock_block_1a.hash);
+                .get_wallet_status_from_lock(mock_block_1a.hash());
             assert_eq!(2, wallet_status_after_1a.synced_unspent.len());
         }
 
@@ -1488,7 +1508,7 @@ mod global_state_tests {
                 .archival_state_mut()
                 .write_block(
                     &next_a_block,
-                    Some(next_a_block.header.proof_of_work_family),
+                    Some(next_a_block.kernel.header.proof_of_work_family),
                 )
                 .await?;
             global_state
@@ -1502,7 +1522,7 @@ mod global_state_tests {
         // Verify that all both MUTXOs have synced MPs
         let wallet_status_on_a_fork = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_a_block.hash);
+            .get_wallet_status_from_lock(fork_a_block.hash());
 
         assert_eq!(2, wallet_status_on_a_fork.synced_unspent.len());
 
@@ -1516,7 +1536,7 @@ mod global_state_tests {
                 .archival_state_mut()
                 .write_block(
                     &next_b_block,
-                    Some(next_b_block.header.proof_of_work_family),
+                    Some(next_b_block.kernel.header.proof_of_work_family),
                 )
                 .await?;
             global_state
@@ -1530,7 +1550,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let wallet_status_on_b_fork_before_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash);
+            .get_wallet_status_from_lock(fork_b_block.hash());
         assert_eq!(
             0,
             wallet_status_on_b_fork_before_resync.synced_unspent.len()
@@ -1542,12 +1562,12 @@ mod global_state_tests {
 
         // Run the resync and verify that MPs are synced
         global_state
-            .resync_membership_proofs_from_stored_blocks(fork_b_block.hash)
+            .resync_membership_proofs_from_stored_blocks(fork_b_block.hash())
             .await
             .unwrap();
         let wallet_status_on_b_fork_after_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash);
+            .get_wallet_status_from_lock(fork_b_block.hash());
         assert_eq!(2, wallet_status_on_b_fork_after_resync.synced_unspent.len());
         assert_eq!(
             0,
@@ -1566,7 +1586,7 @@ mod global_state_tests {
                 .archival_state_mut()
                 .write_block(
                     &next_c_block,
-                    Some(next_c_block.header.proof_of_work_family),
+                    Some(next_c_block.kernel.header.proof_of_work_family),
                 )
                 .await?;
             global_state
@@ -1580,7 +1600,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let wallet_status_on_c_fork_before_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash);
+            .get_wallet_status_from_lock(fork_c_block.hash());
         assert_eq!(
             0,
             wallet_status_on_c_fork_before_resync.synced_unspent.len()
@@ -1593,12 +1613,12 @@ mod global_state_tests {
         // Run the resync and verify that UTXO from genesis is synced, but that
         // UTXO from 1a is not synced.
         global_state
-            .resync_membership_proofs_from_stored_blocks(fork_c_block.hash)
+            .resync_membership_proofs_from_stored_blocks(fork_c_block.hash())
             .await
             .unwrap();
         let wallet_status_on_c_fork_after_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash);
+            .get_wallet_status_from_lock(fork_c_block.hash());
         assert_eq!(1, wallet_status_on_c_fork_after_resync.synced_unspent.len());
         assert_eq!(
             1,
@@ -1610,13 +1630,19 @@ mod global_state_tests {
         assert!(
             !monitored_utxos
                 .get(0)
-                .was_abandoned(&fork_c_block.header, global_state.chain.archival_state())
+                .was_abandoned(
+                    &fork_c_block.kernel.header,
+                    global_state.chain.archival_state()
+                )
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
-                .was_abandoned(&fork_c_block.header, global_state.chain.archival_state())
+                .was_abandoned(
+                    &fork_c_block.kernel.header,
+                    global_state.chain.archival_state()
+                )
                 .await
         );
 

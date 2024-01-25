@@ -70,24 +70,23 @@ impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
     }
 }
 
-/// ValidityConditions is a helper struct. It contains a sequence of
-/// claims with optional witnesses. If all claims a true, then the
-/// transaction is valid.
+/// The validity of a transaction, in the base case, decomposes into
+/// these subclaims.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TransactionValidationLogic {
-    // programs: [lock_script], input: hash of tx kernel (MAST hash), witness: secret spending key, output: []
+    // programs: [lock_script], input: transaction kernel mast hash, witness: secret spending key, output: []
     pub lock_scripts_halt: LockScriptsHalt,
 
-    // program: todo, input: hash of tx kernel (MAST hash), witness: input utxos, utxo mast auth path, output: hashes of lock scripts
+    // program: todo, input: transaction kernel mast hash, witness: input utxos, utxo mast auth path, output: hashes of lock scripts
     pub kernel_to_lock_scripts: KernelToLockScripts,
 
-    // program: recompute swbf indices, input: hash of kernel, witness: inputs + mutator set accumulator, output: []
+    // program: recompute swbf indices, input: transaction kernel mast hash, witness: inputs + mutator set accumulator, output: []
     pub removal_records_integrity: RemovalRecordsIntegrity,
 
-    // program: todo, input: hash of tx kernel (MAST hash), witness: outputs + kernel mast auth path + coins, output: type scripts
+    // program: todo, input: transaction kernel mast hash, witness: outputs + kernel mast auth path + coins, output: hashes of type scripts
     pub kernel_to_typescripts: KernelToTypeScripts,
 
-    // program: type script, input: hash of inputs + hash of outputs + coinbase + fee, witness: inputs + outputs + any, output: []
+    // programs: [type script], input: transaction kernel mast hash, witness: inputs + outputs + any, output: []
     pub type_scripts_halt: TypeScriptsHalt,
 }
 

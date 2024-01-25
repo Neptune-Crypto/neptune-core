@@ -16,8 +16,8 @@ pub struct LatestBlockInfo {
 impl From<&Block> for LatestBlockInfo {
     fn from(b: &Block) -> Self {
         Self {
-            hash: b.hash,
-            height: b.header.height,
+            hash: b.hash(),
+            height: b.kernel.header.height,
         }
     }
 }
@@ -25,8 +25,8 @@ impl From<&Block> for LatestBlockInfo {
 impl From<Block> for LatestBlockInfo {
     fn from(b: Block) -> Self {
         Self {
-            hash: b.hash,
-            height: b.header.height,
+            hash: b.hash(),
+            height: b.kernel.header.height,
         }
     }
 }

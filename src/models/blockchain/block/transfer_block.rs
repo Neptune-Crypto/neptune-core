@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tasm_lib::triton_vm::proof::Proof;
 
 use super::{block_body::BlockBody, block_header::BlockHeader};
 
@@ -8,4 +9,5 @@ use super::{block_body::BlockBody, block_header::BlockHeader};
 pub struct TransferBlock {
     pub header: BlockHeader,
     pub body: BlockBody,
+    pub proof: Proof,
 }

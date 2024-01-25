@@ -1,5 +1,6 @@
 use crate::prelude::twenty_first;
 
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -15,7 +16,7 @@ pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
 pub const TARGET_BLOCK_INTERVAL: u64 = 588000; // 9.8 minutes in milliseconds
 pub const MINIMUM_DIFFICULTY: u32 = 2;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,

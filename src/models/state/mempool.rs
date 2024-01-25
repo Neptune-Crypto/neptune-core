@@ -294,6 +294,7 @@ impl Mempool {
         // Removes the transaction from the mempool if they are not as this would
         // mean that at least on of the mempool transaction's inputs are spent in this block.
         let sbf_indices_set_by_block: HashSet<_> = block
+            .kernel
             .body
             .transaction
             .kernel
@@ -638,6 +639,7 @@ mod tests {
         debug!(
             "Just made block with previous mutator set hash {}",
             block_3_with_updated_tx
+                .kernel
                 .body
                 .previous_mutator_set_accumulator
                 .hash()
@@ -646,6 +648,7 @@ mod tests {
         debug!(
             "Just made block with next mutator set hash {}",
             block_3_with_updated_tx
+                .kernel
                 .body
                 .next_mutator_set_accumulator
                 .hash()
@@ -673,7 +676,7 @@ mod tests {
         }
 
         let (mut block_14, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
-        assert_eq!(Into::<BlockHeight>::into(14), block_14.header.height);
+        assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
         block_14.accumulate_transaction(tx_by_other_updated);
         assert!(

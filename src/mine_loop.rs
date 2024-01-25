@@ -47,8 +47,11 @@ fn make_block_template(
 ) -> (BlockHeader, BlockBody) {
     let additions = transaction.kernel.outputs.clone();
     let removals = transaction.kernel.inputs.clone();
-    let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> =
-        previous_block.body.next_mutator_set_accumulator.clone();
+    let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> = previous_block
+        .kernel
+        .body
+        .next_mutator_set_accumulator
+        .clone();
 
     // Apply the mutator set update to the mutator set accumulator
     // This function mutates the MS accumulator that is given as argument to
@@ -61,22 +64,25 @@ fn make_block_template(
     let block_body: BlockBody = BlockBody {
         transaction,
         next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-        previous_mutator_set_accumulator: previous_block.body.next_mutator_set_accumulator.clone(),
-        stark_proof: vec![],
+        previous_mutator_set_accumulator: previous_block
+            .kernel
+            .body
+            .next_mutator_set_accumulator
+            .clone(),
     };
 
     let zero = BFieldElement::zero();
     let new_pow_line: U32s<5> =
-        previous_block.header.proof_of_work_family + previous_block.header.difficulty;
+        previous_block.kernel.header.proof_of_work_family + previous_block.kernel.header.difficulty;
     let mutator_set_commitment: Digest = next_mutator_set_accumulator.hash();
-    let next_block_height = previous_block.header.height.next();
+    let next_block_height = previous_block.kernel.header.height.next();
     let mut block_timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("Got bad time timestamp in mining process")
         .as_millis() as u64;
-    if block_timestamp < previous_block.header.timestamp.value() {
+    if block_timestamp < previous_block.kernel.header.timestamp.value() {
         warn!("Received block is timestamped in the future; mining on future-timestamped block.");
-        block_timestamp = previous_block.header.timestamp.value() + 1;
+        block_timestamp = previous_block.kernel.header.timestamp.value() + 1;
     }
     let difficulty: U32s<5> = Block::difficulty_control(previous_block, block_timestamp);
 
@@ -84,7 +90,7 @@ fn make_block_template(
         version: zero,
         height: next_block_height,
         mutator_set_hash: mutator_set_commitment,
-        prev_block_digest: Hash::hash(&previous_block.header),
+        prev_block_digest: Hash::hash(&previous_block.kernel.header),
         timestamp: BFieldElement::new(block_timestamp),
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
@@ -153,13 +159,13 @@ async fn mine_block(
     );
 
     let new_block_info = NewBlockFound {
-        block: Box::new(Block::new(block_header, block_body)),
+        block: Box::new(Block::new(block_header, block_body, None)),
         coinbase_utxo_info: Box::new(coinbase_utxo_info),
     };
 
     info!(
         "PoW digest of new block: {}. Threshold was: {threshold}",
-        new_block_info.block.hash
+        new_block_info.block.hash()
     );
 
     sender
@@ -258,7 +264,7 @@ fn create_block_transaction(
         .wallet_secret
         .nth_generation_spending_key(0);
     let receiving_address = coinbase_recipient_spending_key.to_address();
-    let next_block_height: BlockHeight = latest_block.header.height.next();
+    let next_block_height: BlockHeight = latest_block.kernel.header.height.next();
 
     let lock_script = receiving_address.lock_script();
     let coinbase_amount = Block::get_mining_reward(next_block_height) + transaction_fees;
@@ -269,12 +275,17 @@ fn create_block_transaction(
         receiving_address.privacy_digest,
         &global_state.wallet_state.wallet_secret,
         next_block_height,
-        latest_block.body.next_mutator_set_accumulator.clone(),
+        latest_block
+            .kernel
+            .body
+            .next_mutator_set_accumulator
+            .clone(),
     );
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
         latest_block
+            .kernel
             .body
             .next_mutator_set_accumulator
             .hash()
@@ -337,7 +348,7 @@ pub async fn mine(
                     worker_thread_tx,
                     global_state_lock.clone(),
                     coinbase_utxo_info,
-                    latest_block.header.difficulty,
+                    latest_block.kernel.header.difficulty,
                 );
                 global_state_lock.set_mining(true).await;
                 Some(
@@ -371,7 +382,7 @@ pub async fn mine(
                             mt.abort();
                         }
                         latest_block = *block;
-                        info!("Miner thread received {} block height {}", global_state_lock.lock(|s| s.cli.network).await, latest_block.header.height);
+                        info!("Miner thread received {} block height {}", global_state_lock.lock(|s| s.cli.network).await, latest_block.kernel.header.height);
                     }
                     MainToMiner::Empty => (),
                     MainToMiner::ReadyToMineNextBlock => {
@@ -402,7 +413,7 @@ pub async fn mine(
                     }
                 };
 
-                debug!("Worker thread reports new block of height {}", new_block_info.block.header.height);
+                debug!("Worker thread reports new block of height {}", new_block_info.block.kernel.header.height);
 
                 // Sanity check, remove for more efficient mining.
                 // The below PoW check could fail due to race conditions. So we don't panic,
@@ -415,7 +426,7 @@ pub async fn mine(
                 // if it is not.
                 assert!(new_block_info.block.is_valid(&latest_block), "Own mined block must be valid. Failed validity check after successful PoW check.");
 
-                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.lock(|s| s.cli.network).await, new_block_info.block.header.height, new_block_info.block.hash.emojihash());
+                info!("Found new {} block with block height {}. Hash: {}", global_state_lock.lock(|s| s.cli.network).await, new_block_info.block.kernel.header.height, new_block_info.block.hash().emojihash());
 
                 latest_block = *new_block_info.block.to_owned();
                 to_main.send(MinerToMain::NewBlockFound(new_block_info)).await?;
@@ -484,6 +495,7 @@ mod mine_loop_tests {
         let block_template_empty_mempool = Block::new(
             block_header_template_empty_mempool,
             block_body_empty_mempool,
+            None,
         );
         assert!(
             block_template_empty_mempool.is_valid(&genesis_block),
@@ -531,7 +543,7 @@ mod mine_loop_tests {
         // Build and verify block template
         let (block_header_template, block_body) =
             make_block_template(&genesis_block, transaction_non_empty_mempool);
-        let block_template_non_empty_mempool = Block::new(block_header_template, block_body);
+        let block_template_non_empty_mempool = Block::new(block_header_template, block_body, None);
         assert!(
             block_template_non_empty_mempool.is_valid(&genesis_block),
             "Block template created by miner with non-empty mempool must be valid"

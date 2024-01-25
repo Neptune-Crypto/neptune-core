@@ -147,7 +147,7 @@ pub fn get_dummy_latest_block(
     };
 
     let latest_block_info: LatestBlockInfo = block.clone().into();
-    let block_header = block.header.clone();
+    let block_header = block.kernel.header.clone();
     (
         block,
         latest_block_info,
@@ -261,8 +261,8 @@ pub async fn add_block_to_light_state(
     light_state: &mut LightState,
     new_block: Block,
 ) -> Result<()> {
-    let previous_pow_family = light_state.header.proof_of_work_family;
-    if previous_pow_family < new_block.header.proof_of_work_family {
+    let previous_pow_family = light_state.kernel.header.proof_of_work_family;
+    if previous_pow_family < new_block.kernel.header.proof_of_work_family {
         light_state.set_block(new_block);
     } else {
         panic!("Attempted to add to light state an older block than the current light state block");
@@ -317,13 +317,13 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 
 /// Helper function for tests to update state with a new block
 pub async fn add_block(state: &mut GlobalState, new_block: Block) -> Result<()> {
-    let previous_pow_family = state.chain.light_state().header.proof_of_work_family;
+    let previous_pow_family = state.chain.light_state().kernel.header.proof_of_work_family;
     state
         .chain
         .archival_state_mut()
         .write_block(&new_block, Some(previous_pow_family))
         .await?;
-    if previous_pow_family < new_block.header.proof_of_work_family {
+    if previous_pow_family < new_block.kernel.header.proof_of_work_family {
         state.chain.light_state_mut().set_block(new_block);
     }
 
@@ -894,7 +894,7 @@ pub fn make_mock_block(
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
 ) -> (Block, Utxo, Digest) {
-    let new_block_height: BlockHeight = previous_block.header.height.next();
+    let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
 
     // Build coinbase UTXO and associated data
     let lock_script = coinbase_beneficiary.lock_script();
@@ -903,7 +903,11 @@ pub fn make_mock_block(
     let coinbase_output_randomness: Digest = Digest::new(random_elements_array());
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
-    let mut next_mutator_set = previous_block.body.next_mutator_set_accumulator.clone();
+    let mut next_mutator_set = previous_block
+        .kernel
+        .body
+        .next_mutator_set_accumulator
+        .clone();
     let previous_mutator_set = next_mutator_set.clone();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
@@ -913,7 +917,7 @@ pub fn make_mock_block(
 
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
-        None => previous_block.header.timestamp.value() + TARGET_BLOCK_INTERVAL,
+        None => previous_block.kernel.header.timestamp.value() + TARGET_BLOCK_INTERVAL,
     };
 
     let tx_kernel = TransactionKernel {
@@ -949,11 +953,10 @@ pub fn make_mock_block(
         next_mutator_set_accumulator: next_mutator_set.clone(),
 
         previous_mutator_set_accumulator: previous_mutator_set,
-        stark_proof: vec![],
     };
 
-    let block_target_difficulty = previous_block.header.difficulty;
-    let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
+    let block_target_difficulty = previous_block.kernel.header.difficulty;
+    let pow_line = previous_block.kernel.header.proof_of_work_line + block_target_difficulty;
     let pow_family = pow_line;
     let zero = BFieldElement::zero();
     let target_difficulty = Block::difficulty_control(previous_block, block_timestamp);
@@ -961,7 +964,7 @@ pub fn make_mock_block(
         version: zero,
         height: new_block_height,
         mutator_set_hash: next_mutator_set.hash(),
-        prev_block_digest: previous_block.hash,
+        prev_block_digest: previous_block.hash(),
         timestamp: block_body.transaction.kernel.timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
@@ -973,7 +976,7 @@ pub fn make_mock_block(
     };
 
     (
-        Block::new(block_header, block_body),
+        Block::new(block_header, block_body, None),
         coinbase_utxo,
         coinbase_output_randomness,
     )

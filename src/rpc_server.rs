@@ -204,6 +204,7 @@ impl RPC for NeptuneRPCServer {
             .await
             .chain
             .light_state()
+            .kernel
             .header
             .height
     }
@@ -338,6 +339,7 @@ impl RPC for NeptuneRPCServer {
             .await
             .chain
             .light_state()
+            .kernel
             .header
             .clone()
     }

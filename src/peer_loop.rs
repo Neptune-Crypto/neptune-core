@@ -120,36 +120,36 @@ impl PeerLoopHandler {
             if !new_block.has_proof_of_work(previous_block) {
                 warn!(
                     "Received invalid proof-of-work for block of height {} from peer with IP {}",
-                    new_block.header.height, self.peer_address
+                    new_block.kernel.header.height, self.peer_address
                 );
-                warn!("Difficulty is {}.", previous_block.header.difficulty);
+                warn!("Difficulty is {}.", previous_block.kernel.header.difficulty);
                 warn!(
                     "Proof of work should be {} (or more) but was [{}].",
-                    Block::difficulty_to_digest_threshold(previous_block.header.difficulty),
-                    new_block.hash.values().iter().join(", ")
+                    Block::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty),
+                    new_block.hash().values().iter().join(", ")
                 );
                 self.punish(PeerSanctionReason::InvalidBlock((
-                    new_block.header.height,
-                    new_block.hash,
+                    new_block.kernel.header.height,
+                    new_block.hash(),
                 )))
                 .await?;
                 bail!("Failed to validate block due to insufficient PoW");
             } else if !new_block.is_valid(previous_block) {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
-                    new_block.header.height, self.peer_address
+                    new_block.kernel.header.height, self.peer_address
                 );
                 self.punish(PeerSanctionReason::InvalidBlock((
-                    new_block.header.height,
-                    new_block.hash,
+                    new_block.kernel.header.height,
+                    new_block.hash(),
                 )))
                 .await?;
                 bail!("Failed to validate block: invalid block");
             } else {
                 info!(
                     "Block with height {} is valid. mined: {}",
-                    new_block.header.height,
-                    crate::utc_timestamp_to_localtime(new_block.header.timestamp.value())
+                    new_block.kernel.header.height,
+                    crate::utc_timestamp_to_localtime(new_block.kernel.header.timestamp.value())
                         .to_string()
                 );
             }
@@ -159,7 +159,7 @@ impl PeerLoopHandler {
 
         // Send the new blocks to the main thread which handles the state update
         // and storage to the database.
-        let new_block_height = received_blocks.last().unwrap().header.height;
+        let new_block_height = received_blocks.last().unwrap().kernel.header.height;
         self.to_main_tx
             .send(PeerThreadToMain::NewBlocks(received_blocks))
             .await?;
@@ -186,7 +186,7 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        let parent_digest = received_block.header.prev_block_digest;
+        let parent_digest = received_block.kernel.header.prev_block_digest;
         debug!("Fetching parent block");
         let parent_block = self
             .global_state_lock
@@ -204,7 +204,7 @@ impl PeerLoopHandler {
                 "not found".to_string()
             }
         );
-        let parent_height = received_block.header.height.previous();
+        let parent_height = received_block.kernel.header.height.previous();
 
         // If parent is not known, request the parent, and add the current to the peer fork resolution list
         if parent_block.is_none() && parent_height > BlockHeight::genesis() {
@@ -220,10 +220,11 @@ impl PeerLoopHandler {
                     .fork_reconciliation_blocks
                     .last()
                     .unwrap()
+                    .kernel
                     .header
                     .height
                     .previous()
-                    == received_block.header.height
+                    == received_block.kernel.header.height
                     && peer_state.fork_reconciliation_blocks.len() + 1
                         < self
                             .global_state_lock
@@ -237,9 +238,9 @@ impl PeerLoopHandler {
                 // Blocks received out of order. Or more than allowed received without
                 // going into sync mode. Give up on block resolution attempt.
                 self.punish(PeerSanctionReason::ForkResolutionError((
-                    received_block.header.height,
+                    received_block.kernel.header.height,
                     peer_state.fork_reconciliation_blocks.len() as u16,
-                    received_block.hash,
+                    received_block.hash(),
                 )))
                 .await?;
                 warn!(
@@ -277,14 +278,14 @@ impl PeerLoopHandler {
         // TODO: This assert should be replaced with something to punish or disconnect
         // from a peer instead. It can be used by a malevolent peer to crash peer nodes.
         let mut new_blocks_sorted_check = new_blocks.clone();
-        new_blocks_sorted_check.sort_by(|a, b| a.header.height.cmp(&b.header.height));
+        new_blocks_sorted_check.sort_by(|a, b| a.kernel.header.height.cmp(&b.kernel.header.height));
         assert_eq!(
             new_blocks_sorted_check,
             new_blocks,
             "Block list in fork resolution must be sorted. Got blocks in this order: {}",
             new_blocks
                 .iter()
-                .map(|b| b.header.height.to_string())
+                .map(|b| b.kernel.header.height.to_string())
                 .join(", ")
         );
 
@@ -404,12 +405,13 @@ impl PeerLoopHandler {
                     .await
                     .chain
                     .light_state()
-                    .header()
+                    .kernel
+                    .header
                     .proof_of_work_family
-                    < block.header.proof_of_work_family;
+                    < block.kernel.header.proof_of_work_family;
                 let reconciliation_ongoing = match peer_state_info.fork_reconciliation_blocks.last()
                 {
-                    Some(last_block) => last_block.header.prev_block_digest == block.hash,
+                    Some(last_block) => last_block.kernel.header.prev_block_digest == block.hash(),
                     None => false,
                 };
 
@@ -422,7 +424,7 @@ impl PeerLoopHandler {
                 } else {
                     info!(
                         "Got non-canonical block from peer, height: {}, PoW family: {:?}",
-                        new_block_height, block.header.proof_of_work_family,
+                        new_block_height, block.kernel.header.proof_of_work_family,
                     );
                 }
                 Ok(false)
@@ -448,12 +450,15 @@ impl PeerLoopHandler {
 
                         let global_state = self.global_state_lock.lock_guard().await;
 
-                        let tip_header = global_state.chain.light_state().header();
+                        let tip_header = &global_state.chain.light_state().kernel.header;
 
                         if global_state
                             .chain
                             .archival_state()
-                            .block_belongs_to_canonical_chain(&block_candidate.header, tip_header)
+                            .block_belongs_to_canonical_chain(
+                                &block_candidate.kernel.header,
+                                tip_header,
+                            )
                             .await
                         {
                             peers_most_canonical_block = Some(block_candidate);
@@ -484,13 +489,13 @@ impl PeerLoopHandler {
                         / 2,
                 );
                 let global_state = self.global_state_lock.lock_guard().await;
-                let tip_header = global_state.chain.light_state().header();
+                let tip_header = &global_state.chain.light_state().kernel.header;
 
                 let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
-                let mut parent_block_header: BlockHeader = peers_most_canonical_block.header;
+                let mut parent_block_header: BlockHeader = peers_most_canonical_block.kernel.header;
                 while returned_blocks.len() < responded_batch_size {
                     let children = global_state
                         .chain
@@ -508,7 +513,7 @@ impl PeerLoopHandler {
                             if global_state
                                 .chain
                                 .archival_state()
-                                .block_belongs_to_canonical_chain(&child, tip_header)
+                                .block_belongs_to_canonical_chain(&child, &tip_header)
                                 .await
                             {
                                 canonical = child;
@@ -586,7 +591,7 @@ impl PeerLoopHandler {
                 // Convert all blocks to Block objects
                 debug!(
                     "Found own block of height {} to match received batch",
-                    most_canonical_own_block_match.header.height
+                    most_canonical_own_block_match.kernel.header.height
                 );
                 let received_blocks: Vec<Block> = t_blocks.into_iter().map(|x| x.into()).collect();
 
@@ -600,14 +605,15 @@ impl PeerLoopHandler {
                 debug!("Got BlockNotificationRequest");
 
                 peer.send(PeerMessage::BlockNotification(
-                    (self
+                    (&self
                         .global_state_lock
                         .lock_guard()
                         .await
                         .chain
                         .light_state()
-                        .header())
-                    .into(),
+                        .kernel
+                        .header)
+                        .into(),
                 ))
                 .await?;
 
@@ -626,7 +632,8 @@ impl PeerLoopHandler {
                         .await
                         .chain
                         .light_state()
-                        .header()
+                        .kernel
+                        .header
                         .proof_of_work_family
                         < block_notification.proof_of_work_family;
 
@@ -697,7 +704,7 @@ impl PeerLoopHandler {
                 let mut canonical_chain_block_header = block_headers[0].clone();
                 if block_headers.len() > 1 {
                     let global_state = self.global_state_lock.lock_guard().await;
-                    let tip_header = global_state.chain.light_state().header();
+                    let tip_header = &global_state.chain.light_state().kernel.header;
                     for block_header in block_headers {
                         if global_state
                             .chain
@@ -768,6 +775,7 @@ impl PeerLoopHandler {
                         .await
                         .chain
                         .light_state()
+                        .kernel
                         .body
                         .next_mutator_set_accumulator,
                 );
@@ -888,7 +896,7 @@ impl PeerLoopHandler {
             MainToPeerThread::Block(block) => {
                 // We don't currently differentiate whether a new block came from a peer, or from our
                 // own miner. It's always shared through this logic.
-                let new_block_height = block.header.height;
+                let new_block_height = block.kernel.header.height;
                 if new_block_height > peer_state_info.highest_shared_block_height {
                     debug!("Sending PeerMessage::BlockNotification");
                     peer_state_info.highest_shared_block_height = new_block_height;
@@ -1130,7 +1138,8 @@ impl PeerLoopHandler {
                 .await
                 .chain
                 .light_state()
-                .header()
+                .kernel
+                .header
                 .proof_of_work_family
         {
             peer.send(PeerMessage::BlockNotificationRequest).await?;
@@ -1161,9 +1170,7 @@ mod peer_loop_tests {
 
     use crate::{
         config_models::{cli_args, network::Network},
-        models::{
-            blockchain::shared::Hash, peer::TransactionNotification, state::wallet::WalletSecret,
-        },
+        models::{peer::TransactionNotification, state::wallet::WalletSecret},
         tests::shared::{
             add_block, get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
             get_test_genesis_setup, make_mock_block_with_invalid_pow,
@@ -1267,8 +1274,7 @@ mod peer_loop_tests {
             .archival_state()
             .get_latest_block()
             .await;
-        different_genesis_block.header.nonce[2].increment();
-        different_genesis_block.hash = Hash::hash(&different_genesis_block.header);
+        different_genesis_block.kernel.header.nonce[2].increment();
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1_with_different_genesis, _, _) =
@@ -1518,7 +1524,10 @@ mod peer_loop_tests {
         drop(global_state_mut);
 
         let mut mock = Mock::new(vec![
-            Action::Read(PeerMessage::BlockRequestBatch(vec![genesis_block.hash], 14)),
+            Action::Read(PeerMessage::BlockRequestBatch(
+                vec![genesis_block.hash()],
+                14,
+            )),
             Action::Write(PeerMessage::BlockResponseBatch(vec![
                 block_1.clone().into(),
                 block_2_a.clone().into(),
@@ -1543,7 +1552,7 @@ mod peer_loop_tests {
         // Peer knows block 2_b, verify that canonical chain with 2_a is returned
         mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestBatch(
-                vec![block_2_b.hash, block_1.hash, genesis_block.hash],
+                vec![block_2_b.hash(), block_1.hash(), genesis_block.hash()],
                 14,
             )),
             Action::Write(PeerMessage::BlockResponseBatch(vec![
@@ -1714,7 +1723,7 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_1.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1739,10 +1748,10 @@ mod peer_loop_tests {
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
-                if blocks[0].hash != block_1.hash {
+                if blocks[0].hash() != block_1.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
-                if blocks[1].hash != block_2.hash {
+                if blocks[1].hash() != block_2.hash() {
                     bail!("2nd received block by main loop must be block 2");
                 }
             }
@@ -1801,7 +1810,7 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1879,9 +1888,9 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1906,13 +1915,13 @@ mod peer_loop_tests {
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
-                if blocks[0].hash != block_2.hash {
+                if blocks[0].hash() != block_2.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
-                if blocks[1].hash != block_3.hash {
+                if blocks[1].hash() != block_3.hash() {
                     bail!("2nd received block by main loop must be block 2");
                 }
-                if blocks[2].hash != block_4.hash {
+                if blocks[2].hash() != block_4.hash() {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
@@ -1954,9 +1963,9 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_1.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_1.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_1.clone().into()))),
             Action::Read(PeerMessage::Bye),
         ]);
@@ -1981,13 +1990,13 @@ mod peer_loop_tests {
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
-                if blocks[0].hash != block_1.hash {
+                if blocks[0].hash() != block_1.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
-                if blocks[1].hash != block_2.hash {
+                if blocks[1].hash() != block_2.hash() {
                     bail!("2nd received block by main loop must be block 2");
                 }
-                if blocks[2].hash != block_3.hash {
+                if blocks[2].hash() != block_3.hash() {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
@@ -2039,9 +2048,9 @@ mod peer_loop_tests {
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
             //
             // Now make the interruption of the block reconciliation process
             Action::Read(PeerMessage::BlockNotification(block_5.clone().into())),
@@ -2055,7 +2064,9 @@ mod peer_loop_tests {
             // Note that we cannot anticipate the response, as only the main
             // thread writes to the database. And the database needs to be updated
             // for the handling of block 5 to be done correctly.
-            Action::Write(PeerMessage::BlockRequestByHeight(block_5.header.height)),
+            Action::Write(PeerMessage::BlockRequestByHeight(
+                block_5.kernel.header.height,
+            )),
             Action::Read(PeerMessage::Bye),
         ]);
 
@@ -2079,13 +2090,13 @@ mod peer_loop_tests {
 
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
-                if blocks[0].hash != block_2.hash {
+                if blocks[0].hash() != block_2.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
-                if blocks[1].hash != block_3.hash {
+                if blocks[1].hash() != block_3.hash() {
                     bail!("2nd received block by main loop must be block 2");
                 }
-                if blocks[2].hash != block_4.hash {
+                if blocks[2].hash() != block_4.hash() {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
@@ -2149,9 +2160,9 @@ mod peer_loop_tests {
         ];
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_3.hash())),
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
-            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash)),
+            Action::Write(PeerMessage::BlockRequestByHash(block_2.hash())),
             //
             // Now make the interruption of the block reconciliation process
             Action::Read(PeerMessage::PeerListRequest),
@@ -2180,13 +2191,13 @@ mod peer_loop_tests {
         // Verify that blocks are sent to `main_loop` in expected ordering
         match to_main_rx1.recv().await {
             Some(PeerThreadToMain::NewBlocks(blocks)) => {
-                if blocks[0].hash != block_2.hash {
+                if blocks[0].hash() != block_2.hash() {
                     bail!("1st received block by main loop must be block 1");
                 }
-                if blocks[1].hash != block_3.hash {
+                if blocks[1].hash() != block_3.hash() {
                     bail!("2nd received block by main loop must be block 2");
                 }
-                if blocks[2].hash != block_4.hash {
+                if blocks[2].hash() != block_4.hash() {
                     bail!("3rd received block by main loop must be block 3");
                 }
             }
