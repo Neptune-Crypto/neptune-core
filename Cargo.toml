@@ -86,5 +86,5 @@ opt-level = 0
 # rpath = false
 
 [patch.crates-io]
-# rev = "93eeaa1b310a51857c23c33e5f8b7a45db584b7b" is tip of branch `prelude` as of 2024-01-24
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "93eeaa1b310a51857c23c33e5f8b7a45db584b7b" }
+# rev = "f711ae27d1402d733989624bbadd59b7e82a1972" is tip of tasm-lib master as of 2024-01-25
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "f711ae27d1402d733989624bbadd59b7e82a1972" }
