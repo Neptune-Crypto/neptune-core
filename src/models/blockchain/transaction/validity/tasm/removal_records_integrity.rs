@@ -192,8 +192,8 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         }));
         let zip_digest_with_void_pointer = library.import(Box::new(Zip {
             list_type: ListType::Unsafe,
-            left_type: DataType::VoidPointer,
-            right_type: DataType::Digest,
+            left_type: DataType::Digest,
+            right_type: DataType::VoidPointer,
         }));
         let map_compute_indices = library.import(Box::new(Map {
             list_type: ListType::Unsafe,
@@ -236,9 +236,6 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         let kernel_to_inputs = tasm_lib::field!(TransactionKernel::inputs);
         let aocl_to_leaf_count = tasm_lib::field!(MmraH::leaf_count);
         let aocl_to_peaks = tasm_lib::field!(MmraH::peaks);
-        let get_hash_from_list = library.import(Box::new(UnsafeGet {
-            data_type: DataType::Digest,
-        }));
 
         let code = triton_asm! {
 
@@ -297,66 +294,54 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         dup 2 // _ *witness *kernel *[item] *witness
         {&witness_to_mps} //_ *witness *kernel *[items] *mps
         call {get_pointer_list} //_ *witness *kernel *[item] *[*mp]
-        swap 1 //_ *witness *kernel *[*mp] *[item]
-        call {zip_digest_with_void_pointer} // _ *witness *kernel *[(*mp, item)]
+        call {zip_digest_with_void_pointer} // _ *witness *kernel *[(item, *mp)]
 
         // store for later use
-        dup 0  // _ *witness *kernel *[(*mp, item)] *[(*mp, item)]
-        swap 3 // _  *[(*mp, item)] *kernel *[(*mp, item)] *witness
-        swap 2 // _  *[(*mp, item)] *witness *[(*mp, item)] *kernel
-        swap 1 // _  *[(*mp, item)] *witness *kernel *[(*mp, item)]
+        dup 0  // _ *witness *kernel *[(item, *mp)] *[(item, *mp)]
+        swap 3 // _  *[(item, *mp)] *kernel *[(item, *mp)] *witness
+        swap 2 // _  *[(item, *mp)] *witness *[(item, *mp)] *kernel
+        swap 1 // _  *[(item, *mp)] *witness *kernel *[(item, *mp)]
 
-        call {map_compute_indices} // _  *[(*mp, item)] *witness *kernel *[*[index]]
+        call {map_compute_indices} // _  *[(item, *mp)] *witness *kernel *[*[index]]
 
-        call {map_hash_index_list} // _  *[(*mp, item)] *witness *kernel *[index_list_hash]
+        call {map_hash_index_list} // _  *[(item, *mp)] *witness *kernel *[index_list_hash]
 
-        dup 1 // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel
-        {&kernel_to_inputs} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *kernel_inputs
-        call {get_pointer_list} // _  *[(*mp, item)] *witness *kernel *[index_list_hash] *[*tx_input]
-        call {map_hash_removal_record_indices} // _  *[(*mp, item)] *witness *kernel *[witness_index_list_hash] *[kernel_index_list_hash]
+        dup 1 // _  *[(item, *mp)] *witness *kernel *[index_list_hash] *kernel
+        {&kernel_to_inputs} // _  *[(item, *mp)] *witness *kernel *[index_list_hash] *kernel_inputs
+        call {get_pointer_list} // _  *[(item, *mp)] *witness *kernel *[index_list_hash] *[*tx_input]
+        call {map_hash_removal_record_indices} // _  *[(item, *mp)] *witness *kernel *[witness_index_list_hash] *[kernel_index_list_hash]
 
-        swap 1
-        push 0
-        call {get_hash_from_list}
-        push 1340 assert
+        call {multiset_equality} // _  *[(item, *mp)] *witness *kernel witness_inputs==kernel_inputs
 
-        call {multiset_equality} // _  *[(*mp, item)] *witness *kernel witness_inputs==kernel_inputs
-
-        assert // _  *[(*mp, item)] *witness *kernel
-        push 1339 assert
-
+        assert // _  *[(item, *mp)] *witness *kernel
 
         // 5. verify that all items' commitments live in the aocl
         // get aocl leaf count
-        dup 1 // _ *[(*mp, item)] *witness *kernel *witness
-        {&witness_to_aocl}              // _ *[(*mp, item)] *witness *kernel *aocl
-        dup 0                   // _ *[(*mp, item)] *witness *kernel *aocl *aocl
-        {&aocl_to_leaf_count} // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count
-        push 1 add // _ *[(*mp, item)] *witness *kernel *aocl *leaf_count_last_word
+        dup 1 // _ *[(item, *mp)] *witness *kernel *witness
+        {&witness_to_aocl}              // _ *[(item, *mp)] *witness *kernel *aocl
+        dup 0                   // _ *[(item, *mp)] *witness *kernel *aocl *aocl
+        {&aocl_to_leaf_count} // _ *[(item, *mp)] *witness *kernel *aocl *leaf_count
+        push 1 add // _ *[(item, *mp)] *witness *kernel *aocl *leaf_count_last_word
         read_mem 2
-        pop 1      // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo
+        pop 1      // _ *[(item, *mp)] *witness *kernel *aocl leaf_count_hi leaf_count_lo
 
-        dup 2                   // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *aocl
-        {&aocl_to_peaks}              // _ *[(*mp, item)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
-        push 1338 assert
+        dup 2                   // _ *[(item, *mp)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *aocl
+        {&aocl_to_peaks}              // _ *[(item, *mp)] *witness *kernel *aocl leaf_count_hi leaf_count_lo *peaks
 
-
-
-        swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(*mp, item)]
-        swap 2 // _ *peaks *witness *kernel *aocl *[(*mp, item)] leaf_count_lo leaf_count_hi
-        swap 5 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo *witness
-        pop  1 // _ *peaks leaf_count_hi *kernel *aocl *[(*mp, item)] leaf_count_lo
-        swap 3 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)] *kernel
-        pop  1 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(*mp, item)]
-        swap 1 // _ *peaks leaf_count_hi leaf_count_lo *[(*mp, item)] *aocl
-        pop  1 // _ *peaks leaf_count_hi leaf_count_lo *[(*mp, item)]
+        swap 6 // _ *peaks *witness *kernel *aocl leaf_count_hi leaf_count_lo *[(item, *mp)]
+        swap 2 // _ *peaks *witness *kernel *aocl *[(item, *mp)] leaf_count_lo leaf_count_hi
+        swap 5 // _ *peaks leaf_count_hi *kernel *aocl *[(item, *mp)] leaf_count_lo *witness
+        pop  1 // _ *peaks leaf_count_hi *kernel *aocl *[(item, *mp)] leaf_count_lo
+        swap 3 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(item, *mp)] *kernel
+        pop  1 // _ *peaks leaf_count_hi leaf_count_lo *aocl *[(item, *mp)]
+        swap 1 // _ *peaks leaf_count_hi leaf_count_lo *[(item, *mp)] *aocl
+        pop  1 // _ *peaks leaf_count_hi leaf_count_lo *[(item, *mp)]
 
         call {map_compute_canonical_commitment}
                // _ *peaks leaf_count_hi leaf_count_lo *[(cc, *mp)]
 
         call {all_verify_aocl_membership}
                // _ *peaks leaf_count_hi leaf_count_lo all_live_in_aocl
-               push 1337 assert
 
         assert
 
