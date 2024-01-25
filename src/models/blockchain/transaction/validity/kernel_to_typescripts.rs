@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use crate::models::blockchain::transaction::utxo::TypeScript;
 
 use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
@@ -7,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use triton_vm::instruction::LabelledInstruction;
-use triton_vm::{BFieldElement, Claim, Digest, NonDeterminism, PublicInput};
+use triton_vm::prelude::{BFieldElement, Claim, Digest, NonDeterminism, Program, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -21,7 +23,7 @@ impl SecretWitness for KernelToTypeScriptsWitness {
         todo!()
     }
 
-    fn subprogram(&self) -> triton_vm::Program {
+    fn subprogram(&self) -> Program {
         todo!()
     }
 }
@@ -81,7 +83,7 @@ impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
         todo!()
     }
 
-    fn subprogram(&self) -> triton_vm::Program {
+    fn subprogram(&self) -> Program {
         todo!()
     }
 

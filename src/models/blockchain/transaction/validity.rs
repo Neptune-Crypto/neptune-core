@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 pub mod kernel_to_lock_scripts;
 pub mod kernel_to_typescripts;
 pub mod lockscripts_halt;
@@ -9,9 +11,9 @@ use anyhow::{Ok, Result};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
+use triton_vm::prelude::{Claim, NonDeterminism, PublicInput, StarkParameters};
 use triton_vm::program::Program;
-use triton_vm::{proof::Proof, Claim};
-use triton_vm::{NonDeterminism, PublicInput, StarkParameters};
+use triton_vm::proof::Proof;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -45,14 +47,14 @@ pub enum ClaimSupport<SubprogramWitness: SecretWitness> {
 /// encodes a Claim with an optional witness.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct SupportedClaim<SubprogramWitness: SecretWitness> {
-    pub claim: triton_vm::Claim,
+    pub claim: Claim,
     pub support: ClaimSupport<SubprogramWitness>,
 }
 
 impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
     // TODO: REMOVE when all validity logic is implemented
     pub fn dummy() -> Self {
-        let dummy_claim = triton_vm::Claim {
+        let dummy_claim = Claim {
             input: Default::default(),
             output: Default::default(),
             program_digest: Default::default(),

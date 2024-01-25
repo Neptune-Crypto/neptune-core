@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use crate::models::blockchain::transaction::{
     transaction_kernel::{TransactionKernel, TransactionKernelField},
     utxo::Utxo,
@@ -10,7 +12,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
-use triton_vm::{BFieldElement, Claim, Digest, NonDeterminism, Program, PublicInput};
+use triton_vm::prelude::{BFieldElement, Claim, Digest, NonDeterminism, Program, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]

@@ -11,8 +11,13 @@ pub mod main_loop;
 pub mod mine_loop;
 pub mod models;
 pub mod peer_loop;
+pub mod prelude;
 pub mod rpc_server;
 pub mod util_types;
+
+// needed by TasmObject derive macro
+use prelude::{tasm_lib, triton_vm, twenty_first};
+use triton_vm::prelude::BFieldElement;
 
 #[cfg(test)]
 pub mod tests;
@@ -34,6 +39,7 @@ use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
 
+use crate::twenty_first::sync::{LockCallbackFn, LockEvent};
 use crate::util_types::sync::tokio as sync_tokio;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use futures::future;
@@ -53,7 +59,6 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
 use tokio_serde::formats::*;
 use tracing::{info, trace};
-use twenty_first::sync::{LockCallbackFn, LockEvent};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
@@ -292,10 +297,6 @@ where
     T: TryInto<i64>,
     <T as TryInto<i64>>::Error: std::fmt::Debug,
 {
-    // We just want to convert a UTC timestamp to a
-    // local time string.  I've never seen this be so
-    // unintuitive in any other language or library.
-    // Why on earth is chrono popular?!!
     let naive = NaiveDateTime::from_timestamp_millis(timestamp.try_into().unwrap()).unwrap();
     let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
     DateTime::from(utc)

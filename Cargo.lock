@@ -316,9 +316,9 @@ checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
 
 [[package]]
 name = "bfieldcodec_derive"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cb236fab4b97d1b1329308831c14bb9a439216c15492e16b9190a3f7ff56342"
+checksum = "ea4587af76b177449245b3d59e8a94f579f02155c123452bb22d5faa4083bb93"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -806,7 +806,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=6c11a2db#6c11a2dbd604c3d4f002dd2ca7fd771d51ed2dcc"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=93eeaa1b310a51857c23c33e5f8b7a45db584b7b#93eeaa1b310a51857c23c33e5f8b7a45db584b7b"
 dependencies = [
  "quote",
  "syn 2.0.48",
@@ -1684,8 +1684,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
- "triton-vm",
- "twenty-first",
  "unicode-width",
  "zeroize",
 ]
@@ -2667,12 +2665,12 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=6c11a2db#6c11a2dbd604c3d4f002dd2ca7fd771d51ed2dcc"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=93eeaa1b310a51857c23c33e5f8b7a45db584b7b#93eeaa1b310a51857c23c33e5f8b7a45db584b7b"
 dependencies = [
  "anyhow",
  "derive_tasm_object",
  "hex",
- "itertools 0.12.0",
+ "itertools 0.10.5",
  "num",
  "num-traits",
  "rand",
@@ -2680,7 +2678,6 @@ dependencies = [
  "serde",
  "serde_json",
  "triton-vm",
- "twenty-first",
 ]
 
 [[package]]
@@ -3052,9 +3049,8 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.36.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0dfdcdea272985a5c8163f4f74694518dcf47ccd9920440b2af269bce2f312"
+version = "0.36.1"
+source = "git+https://github.com/TritonVM/triton-vm?rev=3679f4ac#3679f4ac069844f5885ddcfff0b0c20b0cffc70a"
 dependencies = [
  "arbitrary",
  "bincode",
@@ -3088,9 +3084,8 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 [[package]]
 name = "twenty-first"
 version = "0.36.0"
-source = "git+https://github.com/Neptune-Crypto/twenty-first.git?rev=fac4ead7d0ad0f816064af1948d46689b2430bbf#fac4ead7d0ad0f816064af1948d46689b2430bbf"
+source = "git+https://github.com/Neptune-Crypto/twenty-first?rev=a97464b8#a97464b89646d337e7decdd33defc37d86f48098"
 dependencies = [
- "anyhow",
  "arbitrary",
  "bfieldcodec_derive",
  "bincode",
@@ -3102,6 +3097,7 @@ dependencies = [
  "hashbrown 0.14.3",
  "itertools 0.12.0",
  "keccak",
+ "lazy_static",
  "lending-iterator",
  "leveldb-sys",
  "num-bigint",
@@ -3115,6 +3111,7 @@ dependencies = [
  "serde-big-array",
  "serde_derive",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]

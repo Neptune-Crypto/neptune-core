@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
@@ -12,7 +14,7 @@ use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 use tasm_lib::neptune::mutator_set::commit::Commit;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
-use triton_vm::{triton_asm, BFieldElement, Digest};
+use triton_vm::prelude::{triton_asm, BFieldElement, Digest};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::util_types::mutator_set::{

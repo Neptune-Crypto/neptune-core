@@ -1,3 +1,5 @@
+use crate::prelude::twenty_first;
+
 use serde::{Deserialize, Serialize};
 
 use twenty_first::shared_math::digest::Digest;

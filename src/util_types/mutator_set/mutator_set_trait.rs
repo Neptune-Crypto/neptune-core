@@ -1,3 +1,5 @@
+use crate::prelude::twenty_first;
+
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 

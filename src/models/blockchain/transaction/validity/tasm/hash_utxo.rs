@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use std::collections::HashMap;
 
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -10,7 +12,7 @@ use tasm_lib::{
         function::{Function, FunctionInitialState},
     },
 };
-use triton_vm::{triton_asm, BFieldElement};
+use triton_vm::prelude::{triton_asm, BFieldElement};
 
 use tasm_lib::library::Library;
 use twenty_first::{
@@ -100,7 +102,7 @@ impl Function for HashUtxo {
     ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let utxo = pseudorandom_utxo(seed);
-        let address = triton_vm::BFieldElement::new(rng.next_u64() % (1 << 20));
+        let address = triton_vm::prelude::BFieldElement::new(rng.next_u64() % (1 << 20));
         let mut stack = tasm_lib::empty_stack();
         stack.push(address);
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();

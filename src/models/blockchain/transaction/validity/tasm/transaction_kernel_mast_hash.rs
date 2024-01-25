@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
@@ -19,7 +21,7 @@ use tasm_lib::{
     },
     rust_shadowing_helper_functions, ExecutionState,
 };
-use triton_vm::{triton_asm, BFieldElement};
+use triton_vm::{prelude::BFieldElement, triton_asm};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::{
     shared_math::{tip5::Digest, tip5::DIGEST_LENGTH},
@@ -35,7 +37,7 @@ impl TransactionKernelMastHash {
         address: BFieldElement,
         transaction_kernel_encoded: &[BFieldElement],
     ) -> ExecutionState {
-        use triton_vm::NonDeterminism;
+        use triton_vm::prelude::NonDeterminism;
 
         assert!(address.value() > 1);
         // populate memory
@@ -254,8 +256,11 @@ impl BasicSnippet for TransactionKernelMastHash {
 impl Function for TransactionKernelMastHash {
     fn rust_shadow(
         &self,
-        stack: &mut Vec<triton_vm::BFieldElement>,
-        memory: &mut std::collections::HashMap<triton_vm::BFieldElement, triton_vm::BFieldElement>,
+        stack: &mut Vec<triton_vm::prelude::BFieldElement>,
+        memory: &mut std::collections::HashMap<
+            triton_vm::prelude::BFieldElement,
+            triton_vm::prelude::BFieldElement,
+        >,
     ) {
         // read address
         let address = stack.pop().unwrap();

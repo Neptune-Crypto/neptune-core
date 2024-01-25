@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 pub mod amount;
 pub mod native_coin;
 pub mod transaction_kernel;
@@ -17,7 +19,10 @@ use tracing::{debug, error, warn};
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::proof::Proof;
-use triton_vm::{triton_asm, NonDeterminism, PublicInput};
+use triton_vm::{
+    prelude::{NonDeterminism, PublicInput},
+    triton_asm,
+};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;

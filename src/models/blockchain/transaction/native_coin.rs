@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use anyhow::bail;
 use num_traits::Zero;
 use std::collections::VecDeque;
@@ -121,7 +123,7 @@ pub fn native_coin_reference(
         mutator_set_hash,
         Digest::default(),
     ];
-    let root = <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&leafs).get_root();
+    let root = <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&leafs)?.root();
     let public_input_hash = [
         public_input.pop_front().unwrap(),
         public_input.pop_front().unwrap(),

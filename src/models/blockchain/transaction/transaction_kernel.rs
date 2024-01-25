@@ -1,3 +1,5 @@
+use crate::prelude::twenty_first;
+
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
@@ -122,16 +124,17 @@ impl TransactionKernel {
         }
 
         // compute Merkle tree and return hash
-        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs)
+        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs).unwrap()
     }
 
     pub fn mast_path(&self, field: TransactionKernelField) -> Vec<Digest> {
         self.merkle_tree()
-            .get_authentication_structure(&[field.discriminant()])
+            .authentication_structure(&[field.discriminant()])
+            .unwrap()
     }
 
     pub fn mast_hash(&self) -> Digest {
-        self.merkle_tree().get_root()
+        self.merkle_tree().root()
     }
 }
 

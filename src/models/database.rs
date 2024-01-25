@@ -1,3 +1,5 @@
+use crate::prelude::twenty_first;
+
 use serde::{Deserialize, Serialize};
 use std::{fmt, net::IpAddr};
 use twenty_first::shared_math::b_field_element::BFieldElement;

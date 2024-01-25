@@ -1,7 +1,7 @@
+use crate::prelude::twenty_first;
+
 use twenty_first::storage::level_db::DB;
-use twenty_first::storage::storage_schema::{
-    traits::*, DbtSingleton, DbtVec, RustyKey, SimpleRustyStorage,
-};
+use twenty_first::storage::storage_schema::{traits::*, DbtSingleton, DbtVec, SimpleRustyStorage};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::archival_mmr::ArchivalMmr},
@@ -35,12 +35,8 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
         let aocl = storage.schema.new_vec::<Digest>("aocl");
         let swbfi = storage.schema.new_vec::<Digest>("swbfi");
         let chunks = storage.schema.new_vec::<Chunk>("chunks");
-        let active_window = storage
-            .schema
-            .new_singleton::<Vec<u32>>(RustyKey("active_window".into()));
-        let sync_label = storage
-            .schema
-            .new_singleton::<Digest>(RustyKey("sync_label".into()));
+        let active_window = storage.schema.new_singleton::<Vec<u32>>("active_window");
+        let sync_label = storage.schema.new_singleton::<Digest>("sync_label");
         storage.restore_or_new();
 
         let kernel = MutatorSetKernel::<H, ArchivalMmr<H, AmsMmrStorage>> {

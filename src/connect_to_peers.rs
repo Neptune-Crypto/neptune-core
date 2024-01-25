@@ -456,6 +456,8 @@ pub async fn close_peer_connected_callback(
 
 #[cfg(test)]
 mod connect_tests {
+    use crate::prelude::twenty_first;
+
     use std::time::SystemTime;
 
     use super::*;

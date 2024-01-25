@@ -1,7 +1,9 @@
+use crate::prelude::twenty_first;
+
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::{
     storage::level_db::DB,
-    storage::storage_schema::{traits::*, DbtSingleton, DbtVec, RustyKey, SimpleRustyStorage},
+    storage::storage_schema::{traits::*, DbtSingleton, DbtVec, SimpleRustyStorage},
 };
 
 use super::monitored_utxo::MonitoredUtxo;
@@ -27,12 +29,8 @@ impl RustyWalletDatabase {
         );
 
         let monitored_utxos_storage = storage.schema.new_vec::<MonitoredUtxo>("monitored_utxos");
-        let sync_label_storage = storage
-            .schema
-            .new_singleton::<Digest>(RustyKey("sync_label".into()));
-        let counter_storage = storage
-            .schema
-            .new_singleton::<u64>(RustyKey("counter".into()));
+        let sync_label_storage = storage.schema.new_singleton::<Digest>("sync_label");
+        let counter_storage = storage.schema.new_singleton::<u64>("counter");
 
         storage.restore_or_new();
 

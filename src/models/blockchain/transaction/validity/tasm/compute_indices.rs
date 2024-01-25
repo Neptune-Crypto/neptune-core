@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
@@ -266,7 +268,7 @@ mod tests {
         traits::function::ShadowedFunction,
         traits::rust_shadow::RustShadow,
     };
-    use triton_vm::NonDeterminism;
+    use triton_vm::prelude::NonDeterminism;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
     use crate::models::blockchain::shared::Hash;

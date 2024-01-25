@@ -8,6 +8,8 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
+use crate::prelude::twenty_first;
+
 use bytesize::ByteSize;
 use get_size::GetSize;
 use num_traits::Zero;

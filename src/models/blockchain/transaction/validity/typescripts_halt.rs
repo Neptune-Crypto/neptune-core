@@ -1,7 +1,9 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use triton_vm::{BFieldElement, Claim, NonDeterminism};
+use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::transaction::{
@@ -20,11 +22,11 @@ pub struct TypeScriptHaltsWitness {
 }
 
 impl SecretWitness for TypeScriptHaltsWitness {
-    fn nondeterminism(&self) -> triton_vm::NonDeterminism<BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
         NonDeterminism::default()
     }
 
-    fn subprogram(&self) -> triton_vm::Program {
+    fn subprogram(&self) -> Program {
         self.type_script.program.clone()
     }
 }
@@ -67,7 +69,7 @@ impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
         }
     }
 
-    fn subprogram(&self) -> triton_vm::Program {
+    fn subprogram(&self) -> Program {
         todo!()
     }
 

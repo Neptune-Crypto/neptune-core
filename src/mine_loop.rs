@@ -14,6 +14,7 @@ use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::{GlobalState, GlobalStateLock};
+use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use anyhow::{Context, Result};

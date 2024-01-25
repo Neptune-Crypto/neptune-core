@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use std::collections::HashMap;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -9,7 +11,7 @@ use tasm_lib::{
     traits::basic_snippet::BasicSnippet,
     traits::function::{Function, FunctionInitialState},
 };
-use triton_vm::{triton_asm, BFieldElement};
+use triton_vm::prelude::{triton_asm, BFieldElement};
 use twenty_first::{
     shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
 };
@@ -136,7 +138,7 @@ mod tests {
         traits::function::ShadowedFunction,
         traits::rust_shadow::RustShadow,
     };
-    use triton_vm::{BFieldElement, Digest, NonDeterminism};
+    use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism};
     use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 
     use super::*;

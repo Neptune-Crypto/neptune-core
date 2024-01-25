@@ -1,7 +1,9 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use triton_vm::{BFieldElement, Claim, NonDeterminism};
+use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
@@ -16,11 +18,11 @@ pub struct LockScriptHaltsWitness {
 }
 
 impl SecretWitness for LockScriptHaltsWitness {
-    fn nondeterminism(&self) -> triton_vm::NonDeterminism<triton_vm::BFieldElement> {
+    fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
         NonDeterminism::new(self.preimage.clone().into_iter().collect_vec())
     }
 
-    fn subprogram(&self) -> triton_vm::Program {
+    fn subprogram(&self) -> Program {
         self.lock_script.program.clone()
     }
 }
@@ -47,7 +49,7 @@ impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
             supported_claims: program_and_program_digests_and_spending_keys
                 .into_iter()
                 .map(|(lockscript, lockscript_digest, spendkey)| SupportedClaim {
-                    claim: triton_vm::Claim {
+                    claim: triton_vm::prelude::Claim {
                         program_digest: lockscript_digest,
                         input: tx_kernel_mast_hash.values().to_vec(),
                         output: empty_string.clone(),
@@ -61,7 +63,7 @@ impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
         }
     }
 
-    fn subprogram(&self) -> triton_vm::Program {
+    fn subprogram(&self) -> Program {
         todo!()
     }
 

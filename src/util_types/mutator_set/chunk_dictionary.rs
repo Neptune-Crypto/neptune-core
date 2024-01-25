@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use anyhow::bail;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -5,7 +7,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use triton_vm::Digest;
+use triton_vm::prelude::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;

@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tasm_lib::{
     data_type::DataType,
@@ -6,7 +8,7 @@ use tasm_lib::{
     traits::basic_snippet::BasicSnippet,
     traits::function::{Function, FunctionInitialState},
 };
-use triton_vm::{triton_asm, BFieldElement};
+use triton_vm::prelude::{triton_asm, BFieldElement};
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::shared::Hash;
@@ -141,7 +143,7 @@ mod tests {
         rust_shadowing_helper_functions,
         traits::function::ShadowedFunction,
     };
-    use triton_vm::{Digest, NonDeterminism};
+    use triton_vm::prelude::{Digest, NonDeterminism};
     use twenty_first::{
         shared_math::{bfield_codec::BFieldCodec, tip5::DIGEST_LENGTH},
         util_types::emojihash_trait::Emojihash,

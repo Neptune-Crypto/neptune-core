@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use std::collections::HashMap;
 
 use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
@@ -14,7 +16,10 @@ use tasm_lib::library::Library;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
 use tasm_lib::{list::ListType, mmr::verify_from_memory::MmrVerifyFromMemory};
-use triton_vm::{triton_asm, BFieldElement, Digest};
+use triton_vm::{
+    prelude::{BFieldElement, Digest},
+    triton_asm,
+};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;

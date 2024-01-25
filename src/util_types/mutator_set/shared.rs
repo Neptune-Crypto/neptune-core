@@ -1,3 +1,5 @@
+use crate::prelude::twenty_first;
+
 use std::collections::{HashMap, HashSet};
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;

@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -6,8 +8,7 @@ use std::collections::HashMap;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
-use triton_vm::BFieldElement;
-use triton_vm::{NonDeterminism, Program};
+use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
@@ -100,7 +101,7 @@ impl ValidationLogic<RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrity
 
         Self {
             supported_claim: SupportedClaim {
-                claim: triton_vm::Claim {
+                claim: Claim {
                     program_digest: Hash::hash_varlen(&Self::program().encode()),
                     input: tx_kernel
                         .mast_hash()
@@ -123,7 +124,7 @@ impl ValidationLogic<RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrity
         self.supported_claim.support.clone()
     }
 
-    fn claim(&self) -> triton_vm::Claim {
+    fn claim(&self) -> Claim {
         self.supported_claim.claim.clone()
     }
 }

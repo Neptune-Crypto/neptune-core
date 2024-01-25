@@ -1,3 +1,5 @@
+use crate::prelude::twenty_first;
+
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;

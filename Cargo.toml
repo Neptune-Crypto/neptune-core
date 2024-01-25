@@ -38,7 +38,7 @@ serde_derive = "1"
 serde_json = "1"
 strum = { version = "0.25", features = ["derive"] }
 tarpc = { version = "^0.34", features = ["tokio1", "serde-transport", "tcp"] }
-tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "6c11a2db" }
+tasm-lib = "0.2.1"
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-serde = { version = "0", features = ["bincode", "json"] }
 tokio-util = { version = "0", features = ["codec"] }
@@ -50,8 +50,6 @@ tracing-subscriber = { version = "0", features = [
     "fmt",
 ] }
 tracing-test = "0"
-triton-vm = "0.36"
-twenty-first = "0.36"
 unicode-width = "0"
 zeroize = "1.7.0"
 
@@ -88,5 +86,5 @@ opt-level = 0
 # rpath = false
 
 [patch.crates-io]
-# needed for now.
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "fac4ead7d0ad0f816064af1948d46689b2430bbf" }
+# rev = "93eeaa1b310a51857c23c33e5f8b7a45db584b7b" is tip of branch `prelude` as of 2024-01-24
+tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "93eeaa1b310a51857c23c33e5f8b7a45db584b7b" }

@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use std::collections::HashSet;
 
 use itertools::Itertools;
@@ -17,8 +19,8 @@ use tasm_lib::{
     mmr::bag_peaks::BagPeaks,
     DIGEST_LENGTH,
 };
-use triton_vm::{instruction::LabelledInstruction, BFieldElement};
-use triton_vm::{triton_asm, NonDeterminism, PublicInput};
+use triton_vm::instruction::LabelledInstruction;
+use triton_vm::prelude::{triton_asm, BFieldElement, NonDeterminism, PublicInput};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
@@ -370,7 +372,7 @@ mod tests {
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{memory::encode_to_memory, traits::compiled_program::test_rust_shadow};
-    use triton_vm::{Claim, StarkParameters};
+    use triton_vm::prelude::{Claim, StarkParameters};
 
     // #[test]
     // fn test_validation_logic() {
@@ -480,12 +482,14 @@ mod tests {
 mod bench {
     use std::collections::HashMap;
 
+    use crate::prelude::triton_vm;
+
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{
         memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS},
         snippet_bencher::BenchmarkCase,
     };
-    use triton_vm::{BFieldElement, NonDeterminism, PublicInput};
+    use triton_vm::prelude::{BFieldElement, NonDeterminism, PublicInput};
 
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
 

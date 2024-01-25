@@ -1,3 +1,5 @@
+use crate::prelude::{triton_vm, twenty_first};
+
 use crate::models::blockchain::shared::Hash;
 use get_size::GetSize;
 use num_traits::Zero;
