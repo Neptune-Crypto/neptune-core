@@ -4,6 +4,8 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
 
 ## Installing
 
+note: We recommend installing the latest release unless you are a developer intending to contribute code.
+
 ### Compile from Source -- Linux Debian/Ubuntu
 
  - Open a terminal to run the following commands.
@@ -13,6 +15,9 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
  - Install LebelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
  - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
  - Enter the repository: `cd neptune-core`
+ * for dev(unstable) skip this step.
+ else for latest release: `git checkout v0.0.5`.
+
  - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM and a few minutes)
 
 ### Windows
@@ -24,6 +29,8 @@ With a functioning version of cargo, compilation on Windows should just work out
 - Open PowerShell to run the following commands.
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
+- for dev(unstable) skip this step. else for latest release: `git checkout v0.0.5`.
+
 - Run `cargo install --path .`
 
 
@@ -34,7 +41,7 @@ With a functioning version of cargo, compilation on Windows should just work out
    - `--peers [ip_address:port]` to connect to a given peer, for instance `--peers [2001:bc8:611:1c72::1]:9798` or `--peers 139.162.193.206:9798` or both
    - `--mine` to mine — if you want to generate testnet coins to test sending and receiving
    - `--help` to get a list of available command-line arguments
-  
+
 If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience that you will then be able to open and receive connections to other nodes through Nepture Core's built-in peer-discovery process.
 
 ## Dashboard
@@ -62,6 +69,10 @@ If you set up `neptune-core` on a different address or port from the default (12
  - in `vscode` install the plugin `rust-analyzer`
  - in `vscode` activate format-on-save via `File` > `Preferences` > `Settings` then check the box for "Format on Save"
  - install `cpulimit` for nicer, and more quiet integration tests: `apt install cpulimit`
+
+## Branches and Pull Requests
+
+Please see this [this document](./developer_docs/git_branches.md) for documentation of our branching methodology and how to submit a pull request.
 
 ## Logging
 
