@@ -7,13 +7,15 @@ We follow a standard [GitHub Flow](https://docs.github.com/en/get-started/using-
 It can be visualized like this:
 
 ```
-          --------
-master   / topic  \
----*----------------------*--------------->
-    \ release              \ release
-     ------------------>    --------->
-      \ hotfix /
-       --------
+master
+-------*----------------------*>
+ \             --------
+  \  dev      / topic  \
+   ----*----------------------*--------------->
+        \ release              \ release
+        ------------------>    --------->
+        \ hotfix /
+        --------
 ```
 
 ### master branch (aka trunk)
@@ -40,6 +42,32 @@ Third party contributors without repo write access must create a *topic* branch 
 4. make your changes and commit them.
 5. push your topic branch to your forked repo
 6. submit the pull request.
+
+#### Topic Branch Naming
+
+When working on an open github issue, it is recommended to prefix the topic branch with the issue identifier.
+
+When the branch is intended to become a pull request, it is recommended to add the suffix `_pr`.
+
+If the branch exists in a triton/neptune official repo, (as opposed to a personal fork), then it is recommended to prefix with your github username follwed by `/`.
+
+So if working on issue `#232` and adding feature *walk_and_chew_gum* one might name the branch `myuser/232_walk_and_chew_gum_pr`.
+
+# Conventional Commits
+
+It is preferred/requested that commit messages use the [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) format.
+
+This aids readability of commit messages and facilitates automated generation of the ChangeLog.
+
+For all but the most trivial changes, please provide some additional lines with a basic summary of the changes and also the _reason/rationale_ for the changes.
+
+A git template for assisting with creation of conventional commit messages can be found in [.gitmessage](.gitmessage). This template can be added globally to git with this command:
+
+```
+git config --global commit.template /path/to/neptune-core/developer_docs/.gitmessage
+```
+
+It can also be added on a per-repository basis by omitting the `--global` flag.
 
 ### Release tagging
 
