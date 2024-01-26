@@ -15,7 +15,7 @@ note: We recommend installing the latest release unless you are a developer inte
  - Install LebelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
  - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
  - Enter the repository: `cd neptune-core`
- * for dev(unstable) skip this step.
+ - for dev(unstable) skip this step. else for latest release: `git checkout v0.0.5`.
 
  - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM and a few minutes)
 
