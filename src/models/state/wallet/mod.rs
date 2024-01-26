@@ -434,7 +434,7 @@ mod wallet_tests {
             next_block
                 .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(Hash::hash(&genesis_block_output_utxo), &ms_membership_proof),
             "Membership proof must be valid after updating wallet state with generated blocks"
         );
@@ -509,7 +509,7 @@ mod wallet_tests {
             let membership_proof_is_valid = block_1
                 .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(membership_proof_is_valid);
         }
@@ -527,7 +527,7 @@ mod wallet_tests {
             let membership_proof_is_valid = block_3
                 .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(
                 !membership_proof_is_valid,

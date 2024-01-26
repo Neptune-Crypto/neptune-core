@@ -513,7 +513,7 @@ impl PeerLoopHandler {
                             if global_state
                                 .chain
                                 .archival_state()
-                                .block_belongs_to_canonical_chain(&child, &tip_header)
+                                .block_belongs_to_canonical_chain(&child, tip_header)
                                 .await
                             {
                                 canonical = child;

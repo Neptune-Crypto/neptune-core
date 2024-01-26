@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
@@ -8,6 +9,7 @@ use num_traits::{abs, Zero};
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use tracing::{debug, error, warn};
@@ -117,8 +119,8 @@ impl Block {
     }
 
     pub fn genesis_block() -> Self {
-        let empty_mutator_set = MutatorSetAccumulator::default();
-        let mut genesis_mutator_set = MutatorSetAccumulator::default();
+        let empty_mutator_set = MutatorSetAccumulator::<Hash>::default();
+        let mut genesis_mutator_set = MutatorSetAccumulator::<Hash>::default();
         let mut ms_update = MutatorSetUpdate::default();
 
         let premine_distribution = Self::premine_distribution();
@@ -164,8 +166,9 @@ impl Block {
 
         let body: BlockBody = BlockBody {
             transaction: genesis_coinbase_tx,
-            next_mutator_set_accumulator: genesis_mutator_set.clone(),
-            previous_mutator_set_accumulator: empty_mutator_set,
+            mutator_set_accumulator: genesis_mutator_set.clone(),
+            block_mmr_accumulator: MmrAccumulator::new(vec![]),
+            lock_free_mmr_accumulator: MmrAccumulator::new(vec![]),
         };
 
         let header: BlockHeader = BlockHeader {
@@ -221,8 +224,7 @@ impl Block {
         // accumulate
         let additions = new_transaction.kernel.outputs.clone();
         let removals = new_transaction.kernel.inputs.clone();
-        let mut next_mutator_set_accumulator =
-            self.kernel.body.previous_mutator_set_accumulator.clone();
+        let mut next_mutator_set_accumulator = self.kernel.body.mutator_set_accumulator.clone();
 
         let mutator_set_update = MutatorSetUpdate::new(removals, additions);
 
@@ -233,12 +235,9 @@ impl Block {
 
         let block_body: BlockBody = BlockBody {
             transaction: new_transaction,
-            next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-            previous_mutator_set_accumulator: self
-                .kernel
-                .body
-                .previous_mutator_set_accumulator
-                .clone(),
+            mutator_set_accumulator: next_mutator_set_accumulator.clone(),
+            lock_free_mmr_accumulator: self.kernel.body.lock_free_mmr_accumulator,
+            block_mmr_accumulator: self.kernel.body.block_mmr_accumulator,
         };
 
         let block_header = BlockHeader {
@@ -274,8 +273,7 @@ impl Block {
         //   a) Block height is previous plus one
         //   b) Block header points to previous block
         //   c) Block timestamp is greater than previous block timestamp
-        //   d) Next mutator set of previous block matches previous MS of current block
-        //   e) Target difficulty was adjusted correctly
+        //   d) Target difficulty, and other control parameters, were adjusted correctly
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
         //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
@@ -307,15 +305,7 @@ impl Block {
             return false;
         }
 
-        // 0.d) Next mutator set of previous block matches previous MS of current block
-        if previous_block.kernel.body.next_mutator_set_accumulator
-            != block_copy.kernel.body.previous_mutator_set_accumulator
-        {
-            warn!("Value for previous mutator set does not match previous block");
-            return false;
-        }
-
-        // 0.e) Target difficulty was updated correctly
+        // 0.d) Target difficulty, and other control parameters, were updated correctly
         if block_copy.kernel.header.difficulty
             != Self::difficulty_control(previous_block, block_copy.kernel.header.timestamp.value())
         {
@@ -326,10 +316,10 @@ impl Block {
         // 1.b) Verify validity of removal records: That their MMR MPs match the SWBF, and
         // that at least one of their listed indices is absent.
         for removal_record in block_copy.kernel.body.transaction.kernel.inputs.iter() {
-            if !block_copy
+            if !previous_block
                 .kernel
                 .body
-                .previous_mutator_set_accumulator
+                .mutator_set_accumulator
                 .kernel
                 .can_remove(removal_record)
             {
@@ -363,11 +353,7 @@ impl Block {
             block_copy.kernel.body.transaction.kernel.inputs.clone(),
             block_copy.kernel.body.transaction.kernel.outputs.clone(),
         );
-        let mut ms = block_copy
-            .kernel
-            .body
-            .previous_mutator_set_accumulator
-            .clone();
+        let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
         let ms_update_result = mutator_set_update.apply(&mut ms);
         match ms_update_result {
             Ok(()) => (),
@@ -379,11 +365,11 @@ impl Block {
 
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.
-        if ms.hash() != block_copy.kernel.body.next_mutator_set_accumulator.hash() {
+        if ms.hash() != block_copy.kernel.body.mutator_set_accumulator.hash() {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
                 "From Block\n{:?}. \n\n\nCalculated\n{:?}",
-                block_copy.kernel.body.next_mutator_set_accumulator, ms
+                block_copy.kernel.body.mutator_set_accumulator, ms
             );
             return false;
         }
@@ -518,12 +504,12 @@ mod block_tests {
         },
         tests::shared::{get_mock_global_state, make_mock_block},
     };
+    use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 
     use super::*;
 
     use rand::random;
     use tracing_test::traced_test;
-    use twenty_first::util_types::emojihash_trait::Emojihash;
 
     #[traced_test]
     #[tokio::test]
@@ -571,14 +557,14 @@ mod block_tests {
         assert!(
             block_1.is_valid(&genesis_block),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
-            block_1.kernel
+            genesis_block.kernel
                 .body
-                .previous_mutator_set_accumulator
+                .mutator_set_accumulator
                 .hash()
                 .emojihash(),
                 block_1.kernel
                     .body
-                    .next_mutator_set_accumulator
+                    .mutator_set_accumulator
                     .hash()
                     .emojihash()
         );

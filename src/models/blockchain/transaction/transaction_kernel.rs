@@ -1,17 +1,15 @@
-use crate::prelude::twenty_first;
+use crate::{
+    models::consensus::mast_hash::{HasDiscriminant, MastHash},
+    prelude::twenty_first,
+};
 
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{
-        algebraic_hasher::AlgebraicHasher,
-        merkle_tree::{CpuParallel, MerkleTree},
-        merkle_tree_maker::MerkleTreeMaker,
-    },
+use twenty_first::shared_math::{
+    b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest,
 };
 
 use super::{amount::pseudorandom_amount, Amount, PublicAnnouncement};
@@ -57,8 +55,8 @@ pub enum TransactionKernelField {
     MutatorSetHash,
 }
 
-impl TransactionKernelField {
-    pub fn discriminant(&self) -> usize {
+impl HasDiscriminant for TransactionKernelField {
+    fn discriminant(&self) -> usize {
         match self {
             TransactionKernelField::InputUtxos => 0,
             TransactionKernelField::OutputUtxos => 1,
@@ -71,9 +69,11 @@ impl TransactionKernelField {
     }
 }
 
-impl TransactionKernel {
+impl MastHash for TransactionKernel {
+    type FieldEnum = TransactionKernelField;
+
     /// Return the sequences (= leaf preimages) of the kernel Merkle tree.
-    pub fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
         let input_utxos_sequence = self.inputs.encode();
 
         let output_utxos_sequence = self.outputs.encode();
@@ -97,34 +97,6 @@ impl TransactionKernel {
             timestamp_sequence,
             mutator_set_hash_sequence,
         ]
-    }
-
-    fn merkle_tree(&self) -> MerkleTree<Hash> {
-        // get a sequence of BFieldElements for each field
-        let sequences = self.mast_sequences();
-
-        let mut mt_leafs = sequences
-            .iter()
-            .map(|seq| Hash::hash_varlen(seq))
-            .collect_vec();
-
-        // pad until power of two
-        while mt_leafs.len() & (mt_leafs.len() - 1) != 0 {
-            mt_leafs.push(Digest::default());
-        }
-
-        // compute Merkle tree and return hash
-        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs).unwrap()
-    }
-
-    pub fn mast_path(&self, field: TransactionKernelField) -> Vec<Digest> {
-        self.merkle_tree()
-            .authentication_structure(&[field.discriminant()])
-            .unwrap()
-    }
-
-    pub fn mast_hash(&self) -> Digest {
-        self.merkle_tree().root()
     }
 }
 

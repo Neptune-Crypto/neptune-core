@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::transaction::TransactionPrimitiveWitness;

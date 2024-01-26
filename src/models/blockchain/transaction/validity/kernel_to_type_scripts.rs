@@ -1,4 +1,5 @@
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::transaction::utxo::TypeScript;

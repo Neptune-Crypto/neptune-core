@@ -1,8 +1,12 @@
+use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::twenty_first::util_types::merkle_tree::{CpuParallel, MerkleTree};
+use tasm_lib::twenty_first::util_types::merkle_tree_maker::MerkleTreeMaker;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 
@@ -59,6 +63,39 @@ impl Display for BlockHeader {
         );
 
         write!(f, "{}", string)
+    }
+}
+
+impl BlockHeader {
+    fn mast_sequences(&self) -> [Vec<BFieldElement>; 16] {
+        [
+            self.version.encode(),
+            self.height.encode(),
+            self.mutator_set_hash.encode(),
+            self.prev_block_digest.encode(),
+            self.timestamp.encode(),
+            self.nonce.encode(),
+            self.max_block_size.encode(),
+            self.proof_of_work_line.encode(),
+            self.proof_of_work_family.encode(),
+            self.difficulty.encode(),
+            self.block_body_merkle_root.encode(),
+            self.uncles.encode(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        ]
+    }
+
+    fn merkle_tree(&self) -> MerkleTree<Hash> {
+        let sequences = self.mast_sequences();
+        let digests = sequences.map(|seq| Hash::hash_varlen(&seq));
+        CpuParallel::from_digests(&digests).unwrap()
+    }
+
+    pub(crate) fn mast_hash(&self) -> Digest {
+        self.merkle_tree().root()
     }
 }
 

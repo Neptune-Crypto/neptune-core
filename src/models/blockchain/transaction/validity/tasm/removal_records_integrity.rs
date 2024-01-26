@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
 use std::collections::HashSet;
@@ -481,7 +482,7 @@ mod tests {
 mod bench {
     use std::collections::HashMap;
 
-    use crate::prelude::triton_vm;
+    use crate::{models::consensus::mast_hash::MastHash, prelude::triton_vm};
 
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{

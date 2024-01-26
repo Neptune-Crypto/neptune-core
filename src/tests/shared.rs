@@ -950,9 +950,7 @@ pub fn make_mock_block(
 
     let block_body: BlockBody = BlockBody {
         transaction,
-        next_mutator_set_accumulator: next_mutator_set.clone(),
-
-        previous_mutator_set_accumulator: previous_mutator_set,
+        mutator_set_accumulator: next_mutator_set.clone(),
     };
 
     let block_target_difficulty = previous_block.kernel.header.difficulty;

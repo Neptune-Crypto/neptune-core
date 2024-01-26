@@ -1,4 +1,7 @@
-use crate::prelude::{triton_vm, twenty_first};
+use crate::{
+    models::consensus::mast_hash::MastHash,
+    prelude::{triton_vm, twenty_first},
+};
 
 use get_size::GetSize;
 use itertools::Itertools;

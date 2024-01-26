@@ -454,6 +454,8 @@ mod tests {
     use twenty_first::shared_math::tip5::Tip5State;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
+    use crate::models::consensus::mast_hash::MastHash;
+
     use super::*;
 
     #[test]

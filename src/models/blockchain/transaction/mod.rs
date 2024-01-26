@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
 pub mod amount;
@@ -86,12 +87,12 @@ impl Transaction {
     /// compatibility with a new block. Note that for SingleProof witnesses, this will
     /// invalidate the proof, requiring an update. For LinkedProofs or PrimitiveWitness
     /// witnesses the witness data can be and is updated.
-    pub fn update_mutator_set_records(&mut self, block: &Block) -> Result<()> {
-        let mut msa_state: MutatorSetAccumulator<Hash> = block
-            .kernel
-            .body
-            .previous_mutator_set_accumulator
-            .to_owned();
+    pub fn update_mutator_set_records(
+        &mut self,
+        previous_mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+        block: &Block,
+    ) -> Result<()> {
+        let mut msa_state: MutatorSetAccumulator<Hash> = previous_mutator_set_accumulator.clone();
         let block_addition_records: Vec<AdditionRecord> =
             block.kernel.body.transaction.kernel.outputs.clone();
         let mut transaction_removal_records: Vec<RemovalRecord<Hash>> = self.kernel.inputs.clone();
@@ -160,12 +161,7 @@ impl Transaction {
         }
 
         // Sanity check of block validity
-        let block_msa_hash = block
-            .kernel
-            .body
-            .next_mutator_set_accumulator
-            .clone()
-            .hash();
+        let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash();
         assert_eq!(
             msa_state.hash(),
             block_msa_hash,
