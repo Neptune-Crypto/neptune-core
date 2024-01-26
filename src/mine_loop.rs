@@ -27,6 +27,7 @@ use rand::SeedableRng;
 use std::ops::Deref;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -47,11 +48,8 @@ fn make_block_template(
 ) -> (BlockHeader, BlockBody) {
     let additions = transaction.kernel.outputs.clone();
     let removals = transaction.kernel.inputs.clone();
-    let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> = previous_block
-        .kernel
-        .body
-        .next_mutator_set_accumulator
-        .clone();
+    let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> =
+        previous_block.kernel.body.mutator_set_accumulator.clone();
 
     // Apply the mutator set update to the mutator set accumulator
     // This function mutates the MS accumulator that is given as argument to
@@ -63,12 +61,9 @@ fn make_block_template(
 
     let block_body: BlockBody = BlockBody {
         transaction,
-        next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-        previous_mutator_set_accumulator: previous_block
-            .kernel
-            .body
-            .next_mutator_set_accumulator
-            .clone(),
+        mutator_set_accumulator: next_mutator_set_accumulator.clone(),
+        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        block_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
     };
 
     let zero = BFieldElement::zero();
@@ -275,11 +270,7 @@ fn create_block_transaction(
         receiving_address.privacy_digest,
         &global_state.wallet_state.wallet_secret,
         next_block_height,
-        latest_block
-            .kernel
-            .body
-            .next_mutator_set_accumulator
-            .clone(),
+        latest_block.kernel.body.mutator_set_accumulator.clone(),
     );
 
     debug!(
@@ -287,7 +278,7 @@ fn create_block_transaction(
         latest_block
             .kernel
             .body
-            .next_mutator_set_accumulator
+            .mutator_set_accumulator
             .hash()
             .emojihash()
     );

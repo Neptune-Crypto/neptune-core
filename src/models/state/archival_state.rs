@@ -705,7 +705,7 @@ impl ArchivalState {
         assert_eq!(
             new_block
                 .kernel.body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .hash(),
             self.archival_mutator_set.ams().hash(),
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash()
@@ -875,9 +875,17 @@ mod archival_state_tests {
                 .update_mutator_set(&mock_block_1)
                 .await
                 .unwrap();
+            let msa = genesis_receiver_global_state
+                .chain
+                .archival_state_mut()
+                .genesis_block
+                .kernel
+                .body
+                .mutator_set_accumulator
+                .clone();
             genesis_receiver_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&mock_block_1)
+                .update_wallet_state_with_new_block(&msa, &mock_block_1)
                 .await
                 .unwrap();
 
@@ -1177,7 +1185,10 @@ mod archival_state_tests {
                 // 3. Update wallet state so we can continue making transactions
                 global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(&next_block)
+                    .update_wallet_state_with_new_block(
+                        &previous_block.kernel.body.mutator_set_accumulator,
+                        &next_block,
+                    )
                     .await
                     .unwrap();
             }
@@ -1407,7 +1418,10 @@ mod archival_state_tests {
                 .unwrap();
             genesis_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&block_1)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
                 .await
                 .unwrap();
             assert_eq!(
@@ -1436,7 +1450,10 @@ mod archival_state_tests {
             }
             alice_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&block_1)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
                 .await
                 .unwrap();
         }
@@ -1457,7 +1474,10 @@ mod archival_state_tests {
             }
             bob_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&block_1)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
                 .await
                 .unwrap();
         }
@@ -1577,14 +1597,20 @@ mod archival_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(&block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
             .await
             .unwrap();
         bob_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(&block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
             .await
             .unwrap();
         assert!(alice_state_lock
@@ -1647,7 +1673,10 @@ mod archival_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(&block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
             .await
             .unwrap();
 
@@ -1666,7 +1695,7 @@ mod archival_state_tests {
             let state = state_lock.lock_guard().await;
 
             assert_eq!(
-                block_2.kernel.body.next_mutator_set_accumulator,
+                block_2.kernel.body.mutator_set_accumulator,
                 state
                     .chain
                     .archival_state()

@@ -797,7 +797,7 @@ mod tests {
                 .set_block(new_block.clone());
 
             latest_block = new_block;
-            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator;
+            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         }
         assert!(
             own_global_state
@@ -816,7 +816,7 @@ mod tests {
         // Add block 3a with a coinbase UTXO for us
         let own_recipient_address = own_spending_key.to_address();
         let (block_3a, block_3a_coinbase_utxo, block_3a_coinbase_sender_randomness) =
-            make_mock_block(&latest_block, None, own_recipient_address);
+            make_mock_block(&latest_block.clone(), None, own_recipient_address);
         own_global_state
             .wallet_state
             .expected_utxos
@@ -916,7 +916,7 @@ mod tests {
 
         // Mine nine blocks on top of 3b, update states
         latest_block = block_3b;
-        mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator;
+        mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, other_recipient_address);
@@ -940,7 +940,7 @@ mod tests {
                 .set_block(new_block.clone());
 
             latest_block = new_block;
-            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator;
+            mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         }
 
         let prune_count_11 = own_global_state

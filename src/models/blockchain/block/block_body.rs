@@ -11,7 +11,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
-enum BlockBodyField {
+pub enum BlockBodyField {
     Transaction,
     MutatorSetAccumulator,
     LockFreeMmrAccumulator,
@@ -21,10 +21,10 @@ enum BlockBodyField {
 impl HasDiscriminant for BlockBodyField {
     fn discriminant(&self) -> usize {
         match self {
-            Transaction => 0,
-            MutatorSetAccumulator => 1,
-            LockFreeMmrAccumulator => 2,
-            BlockMmrAccumulator => 3,
+            BlockBodyField::Transaction => 0,
+            BlockBodyField::MutatorSetAccumulator => 1,
+            BlockBodyField::LockFreeMmrAccumulator => 2,
+            BlockBodyField::BlockMmrAccumulator => 3,
         }
     }
 }

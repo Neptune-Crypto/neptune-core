@@ -28,6 +28,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
@@ -903,11 +904,7 @@ pub fn make_mock_block(
     let coinbase_output_randomness: Digest = Digest::new(random_elements_array());
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
-    let mut next_mutator_set = previous_block
-        .kernel
-        .body
-        .next_mutator_set_accumulator
-        .clone();
+    let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
     let previous_mutator_set = next_mutator_set.clone();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
@@ -951,6 +948,8 @@ pub fn make_mock_block(
     let block_body: BlockBody = BlockBody {
         transaction,
         mutator_set_accumulator: next_mutator_set.clone(),
+        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        block_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
     };
 
     let block_target_difficulty = previous_block.kernel.header.difficulty;

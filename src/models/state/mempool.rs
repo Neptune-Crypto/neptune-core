@@ -8,7 +8,9 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
-use crate::prelude::twenty_first;
+use crate::{
+    prelude::twenty_first, util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
+};
 
 use bytesize::ByteSize;
 use get_size::GetSize;
@@ -62,8 +64,10 @@ fn now() -> Duration {
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct Mempool {
     max_total_size: usize,
+
     // Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
+
     // Maintain for fast min and max
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
     queue: DoublePriorityQueue<Digest, FeeDensity>,
@@ -288,7 +292,11 @@ impl Mempool {
     /// This function remove from the mempool all those transactions that become invalid because
     /// of this newly mined block. It also updates all mutator set data for the monitored
     /// transactions that were not removed due to being included in the block.
-    pub fn update_with_block(&mut self, block: &Block) {
+    pub fn update_with_block(
+        &mut self,
+        previous_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+        block: &Block,
+    ) {
         // Check if the sets of inserted indices in the block transaction
         // and transactions in the mempool are disjoint.
         // Removes the transaction from the mempool if they are not as this would
@@ -323,7 +331,7 @@ impl Mempool {
 
         // Update the remaining transactions so their mutator set data is still valid
         for tx in self.tx_dictionary.values_mut() {
-            tx.update_mutator_set_records(block)
+            tx.update_mutator_set_records(&previous_mutator_set_accumulator, block)
                 .expect("Updating mempool transaction must succeed");
         }
 
@@ -548,7 +556,10 @@ mod tests {
         // Update both states with block 1
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
         premine_receiver_global_state
             .chain
@@ -566,7 +577,10 @@ mod tests {
             .expect("UTXO notification from miner must be accepted");
         other_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
         other_global_state
             .chain
@@ -624,7 +638,7 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool.update_with_block(&block_2);
+        mempool.update_with_block(block_1.kernel.body.mutator_set_accumulator, &block_2);
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction still contains
@@ -638,10 +652,10 @@ mod tests {
 
         debug!(
             "Just made block with previous mutator set hash {}",
-            block_3_with_updated_tx
+            block_2
                 .kernel
                 .body
-                .previous_mutator_set_accumulator
+                .mutator_set_accumulator
                 .hash()
                 .emojihash()
         );
@@ -650,7 +664,7 @@ mod tests {
             block_3_with_updated_tx
                 .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .hash()
                 .emojihash()
         );
@@ -671,7 +685,10 @@ mod tests {
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
             let (next_block, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
-            mempool.update_with_block(&next_block);
+            mempool.update_with_block(
+                previous_block.kernel.body.mutator_set_accumulator,
+                &next_block,
+            );
             previous_block = next_block;
         }
 
@@ -684,7 +701,10 @@ mod tests {
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        mempool.update_with_block(&block_14);
+        mempool.update_with_block(
+            previous_block.kernel.body.mutator_set_accumulator,
+            &block_14,
+        );
 
         assert!(
             mempool.is_empty(),

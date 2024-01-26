@@ -777,7 +777,7 @@ impl PeerLoopHandler {
                         .light_state()
                         .kernel
                         .body
-                        .next_mutator_set_accumulator,
+                        .mutator_set_accumulator,
                 );
                 if !confirmable {
                     warn!("Received unconfirmable tx");

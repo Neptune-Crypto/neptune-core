@@ -1,4 +1,5 @@
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 use anyhow::{bail, Result};
 use itertools::Itertools;
@@ -397,7 +398,7 @@ impl GlobalState {
             .await?;
 
         // Create all removal records. These must be relative to the block tip.
-        let msa_tip = &bc_tip.kernel.body.next_mutator_set_accumulator;
+        let msa_tip = &bc_tip.kernel.body.mutator_set_accumulator;
         let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
         let mut input_amount: Amount = Amount::zero();
         for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
@@ -516,13 +517,13 @@ impl GlobalState {
         // sanity check: test membership proofs
         for (utxo, membership_proof) in input_utxos.iter().zip(input_membership_proofs.iter()) {
             let item = Hash::hash(utxo);
-            assert!(self.chain.light_state().body().next_mutator_set_accumulator.verify(item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
+            assert!(self.chain.light_state().body().mutator_set_accumulator.verify(item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
             debug!(
                 "Have valid membership proofs relative to {}",
                 self.chain
                     .light_state()
                     .body()
-                    .next_mutator_set_accumulator
+                    .mutator_set_accumulator
                     .hash()
                     .emojihash()
             );
@@ -532,7 +533,7 @@ impl GlobalState {
             .chain
             .light_state()
             .body()
-            .next_mutator_set_accumulator
+            .mutator_set_accumulator
             .clone();
 
         // When reading a digest from secret and standard-in, the digest's
@@ -773,6 +774,15 @@ impl GlobalState {
                     .get_block(revert_block_hash)
                     .await?
                     .unwrap();
+                let maybe_revert_block_predecessor = self
+                    .chain
+                    .archival_state()
+                    .get_block(revert_block.kernel.header.prev_block_digest)
+                    .await?;
+                let previous_mutator_set = match maybe_revert_block_predecessor {
+                    Some(block) => block.kernel.body.mutator_set_accumulator,
+                    None => MutatorSetAccumulator::<Hash>::default(),
+                };
 
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
@@ -786,11 +796,6 @@ impl GlobalState {
                 }
 
                 // revert additions
-                let previous_mutator_set = revert_block
-                    .kernel
-                    .body
-                    .previous_mutator_set_accumulator
-                    .clone();
                 membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
 
                 // unset spent_in_block field if the UTXO was spent in this block
@@ -821,13 +826,17 @@ impl GlobalState {
                     .get_block(apply_block_hash)
                     .await?
                     .unwrap();
+                let maybe_apply_block_predecessor = self
+                    .chain
+                    .archival_state()
+                    .get_block(apply_block.kernel.header.prev_block_digest)
+                    .await?;
+                let mut block_msa = match maybe_apply_block_predecessor {
+                    Some(block) => block.kernel.body.mutator_set_accumulator,
+                    None => MutatorSetAccumulator::<Hash>::default(),
+                };
                 let addition_records = apply_block.kernel.body.transaction.kernel.outputs;
                 let removal_records = apply_block.kernel.body.transaction.kernel.inputs;
-                let mut block_msa = apply_block
-                    .kernel
-                    .body
-                    .previous_mutator_set_accumulator
-                    .clone();
 
                 // apply additions
                 for addition_record in addition_records.iter() {
@@ -849,10 +858,7 @@ impl GlobalState {
                     block_msa.remove(removal_record);
                 }
 
-                assert_eq!(
-                    block_msa,
-                    apply_block.kernel.body.next_mutator_set_accumulator
-                );
+                assert_eq!(block_msa, apply_block.kernel.body.mutator_set_accumulator);
             }
 
             // store updated membership proof
@@ -996,6 +1002,13 @@ impl GlobalState {
     ) -> Result<()> {
         // get proof_of_work_family for tip
         let tip_proof_of_work_family = self.chain.light_state().kernel.header.proof_of_work_family;
+        let previous_mutator_set_accumulator = self
+            .chain
+            .light_state()
+            .kernel
+            .body
+            .mutator_set_accumulator
+            .clone();
 
         // Apply the updates
         self.chain
@@ -1025,12 +1038,13 @@ impl GlobalState {
 
         // update wallet state with relevant UTXOs from this block
         self.wallet_state
-            .update_wallet_state_with_new_block(&new_block)
+            .update_wallet_state_with_new_block(&previous_mutator_set_accumulator, &new_block)
             .await?;
 
         // Update mempool with UTXOs from this block. This is done by removing all transaction
         // that became invalid/was mined by this block.
-        self.mempool.update_with_block(&new_block);
+        self.mempool
+            .update_with_block(previous_mutator_set_accumulator, &new_block);
 
         self.chain.light_state_mut().set_block(new_block);
 
@@ -1095,7 +1109,7 @@ mod global_state_tests {
                     if !tip_block
                         .kernel
                         .body
-                        .next_mutator_set_accumulator
+                        .mutator_set_accumulator
                         .verify(Hash::hash(&monitored_utxo.utxo), &mp)
                     {
                         return false;
@@ -1252,7 +1266,7 @@ mod global_state_tests {
                 .chain
                 .light_state()
                 .body()
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(
                     ms_item,
                     &own_premine_mutxo
@@ -1374,7 +1388,10 @@ mod global_state_tests {
                 .unwrap();
             global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&mock_block_1a)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &mock_block_1a,
+                )
                 .await
                 .unwrap();
         }
@@ -1403,7 +1420,10 @@ mod global_state_tests {
                 .await?;
             global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&next_block)
+                .update_wallet_state_with_new_block(
+                    &parent_block.kernel.body.mutator_set_accumulator,
+                    &next_block,
+                )
                 .await
                 .unwrap();
             parent_block = next_block;
@@ -1487,7 +1507,10 @@ mod global_state_tests {
                 .unwrap();
             global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&mock_block_1a)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &mock_block_1a,
+                )
                 .await
                 .unwrap();
 
@@ -1513,7 +1536,10 @@ mod global_state_tests {
                 .await?;
             global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&next_a_block)
+                .update_wallet_state_with_new_block(
+                    &fork_a_block.kernel.body.mutator_set_accumulator,
+                    &next_a_block,
+                )
                 .await
                 .unwrap();
             fork_a_block = next_a_block;
@@ -1541,7 +1567,10 @@ mod global_state_tests {
                 .await?;
             global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&next_b_block)
+                .update_wallet_state_with_new_block(
+                    &fork_b_block.kernel.body.mutator_set_accumulator,
+                    &next_b_block,
+                )
                 .await
                 .unwrap();
             fork_b_block = next_b_block;
@@ -1591,7 +1620,10 @@ mod global_state_tests {
                 .await?;
             global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&next_c_block)
+                .update_wallet_state_with_new_block(
+                    &fork_c_block.kernel.body.mutator_set_accumulator,
+                    &next_c_block,
+                )
                 .await
                 .unwrap();
             fork_c_block = next_c_block;

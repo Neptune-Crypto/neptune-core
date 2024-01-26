@@ -21,8 +21,8 @@ pub enum BlockKernelField {
 impl HasDiscriminant for BlockKernelField {
     fn discriminant(&self) -> usize {
         match self {
-            Header => 0,
-            Body => 1,
+            BlockKernelField::Header => 0,
+            BlockKernelField::Body => 1,
         }
     }
 }

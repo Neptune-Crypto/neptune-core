@@ -119,7 +119,6 @@ impl Block {
     }
 
     pub fn genesis_block() -> Self {
-        let empty_mutator_set = MutatorSetAccumulator::<Hash>::default();
         let mut genesis_mutator_set = MutatorSetAccumulator::<Hash>::default();
         let mut ms_update = MutatorSetUpdate::default();
 
@@ -236,8 +235,8 @@ impl Block {
         let block_body: BlockBody = BlockBody {
             transaction: new_transaction,
             mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-            lock_free_mmr_accumulator: self.kernel.body.lock_free_mmr_accumulator,
-            block_mmr_accumulator: self.kernel.body.block_mmr_accumulator,
+            lock_free_mmr_accumulator: self.kernel.body.lock_free_mmr_accumulator.clone(),
+            block_mmr_accumulator: self.kernel.body.block_mmr_accumulator.clone(),
         };
 
         let block_header = BlockHeader {
