@@ -20,20 +20,18 @@ pub trait MastHash {
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>>;
 
     fn merkle_tree(&self) -> MerkleTree<Hash> {
-        let mut sequences = self.mast_sequences().to_vec();
+        let mut digests = self
+            .mast_sequences()
+            .into_iter()
+            .map(|seq| Hash::hash_varlen(&seq))
+            .collect_vec();
 
         // pad until length is a power of two
-        while sequences.len() & (sequences.len() - 1) != 0 {
-            sequences.push(vec![]);
+        while digests.len() & (digests.len() - 1) != 0 {
+            digests.push(Digest::default());
         }
 
-        CpuParallel::from_digests(
-            &sequences
-                .into_iter()
-                .map(|seq| Hash::hash_varlen(&seq))
-                .collect_vec(),
-        )
-        .unwrap()
+        CpuParallel::from_digests(&digests).unwrap()
     }
 
     fn mast_hash(&self) -> Digest {

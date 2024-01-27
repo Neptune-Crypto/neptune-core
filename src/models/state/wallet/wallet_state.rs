@@ -759,7 +759,7 @@ mod tests {
             .wallet_db
             .monitored_utxos()
             .len();
-        let mut mutator_set_accumulator = MutatorSetAccumulator::<Hash>::default();
+        let mut mutator_set_accumulator = genesis_block.kernel.body.mutator_set_accumulator.clone();
         assert!(
             monitored_utxos_count_init.is_zero(),
             "Monitored UTXO list must be empty at init"

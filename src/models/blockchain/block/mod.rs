@@ -275,10 +275,10 @@ impl Block {
         //   d) Target difficulty, and other control parameters, were adjusted correctly
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
-        //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
-        //   b) Verify that MS removal record is valid, done against `previous_mutator_set_accumulator`,
+        //   a) verify that MS membership proof is valid, done against previous `mutator_set_accumulator`,
+        //   b) Verify that MS removal record is valid, done against previous `mutator_set_accumulator`,
         //   c) Verify that all removal records have unique index sets
-        //   d) verify that adding `mutator_set_update` to `previous_mutator_set_accumulator`
+        //   d) verify that adding `mutator_set_update` to previous `mutator_set_accumulator`
         //      gives `next_mutator_set_accumulator`,
         //   e) transaction timestamp <= block timestamp
         //   f) transaction coinbase <= miner reward
@@ -291,7 +291,7 @@ impl Block {
         }
 
         // 0.b) Block header points to previous block
-        if previous_block.hash() != block_copy.kernel.header.prev_block_digest {
+        if previous_block.kernel.mast_hash() != block_copy.kernel.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }

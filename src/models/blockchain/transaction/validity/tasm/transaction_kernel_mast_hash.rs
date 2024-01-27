@@ -50,12 +50,6 @@ impl TransactionKernelMastHash {
             BFieldElement::new(transaction_kernel_encoded.len() as u64),
         );
 
-        // set dynamic allocator
-        memory.insert(
-            <BFieldElement as num_traits::Zero>::zero(),
-            BFieldElement::new(transaction_kernel_encoded.len() as u64) + address,
-        );
-
         let mut stack = tasm_lib::empty_stack();
         stack.push(address);
         ExecutionState {

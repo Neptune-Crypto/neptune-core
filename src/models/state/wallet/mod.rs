@@ -360,7 +360,6 @@ mod wallet_tests {
         add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
         make_mock_transaction_with_generation_key,
     };
-    use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
@@ -464,7 +463,6 @@ mod wallet_tests {
         let genesis_block = Block::genesis_block();
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_recipient_address = own_spending_key.to_address();
-        let mutator_set_accumulator = MutatorSetAccumulator::<Hash>::default();
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
             make_mock_block(&genesis_block, None, own_recipient_address);
 
@@ -483,7 +481,10 @@ mod wallet_tests {
             "Expected UTXO list must have length 1 before block registration"
         );
         own_wallet_state
-            .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
         assert_eq!(
             1,
@@ -596,7 +597,10 @@ mod wallet_tests {
             )
             .unwrap();
         own_wallet_state
-            .update_wallet_state_with_new_block(&MutatorSetAccumulator::default(), &block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
 
         // Verify that the allocater returns a sane amount
@@ -794,7 +798,7 @@ mod wallet_tests {
             "Premine must have non-zero synced balance"
         );
 
-        let previous_msa = MutatorSetAccumulator::default();
+        let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
 
         let receiver_data_12_to_other = UtxoReceiverData {

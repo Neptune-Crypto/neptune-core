@@ -10,6 +10,7 @@ use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::*;
 use crate::models::channel::*;
+use crate::models::consensus::mast_hash::MastHash;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNotifier};
 use crate::models::state::wallet::WalletSecret;
@@ -85,7 +86,7 @@ fn make_block_template(
         version: zero,
         height: next_block_height,
         mutator_set_hash: mutator_set_commitment,
-        prev_block_digest: Hash::hash(&previous_block.kernel.header),
+        prev_block_digest: previous_block.kernel.mast_hash(),
         timestamp: BFieldElement::new(block_timestamp),
         nonce: [zero, zero, zero],
         max_block_size: MOCK_MAX_BLOCK_SIZE,
