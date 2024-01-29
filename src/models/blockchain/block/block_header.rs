@@ -1,12 +1,10 @@
-use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
+use crate::models::consensus::mast_hash::HasDiscriminant;
+use crate::models::consensus::mast_hash::MastHash;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
-use tasm_lib::twenty_first::prelude::AlgebraicHasher;
-use tasm_lib::twenty_first::util_types::merkle_tree::{CpuParallel, MerkleTree};
-use tasm_lib::twenty_first::util_types::merkle_tree_maker::MerkleTreeMaker;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 
@@ -66,9 +64,45 @@ impl Display for BlockHeader {
     }
 }
 
-impl BlockHeader {
-    fn mast_sequences(&self) -> [Vec<BFieldElement>; 16] {
-        [
+pub enum BlockHeaderField {
+    Version,
+    Height,
+    MutatorSetHash,
+    PrevBlockDigest,
+    Timestamp,
+    Nonce,
+    MaxBlockSize,
+    ProofOfWorkLine,
+    ProofOfWorkFamily,
+    Difficulty,
+    BlockBodyMerkleRoot,
+    Uncles,
+}
+
+impl HasDiscriminant for BlockHeaderField {
+    fn discriminant(&self) -> usize {
+        match self {
+            BlockHeaderField::Version => 0,
+            BlockHeaderField::Height => 1,
+            BlockHeaderField::MutatorSetHash => 2,
+            BlockHeaderField::PrevBlockDigest => 3,
+            BlockHeaderField::Timestamp => 4,
+            BlockHeaderField::Nonce => 5,
+            BlockHeaderField::MaxBlockSize => 6,
+            BlockHeaderField::ProofOfWorkLine => 7,
+            BlockHeaderField::ProofOfWorkFamily => 8,
+            BlockHeaderField::Difficulty => 9,
+            BlockHeaderField::BlockBodyMerkleRoot => 10,
+            BlockHeaderField::Uncles => 11,
+        }
+    }
+}
+
+impl MastHash for BlockHeader {
+    type FieldEnum = BlockHeaderField;
+
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+        vec![
             self.version.encode(),
             self.height.encode(),
             self.mutator_set_hash.encode(),
@@ -86,16 +120,6 @@ impl BlockHeader {
             vec![],
             vec![],
         ]
-    }
-
-    fn merkle_tree(&self) -> MerkleTree<Hash> {
-        let sequences = self.mast_sequences();
-        let digests = sequences.map(|seq| Hash::hash_varlen(&seq));
-        CpuParallel::from_digests(&digests).unwrap()
-    }
-
-    pub(crate) fn mast_hash(&self) -> Digest {
-        self.merkle_tree().root()
     }
 }
 
