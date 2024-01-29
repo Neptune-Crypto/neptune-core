@@ -218,15 +218,16 @@ impl Block {
                 transaction.kernel.timestamp.value(),
             ),
         ));
-        let new_transaction = self.kernel.body.transaction.clone().merge_with(transaction);
 
         // accumulate
-        let additions = new_transaction.kernel.outputs.clone();
-        let removals = new_transaction.kernel.inputs.clone();
         let mut next_mutator_set_accumulator = self.kernel.body.mutator_set_accumulator.clone();
 
-        let mutator_set_update = MutatorSetUpdate::new(removals, additions);
+        let mutator_set_update = MutatorSetUpdate::new(
+            transaction.kernel.inputs.clone(),
+            transaction.kernel.outputs.clone(),
+        );
 
+        let new_transaction = self.kernel.body.transaction.clone().merge_with(transaction);
         // Apply the mutator set update to get the `next_mutator_set_accumulator`
         mutator_set_update
             .apply(&mut next_mutator_set_accumulator)
