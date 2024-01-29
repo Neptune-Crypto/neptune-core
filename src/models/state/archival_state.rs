@@ -559,7 +559,7 @@ impl ArchivalState {
             if count == 0 {
                 break;
             }
-            ret.push(Hash::hash(&parent));
+            ret.push(parent_digest);
             parent_digest = parent.prev_block_digest;
             count -= 1;
         }
