@@ -414,9 +414,10 @@ mod wallet_tests {
             let (nb, _coinbase_utxo, _sender_randomness) =
                 make_mock_block(&previous_block, None, other_receiver_address);
             next_block = nb;
-            let mutator_set_accumulator = next_block.kernel.body.mutator_set_accumulator.clone();
+            let current_mutator_set_accumulator =
+                previous_block.kernel.body.mutator_set_accumulator.clone();
             wallet_state_premine_recipient
-                .update_wallet_state_with_new_block(&mutator_set_accumulator, &next_block)
+                .update_wallet_state_with_new_block(&current_mutator_set_accumulator, &next_block)
                 .await?;
         }
 
