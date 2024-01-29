@@ -7,7 +7,7 @@ use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::path::PathBuf;
-use tracing::debug;
+use tracing::{debug, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::storage::level_db::DB;
@@ -482,18 +482,25 @@ impl ArchivalState {
         }
     }
 
-    pub async fn get_children_blocks(&self, parent_block_header: &BlockHeader) -> Vec<BlockHeader> {
+    pub async fn get_children_blocks(&self, parent_block_digest: Digest) -> Vec<BlockHeader> {
+        // get header
+        let parent_block_header = match self.get_block_header(parent_block_digest).await {
+            Some(header) => header,
+            None => {
+                warn!("Querying for children of unknown parent block digest.");
+                return vec![];
+            }
+        };
         // Get all blocks with height n + 1
         let blocks_from_childrens_generation: Vec<BlockHeader> = self
             .block_height_to_block_headers(parent_block_header.height.next())
             .await;
 
         // Filter out those that don't have the right parent
-        let parent_block_header_digest = Hash::hash(parent_block_header);
         blocks_from_childrens_generation
             .into_iter()
             .filter(|child_block_header| {
-                child_block_header.prev_block_digest == parent_block_header_digest
+                child_block_header.prev_block_digest == parent_block_digest
             })
             .collect()
     }
@@ -727,6 +734,7 @@ mod archival_state_tests {
     use crate::models::blockchain::transaction::utxo::LockScript;
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
+    use crate::models::consensus::mast_hash::MastHash;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
@@ -2702,7 +2710,7 @@ mod archival_state_tests {
 
         // Test `get_children_blocks`
         let children_of_mock_block_1 = archival_state
-            .get_children_blocks(&mock_block_1.kernel.header)
+            .get_children_blocks(mock_block_1.kernel.mast_hash())
             .await;
         assert_eq!(1, children_of_mock_block_1.len());
         assert_eq!(mock_block_2.kernel.header, children_of_mock_block_1[0]);
@@ -2712,8 +2720,8 @@ mod archival_state_tests {
             .get_ancestor_block_digests(mock_block_2.hash(), 10)
             .await;
         assert_eq!(2, ancestor_digests.len());
-        assert_eq!(Hash::hash(&mock_block_1.kernel.header), ancestor_digests[0]);
-        assert_eq!(Hash::hash(&genesis.kernel.header), ancestor_digests[1]);
+        assert_eq!(mock_block_1.kernel.mast_hash(), ancestor_digests[0]);
+        assert_eq!(genesis.kernel.mast_hash(), ancestor_digests[1]);
 
         Ok(())
     }

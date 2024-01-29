@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 
 use super::models::blockchain::shared::Hash;
@@ -495,12 +496,11 @@ impl PeerLoopHandler {
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
-                let mut parent_block_header: BlockHeader = peers_most_canonical_block.kernel.header;
                 while returned_blocks.len() < responded_batch_size {
                     let children = global_state
                         .chain
                         .archival_state()
-                        .get_children_blocks(&parent_block_header)
+                        .get_children_blocks(peers_most_canonical_block.kernel.mast_hash())
                         .await;
                     if children.is_empty() {
                         break;
@@ -530,7 +530,6 @@ impl PeerLoopHandler {
                         .await?
                         .unwrap();
 
-                    parent_block_header = header_of_canonical_child;
                     returned_blocks.push(canonical_child.into());
                 }
 
