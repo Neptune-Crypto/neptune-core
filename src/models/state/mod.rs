@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
@@ -894,12 +895,13 @@ impl GlobalState {
             )
         }
 
-        let current_tip = self.chain.light_state().header();
+        let current_tip_header = self.chain.light_state().header();
+        let current_tip_digest = self.chain.light_state().kernel.mast_hash();
 
         let current_tip_info: (Digest, Duration, BlockHeight) = (
-            Hash::hash(current_tip),
-            Duration::from_millis(current_tip.timestamp.value()),
-            current_tip.height,
+            Hash::hash(current_tip_header),
+            Duration::from_millis(current_tip_header.timestamp.value()),
+            current_tip_header.height,
         );
 
         let mut updates = std::collections::BTreeMap::new();
@@ -928,11 +930,11 @@ impl GlobalState {
             // if it was confirmed in block that is now abandoned,
             // and if that block is older than threshold.
             if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
-                let depth = current_tip.height - block_height_confirmed + 1;
+                let depth = current_tip_header.height - block_height_confirmed + 1;
 
                 let abandoned = depth >= block_depth_threshhold as i128
                     && mutxo
-                        .was_abandoned(current_tip, self.chain.archival_state())
+                        .was_abandoned(current_tip_digest, self.chain.archival_state())
                         .await;
 
                 if abandoned {
@@ -1449,7 +1451,7 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .was_abandoned(
-                    &parent_block.kernel.header,
+                    parent_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
                 )
                 .await
@@ -1458,7 +1460,7 @@ mod global_state_tests {
             monitored_utxos
                 .get(1)
                 .was_abandoned(
-                    &parent_block.kernel.header,
+                    parent_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
                 )
                 .await
@@ -1663,7 +1665,7 @@ mod global_state_tests {
             !monitored_utxos
                 .get(0)
                 .was_abandoned(
-                    &fork_c_block.kernel.header,
+                    fork_c_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
                 )
                 .await
@@ -1672,7 +1674,7 @@ mod global_state_tests {
             monitored_utxos
                 .get(1)
                 .was_abandoned(
-                    &fork_c_block.kernel.header,
+                    fork_c_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
                 )
                 .await

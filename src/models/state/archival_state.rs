@@ -7,11 +7,11 @@ use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::path::PathBuf;
+use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 use tracing::{debug, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::storage::level_db::DB;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::traits::*;
 
@@ -457,32 +457,34 @@ impl ArchivalState {
         &self,
         block_height: BlockHeight,
     ) -> Vec<BlockHeader> {
-        let maybe_digests = self
-            .block_index_db
-            .get(BlockIndexKey::Height(block_height))
-            .await
-            .map(|x| x.as_height_record());
-
-        match maybe_digests {
-            Some(block_digests) => {
-                let mut block_headers = vec![];
-                for block_digest in block_digests {
-                    let block_header = self
-                        .block_index_db
-                        .get(BlockIndexKey::Block(block_digest))
-                        .await
-                        .map(|x| x.as_block_record())
-                        .unwrap();
-                    block_headers.push(block_header.block_header);
-                }
-
-                block_headers
-            }
-            None => vec![],
+        let block_digests = self.block_height_to_block_digests(block_height).await;
+        let mut block_headers = vec![];
+        for block_digest in block_digests.into_iter() {
+            let block = self
+                .block_index_db
+                .get(BlockIndexKey::Block(block_digest))
+                .await
+                .map(|x| x.as_block_record())
+                .unwrap();
+            block_headers.push(block.block_header);
         }
+
+        block_headers
     }
 
-    pub async fn get_children_blocks(&self, parent_block_digest: Digest) -> Vec<BlockHeader> {
+    /// Return the digests of the known blocks at a specific height
+    pub async fn block_height_to_block_digests(&self, block_height: BlockHeight) -> Vec<Digest> {
+        self.block_index_db
+            .get(BlockIndexKey::Height(block_height))
+            .await
+            .map(|x| x.as_height_record())
+            .unwrap_or_else(Vec::new)
+    }
+
+    pub async fn get_children_block_headers(
+        &self,
+        parent_block_digest: Digest,
+    ) -> Vec<BlockHeader> {
         // get header
         let parent_block_header = match self.get_block_header(parent_block_digest).await {
             Some(header) => header,
@@ -505,24 +507,74 @@ impl ArchivalState {
             .collect()
     }
 
+    pub async fn get_children_block_digests(&self, parent_block_digest: Digest) -> Vec<Digest> {
+        // get header
+        let parent_block_header = match self.get_block_header(parent_block_digest).await {
+            Some(header) => header,
+            None => {
+                warn!("Querying for children of unknown parent block digest.");
+                return vec![];
+            }
+        };
+        // Get all blocks with height n + 1
+        let children_digests = self
+            .block_height_to_block_digests(parent_block_header.height.next())
+            .await;
+        let mut downstream_children = vec![];
+        for child_digest in children_digests {
+            let child_header =
+                self
+                .get_block_header(child_digest)
+                .await
+                .unwrap_or_else(
+                    || panic!(
+                        "Cannot get block header from digest, even though digest was fetched from height. Digest: {}/{}",
+                        child_digest,
+                        child_digest.emojihash()
+                    )
+                );
+            if child_header.prev_block_digest == parent_block_digest {
+                downstream_children.push(child_digest);
+            }
+        }
+
+        downstream_children
+    }
+
     /// Return a boolean indicating if block belongs to most canonical chain
     pub async fn block_belongs_to_canonical_chain(
         &self,
-        block_header: &BlockHeader,
-        tip_header: &BlockHeader,
+        block_digest: Digest,
+        tip_digest: Digest,
     ) -> bool {
-        let block_header_digest = Hash::hash(block_header);
-        let tip_header_digest = Hash::hash(tip_header);
+        let block_header = self
+            .get_block_header(block_digest)
+            .await
+            .unwrap_or_else(|| {
+                panic!(
+                    "Could not get block header by digest: {}/{}",
+                    block_digest,
+                    block_digest.emojihash()
+                )
+            });
+        let tip_header = self
+            .get_block_header(block_digest)
+            .await
+            .unwrap_or_else(|| {
+                panic!(
+                    "Could not get block header by digest: {}/{}",
+                    tip_digest,
+                    tip_digest.emojihash()
+                )
+            });
 
         // If block is tip or parent to tip, then block belongs to canonical chain
-        if tip_header_digest == block_header_digest
-            || tip_header.prev_block_digest == block_header_digest
-        {
+        if tip_digest == block_digest || tip_header.prev_block_digest == block_digest {
             return true;
         }
 
         // If block is genesis block, it belongs to the canonical chain
-        if block_header_digest == self.genesis_block.hash() {
+        if block_digest == self.genesis_block.hash() {
             return true;
         }
 
@@ -543,7 +595,7 @@ impl ArchivalState {
         }
 
         // Find the path from block to tip and check if this involves stepping back
-        let (backwards, _, _) = self.find_path(block_header_digest, tip_header_digest).await;
+        let (backwards, _, _) = self.find_path(block_digest, tip_digest).await;
 
         backwards.is_empty()
     }
@@ -2002,7 +2054,10 @@ mod archival_state_tests {
         let genesis = *archival_state.genesis_block.clone();
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(&genesis.kernel.header, &genesis.kernel.header)
+                .block_belongs_to_canonical_chain(
+                    genesis.kernel.mast_hash(),
+                    genesis.kernel.mast_hash()
+                )
                 .await,
             "Genesis block is always part of the canonical chain, tip"
         );
@@ -2016,8 +2071,8 @@ mod archival_state_tests {
         assert!(
             archival_state
                 .block_belongs_to_canonical_chain(
-                    &genesis.kernel.header,
-                    &mock_block_1.kernel.header
+                    genesis.kernel.mast_hash(),
+                    mock_block_1.kernel.mast_hash()
                 )
                 .await,
             "Genesis block is always part of the canonical chain, tip parent"
@@ -2025,8 +2080,8 @@ mod archival_state_tests {
         assert!(
             archival_state
                 .block_belongs_to_canonical_chain(
-                    &mock_block_1.kernel.header,
-                    &mock_block_1.kernel.header
+                    mock_block_1.kernel.mast_hash(),
+                    mock_block_1.kernel.mast_hash()
                 )
                 .await,
             "Tip block is always part of the canonical chain"
@@ -2055,8 +2110,8 @@ mod archival_state_tests {
             assert!(
                 archival_state
                     .block_belongs_to_canonical_chain(
-                        &block.kernel.header,
-                        &mock_block_4_a.kernel.header
+                        block.kernel.mast_hash(),
+                        mock_block_4_a.kernel.mast_hash()
                     )
                     .await,
                 "only chain {} is canonical",
@@ -2069,8 +2124,8 @@ mod archival_state_tests {
         assert!(
             archival_state
                 .block_belongs_to_canonical_chain(
-                    &genesis.kernel.header,
-                    &mock_block_4_a.kernel.header
+                    genesis.kernel.mast_hash(),
+                    mock_block_4_a.kernel.mast_hash()
                 )
                 .await,
             "Genesis block is always part of the canonical chain, block height is four"
@@ -2103,8 +2158,8 @@ mod archival_state_tests {
             assert!(
                 archival_state
                     .block_belongs_to_canonical_chain(
-                        &block.kernel.header,
-                        &mock_block_4_a.kernel.header
+                        block.kernel.mast_hash(),
+                        mock_block_4_a.kernel.mast_hash()
                     )
                     .await,
                 "canonical chain {} is canonical",
@@ -2128,8 +2183,8 @@ mod archival_state_tests {
             assert!(
                 !archival_state
                     .block_belongs_to_canonical_chain(
-                        &block.kernel.header,
-                        &mock_block_4_a.kernel.header
+                        block.kernel.mast_hash(),
+                        mock_block_4_a.kernel.mast_hash()
                     )
                     .await,
                 "Stale chain {} is not canonical",
@@ -2213,8 +2268,8 @@ mod archival_state_tests {
             assert!(
                 archival_state
                     .block_belongs_to_canonical_chain(
-                        &block.kernel.header,
-                        &mock_block_6_d.kernel.header
+                        block.kernel.mast_hash(),
+                        mock_block_6_d.kernel.mast_hash()
                     )
                     .await,
                 "canonical chain {} is canonical, complicated",
@@ -2247,8 +2302,8 @@ mod archival_state_tests {
             assert!(
                 !archival_state
                     .block_belongs_to_canonical_chain(
-                        &block.kernel.header,
-                        &mock_block_6_d.kernel.header
+                        block.kernel.mast_hash(),
+                        mock_block_6_d.kernel.mast_hash()
                     )
                     .await,
                 "Stale chain {} is not canonical",
@@ -2286,8 +2341,8 @@ mod archival_state_tests {
             assert!(
                 !archival_state
                     .block_belongs_to_canonical_chain(
-                        &block.kernel.header,
-                        &mock_block_6_b.kernel.header
+                        block.kernel.mast_hash(),
+                        mock_block_6_b.kernel.mast_hash()
                     )
                     .await,
                 "Stale chain {} is not canonical",
@@ -2312,8 +2367,8 @@ mod archival_state_tests {
             assert!(
                 archival_state
                     .block_belongs_to_canonical_chain(
-                        &block.kernel.header,
-                        &mock_block_6_b.kernel.header
+                        block.kernel.mast_hash(),
+                        mock_block_6_b.kernel.mast_hash()
                     )
                     .await,
                 "canonical chain {} is canonical, complicated",
@@ -2710,7 +2765,7 @@ mod archival_state_tests {
 
         // Test `get_children_blocks`
         let children_of_mock_block_1 = archival_state
-            .get_children_blocks(mock_block_1.kernel.mast_hash())
+            .get_children_block_headers(mock_block_1.kernel.mast_hash())
             .await;
         assert_eq!(1, children_of_mock_block_1.len());
         assert_eq!(mock_block_2.kernel.header, children_of_mock_block_1[0]);

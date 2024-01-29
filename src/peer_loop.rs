@@ -3,7 +3,6 @@ use crate::prelude::twenty_first;
 
 use super::models::blockchain::shared::Hash;
 use crate::connect_to_peers::close_peer_connected_callback;
-use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
 use crate::models::blockchain::block::Block;
@@ -451,14 +450,14 @@ impl PeerLoopHandler {
 
                         let global_state = self.global_state_lock.lock_guard().await;
 
-                        let tip_header = &global_state.chain.light_state().kernel.header;
+                        let tip_digest = global_state.chain.light_state().kernel.mast_hash();
 
                         if global_state
                             .chain
                             .archival_state()
                             .block_belongs_to_canonical_chain(
-                                &block_candidate.kernel.header,
-                                tip_header,
+                                block_candidate.kernel.mast_hash(),
+                                tip_digest,
                             )
                             .await
                         {
@@ -490,7 +489,7 @@ impl PeerLoopHandler {
                         / 2,
                 );
                 let global_state = self.global_state_lock.lock_guard().await;
-                let tip_header = &global_state.chain.light_state().kernel.header;
+                let tip_digest = global_state.chain.light_state().kernel.mast_hash();
 
                 let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
                 let mut returned_blocks: Vec<TransferBlock> =
@@ -500,20 +499,20 @@ impl PeerLoopHandler {
                     let children = global_state
                         .chain
                         .archival_state()
-                        .get_children_blocks(peers_most_canonical_block.kernel.mast_hash())
+                        .get_children_block_digests(peers_most_canonical_block.kernel.mast_hash())
                         .await;
                     if children.is_empty() {
                         break;
                     }
                     let header_of_canonical_child = if children.len() == 1 {
-                        children[0].clone()
+                        children[0]
                     } else {
-                        let mut canonical: BlockHeader = children[0].clone();
+                        let mut canonical = children[0];
                         for child in children {
                             if global_state
                                 .chain
                                 .archival_state()
-                                .block_belongs_to_canonical_chain(&child, tip_header)
+                                .block_belongs_to_canonical_chain(child, tip_digest)
                                 .await
                             {
                                 canonical = child;
@@ -682,17 +681,17 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestByHeight(block_height) => {
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
-                let block_headers: Vec<BlockHeader> = self
+                let block_digests = self
                     .global_state_lock
                     .lock_guard()
                     .await
                     .chain
                     .archival_state()
-                    .block_height_to_block_headers(block_height)
+                    .block_height_to_block_digests(block_height)
                     .await;
-                debug!("Found {} blocks", block_headers.len());
+                debug!("Found {} blocks", block_digests.len());
 
-                if block_headers.is_empty() {
+                if block_digests.is_empty() {
                     warn!("Got block request by height for unknown block");
                     self.punish(PeerSanctionReason::BlockRequestUnknownHeight)
                         .await?;
@@ -700,18 +699,18 @@ impl PeerLoopHandler {
                 }
 
                 // If more than one block is found, we need to find the one that's canonical
-                let mut canonical_chain_block_header = block_headers[0].clone();
-                if block_headers.len() > 1 {
+                let mut canonical_chain_block_digest = block_digests[0];
+                if block_digests.len() > 1 {
                     let global_state = self.global_state_lock.lock_guard().await;
-                    let tip_header = &global_state.chain.light_state().kernel.header;
-                    for block_header in block_headers {
+                    let tip_digest = global_state.chain.light_state().kernel.mast_hash();
+                    for block_digest in block_digests {
                         if global_state
                             .chain
                             .archival_state()
-                            .block_belongs_to_canonical_chain(&block_header, tip_header)
+                            .block_belongs_to_canonical_chain(block_digest, tip_digest)
                             .await
                         {
-                            canonical_chain_block_header = block_header;
+                            canonical_chain_block_digest = block_digest;
                         }
                     }
                 }
@@ -722,7 +721,7 @@ impl PeerLoopHandler {
                     .await
                     .chain
                     .archival_state()
-                    .get_block(Hash::hash(&canonical_chain_block_header))
+                    .get_block(canonical_chain_block_digest)
                     .await?
                     .unwrap();
                 let block_response: PeerMessage =
