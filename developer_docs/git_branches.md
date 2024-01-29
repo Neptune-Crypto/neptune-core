@@ -53,6 +53,27 @@ If the branch exists in a triton/neptune official repo, (as opposed to a persona
 
 So if working on issue `#232` and adding feature *walk_and_chew_gum* one might name the branch `myuser/232_walk_and_chew_gum_pr`.
 
+### release branch
+
+The `master` branch can contain changes that are not compatible with whatever network is currently live. Beta-testers looking for the branch that will synchronize with the network that is currently live need branch `release`. This branch may cherry-pick commits that are meant for `master` so long as they are backwards-compatible. However, when this task is too cumbersome, branch `release` will become effectively abandoned -- until the next network version is released.
+
+#### TestNet Release Protocol
+
+ - Ensure that master builds against crates that live on [crates.io](https://crates.io). In particular, no dependencies on github repositories or revisions.
+ - Update `README.md` in case to make sure the installation instructions are up-to-date.
+ - Ensure that all tests pass.
+ - Bump the version in `Cargo.toml`
+ - Create a commit with the subject line `v0.0.6` (or watever the new version number is) and in the body list all the changes.
+ - Push to `master` on github.
+ - Add a tag marking the current commit with the version:
+   - `git tag v0.0.6` (or whatever the next version is)
+   - `git push --tags`.
+ - Set branch `release` to point to `master`:
+   - `git checkout release`
+   - `git reset master`
+   - `git push`
+ - Consider making an announcement.
+
 # Conventional Commits
 
 It is preferred/requested that commit messages use the [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) format.
@@ -68,29 +89,6 @@ git config --global commit.template /path/to/neptune-core/developer_docs/.gitmes
 ```
 
 It can also be added on a per-repository basis by omitting the `--global` flag.
-
-### Release tagging
-
-Every published release of a crate is tagged with the [semver](https://semver.org) version eg `v0.0.5`. Some releases of neptune-core may create a new testnet in which case the testnet identifier is also tagged, eg: `(tag: v0.0.5, tag: alphanet-v5)`.
-
-### Release branch(es)
-
-If any changes/fixes are needed for a published release, then a branch can be created based on the release tag
-for any affected crate(s), and the fix should be placed on that branch. Normally a `hotfix` branch should be created based on the release branch with a corresponding pull-request.
-
-As long as the fix does not require an API change, the crate(s) can be published to crates.io with only a bump to the semver PATCH version.
-
-A neptune-core release branch should be created for each
-release, even if it has no further commits.
-
-The neptune-core `README.md` should likewise be updated with each release to provide instructions for
-checking out and building from the release
-branch.
-
-Additionally a warning shall be placed in the
-README.md that the tip of `master` branch is
-for development and should be considered unstable, along with a link to this document.
-
 
 ## Cargo dependencies
 
@@ -136,4 +134,4 @@ The [patch section docs](https://doc.rust-lang.org/cargo/reference/overriding-de
 This [blog article](https://gatowololo.github.io/blog/cargo-patch/) is also helpful.
 
 
-Finally, all such temporary patches must be removed before publishing a crate!
+Finally, all such temporary patches must be removed before publishing a crate or issuing a new release!

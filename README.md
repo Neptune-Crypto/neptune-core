@@ -4,8 +4,6 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
 
 ## Installing
 
-note: We recommend installing the latest release unless you are a developer intending to contribute code.
-
 ### Compile from Source -- Linux Debian/Ubuntu
 
  - Open a terminal to run the following commands.
@@ -15,7 +13,7 @@ note: We recommend installing the latest release unless you are a developer inte
  - Install LebelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
  - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
  - Enter the repository: `cd neptune-core`
- - for dev(unstable) skip this step. else for latest release: `git checkout v0.0.5`.
+ - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
 
  - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM and a few minutes)
 
@@ -28,7 +26,7 @@ With a functioning version of cargo, compilation on Windows should just work out
 - Open PowerShell to run the following commands.
 - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
 - Enter the repository: `cd neptune-core`
-- for dev(unstable) skip this step. else for latest release: `git checkout v0.0.5`.
+- Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
 
 - Run `cargo install --path .`
 
