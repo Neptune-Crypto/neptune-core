@@ -899,7 +899,7 @@ impl GlobalState {
         let current_tip_digest = self.chain.light_state().kernel.mast_hash();
 
         let current_tip_info: (Digest, Duration, BlockHeight) = (
-            Hash::hash(current_tip_header),
+            current_tip_digest,
             Duration::from_millis(current_tip_header.timestamp.value()),
             current_tip_header.height,
         );
