@@ -1,7 +1,6 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 
-use super::models::blockchain::shared::Hash;
 use crate::connect_to_peers::close_peer_connected_callback;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
@@ -26,7 +25,6 @@ use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::digest::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 const STANDARD_BLOCK_BATCH_SIZE: usize = 50;
 const MAX_PEER_LIST_LENGTH: usize = 10;
@@ -429,11 +427,14 @@ impl PeerLoopHandler {
                 }
                 Ok(false)
             }
-            PeerMessage::BlockRequestBatch(most_canonical_digests, requested_batch_size) => {
+            PeerMessage::BlockRequestBatch(
+                peers_suggested_starting_points,
+                requested_batch_size,
+            ) => {
                 // Find the block that the peer is requesting to start from
                 let mut peers_most_canonical_block: Option<Block> = None;
 
-                for digest in most_canonical_digests {
+                for digest in peers_suggested_starting_points {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
                         .global_state_lock
@@ -477,8 +478,8 @@ impl PeerLoopHandler {
                     }
                 };
 
-                // Get the relevant blocks, from the descendant of the peer's most canonical block
-                // to that height plus the batch size.
+                // Get the relevant blocks, at most batch size many, descending from the
+                // peer's most canonical block.
                 let responded_batch_size = cmp::min(
                     requested_batch_size,
                     self.global_state_lock
@@ -495,20 +496,22 @@ impl PeerLoopHandler {
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
+                let mut current_digest = peers_most_canonical_block.kernel.mast_hash();
                 while returned_blocks.len() < responded_batch_size {
                     let children = global_state
                         .chain
                         .archival_state()
-                        .get_children_block_digests(peers_most_canonical_block.kernel.mast_hash())
+                        .get_children_block_digests(current_digest)
                         .await;
+
                     if children.is_empty() {
                         break;
                     }
-                    let header_of_canonical_child = if children.len() == 1 {
+                    let canonical_child_digest = if children.len() == 1 {
                         children[0]
                     } else {
                         let mut canonical = children[0];
-                        for child in children {
+                        for child in children.into_iter().skip(1) {
                             if global_state
                                 .chain
                                 .archival_state()
@@ -522,14 +525,17 @@ impl PeerLoopHandler {
                         canonical
                     };
 
+                    // get block and append to list
                     let canonical_child: Block = global_state
                         .chain
                         .archival_state()
-                        .get_block(Hash::hash(&header_of_canonical_child))
+                        .get_block(canonical_child_digest)
                         .await?
                         .unwrap();
-
                     returned_blocks.push(canonical_child.into());
+
+                    // prepare for next iteration
+                    current_digest = canonical_child_digest;
                 }
 
                 debug!(
@@ -537,8 +543,8 @@ impl PeerLoopHandler {
                     returned_blocks.len()
                 );
 
-                peer.send(PeerMessage::BlockResponseBatch(returned_blocks))
-                    .await?;
+                let response = PeerMessage::BlockResponseBatch(returned_blocks);
+                peer.send(response).await?;
 
                 Ok(false)
             }

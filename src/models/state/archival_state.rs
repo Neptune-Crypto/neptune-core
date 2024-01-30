@@ -507,6 +507,8 @@ impl ArchivalState {
             .collect()
     }
 
+    /// Get all immediate children of the given block, no grandchildren or higher-order
+    /// descendants.
     pub async fn get_children_block_digests(&self, parent_block_digest: Digest) -> Vec<Digest> {
         // get header
         let parent_block_header = match self.get_block_header(parent_block_digest).await {
@@ -557,16 +559,13 @@ impl ArchivalState {
                     block_digest.emojihash()
                 )
             });
-        let tip_header = self
-            .get_block_header(block_digest)
-            .await
-            .unwrap_or_else(|| {
-                panic!(
-                    "Could not get block header by digest: {}/{}",
-                    tip_digest,
-                    tip_digest.emojihash()
-                )
-            });
+        let tip_header = self.get_block_header(tip_digest).await.unwrap_or_else(|| {
+            panic!(
+                "Could not get block header by digest: {}/{}",
+                tip_digest,
+                tip_digest.emojihash()
+            )
+        });
 
         // If block is tip or parent to tip, then block belongs to canonical chain
         if tip_digest == block_digest || tip_header.prev_block_digest == block_digest {
@@ -780,6 +779,7 @@ impl ArchivalState {
 
 #[cfg(test)]
 mod archival_state_tests {
+
     use super::*;
 
     use crate::config_models::network::Network;
@@ -2135,7 +2135,7 @@ mod archival_state_tests {
                         mock_block_4_a.kernel.mast_hash()
                     )
                     .await,
-                "only chain {} is canonical",
+                "block {} does not belong to canonical chain",
                 i
             );
             dag_walker_leash_prop(block.hash(), mock_block_4_a.hash(), &archival_state).await;
