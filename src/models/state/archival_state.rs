@@ -1451,6 +1451,13 @@ mod archival_state_tests {
             assert!(block_1.is_valid(&genesis_block));
         }
 
+        println!("Accumulated transaction into block_1.");
+        println!(
+            "Transaction has {} inputs (removal records) and {} outputs (addition records)",
+            block_1.kernel.body.transaction.kernel.inputs.len(),
+            block_1.kernel.body.transaction.kernel.outputs.len()
+        );
+
         // Update chain states
         for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
             let mut state = state_lock.lock_guard_mut().await;
@@ -1632,6 +1639,20 @@ mod archival_state_tests {
         let (mut block_2, cb_utxo_block_2, cb_sender_randomness_block_2) =
             make_mock_block_with_valid_pow(&block_1, None, genesis_spending_key.to_address());
         block_2.accumulate_transaction(tx_from_alice);
+        assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
+        assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
+
+        // This test is flaky!
+        // It fails roughly every 3 out of 10 runs. If you run with `-- --nocapture` then
+        // (on Alan's machine) it runs with a 100% success rate. But doing that *and*
+        // commenting out the next two print statements boosts the failure rate again.
+        println!("accumulated Alice's transaction into block; number of inputs: {}; number of outputs: {}", block_2.kernel.body.transaction.kernel.inputs.len(), block_2.kernel.body.transaction.kernel.outputs.len());
+        println!(
+            "Transaction from Bob has {} inputs and {} outputs",
+            tx_from_bob.kernel.inputs.len(),
+            tx_from_bob.kernel.outputs.len()
+        );
+
         block_2.accumulate_transaction(tx_from_bob);
 
         // Sanity checks
