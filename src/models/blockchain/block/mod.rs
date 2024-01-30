@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use tracing::{debug, error, warn};
@@ -272,8 +273,8 @@ impl Block {
         // 0. `previous_block` is consistent with current block
         //   a) Block height is previous plus one
         //   b) Block header points to previous block
-        //   c) Block timestamp is greater than previous block timestamp
-        //   d) Target difficulty, and other control parameters, were adjusted correctly
+        //   d) Block timestamp is greater than previous block timestamp
+        //   e) Target difficulty, and other control parameters, were adjusted correctly
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
         //   a) verify that MS membership proof is valid, done against previous `mutator_set_accumulator`,
@@ -297,7 +298,15 @@ impl Block {
             return false;
         }
 
-        // 0.c) Block timestamp is greater than that of previuos block
+        // 0.c) Verify correct addition to block MMR
+        let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
+        mmra.append(previous_block.hash());
+        if mmra != self.kernel.body.block_mmr_accumulator {
+            warn!("Block MMRA was not updated correctly");
+            return false;
+        }
+
+        // 0.d) Block timestamp is greater than that of previuos block
         if previous_block.kernel.header.timestamp.value()
             >= block_copy.kernel.header.timestamp.value()
         {
@@ -305,7 +314,7 @@ impl Block {
             return false;
         }
 
-        // 0.d) Target difficulty, and other control parameters, were updated correctly
+        // 0.e) Target difficulty, and other control parameters, were updated correctly
         if block_copy.kernel.header.difficulty
             != Self::difficulty_control(previous_block, block_copy.kernel.header.timestamp.value())
         {
@@ -345,8 +354,8 @@ impl Block {
             return false;
         }
 
-        // 1.d) Verify that the two mutator sets, previous and current, are
-        // consistent with the transactions.
+        // 1.d) Verify that the two mutator sets, the one from the current block and the
+        // one from the previous, are consistent with the transactions.
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
         let mutator_set_update = MutatorSetUpdate::new(
@@ -502,7 +511,7 @@ mod block_tests {
             blockchain::transaction::PublicAnnouncement, state::wallet::WalletSecret,
             state::UtxoReceiverData,
         },
-        tests::shared::{get_mock_global_state, make_mock_block},
+        tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
     };
     use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 
@@ -610,5 +619,19 @@ mod block_tests {
         assert_eq!(0u64, some_threshold_actual.values()[4].value());
         assert_eq!(some_threshold_actual, some_threshold_expected);
         assert_eq!(bfe_max_elem, some_threshold_actual.values()[3]);
+    }
+
+    #[test]
+    fn block_with_wrong_mmra_is_invalid() {
+        let genesis_block = Block::genesis_block();
+
+        let a_wallet_secret = WalletSecret::new_random();
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (mut block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+
+        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
+
+        assert!(!block_1.is_valid(&genesis_block));
     }
 }

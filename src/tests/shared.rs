@@ -907,6 +907,8 @@ pub fn make_mock_block(
 
     let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
     let previous_mutator_set = next_mutator_set.clone();
+    let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
+    block_mmr.append(previous_block.hash());
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
     let coinbase_addition_record: AdditionRecord =
@@ -950,7 +952,7 @@ pub fn make_mock_block(
         transaction,
         mutator_set_accumulator: next_mutator_set.clone(),
         lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
-        block_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        block_mmr_accumulator: block_mmr,
         uncle_blocks: vec![],
     };
 

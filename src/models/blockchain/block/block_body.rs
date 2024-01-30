@@ -47,7 +47,8 @@ pub struct BlockBody {
     pub lock_free_mmr_accumulator: MmrAccumulator<Hash>,
 
     /// All blocks live in an MMR, so that we can efficiently prove that a given block
-    /// lives on the line between the tip and genesis.
+    /// lives on the line between the tip and genesis. This MMRA does not contain the
+    /// current block.
     pub block_mmr_accumulator: MmrAccumulator<Hash>,
 
     /// All blocks that lost the block race to an ancestor of this block and have not been

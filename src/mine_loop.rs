@@ -29,6 +29,7 @@ use std::ops::Deref;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -60,11 +61,13 @@ fn make_block_template(
         .apply(&mut next_mutator_set_accumulator)
         .expect("Mutator set mutation must work");
 
+    let mut block_mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
+    block_mmra.append(previous_block.hash());
     let block_body: BlockBody = BlockBody {
         transaction,
         mutator_set_accumulator: next_mutator_set_accumulator.clone(),
         lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
-        block_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        block_mmr_accumulator: block_mmra,
         uncle_blocks: vec![],
     };
 
