@@ -5,6 +5,7 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::blockchain::shared::Hash;
@@ -16,6 +17,7 @@ pub enum BlockBodyField {
     MutatorSetAccumulator,
     LockFreeMmrAccumulator,
     BlockMmrAccumulator,
+    UncleBlocks,
 }
 
 impl HasDiscriminant for BlockBodyField {
@@ -25,6 +27,7 @@ impl HasDiscriminant for BlockBodyField {
             BlockBodyField::MutatorSetAccumulator => 1,
             BlockBodyField::LockFreeMmrAccumulator => 2,
             BlockBodyField::BlockMmrAccumulator => 3,
+            BlockBodyField::UncleBlocks => 4,
         }
     }
 }
@@ -46,6 +49,10 @@ pub struct BlockBody {
     /// All blocks live in an MMR, so that we can efficiently prove that a given block
     /// lives on the line between the tip and genesis.
     pub block_mmr_accumulator: MmrAccumulator<Hash>,
+
+    /// All blocks that lost the block race to an ancestor of this block and have not been
+    /// listed as uncle before.
+    pub uncle_blocks: Vec<Digest>,
 }
 
 impl MastHash for BlockBody {
@@ -57,6 +64,7 @@ impl MastHash for BlockBody {
             self.mutator_set_accumulator.encode(),
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),
+            self.uncle_blocks.encode(),
         ]
     }
 }

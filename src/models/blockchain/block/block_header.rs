@@ -42,7 +42,6 @@ pub struct BlockHeader {
     // This is the difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
     pub block_body_merkle_root: Digest,
-    pub uncles: Vec<Digest>,
 }
 
 impl Display for BlockHeader {
@@ -76,7 +75,6 @@ pub enum BlockHeaderField {
     ProofOfWorkFamily,
     Difficulty,
     BlockBodyMerkleRoot,
-    Uncles,
 }
 
 impl HasDiscriminant for BlockHeaderField {
@@ -93,7 +91,6 @@ impl HasDiscriminant for BlockHeaderField {
             BlockHeaderField::ProofOfWorkFamily => 8,
             BlockHeaderField::Difficulty => 9,
             BlockHeaderField::BlockBodyMerkleRoot => 10,
-            BlockHeaderField::Uncles => 11,
         }
     }
 }
@@ -114,19 +111,13 @@ impl MastHash for BlockHeader {
             self.proof_of_work_family.encode(),
             self.difficulty.encode(),
             self.block_body_merkle_root.encode(),
-            self.uncles.encode(),
-            vec![],
-            vec![],
-            vec![],
-            vec![],
         ]
     }
 }
 
 #[cfg(test)]
 mod block_header_tests {
-    use rand::{thread_rng, Rng, RngCore};
-    use twenty_first::shared_math::other::random_elements;
+    use rand::{thread_rng, Rng};
 
     use super::*;
 
@@ -144,7 +135,6 @@ mod block_header_tests {
             proof_of_work_family: rng.gen(),
             difficulty: rng.gen(),
             block_body_merkle_root: rng.gen(),
-            uncles: random_elements((rng.next_u32() % 3) as usize),
         }
     }
     #[test]

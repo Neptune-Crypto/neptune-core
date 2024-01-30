@@ -65,6 +65,7 @@ fn make_block_template(
         mutator_set_accumulator: next_mutator_set_accumulator.clone(),
         lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
         block_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        uncle_blocks: vec![],
     };
 
     let zero = BFieldElement::zero();
@@ -94,7 +95,6 @@ fn make_block_template(
         proof_of_work_family: new_pow_line,
         difficulty,
         block_body_merkle_root: Hash::hash(&block_body),
-        uncles: vec![],
     };
 
     (block_header, block_body)

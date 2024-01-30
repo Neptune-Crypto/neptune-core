@@ -951,6 +951,7 @@ pub fn make_mock_block(
         mutator_set_accumulator: next_mutator_set.clone(),
         lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
         block_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        uncle_blocks: vec![],
     };
 
     let block_target_difficulty = previous_block.kernel.header.difficulty;
@@ -970,7 +971,6 @@ pub fn make_mock_block(
         proof_of_work_family: pow_family,
         difficulty: target_difficulty,
         block_body_merkle_root: Hash::hash(&block_body),
-        uncles: vec![],
     };
 
     (

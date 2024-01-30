@@ -168,6 +168,7 @@ impl Block {
             mutator_set_accumulator: genesis_mutator_set.clone(),
             block_mmr_accumulator: MmrAccumulator::new(vec![]),
             lock_free_mmr_accumulator: MmrAccumulator::new(vec![]),
+            uncle_blocks: vec![],
         };
 
         let header: BlockHeader = BlockHeader {
@@ -186,7 +187,6 @@ impl Block {
             proof_of_work_family: U32s::zero(),
             difficulty: MINIMUM_DIFFICULTY.into(),
             block_body_merkle_root: Hash::hash(&body),
-            uncles: vec![],
         };
 
         Self::new(header, body, None)
@@ -238,6 +238,7 @@ impl Block {
             mutator_set_accumulator: next_mutator_set_accumulator.clone(),
             lock_free_mmr_accumulator: self.kernel.body.lock_free_mmr_accumulator.clone(),
             block_mmr_accumulator: self.kernel.body.block_mmr_accumulator.clone(),
+            uncle_blocks: self.kernel.body.uncle_blocks.clone(),
         };
 
         let block_header = BlockHeader {
@@ -252,7 +253,6 @@ impl Block {
             proof_of_work_family: self.kernel.header.proof_of_work_family,
             difficulty: self.kernel.header.difficulty,
             block_body_merkle_root: Hash::hash(&block_body),
-            uncles: vec![],
         };
 
         self.kernel.body = block_body;
