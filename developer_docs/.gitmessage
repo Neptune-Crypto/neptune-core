@@ -1,0 +1,31 @@
+# Title: Summary, imperative, start upper case, don't end with a period
+# use convential commit format. http://conventionalcommits.org
+#   <type>[optional scope]: <description>
+#   scope is in parens, eg: feat(lang): added polish language
+#   types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test 
+# No more than 60 chars. #### 60 chars is here: #
+
+# Body: Explain *what* and *why* (not *how*). Include task ID (Jira issue).
+# BREAKING CHANGE: a commit that has the text BREAKING CHANGE: at the
+#   beginning of its optional body or footer section introduces a breaking
+#   API change (correlating with MAJOR in semantic versioning). 
+# Wrap at 72 chars. ################################## which is here: #
+
+
+# At the end: Include Co-authored-by for all contributors. 
+# Include at least one empty line before it. Format: 
+# Co-authored-by: name <user@users.noreply.github.com>
+#
+# How to Write a Git Commit Message:
+# https://chris.beams.io/posts/git-commit/
+#
+# 1.Separate subject from body with a blank line
+# 2. Limit the subject line to 50 characters
+# 3. Capitalize the subject line
+# 4. Do not end the subject line with a period
+# 5. Use the imperative mood in the subject line
+# 6. Wrap the body at 72 characters
+# 7. Use the body to explain what and why vs. how
+
+# Instructions to use this as a template. see
+# https://gist.github.com/lisawolderiksen/a7b99d94c92c6671181611be1641c733
