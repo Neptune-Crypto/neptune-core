@@ -22,7 +22,6 @@ pub const MINIMUM_DIFFICULTY: u32 = 2;
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,
-    pub mutator_set_hash: Digest,
     pub prev_block_digest: Digest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
@@ -65,7 +64,6 @@ impl Display for BlockHeader {
 pub enum BlockHeaderField {
     Version,
     Height,
-    MutatorSetHash,
     PrevBlockDigest,
     Timestamp,
     Nonce,
@@ -80,14 +78,13 @@ impl HasDiscriminant for BlockHeaderField {
         match self {
             BlockHeaderField::Version => 0,
             BlockHeaderField::Height => 1,
-            BlockHeaderField::MutatorSetHash => 2,
-            BlockHeaderField::PrevBlockDigest => 3,
-            BlockHeaderField::Timestamp => 4,
-            BlockHeaderField::Nonce => 5,
-            BlockHeaderField::MaxBlockSize => 6,
-            BlockHeaderField::ProofOfWorkLine => 7,
-            BlockHeaderField::ProofOfWorkFamily => 8,
-            BlockHeaderField::Difficulty => 9,
+            BlockHeaderField::PrevBlockDigest => 2,
+            BlockHeaderField::Timestamp => 3,
+            BlockHeaderField::Nonce => 4,
+            BlockHeaderField::MaxBlockSize => 5,
+            BlockHeaderField::ProofOfWorkLine => 6,
+            BlockHeaderField::ProofOfWorkFamily => 7,
+            BlockHeaderField::Difficulty => 8,
         }
     }
 }
@@ -99,7 +96,6 @@ impl MastHash for BlockHeader {
         vec![
             self.version.encode(),
             self.height.encode(),
-            self.mutator_set_hash.encode(),
             self.prev_block_digest.encode(),
             self.timestamp.encode(),
             self.nonce.encode(),
@@ -122,7 +118,6 @@ mod block_header_tests {
         BlockHeader {
             version: rng.gen(),
             height: BlockHeight::from(rng.gen::<u64>()),
-            mutator_set_hash: rng.gen(),
             prev_block_digest: rng.gen(),
             timestamp: rng.gen(),
             nonce: rng.gen(),

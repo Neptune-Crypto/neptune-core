@@ -74,7 +74,6 @@ fn make_block_template(
     let zero = BFieldElement::zero();
     let new_pow_line: U32s<5> =
         previous_block.kernel.header.proof_of_work_family + previous_block.kernel.header.difficulty;
-    let mutator_set_commitment: Digest = next_mutator_set_accumulator.hash();
     let next_block_height = previous_block.kernel.header.height.next();
     let mut block_timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -89,7 +88,6 @@ fn make_block_template(
     let block_header = BlockHeader {
         version: zero,
         height: next_block_height,
-        mutator_set_hash: mutator_set_commitment,
         prev_block_digest: previous_block.kernel.mast_hash(),
         timestamp: BFieldElement::new(block_timestamp),
         nonce: [zero, zero, zero],

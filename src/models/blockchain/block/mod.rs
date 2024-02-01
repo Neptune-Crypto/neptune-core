@@ -175,7 +175,6 @@ impl Block {
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
-            mutator_set_hash: genesis_mutator_set.hash(),
             prev_block_digest: Digest::default(),
             timestamp,
             nonce: [
@@ -244,7 +243,6 @@ impl Block {
         let block_header = BlockHeader {
             version: self.kernel.header.version,
             height: self.kernel.header.height,
-            mutator_set_hash: next_mutator_set_accumulator.hash(),
             prev_block_digest: self.kernel.header.prev_block_digest,
             timestamp: merged_timestamp,
             nonce: self.kernel.header.nonce,
@@ -378,12 +376,6 @@ impl Block {
                 "From Block\n{:?}. \n\n\nCalculated\n{:?}",
                 block_copy.kernel.body.mutator_set_accumulator, ms
             );
-            return false;
-        }
-
-        // Verify that the locally constructed mutator set matches that in the received block's header
-        if ms.hash() != block_copy.kernel.header.mutator_set_hash {
-            warn!("Mutator set commitment does not match calculated object");
             return false;
         }
 

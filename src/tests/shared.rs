@@ -964,7 +964,6 @@ pub fn make_mock_block(
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
-        mutator_set_hash: next_mutator_set.hash(),
         prev_block_digest: previous_block.hash(),
         timestamp: block_body.transaction.kernel.timestamp,
         nonce: [zero, zero, zero],
