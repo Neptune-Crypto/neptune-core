@@ -99,9 +99,12 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
 
 #[cfg(test)]
 mod ms_accumulator_tests {
-    use crate::util_types::test_shared::mutator_set::*;
+    use crate::util_types::{
+        mutator_set::shared::{BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS, WINDOW_SIZE},
+        test_shared::mutator_set::*,
+    };
     use itertools::{izip, Itertools};
-    use rand::Rng;
+    use rand::{thread_rng, Rng};
     use twenty_first::shared_math::tip5::Tip5;
 
     use crate::util_types::mutator_set::mutator_set_trait::commit;
@@ -416,5 +419,61 @@ mod ms_accumulator_tests {
                 *MutatorSetAccumulator::decode(&encoded).unwrap();
             assert_eq!(msa, decoded);
         }
+    }
+
+    #[ignore]
+    #[test]
+    fn profile() {
+        // populate a mutator set with items according to some target profile,
+        // and then print the size of the mutator set accumulator, in bytes
+        let mut rng = thread_rng();
+        println!(
+            "profiling Mutator Set (w, b, s, k) = ({}, {}, {}, {}) ...",
+            WINDOW_SIZE, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS
+        );
+        let mut msa = MutatorSetAccumulator::new();
+        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<Tip5>)> = vec![];
+        let target_set_size = 100;
+        let num_iterations = 10000;
+
+        for i in 0..num_iterations {
+            if i % 100 == 0 {
+                println!("{}/{}", i, num_iterations);
+            }
+            let operation = if items_and_membership_proofs.len()
+                > (1.25 * target_set_size as f64) as usize
+            {
+                rng.gen_range(0..10) >= 3
+            } else if items_and_membership_proofs.len() < (0.8 * target_set_size as f64) as usize {
+                rng.gen_range(0..10) < 3
+            } else {
+                rng.gen_range(0..10) < 5
+            };
+            if operation && !items_and_membership_proofs.is_empty() {
+                // removal
+                let index = rng.gen_range(0..items_and_membership_proofs.len());
+                let (item, membership_proof) = items_and_membership_proofs.swap_remove(index);
+                let removal_record = msa.drop(item, &membership_proof);
+                for (_it, mp) in items_and_membership_proofs.iter_mut() {
+                    mp.update_from_remove(&removal_record).unwrap();
+                }
+                msa.remove(&removal_record);
+            } else {
+                // addition
+                let item = rng.gen::<Digest>();
+                let sender_randomness = rng.gen::<Digest>();
+                let receiver_preimage = rng.gen::<Digest>();
+                let addition_record = commit::<Tip5>(item, sender_randomness, receiver_preimage);
+                for (it, mp) in items_and_membership_proofs.iter_mut() {
+                    mp.update_from_addition(*it, &msa, &addition_record)
+                        .unwrap();
+                }
+                let membership_proof = msa.prove(item, sender_randomness, receiver_preimage);
+                msa.add(&addition_record);
+                items_and_membership_proofs.push((item, membership_proof));
+            }
+        }
+
+        println!("{} operations resulted in a set containin {} elements; mutator set accumulator size: {} bytes", num_iterations, items_and_membership_proofs.len(), msa.get_size());
     }
 }
