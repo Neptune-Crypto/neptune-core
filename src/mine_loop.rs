@@ -97,7 +97,6 @@ fn make_block_template(
         proof_of_work_line: new_pow_line,
         proof_of_work_family: new_pow_line,
         difficulty,
-        block_body_merkle_root: Hash::hash(&block_body),
     };
 
     (block_header, block_body)

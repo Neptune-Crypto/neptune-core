@@ -41,7 +41,6 @@ pub struct BlockHeader {
 
     // This is the difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
-    pub block_body_merkle_root: Digest,
 }
 
 impl Display for BlockHeader {
@@ -74,7 +73,6 @@ pub enum BlockHeaderField {
     ProofOfWorkLine,
     ProofOfWorkFamily,
     Difficulty,
-    BlockBodyMerkleRoot,
 }
 
 impl HasDiscriminant for BlockHeaderField {
@@ -90,7 +88,6 @@ impl HasDiscriminant for BlockHeaderField {
             BlockHeaderField::ProofOfWorkLine => 7,
             BlockHeaderField::ProofOfWorkFamily => 8,
             BlockHeaderField::Difficulty => 9,
-            BlockHeaderField::BlockBodyMerkleRoot => 10,
         }
     }
 }
@@ -110,7 +107,6 @@ impl MastHash for BlockHeader {
             self.proof_of_work_line.encode(),
             self.proof_of_work_family.encode(),
             self.difficulty.encode(),
-            self.block_body_merkle_root.encode(),
         ]
     }
 }
@@ -134,7 +130,6 @@ mod block_header_tests {
             proof_of_work_line: rng.gen(),
             proof_of_work_family: rng.gen(),
             difficulty: rng.gen(),
-            block_body_merkle_root: rng.gen(),
         }
     }
     #[test]

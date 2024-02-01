@@ -972,7 +972,6 @@ pub fn make_mock_block(
         proof_of_work_line: pow_family,
         proof_of_work_family: pow_family,
         difficulty: target_difficulty,
-        block_body_merkle_root: Hash::hash(&block_body),
     };
 
     (

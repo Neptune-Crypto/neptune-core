@@ -187,7 +187,6 @@ impl Block {
             proof_of_work_line: U32s::zero(),
             proof_of_work_family: U32s::zero(),
             difficulty: MINIMUM_DIFFICULTY.into(),
-            block_body_merkle_root: Hash::hash(&body),
         };
 
         Self::new(header, body, None)
@@ -253,7 +252,6 @@ impl Block {
             proof_of_work_line: self.kernel.header.proof_of_work_line,
             proof_of_work_family: self.kernel.header.proof_of_work_family,
             difficulty: self.kernel.header.difficulty,
-            block_body_merkle_root: Hash::hash(&block_body),
         };
 
         self.kernel.body = block_body;
@@ -429,12 +427,6 @@ impl Block {
         // 4. for every uncle
         //  4.1. verify that uncle's prev_block_digest matches with parent's prev_block_digest
         //  4.2. verify that all uncles' hash are below parent's target_difficulty
-
-        // 5. `block_body_merkle_root`
-        if block_copy.kernel.header.block_body_merkle_root != Hash::hash(&block_copy.kernel.body) {
-            warn!("Block body does not match referenced block body Merkle root");
-            return false;
-        }
 
         true
     }
