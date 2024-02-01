@@ -52,7 +52,8 @@ pub struct BlockBody {
     pub block_mmr_accumulator: MmrAccumulator<Hash>,
 
     /// All blocks that lost the block race to an ancestor of this block and have not been
-    /// listed as uncle before.
+    /// listed as uncle before. The miner will need to prove that between his block and
+    /// its least common ancestor with the uncle block, it was not listed.
     pub uncle_blocks: Vec<Digest>,
 }
 
