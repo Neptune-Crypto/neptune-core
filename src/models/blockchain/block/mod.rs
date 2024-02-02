@@ -497,11 +497,18 @@ mod block_tests {
         },
         tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
     };
-    use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
+    use tasm_lib::twenty_first::{
+        storage::level_db::DB,
+        util_types::{
+            emojihash_trait::Emojihash,
+            mmr::archival_mmr::ArchivalMmr,
+            storage_schema::{SimpleRustyStorage, StorageWriter},
+        },
+    };
 
     use super::*;
 
-    use rand::random;
+    use rand::{random, thread_rng, Rng};
     use tracing_test::traced_test;
 
     #[traced_test]
@@ -617,5 +624,64 @@ mod block_tests {
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
 
         assert!(!block_1.is_valid(&genesis_block));
+    }
+
+    #[test]
+    fn can_prove_block_ancestry() {
+        let genesis_block = Block::genesis_block();
+        let mut blocks = vec![];
+        blocks.push(genesis_block.clone());
+        let db = DB::open_new_test_database(true, None, None, None).unwrap();
+        let mut storage = SimpleRustyStorage::new(db);
+        storage.restore_or_new();
+        let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0");
+        let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage);
+        ammr.append(genesis_block.hash());
+        let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
+
+        for i in 0..55 {
+            let wallet_secret = WalletSecret::new_random();
+            let recipient_address = wallet_secret.nth_generation_spending_key(0).to_address();
+            let (new_block, _, _) =
+                make_mock_block(blocks.last().unwrap(), None, recipient_address);
+            if i != 54 {
+                ammr.append(new_block.hash());
+                mmra.append(new_block.hash());
+                assert_eq!(ammr.to_accumulator().bag_peaks(), mmra.bag_peaks());
+            }
+            blocks.push(new_block);
+        }
+
+        let last_block_mmra = blocks.last().unwrap().body().block_mmr_accumulator.clone();
+        assert_eq!(mmra, last_block_mmra);
+
+        let index = thread_rng().gen_range(0..blocks.len() - 1);
+        let block_digest = blocks[index].hash();
+        let (membership_proof, _) = ammr.prove_membership(index as u64);
+        let (v, _) = membership_proof.verify(
+            &last_block_mmra.get_peaks(),
+            block_digest,
+            last_block_mmra.count_leaves(),
+        );
+        assert!(
+            v,
+            "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {} leaf index: {}",
+            last_block_mmra
+                .get_peaks()
+                .iter()
+                .map(|d| d.emojihash())
+                .join(","),
+            last_block_mmra.get_peaks().len(),
+            last_block_mmra.count_leaves(),
+            membership_proof.leaf_index,
+            membership_proof
+                .authentication_path
+                .iter()
+                .map(|d| d.emojihash())
+                .join(","),
+            blocks.len(),
+            membership_proof.leaf_index
+        );
+        assert_eq!(last_block_mmra.count_leaves(), blocks.len() as u64 - 1);
     }
 }
