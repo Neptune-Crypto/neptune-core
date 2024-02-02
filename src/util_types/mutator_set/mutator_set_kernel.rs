@@ -183,7 +183,16 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
             }
 
             // If chunk index is not in the active part, insert the index into the relevant chunk
-            let relevant_chunk = new_target_chunks.dictionary.get_mut(&chunk_index).unwrap();
+            let new_target_chunks_clone = new_target_chunks.clone();
+            let relevant_chunk = new_target_chunks
+                .dictionary
+                .get_mut(&chunk_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Can't get chunk index {chunk_index} from dictionary! dictionary: {:?}",
+                        new_target_chunks_clone.dictionary
+                    )
+                });
             for index in indices {
                 let relative_index = (index % CHUNK_SIZE as u128) as u32;
                 relevant_chunk.1.insert(relative_index);

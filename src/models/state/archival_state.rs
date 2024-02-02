@@ -7,11 +7,11 @@ use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::path::PathBuf;
-use tracing::debug;
+use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
+use tracing::{debug, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::storage::level_db::DB;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::traits::*;
 
@@ -200,10 +200,10 @@ impl ArchivalState {
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
         if archival_mutator_set.ams().kernel.aocl.is_empty() {
-            for addition_record in genesis_block.body.transaction.kernel.outputs.iter() {
+            for addition_record in genesis_block.kernel.body.transaction.kernel.outputs.iter() {
                 archival_mutator_set.ams_mut().add(addition_record);
             }
-            archival_mutator_set.set_sync_label(genesis_block.hash);
+            archival_mutator_set.set_sync_label(genesis_block.hash());
             archival_mutator_set.persist();
         }
 
@@ -261,13 +261,13 @@ impl ArchivalState {
             .await
             .map(|x| x.as_file_record());
         let file_record_value: FileRecord = match file_record_value {
-            Some(record) => record.add(serialized_block_size, &new_block.header),
+            Some(record) => record.add(serialized_block_size, &new_block.kernel.header),
             None => {
                 assert!(
                     block_file.metadata().unwrap().len().is_zero(),
                     "If no file record exists, block file must be empty"
                 );
-                FileRecord::new(serialized_block_size, &new_block.header)
+                FileRecord::new(serialized_block_size, &new_block.kernel.header)
             }
         };
 
@@ -287,7 +287,7 @@ impl ArchivalState {
             block_file.metadata().unwrap().len()
         );
 
-        let height_record_key = BlockIndexKey::Height(new_block.header.height);
+        let height_record_key = BlockIndexKey::Height(new_block.kernel.header.height);
         let mut blocks_at_same_height: Vec<Digest> =
             match self.block_index_db.get(height_record_key.clone()).await {
                 Some(rec) => rec.as_height_record(),
@@ -306,9 +306,9 @@ impl ArchivalState {
 
         // Update block index database with newly stored block
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
-        let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash);
+        let block_record_key: BlockIndexKey = BlockIndexKey::Block(new_block.hash());
         let block_record_value: BlockIndexValue = BlockIndexValue::Block(Box::new(BlockRecord {
-            block_header: new_block.header.clone(),
+            block_header: new_block.kernel.header.clone(),
             file_location: BlockFileLocation {
                 file_index: last_rec.last_file,
                 offset: file_offset,
@@ -320,7 +320,7 @@ impl ArchivalState {
         block_index_entries.push((block_record_key, block_record_value));
 
         block_index_entries.push((BlockIndexKey::LastFile, BlockIndexValue::LastFile(last_rec)));
-        blocks_at_same_height.push(new_block.hash);
+        blocks_at_same_height.push(new_block.hash());
         block_index_entries.push((
             height_record_key,
             BlockIndexValue::Height(blocks_at_same_height),
@@ -328,11 +328,11 @@ impl ArchivalState {
 
         // Mark block as tip if its PoW family is larger than current most canonical
         if current_max_pow_family.is_none()
-            || current_max_pow_family.unwrap() < new_block.header.proof_of_work_family
+            || current_max_pow_family.unwrap() < new_block.kernel.header.proof_of_work_family
         {
             block_index_entries.push((
                 BlockIndexKey::BlockTipDigest,
-                BlockIndexValue::BlockTipDigest(new_block.hash),
+                BlockIndexValue::BlockTipDigest(new_block.hash()),
             ));
         }
 
@@ -408,8 +408,8 @@ impl ArchivalState {
             .map(|x| x.as_block_record().block_header);
 
         // If no block was found, check if digest is genesis digest
-        if ret.is_none() && block_digest == self.genesis_block.hash {
-            ret = Some(self.genesis_block.header.clone());
+        if ret.is_none() && block_digest == self.genesis_block.hash() {
+            ret = Some(self.genesis_block.kernel.header.clone());
         }
 
         ret
@@ -425,7 +425,7 @@ impl ArchivalState {
         let record: BlockRecord = match maybe_record {
             Some(rec) => rec,
             None => {
-                if self.genesis_block.hash == block_digest {
+                if self.genesis_block.hash() == block_digest {
                     return Ok(Some(*self.genesis_block.clone()));
                 } else {
                     return Ok(None);
@@ -457,65 +457,123 @@ impl ArchivalState {
         &self,
         block_height: BlockHeight,
     ) -> Vec<BlockHeader> {
-        let maybe_digests = self
-            .block_index_db
-            .get(BlockIndexKey::Height(block_height))
-            .await
-            .map(|x| x.as_height_record());
-
-        match maybe_digests {
-            Some(block_digests) => {
-                let mut block_headers = vec![];
-                for block_digest in block_digests {
-                    let block_header = self
-                        .block_index_db
-                        .get(BlockIndexKey::Block(block_digest))
-                        .await
-                        .map(|x| x.as_block_record())
-                        .unwrap();
-                    block_headers.push(block_header.block_header);
-                }
-
-                block_headers
-            }
-            None => vec![],
+        let block_digests = self.block_height_to_block_digests(block_height).await;
+        let mut block_headers = vec![];
+        for block_digest in block_digests.into_iter() {
+            let block = self
+                .block_index_db
+                .get(BlockIndexKey::Block(block_digest))
+                .await
+                .map(|x| x.as_block_record())
+                .unwrap();
+            block_headers.push(block.block_header);
         }
+
+        block_headers
     }
 
-    pub async fn get_children_blocks(&self, parent_block_header: &BlockHeader) -> Vec<BlockHeader> {
+    /// Return the digests of the known blocks at a specific height
+    pub async fn block_height_to_block_digests(&self, block_height: BlockHeight) -> Vec<Digest> {
+        self.block_index_db
+            .get(BlockIndexKey::Height(block_height))
+            .await
+            .map(|x| x.as_height_record())
+            .unwrap_or_else(Vec::new)
+    }
+
+    pub async fn get_children_block_headers(
+        &self,
+        parent_block_digest: Digest,
+    ) -> Vec<BlockHeader> {
+        // get header
+        let parent_block_header = match self.get_block_header(parent_block_digest).await {
+            Some(header) => header,
+            None => {
+                warn!("Querying for children of unknown parent block digest.");
+                return vec![];
+            }
+        };
         // Get all blocks with height n + 1
         let blocks_from_childrens_generation: Vec<BlockHeader> = self
             .block_height_to_block_headers(parent_block_header.height.next())
             .await;
 
         // Filter out those that don't have the right parent
-        let parent_block_header_digest = Hash::hash(parent_block_header);
         blocks_from_childrens_generation
             .into_iter()
             .filter(|child_block_header| {
-                child_block_header.prev_block_digest == parent_block_header_digest
+                child_block_header.prev_block_digest == parent_block_digest
             })
             .collect()
+    }
+
+    /// Get all immediate children of the given block, no grandchildren or higher-order
+    /// descendants.
+    pub async fn get_children_block_digests(&self, parent_block_digest: Digest) -> Vec<Digest> {
+        // get header
+        let parent_block_header = match self.get_block_header(parent_block_digest).await {
+            Some(header) => header,
+            None => {
+                warn!("Querying for children of unknown parent block digest.");
+                return vec![];
+            }
+        };
+        // Get all blocks with height n + 1
+        let children_digests = self
+            .block_height_to_block_digests(parent_block_header.height.next())
+            .await;
+        let mut downstream_children = vec![];
+        for child_digest in children_digests {
+            let child_header =
+                self
+                .get_block_header(child_digest)
+                .await
+                .unwrap_or_else(
+                    || panic!(
+                        "Cannot get block header from digest, even though digest was fetched from height. Digest: {}/{}",
+                        child_digest,
+                        child_digest.emojihash()
+                    )
+                );
+            if child_header.prev_block_digest == parent_block_digest {
+                downstream_children.push(child_digest);
+            }
+        }
+
+        downstream_children
     }
 
     /// Return a boolean indicating if block belongs to most canonical chain
     pub async fn block_belongs_to_canonical_chain(
         &self,
-        block_header: &BlockHeader,
-        tip_header: &BlockHeader,
+        block_digest: Digest,
+        tip_digest: Digest,
     ) -> bool {
-        let block_header_digest = Hash::hash(block_header);
-        let tip_header_digest = Hash::hash(tip_header);
+        let block_header = self
+            .get_block_header(block_digest)
+            .await
+            .unwrap_or_else(|| {
+                panic!(
+                    "Could not get block header by digest: {}/{}",
+                    block_digest,
+                    block_digest.emojihash()
+                )
+            });
+        let tip_header = self.get_block_header(tip_digest).await.unwrap_or_else(|| {
+            panic!(
+                "Could not get block header by digest: {}/{}",
+                tip_digest,
+                tip_digest.emojihash()
+            )
+        });
 
         // If block is tip or parent to tip, then block belongs to canonical chain
-        if tip_header_digest == block_header_digest
-            || tip_header.prev_block_digest == block_header_digest
-        {
+        if tip_digest == block_digest || tip_header.prev_block_digest == block_digest {
             return true;
         }
 
         // If block is genesis block, it belongs to the canonical chain
-        if block_header_digest == self.genesis_block.hash {
+        if block_digest == self.genesis_block.hash() {
             return true;
         }
 
@@ -536,7 +594,7 @@ impl ArchivalState {
         }
 
         // Find the path from block to tip and check if this involves stepping back
-        let (backwards, _, _) = self.find_path(block_header_digest, tip_header_digest).await;
+        let (backwards, _, _) = self.find_path(block_digest, tip_digest).await;
 
         backwards.is_empty()
     }
@@ -559,7 +617,7 @@ impl ArchivalState {
             if count == 0 {
                 break;
             }
-            ret.push(Hash::hash(&parent));
+            ret.push(parent_digest);
             parent_digest = parent.prev_block_digest;
             count -= 1;
         }
@@ -579,15 +637,18 @@ impl ArchivalState {
             // Find path from mutator set sync digest to new block. Optimize for the common case,
             // where the new block is the child block of block that the mutator set is synced to.
             let (backwards, _luca, forwards) =
-                if ms_block_sync_digest == new_block.header.prev_block_digest {
+                if ms_block_sync_digest == new_block.kernel.header.prev_block_digest {
                     // Trivial path
                     (vec![], ms_block_sync_digest, vec![])
                 } else {
                     // Non-trivial path from current mutator set sync digest to new block
-                    self.find_path(ms_block_sync_digest, new_block.header.prev_block_digest)
-                        .await
+                    self.find_path(
+                        ms_block_sync_digest,
+                        new_block.kernel.header.prev_block_digest,
+                    )
+                    .await
                 };
-            let forwards = [forwards, vec![new_block.hash]].concat();
+            let forwards = [forwards, vec![new_block.hash()]].concat();
 
             (forwards, backwards)
         };
@@ -602,11 +663,19 @@ impl ArchivalState {
 
             debug!(
                 "Updating mutator set: rolling back block with height {}",
-                roll_back_block.header.height
+                roll_back_block.kernel.header.height
             );
 
             // Roll back all addition records contained in block
-            for addition_record in roll_back_block.body.transaction.kernel.outputs.iter().rev() {
+            for addition_record in roll_back_block
+                .kernel
+                .body
+                .transaction
+                .kernel
+                .outputs
+                .iter()
+                .rev()
+            {
                 assert!(
                     self.archival_mutator_set
                         .ams_mut()
@@ -619,7 +688,7 @@ impl ArchivalState {
             }
 
             // Roll back all removal records contained in block
-            for removal_record in roll_back_block.body.transaction.kernel.inputs.iter() {
+            for removal_record in roll_back_block.kernel.body.transaction.kernel.inputs.iter() {
                 self.archival_mutator_set
                     .ams_mut()
                     .revert_remove(removal_record);
@@ -628,7 +697,7 @@ impl ArchivalState {
 
         for digest in forwards {
             // Add block to mutator set
-            let apply_forward_block = if digest == new_block.hash {
+            let apply_forward_block = if digest == new_block.hash() {
                 new_block.to_owned()
             } else {
                 self.get_block(digest)
@@ -638,15 +707,28 @@ impl ArchivalState {
             };
             debug!(
                 "Updating mutator set: adding block with height {}.  Mined: {}",
-                apply_forward_block.header.height,
-                crate::utc_timestamp_to_localtime(apply_forward_block.header.timestamp.value())
-                    .to_string()
+                apply_forward_block.kernel.header.height,
+                crate::utc_timestamp_to_localtime(
+                    apply_forward_block.kernel.header.timestamp.value()
+                )
+                .to_string()
             );
 
-            let mut addition_records: Vec<AdditionRecord> =
-                apply_forward_block.body.transaction.kernel.outputs.clone();
+            let mut addition_records: Vec<AdditionRecord> = apply_forward_block
+                .kernel
+                .body
+                .transaction
+                .kernel
+                .outputs
+                .clone();
             addition_records.reverse();
-            let mut removal_records = apply_forward_block.body.transaction.kernel.inputs.clone();
+            let mut removal_records = apply_forward_block
+                .kernel
+                .body
+                .transaction
+                .kernel
+                .inputs
+                .clone();
             removal_records.reverse();
             let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
                 removal_records.iter_mut().collect::<Vec<_>>();
@@ -680,15 +762,15 @@ impl ArchivalState {
         debug!("sanity check: was AMS updated consistently with new block?");
         assert_eq!(
             new_block
-                .body
-                .next_mutator_set_accumulator
+                .kernel.body
+                .mutator_set_accumulator
                 .hash(),
             self.archival_mutator_set.ams().hash(),
-            "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash
+            "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash()
         );
 
         // Persist updated mutator set to disk, with sync label
-        self.archival_mutator_set.set_sync_label(new_block.hash);
+        self.archival_mutator_set.set_sync_label(new_block.hash());
         self.archival_mutator_set.persist();
 
         Ok(())
@@ -697,12 +779,14 @@ impl ArchivalState {
 
 #[cfg(test)]
 mod archival_state_tests {
+
     use super::*;
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::utxo::LockScript;
-    use crate::models::blockchain::transaction::PubScript;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
+    use crate::models::consensus::mast_hash::MastHash;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
@@ -744,7 +828,7 @@ mod archival_state_tests {
                 .await
                 .unwrap();
             let _c = archival_state0
-                .get_block(block_1.hash)
+                .get_block(block_1.hash())
                 .await
                 .unwrap()
                 .unwrap();
@@ -761,7 +845,13 @@ mod archival_state_tests {
         let archival_state = make_test_archival_state(Network::Alpha).await;
 
         assert_eq!(
-            Block::genesis_block().body.transaction.kernel.outputs.len() as u64,
+            Block::genesis_block()
+                .kernel
+                .body
+                .transaction
+                .kernel
+                .outputs
+                .len() as u64,
             archival_state
                 .archival_mutator_set
                 .ams()
@@ -772,7 +862,7 @@ mod archival_state_tests {
         );
 
         assert_eq!(
-            Block::genesis_block().hash,
+            Block::genesis_block().hash(),
             archival_state.archival_mutator_set.get_sync_label(),
             "AMS must be synced to genesis block after initialization from genesis block"
         );
@@ -804,7 +894,7 @@ mod archival_state_tests {
         let restored_archival_state = archival_state;
 
         assert_eq!(
-            mock_block_1.hash,
+            mock_block_1.hash(),
             restored_archival_state
                 .archival_mutator_set
                 .get_sync_label(),
@@ -845,9 +935,17 @@ mod archival_state_tests {
                 .update_mutator_set(&mock_block_1)
                 .await
                 .unwrap();
+            let msa = genesis_receiver_global_state
+                .chain
+                .archival_state_mut()
+                .genesis_block
+                .kernel
+                .body
+                .mutator_set_accumulator
+                .clone();
             genesis_receiver_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&mock_block_1)
+                .update_wallet_state_with_new_block(&msa, &mock_block_1)
                 .await
                 .unwrap();
 
@@ -866,8 +964,7 @@ mod archival_state_tests {
             let sender_tx = genesis_receiver_global_state
                 .create_transaction(
                     vec![UtxoReceiverData {
-                        pubscript: PubScript::default(),
-                        pubscript_input: vec![],
+                        public_announcement: PublicAnnouncement::default(),
                         receiver_privacy_digest: random(),
                         sender_randomness: random(),
                         utxo: Utxo {
@@ -918,7 +1015,7 @@ mod archival_state_tests {
         archival_state
             .write_block(
                 &mock_block_1a,
-                Some(mock_block_1a.header.proof_of_work_family),
+                Some(mock_block_1a.kernel.header.proof_of_work_family),
             )
             .await?;
 
@@ -937,7 +1034,7 @@ mod archival_state_tests {
         archival_state
             .write_block(
                 &mock_block_1a,
-                Some(mock_block_1b.header.proof_of_work_family),
+                Some(mock_block_1b.kernel.header.proof_of_work_family),
             )
             .await?;
 
@@ -984,8 +1081,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: random(),
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -994,8 +1090,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: random(),
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
         ];
         let sender_tx = global_state_lock
@@ -1011,7 +1106,7 @@ mod archival_state_tests {
 
         {
             archival_state
-                .write_block(&block_1a, Some(block_1a.header.proof_of_work_family))
+                .write_block(&block_1a, Some(block_1a.kernel.header.proof_of_work_family))
                 .await
                 .unwrap();
 
@@ -1025,7 +1120,10 @@ mod archival_state_tests {
                 own_receiving_address,
             );
             archival_state
-                .write_block(&block_1a, Some(mock_block_1b.header.proof_of_work_family))
+                .write_block(
+                    &block_1a,
+                    Some(mock_block_1b.kernel.header.proof_of_work_family),
+                )
                 .await
                 .unwrap();
 
@@ -1097,8 +1195,7 @@ mod archival_state_tests {
                     },
                     sender_randomness: random(),
                     receiver_privacy_digest: random(),
-                    pubscript: PubScript::default(),
-                    pubscript_input: vec![],
+                    public_announcement: PublicAnnouncement::default(),
                 },
                 UtxoReceiverData {
                     utxo: Utxo {
@@ -1107,8 +1204,7 @@ mod archival_state_tests {
                     },
                     sender_randomness: random(),
                     receiver_privacy_digest: random(),
-                    pubscript: PubScript::default(),
-                    pubscript_input: vec![],
+                    public_announcement: PublicAnnouncement::default(),
                 },
             ];
             let sender_tx = global_state
@@ -1128,7 +1224,10 @@ mod archival_state_tests {
                 global_state
                     .chain
                     .archival_state_mut()
-                    .write_block(&next_block, Some(next_block.header.proof_of_work_family))
+                    .write_block(
+                        &next_block,
+                        Some(next_block.kernel.header.proof_of_work_family),
+                    )
                     .await?;
                 global_state
                     .chain
@@ -1146,7 +1245,10 @@ mod archival_state_tests {
                 // 3. Update wallet state so we can continue making transactions
                 global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(&next_block)
+                    .update_wallet_state_with_new_block(
+                        &previous_block.kernel.body.mutator_set_accumulator,
+                        &next_block,
+                    )
                     .await
                     .unwrap();
             }
@@ -1154,10 +1256,10 @@ mod archival_state_tests {
             // Genesis block may have a different number of outputs than the blocks produced above
             if i == 0 {
                 _aocl_index_of_consumed_input +=
-                    genesis_block.body.transaction.kernel.outputs.len() as u64;
+                    genesis_block.kernel.body.transaction.kernel.outputs.len() as u64;
             } else {
                 _aocl_index_of_consumed_input +=
-                    next_block.body.transaction.kernel.outputs.len() as u64;
+                    next_block.kernel.body.transaction.kernel.outputs.len() as u64;
             }
 
             previous_block = next_block;
@@ -1172,7 +1274,7 @@ mod archival_state_tests {
                 .archival_state_mut()
                 .write_block(
                     &mock_block_1b,
-                    Some(mock_block_1b.header.proof_of_work_family),
+                    Some(mock_block_1b.kernel.header.proof_of_work_family),
                 )
                 .await?;
 
@@ -1237,8 +1339,7 @@ mod archival_state_tests {
         // Add a valid input to the block transaction
         let one_money: Amount = Into::<Amount>::into(1);
         let receiver_data = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: random(),
             sender_randomness: random(),
             utxo: Utxo {
@@ -1291,8 +1392,7 @@ mod archival_state_tests {
         let sender_randomness: Digest = random();
         let receiver_data_for_alice = vec![
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1301,8 +1401,7 @@ mod archival_state_tests {
                 },
             },
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1314,8 +1413,7 @@ mod archival_state_tests {
         // Two outputs for Bob
         let receiver_data_for_bob = vec![
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1324,8 +1422,7 @@ mod archival_state_tests {
                 },
             },
             UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
                 sender_randomness,
                 utxo: Utxo {
@@ -1354,6 +1451,13 @@ mod archival_state_tests {
             assert!(block_1.is_valid(&genesis_block));
         }
 
+        println!("Accumulated transaction into block_1.");
+        println!(
+            "Transaction has {} inputs (removal records) and {} outputs (addition records)",
+            block_1.kernel.body.transaction.kernel.inputs.len(),
+            block_1.kernel.body.transaction.kernel.outputs.len()
+        );
+
         // Update chain states
         for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
             let mut state = state_lock.lock_guard_mut().await;
@@ -1381,7 +1485,10 @@ mod archival_state_tests {
                 .unwrap();
             genesis_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&block_1)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
                 .await
                 .unwrap();
             assert_eq!(
@@ -1410,7 +1517,10 @@ mod archival_state_tests {
             }
             alice_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&block_1)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
                 .await
                 .unwrap();
         }
@@ -1431,7 +1541,10 @@ mod archival_state_tests {
             }
             bob_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&block_1)
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
                 .await
                 .unwrap();
         }
@@ -1466,8 +1579,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -1476,8 +1588,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
         ];
         let tx_from_alice = alice_state_lock
@@ -1494,8 +1605,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -1504,8 +1614,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
             UtxoReceiverData {
                 utxo: Utxo {
@@ -1514,8 +1623,7 @@ mod archival_state_tests {
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
             },
         ];
         let tx_from_bob = bob_state_lock
@@ -1531,11 +1639,25 @@ mod archival_state_tests {
         let (mut block_2, cb_utxo_block_2, cb_sender_randomness_block_2) =
             make_mock_block_with_valid_pow(&block_1, None, genesis_spending_key.to_address());
         block_2.accumulate_transaction(tx_from_alice);
+        assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
+        assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
+
+        // This test is flaky!
+        // It fails roughly every 3 out of 10 runs. If you run with `-- --nocapture` then
+        // (on Alan's machine) it runs with a 100% success rate. But doing that *and*
+        // commenting out the next two print statements boosts the failure rate again.
+        println!("accumulated Alice's transaction into block; number of inputs: {}; number of outputs: {}", block_2.kernel.body.transaction.kernel.inputs.len(), block_2.kernel.body.transaction.kernel.outputs.len());
+        println!(
+            "Transaction from Bob has {} inputs and {} outputs",
+            tx_from_bob.kernel.inputs.len(),
+            tx_from_bob.kernel.outputs.len()
+        );
+
         block_2.accumulate_transaction(tx_from_bob);
 
         // Sanity checks
-        assert_eq!(4, block_2.body.transaction.kernel.inputs.len());
-        assert_eq!(6, block_2.body.transaction.kernel.outputs.len());
+        assert_eq!(4, block_2.kernel.body.transaction.kernel.inputs.len());
+        assert_eq!(6, block_2.kernel.body.transaction.kernel.outputs.len());
         assert!(block_2.is_valid(&block_1));
 
         // Update chain states
@@ -1556,14 +1678,20 @@ mod archival_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(&block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
             .await
             .unwrap();
         bob_state_lock
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(&block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
             .await
             .unwrap();
         assert!(alice_state_lock
@@ -1626,7 +1754,10 @@ mod archival_state_tests {
             .lock_guard_mut()
             .await
             .wallet_state
-            .update_wallet_state_with_new_block(&block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
             .await
             .unwrap();
 
@@ -1645,7 +1776,7 @@ mod archival_state_tests {
             let state = state_lock.lock_guard().await;
 
             assert_eq!(
-                block_2.body.next_mutator_set_accumulator,
+                block_2.kernel.body.mutator_set_accumulator,
                 state
                     .chain
                     .archival_state()
@@ -1724,14 +1855,14 @@ mod archival_state_tests {
             make_mock_block_with_valid_pow(&genesis.clone(), None, own_receiving_address);
 
         // Lookup a block in an empty database, expect None to be returned
-        let ret0 = archival_state.get_block(mock_block_1.hash).await?;
+        let ret0 = archival_state.get_block(mock_block_1.hash()).await?;
         assert!(
             ret0.is_none(),
             "Must return a block when one is stored to DB"
         );
 
         add_block_to_archival_state(&mut archival_state, mock_block_1.clone()).await?;
-        let ret1 = archival_state.get_block(mock_block_1.hash).await?;
+        let ret1 = archival_state.get_block(mock_block_1.hash()).await?;
         assert!(
             ret1.is_some(),
             "Must return a block when one is stored to DB"
@@ -1746,12 +1877,18 @@ mod archival_state_tests {
         let (mock_block_2, _, _) =
             make_mock_block_with_valid_pow(&mock_block_1.clone(), None, own_receiving_address);
         add_block_to_archival_state(&mut archival_state, mock_block_2.clone()).await?;
-        let fetched2 = archival_state.get_block(mock_block_2.hash).await?.unwrap();
+        let fetched2 = archival_state
+            .get_block(mock_block_2.hash())
+            .await?
+            .unwrap();
         assert_eq!(
             mock_block_2, fetched2,
             "Returned block must match the one inserted"
         );
-        let fetched1 = archival_state.get_block(mock_block_1.hash).await?.unwrap();
+        let fetched1 = archival_state
+            .get_block(mock_block_1.hash())
+            .await?
+            .unwrap();
         assert_eq!(
             mock_block_1, fetched1,
             "Returned block must match the one inserted"
@@ -1769,7 +1906,10 @@ mod archival_state_tests {
         }
 
         for block in blocks {
-            assert_eq!(block, archival_state.get_block(block.hash).await?.unwrap());
+            assert_eq!(
+                block,
+                archival_state.get_block(block.hash()).await?.unwrap()
+            );
         }
 
         Ok(())
@@ -1783,8 +1923,9 @@ mod archival_state_tests {
         let genesis = *archival_state.genesis_block.clone();
 
         // Test that `find_path` returns the correct result
-        let (backwards_0, luca_0, forwards_0) =
-            archival_state.find_path(genesis.hash, genesis.hash).await;
+        let (backwards_0, luca_0, forwards_0) = archival_state
+            .find_path(genesis.hash(), genesis.hash())
+            .await;
         assert!(
             backwards_0.is_empty(),
             "Backwards path from genesis to genesis is empty"
@@ -1794,7 +1935,8 @@ mod archival_state_tests {
             "Forward path from genesis to genesis is empty"
         );
         assert_eq!(
-            genesis.hash, luca_0,
+            genesis.hash(),
+            luca_0,
             "Luca of genesis and genesis is genesis"
         );
 
@@ -1811,49 +1953,49 @@ mod archival_state_tests {
 
         // Test 1a
         let (backwards_1, luca_1, forwards_1) = archival_state
-            .find_path(genesis.hash, mock_block_1_a.hash)
+            .find_path(genesis.hash(), mock_block_1_a.hash())
             .await;
         assert!(
             backwards_1.is_empty(),
             "Backwards path from genesis to 1a is empty"
         );
         assert_eq!(
-            vec![mock_block_1_a.hash],
+            vec![mock_block_1_a.hash()],
             forwards_1,
             "Forwards from genesis to block 1a is block 1a"
         );
-        assert_eq!(genesis.hash, luca_1, "Luca of genesis and 1a is genesis");
+        assert_eq!(genesis.hash(), luca_1, "Luca of genesis and 1a is genesis");
 
         // Test 1b
         let (backwards_2, luca_2, forwards_2) = archival_state
-            .find_path(genesis.hash, mock_block_1_b.hash)
+            .find_path(genesis.hash(), mock_block_1_b.hash())
             .await;
         assert!(
             backwards_2.is_empty(),
             "Backwards path from genesis to 1b is empty"
         );
         assert_eq!(
-            vec![mock_block_1_b.hash],
+            vec![mock_block_1_b.hash()],
             forwards_2,
             "Forwards from genesis to block 1b is block 1a"
         );
-        assert_eq!(genesis.hash, luca_2, "Luca of genesis and 1b is genesis");
+        assert_eq!(genesis.hash(), luca_2, "Luca of genesis and 1b is genesis");
 
         // Test 1a to 1b
         let (backwards_3, luca_3, forwards_3) = archival_state
-            .find_path(mock_block_1_a.hash, mock_block_1_b.hash)
+            .find_path(mock_block_1_a.hash(), mock_block_1_b.hash())
             .await;
         assert_eq!(
-            vec![mock_block_1_a.hash],
+            vec![mock_block_1_a.hash()],
             backwards_3,
             "Backwards path from 1a to 1b is 1a"
         );
         assert_eq!(
-            vec![mock_block_1_b.hash],
+            vec![mock_block_1_b.hash()],
             forwards_3,
             "Forwards from 1a to block 1b is block 1b"
         );
-        assert_eq!(genesis.hash, luca_3, "Luca of 1a and 1b is genesis");
+        assert_eq!(genesis.hash(), luca_3, "Luca of 1a and 1b is genesis");
 
         Ok(())
     }
@@ -1933,7 +2075,10 @@ mod archival_state_tests {
         let genesis = *archival_state.genesis_block.clone();
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(&genesis.header, &genesis.header)
+                .block_belongs_to_canonical_chain(
+                    genesis.kernel.mast_hash(),
+                    genesis.kernel.mast_hash()
+                )
                 .await,
             "Genesis block is always part of the canonical chain, tip"
         );
@@ -1946,13 +2091,19 @@ mod archival_state_tests {
         add_block_to_archival_state(&mut archival_state, mock_block_1.clone()).await?;
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(&genesis.header, &mock_block_1.header)
+                .block_belongs_to_canonical_chain(
+                    genesis.kernel.mast_hash(),
+                    mock_block_1.kernel.mast_hash()
+                )
                 .await,
             "Genesis block is always part of the canonical chain, tip parent"
         );
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(&mock_block_1.header, &mock_block_1.header)
+                .block_belongs_to_canonical_chain(
+                    mock_block_1.kernel.mast_hash(),
+                    mock_block_1.kernel.mast_hash()
+                )
                 .await,
             "Tip block is always part of the canonical chain"
         );
@@ -1979,18 +2130,24 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(&block.header, &mock_block_4_a.header)
+                    .block_belongs_to_canonical_chain(
+                        block.kernel.mast_hash(),
+                        mock_block_4_a.kernel.mast_hash()
+                    )
                     .await,
-                "only chain {} is canonical",
+                "block {} does not belong to canonical chain",
                 i
             );
-            dag_walker_leash_prop(block.hash, mock_block_4_a.hash, &archival_state).await;
-            dag_walker_leash_prop(mock_block_4_a.hash, block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_4_a.hash(), &archival_state).await;
+            dag_walker_leash_prop(mock_block_4_a.hash(), block.hash(), &archival_state).await;
         }
 
         assert!(
             archival_state
-                .block_belongs_to_canonical_chain(&genesis.header, &mock_block_4_a.header)
+                .block_belongs_to_canonical_chain(
+                    genesis.kernel.mast_hash(),
+                    mock_block_4_a.kernel.mast_hash()
+                )
                 .await,
             "Genesis block is always part of the canonical chain, block height is four"
         );
@@ -2021,13 +2178,16 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(&block.header, &mock_block_4_a.header)
+                    .block_belongs_to_canonical_chain(
+                        block.kernel.mast_hash(),
+                        mock_block_4_a.kernel.mast_hash()
+                    )
                     .await,
                 "canonical chain {} is canonical",
                 i
             );
-            dag_walker_leash_prop(block.hash, mock_block_4_a.hash, &archival_state).await;
-            dag_walker_leash_prop(mock_block_4_a.hash, block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_4_a.hash(), &archival_state).await;
+            dag_walker_leash_prop(mock_block_4_a.hash(), block.hash(), &archival_state).await;
         }
 
         // These blocks do not belong to the canonical chain since block 4_a has a higher PoW family
@@ -2043,13 +2203,16 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(&block.header, &mock_block_4_a.header)
+                    .block_belongs_to_canonical_chain(
+                        block.kernel.mast_hash(),
+                        mock_block_4_a.kernel.mast_hash()
+                    )
                     .await,
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(block.hash, mock_block_4_a.hash, &archival_state).await;
-            dag_walker_leash_prop(mock_block_4_a.hash, block.hash, &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_4_a.hash(), &archival_state).await;
+            dag_walker_leash_prop(mock_block_4_a.hash(), block.hash(), &archival_state).await;
         }
 
         // Make a complicated tree and verify that the function identifies the correct blocks as part
@@ -2125,13 +2288,16 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_d.header)
+                    .block_belongs_to_canonical_chain(
+                        block.kernel.mast_hash(),
+                        mock_block_6_d.kernel.mast_hash()
+                    )
                     .await,
                 "canonical chain {} is canonical, complicated",
                 i
             );
-            dag_walker_leash_prop(mock_block_6_d.hash, block.hash, &archival_state).await;
-            dag_walker_leash_prop(block.hash, mock_block_6_d.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_d.hash(), block.hash(), &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_6_d.hash(), &archival_state).await;
         }
 
         for (i, block) in [
@@ -2156,13 +2322,16 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_d.header)
+                    .block_belongs_to_canonical_chain(
+                        block.kernel.mast_hash(),
+                        mock_block_6_d.kernel.mast_hash()
+                    )
                     .await,
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(mock_block_6_d.hash, block.hash, &archival_state).await;
-            dag_walker_leash_prop(block.hash, mock_block_6_d.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_d.hash(), block.hash(), &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_6_d.hash(), &archival_state).await;
         }
 
         // Make a new block, 6b, canonical and verify that all checks work
@@ -2192,13 +2361,16 @@ mod archival_state_tests {
         {
             assert!(
                 !archival_state
-                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_b.header)
+                    .block_belongs_to_canonical_chain(
+                        block.kernel.mast_hash(),
+                        mock_block_6_b.kernel.mast_hash()
+                    )
                     .await,
                 "Stale chain {} is not canonical",
                 i
             );
-            dag_walker_leash_prop(mock_block_6_b.hash, block.hash, &archival_state).await;
-            dag_walker_leash_prop(block.hash, mock_block_6_b.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_b.hash(), block.hash(), &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_6_b.hash(), &archival_state).await;
         }
 
         for (i, block) in [
@@ -2215,13 +2387,16 @@ mod archival_state_tests {
         {
             assert!(
                 archival_state
-                    .block_belongs_to_canonical_chain(&block.header, &mock_block_6_b.header)
+                    .block_belongs_to_canonical_chain(
+                        block.kernel.mast_hash(),
+                        mock_block_6_b.kernel.mast_hash()
+                    )
                     .await,
                 "canonical chain {} is canonical, complicated",
                 i
             );
-            dag_walker_leash_prop(mock_block_6_b.hash, block.hash, &archival_state).await;
-            dag_walker_leash_prop(block.hash, mock_block_6_b.hash, &archival_state).await;
+            dag_walker_leash_prop(mock_block_6_b.hash(), block.hash(), &archival_state).await;
+            dag_walker_leash_prop(block.hash(), mock_block_6_b.hash(), &archival_state).await;
         }
 
         // An explicit test of `find_path`
@@ -2238,30 +2413,30 @@ mod archival_state_tests {
         //
         // Note that in the later test, 6b becomes the tip.
         let (backwards, luca, forwards) = archival_state
-            .find_path(mock_block_5_e.hash, mock_block_6_b.hash)
+            .find_path(mock_block_5_e.hash(), mock_block_6_b.hash())
             .await;
         assert_eq!(
             vec![
-                mock_block_2_b.hash,
-                mock_block_3_b.hash,
-                mock_block_4_b.hash,
-                mock_block_5_b.hash,
-                mock_block_6_b.hash,
+                mock_block_2_b.hash(),
+                mock_block_3_b.hash(),
+                mock_block_4_b.hash(),
+                mock_block_5_b.hash(),
+                mock_block_6_b.hash(),
             ],
             forwards,
             "find_path forwards return value must match expected value"
         );
         assert_eq!(
             vec![
-                mock_block_5_e.hash,
-                mock_block_4_e.hash,
-                mock_block_3_d.hash,
-                mock_block_2_a.hash
+                mock_block_5_e.hash(),
+                mock_block_4_e.hash(),
+                mock_block_3_d.hash(),
+                mock_block_2_a.hash()
             ],
             backwards,
             "find_path backwards return value must match expected value"
         );
-        assert_eq!(mock_block_1.hash, luca, "Luca must be block 1");
+        assert_eq!(mock_block_1.hash(), luca, "Luca must be block 1");
 
         Ok(())
     }
@@ -2274,7 +2449,7 @@ mod archival_state_tests {
 
         let genesis = archival_state.genesis_block.clone();
         archival_state
-            .get_ancestor_block_digests(genesis.header.prev_block_digest, 10)
+            .get_ancestor_block_digests(genesis.kernel.header.prev_block_digest, 10)
             .await;
     }
 
@@ -2287,15 +2462,15 @@ mod archival_state_tests {
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
 
         assert!(archival_state
-            .get_ancestor_block_digests(genesis.hash, 10)
+            .get_ancestor_block_digests(genesis.hash(), 10)
             .await
             .is_empty());
         assert!(archival_state
-            .get_ancestor_block_digests(genesis.hash, 1)
+            .get_ancestor_block_digests(genesis.hash(), 1)
             .await
             .is_empty());
         assert!(archival_state
-            .get_ancestor_block_digests(genesis.hash, 0)
+            .get_ancestor_block_digests(genesis.hash(), 0)
             .await
             .is_empty());
 
@@ -2322,57 +2497,57 @@ mod archival_state_tests {
             .unwrap();
 
         assert!(archival_state
-            .get_ancestor_block_digests(genesis.hash, 10)
+            .get_ancestor_block_digests(genesis.hash(), 10)
             .await
             .is_empty());
         assert!(archival_state
-            .get_ancestor_block_digests(genesis.hash, 1)
+            .get_ancestor_block_digests(genesis.hash(), 1)
             .await
             .is_empty());
         assert!(archival_state
-            .get_ancestor_block_digests(genesis.hash, 0)
+            .get_ancestor_block_digests(genesis.hash(), 0)
             .await
             .is_empty());
 
         // Check that ancestors of block 1 and 2 return the right values
         let ancestors_of_1 = archival_state
-            .get_ancestor_block_digests(mock_block_1.hash, 10)
+            .get_ancestor_block_digests(mock_block_1.hash(), 10)
             .await;
         assert_eq!(1, ancestors_of_1.len());
-        assert_eq!(genesis.hash, ancestors_of_1[0]);
+        assert_eq!(genesis.hash(), ancestors_of_1[0]);
         assert!(archival_state
-            .get_ancestor_block_digests(mock_block_1.hash, 0)
+            .get_ancestor_block_digests(mock_block_1.hash(), 0)
             .await
             .is_empty());
 
         let ancestors_of_2 = archival_state
-            .get_ancestor_block_digests(mock_block_2.hash, 10)
+            .get_ancestor_block_digests(mock_block_2.hash(), 10)
             .await;
         assert_eq!(2, ancestors_of_2.len());
-        assert_eq!(mock_block_1.hash, ancestors_of_2[0]);
-        assert_eq!(genesis.hash, ancestors_of_2[1]);
+        assert_eq!(mock_block_1.hash(), ancestors_of_2[0]);
+        assert_eq!(genesis.hash(), ancestors_of_2[1]);
         assert!(archival_state
-            .get_ancestor_block_digests(mock_block_2.hash, 0)
+            .get_ancestor_block_digests(mock_block_2.hash(), 0)
             .await
             .is_empty());
 
         // Verify that max length is respected
         let ancestors_of_4_long = archival_state
-            .get_ancestor_block_digests(mock_block_4.hash, 10)
+            .get_ancestor_block_digests(mock_block_4.hash(), 10)
             .await;
         assert_eq!(4, ancestors_of_4_long.len());
-        assert_eq!(mock_block_3.hash, ancestors_of_4_long[0]);
-        assert_eq!(mock_block_2.hash, ancestors_of_4_long[1]);
-        assert_eq!(mock_block_1.hash, ancestors_of_4_long[2]);
-        assert_eq!(genesis.hash, ancestors_of_4_long[3]);
+        assert_eq!(mock_block_3.hash(), ancestors_of_4_long[0]);
+        assert_eq!(mock_block_2.hash(), ancestors_of_4_long[1]);
+        assert_eq!(mock_block_1.hash(), ancestors_of_4_long[2]);
+        assert_eq!(genesis.hash(), ancestors_of_4_long[3]);
         let ancestors_of_4_short = archival_state
-            .get_ancestor_block_digests(mock_block_4.hash, 2)
+            .get_ancestor_block_digests(mock_block_4.hash(), 2)
             .await;
         assert_eq!(2, ancestors_of_4_short.len());
-        assert_eq!(mock_block_3.hash, ancestors_of_4_short[0]);
-        assert_eq!(mock_block_2.hash, ancestors_of_4_short[1]);
+        assert_eq!(mock_block_3.hash(), ancestors_of_4_short[0]);
+        assert_eq!(mock_block_2.hash(), ancestors_of_4_short[1]);
         assert!(archival_state
-            .get_ancestor_block_digests(mock_block_4.hash, 0)
+            .get_ancestor_block_digests(mock_block_4.hash(), 0)
             .await
             .is_empty());
     }
@@ -2388,7 +2563,10 @@ mod archival_state_tests {
         let (mock_block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis.clone(), None, own_receiving_address);
         archival_state
-            .write_block(&mock_block_1, Some(genesis.header.proof_of_work_family))
+            .write_block(
+                &mock_block_1,
+                Some(genesis.kernel.header.proof_of_work_family),
+            )
             .await?;
 
         // Verify that `LastFile` value is stored correctly
@@ -2412,7 +2590,7 @@ mod archival_state_tests {
                 .as_height_record();
 
             assert_eq!(1, blocks_with_height_1.len());
-            assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
+            assert_eq!(mock_block_1.hash(), blocks_with_height_1[0]);
         }
 
         // Verify that `File` value is stored correctly
@@ -2429,11 +2607,11 @@ mod archival_state_tests {
         let expected_block_len_1 = bincode::serialize(&mock_block_1).unwrap().len();
         assert_eq!(expected_block_len_1, last_file_record_1.file_size as usize);
         assert_eq!(
-            mock_block_1.header.height,
+            mock_block_1.kernel.header.height,
             last_file_record_1.min_block_height
         );
         assert_eq!(
-            mock_block_1.header.height,
+            mock_block_1.kernel.header.height,
             last_file_record_1.max_block_height
         );
 
@@ -2445,17 +2623,17 @@ mod archival_state_tests {
             .unwrap()
             .as_tip_digest();
 
-        assert_eq!(mock_block_1.hash, tip_digest);
+        assert_eq!(mock_block_1.hash(), tip_digest);
 
         // Verify that `Block` is stored correctly
         let actual_block: BlockRecord = archival_state
             .block_index_db
-            .get(BlockIndexKey::Block(mock_block_1.hash))
+            .get(BlockIndexKey::Block(mock_block_1.hash()))
             .await
             .unwrap()
             .as_block_record();
 
-        assert_eq!(mock_block_1.header, actual_block.block_header);
+        assert_eq!(mock_block_1.kernel.header, actual_block.block_header);
         assert_eq!(
             expected_block_len_1,
             actual_block.file_location.block_length
@@ -2475,7 +2653,7 @@ mod archival_state_tests {
         archival_state
             .write_block(
                 &mock_block_2,
-                Some(mock_block_1.header.proof_of_work_family),
+                Some(mock_block_1.kernel.header.proof_of_work_family),
             )
             .await?;
 
@@ -2497,7 +2675,7 @@ mod archival_state_tests {
                 .unwrap()
                 .as_height_record();
             assert_eq!(1, blocks_with_height_1.len());
-            assert_eq!(mock_block_1.hash, blocks_with_height_1[0]);
+            assert_eq!(mock_block_1.hash(), blocks_with_height_1[0]);
         }
 
         {
@@ -2508,7 +2686,7 @@ mod archival_state_tests {
                 .unwrap()
                 .as_height_record();
             assert_eq!(1, blocks_with_height_2.len());
-            assert_eq!(mock_block_2.hash, blocks_with_height_2[0]);
+            assert_eq!(mock_block_2.hash(), blocks_with_height_2[0]);
         }
         // Verify that `File` value is updated correctly
         let expected_file_2: u32 = read_last_file.last_file;
@@ -2525,11 +2703,11 @@ mod archival_state_tests {
             last_file_record_2.file_size as usize
         );
         assert_eq!(
-            mock_block_1.header.height,
+            mock_block_1.kernel.header.height,
             last_file_record_2.min_block_height
         );
         assert_eq!(
-            mock_block_2.header.height,
+            mock_block_2.kernel.header.height,
             last_file_record_2.max_block_height
         );
 
@@ -2540,17 +2718,20 @@ mod archival_state_tests {
             .await
             .unwrap()
             .as_tip_digest();
-        assert_eq!(mock_block_2.hash, tip_digest_2);
+        assert_eq!(mock_block_2.hash(), tip_digest_2);
 
         // Verify that `Block` is stored correctly
         let actual_block_record_2: BlockRecord = archival_state
             .block_index_db
-            .get(BlockIndexKey::Block(mock_block_2.hash))
+            .get(BlockIndexKey::Block(mock_block_2.hash()))
             .await
             .unwrap()
             .as_block_record();
 
-        assert_eq!(mock_block_2.header, actual_block_record_2.block_header);
+        assert_eq!(
+            mock_block_2.kernel.header,
+            actual_block_record_2.block_header
+        );
         assert_eq!(
             expected_block_len_2,
             actual_block_record_2.file_location.block_length
@@ -2573,48 +2754,50 @@ mod archival_state_tests {
             .get_block_from_block_record(actual_block_record_2)
             .unwrap();
         assert_eq!(mock_block_2, block_from_block_record);
-        assert_eq!(mock_block_2.hash, block_from_block_record.hash);
+        assert_eq!(mock_block_2.hash(), block_from_block_record.hash());
 
         // Test `get_block_header`
         let block_header_2 = archival_state
-            .get_block_header(mock_block_2.hash)
+            .get_block_header(mock_block_2.hash())
             .await
             .unwrap();
-        assert_eq!(mock_block_2.header, block_header_2);
+        assert_eq!(mock_block_2.kernel.header, block_header_2);
 
         // Test `get_block_header`
         {
             let block_header_2_from_lock_method = archival_state
-                .get_block_header(mock_block_2.hash)
+                .get_block_header(mock_block_2.hash())
                 .await
                 .unwrap();
-            assert_eq!(mock_block_2.header, block_header_2_from_lock_method);
+            assert_eq!(mock_block_2.kernel.header, block_header_2_from_lock_method);
 
-            let genesis_header_from_lock_method =
-                archival_state.get_block_header(genesis.hash).await.unwrap();
-            assert_eq!(genesis.header, genesis_header_from_lock_method);
+            let genesis_header_from_lock_method = archival_state
+                .get_block_header(genesis.hash())
+                .await
+                .unwrap();
+            assert_eq!(genesis.kernel.header, genesis_header_from_lock_method);
         }
 
         // Test `block_height_to_block_headers`
         let block_headers_of_height_2 =
             archival_state.block_height_to_block_headers(2.into()).await;
         assert_eq!(1, block_headers_of_height_2.len());
-        assert_eq!(mock_block_2.header, block_headers_of_height_2[0]);
+        assert_eq!(mock_block_2.kernel.header, block_headers_of_height_2[0]);
 
         // Test `get_children_blocks`
         let children_of_mock_block_1 = archival_state
-            .get_children_blocks(&mock_block_1.header)
+            .get_children_block_headers(mock_block_1.kernel.mast_hash())
             .await;
         assert_eq!(1, children_of_mock_block_1.len());
-        assert_eq!(mock_block_2.header, children_of_mock_block_1[0]);
+        assert_eq!(mock_block_2.kernel.header, children_of_mock_block_1[0]);
 
         // Test `get_ancestor_block_digests`
         let ancestor_digests = archival_state
-            .get_ancestor_block_digests(mock_block_2.hash, 10)
+            .get_ancestor_block_digests(mock_block_2.hash(), 10)
             .await;
         assert_eq!(2, ancestor_digests.len());
-        assert_eq!(Hash::hash(&mock_block_1.header), ancestor_digests[0]);
-        assert_eq!(Hash::hash(&genesis.header), ancestor_digests[1]);
+        assert_eq!(mock_block_1.kernel.mast_hash(), ancestor_digests[0]);
+        assert_eq!(genesis.kernel.mast_hash(), ancestor_digests[1]);
 
         Ok(())
     }

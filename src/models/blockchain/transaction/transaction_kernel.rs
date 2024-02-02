@@ -1,20 +1,18 @@
-use crate::prelude::twenty_first;
+use crate::{
+    models::consensus::mast_hash::{HasDiscriminant, MastHash},
+    prelude::twenty_first,
+};
 
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::structure::tasm_object::TasmObject;
-use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{
-        algebraic_hasher::AlgebraicHasher,
-        merkle_tree::{CpuParallel, MerkleTree},
-        merkle_tree_maker::MerkleTreeMaker,
-    },
+use twenty_first::shared_math::{
+    b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest,
 };
 
-use super::{amount::pseudorandom_amount, Amount};
+use super::{amount::pseudorandom_amount, Amount, PublicAnnouncement};
 use crate::{
     util_types::mutator_set::{
         addition_record::{pseudorandom_addition_record, AdditionRecord},
@@ -23,21 +21,11 @@ use crate::{
     Hash,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct PubScriptHashAndInput {
-    pub pubscript_hash: Digest,
-    pub pubscript_input: Vec<BFieldElement>,
-}
-
-pub fn pseudorandom_pubscript_struct(seed: [u8; 32]) -> PubScriptHashAndInput {
+pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let digest: Digest = rng.gen();
     let len = 10 + (rng.next_u32() % 50) as usize;
-    let input: Vec<BFieldElement> = (0..len).map(|_| rng.gen()).collect_vec();
-    PubScriptHashAndInput {
-        pubscript_hash: digest,
-        pubscript_input: input,
-    }
+    let message = (0..len).map(|_| rng.gen()).collect_vec();
+    PublicAnnouncement { message }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
@@ -47,7 +35,7 @@ pub struct TransactionKernel {
     // `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,
 
-    pub pubscript_hashes_and_inputs: Vec<PubScriptHashAndInput>,
+    pub public_announcements: Vec<PublicAnnouncement>,
     pub fee: Amount,
     pub coinbase: Option<Amount>,
 
@@ -57,6 +45,7 @@ pub struct TransactionKernel {
     pub mutator_set_hash: Digest,
 }
 
+#[derive(Debug, Clone)]
 pub enum TransactionKernelField {
     InputUtxos,
     OutputUtxos,
@@ -67,28 +56,22 @@ pub enum TransactionKernelField {
     MutatorSetHash,
 }
 
-impl TransactionKernelField {
-    pub fn discriminant(&self) -> usize {
-        match self {
-            TransactionKernelField::InputUtxos => 0,
-            TransactionKernelField::OutputUtxos => 1,
-            TransactionKernelField::Pubscript => 2,
-            TransactionKernelField::Fee => 3,
-            TransactionKernelField::Coinbase => 4,
-            TransactionKernelField::Timestamp => 5,
-            TransactionKernelField::MutatorSetHash => 6,
-        }
+impl HasDiscriminant for TransactionKernelField {
+    fn discriminant(&self) -> usize {
+        self.clone() as usize
     }
 }
 
-impl TransactionKernel {
+impl MastHash for TransactionKernel {
+    type FieldEnum = TransactionKernelField;
+
     /// Return the sequences (= leaf preimages) of the kernel Merkle tree.
-    pub fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
         let input_utxos_sequence = self.inputs.encode();
 
         let output_utxos_sequence = self.outputs.encode();
 
-        let pubscript_sequence = self.pubscript_hashes_and_inputs.encode();
+        let pubscript_sequence = self.public_announcements.encode();
 
         let fee_sequence = self.fee.encode();
 
@@ -107,34 +90,6 @@ impl TransactionKernel {
             timestamp_sequence,
             mutator_set_hash_sequence,
         ]
-    }
-
-    fn merkle_tree(&self) -> MerkleTree<Hash> {
-        // get a sequence of BFieldElements for each field
-        let sequences = self.mast_sequences();
-
-        let mut mt_leafs = sequences
-            .iter()
-            .map(|seq| Hash::hash_varlen(seq))
-            .collect_vec();
-
-        // pad until power of two
-        while mt_leafs.len() & (mt_leafs.len() - 1) != 0 {
-            mt_leafs.push(Digest::default());
-        }
-
-        // compute Merkle tree and return hash
-        <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&mt_leafs).unwrap()
-    }
-
-    pub fn mast_path(&self, field: TransactionKernelField) -> Vec<Digest> {
-        self.merkle_tree()
-            .authentication_structure(&[field.discriminant()])
-            .unwrap()
-    }
-
-    pub fn mast_hash(&self) -> Digest {
-        self.merkle_tree().root()
     }
 }
 
@@ -161,7 +116,7 @@ pub fn pseudorandom_transaction_kernel(
         .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
         .collect_vec();
     let pubscripts = (0..num_pubscripts)
-        .map(|_| pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>()))
+        .map(|_| pseudorandom_public_announcement(rng.gen::<[u8; 32]>()))
         .collect_vec();
     let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
     let coinbase = pseudorandom_option(rng.gen(), pseudorandom_amount(rng.gen::<[u8; 32]>()));
@@ -171,7 +126,7 @@ pub fn pseudorandom_transaction_kernel(
     TransactionKernel {
         inputs,
         outputs,
-        pubscript_hashes_and_inputs: pubscripts,
+        public_announcements: pubscripts,
         fee,
         coinbase,
         timestamp,
@@ -185,25 +140,25 @@ pub mod transaction_kernel_tests {
     use rand::{random, thread_rng, Rng, RngCore};
 
     use crate::{
-        tests::shared::{random_pubscript_struct, random_transaction_kernel},
+        tests::shared::{random_public_announcement, random_transaction_kernel},
         util_types::mutator_set::{removal_record::AbsoluteIndexSet, shared::NUM_TRIALS},
     };
 
     use super::*;
 
     #[test]
-    pub fn decode_pubscripthash_and_input() {
-        let pubscript = random_pubscript_struct();
+    pub fn decode_public_announcement() {
+        let pubscript = random_public_announcement();
         let encoded = pubscript.encode();
-        let decoded = *PubScriptHashAndInput::decode(&encoded).unwrap();
+        let decoded = *PublicAnnouncement::decode(&encoded).unwrap();
         assert_eq!(pubscript, decoded);
     }
 
     #[test]
-    pub fn decode_pubscripthashes_and_inputs() {
-        let pubscripts = vec![random_pubscript_struct(), random_pubscript_struct()];
+    pub fn decode_public_announcements() {
+        let pubscripts = vec![random_public_announcement(), random_public_announcement()];
         let encoded = pubscripts.encode();
-        let decoded = *Vec::<PubScriptHashAndInput>::decode(&encoded).unwrap();
+        let decoded = *Vec::<PublicAnnouncement>::decode(&encoded).unwrap();
         assert_eq!(pubscripts, decoded);
     }
 
@@ -234,7 +189,7 @@ pub mod transaction_kernel_tests {
             outputs: vec![AdditionRecord {
                 canonical_commitment: random(),
             }],
-            pubscript_hashes_and_inputs: Default::default(),
+            public_announcements: Default::default(),
             fee: Amount::one(),
             coinbase: None,
             timestamp: Default::default(),

@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
 use field_count::FieldCount;
@@ -14,15 +15,12 @@ use twenty_first::{
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
 };
 
-use crate::models::blockchain::transaction::validity::SecretWitness;
+use crate::models::consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
 use crate::{
     models::blockchain::{
         shared::Hash,
         transaction::{
-            transaction_kernel::TransactionKernel,
-            utxo::Utxo,
-            validity::{ClaimSupport, SupportedClaim, ValidationLogic},
-            PrimitiveWitness,
+            transaction_kernel::TransactionKernel, utxo::Utxo, TransactionPrimitiveWitness,
         },
     },
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
@@ -50,7 +48,10 @@ pub struct RemovalRecordsIntegrityWitness {
 }
 
 impl RemovalRecordsIntegrityWitness {
-    pub fn new(primitive_witness: &PrimitiveWitness, tx_kernel: &TransactionKernel) -> Self {
+    pub fn new(
+        primitive_witness: &TransactionPrimitiveWitness,
+        tx_kernel: &TransactionKernel,
+    ) -> Self {
         Self {
             input_utxos: primitive_witness.input_utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
@@ -92,8 +93,12 @@ pub struct RemovalRecordsIntegrity {
 }
 
 impl ValidationLogic<RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrity {
+    type PrimitiveWitness = TransactionPrimitiveWitness;
+
+    type Kernel = TransactionKernel;
+
     fn new_from_primitive_witness(
-        primitive_witness: &crate::models::blockchain::transaction::PrimitiveWitness,
+        primitive_witness: &crate::models::blockchain::transaction::TransactionPrimitiveWitness,
         tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
     ) -> Self {
         let removal_records_integrity_witness =

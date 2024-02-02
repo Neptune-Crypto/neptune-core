@@ -1,3 +1,4 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
 pub mod amount;
@@ -6,6 +7,7 @@ pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
+use crate::models::consensus::Witness;
 use anyhow::Result;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -16,13 +18,7 @@ use std::cmp::max;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::SystemTime;
 use tracing::{debug, error, warn};
-use triton_vm::instruction::LabelledInstruction;
-use triton_vm::program::Program;
-use triton_vm::proof::Proof;
-use triton_vm::{
-    prelude::{NonDeterminism, PublicInput},
-    triton_asm,
-};
+use triton_vm::prelude::NonDeterminism;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -30,7 +26,7 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use self::amount::Amount;
 use self::native_coin::native_coin_program;
-use self::transaction_kernel::{PubScriptHashAndInput, TransactionKernel};
+use self::transaction_kernel::TransactionKernel;
 use self::utxo::{LockScript, TypeScript, Utxo};
 use self::validity::TransactionValidationLogic;
 use super::block::Block;
@@ -41,86 +37,38 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct PubScript {
-    pub program: Program,
+pub type TransactionWitness = Witness<TransactionPrimitiveWitness, TransactionValidationLogic>;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
+pub struct PublicAnnouncement {
+    pub message: Vec<BFieldElement>,
 }
 
-impl Default for PubScript {
-    fn default() -> Self {
-        Self {
-            program: Program::new(&triton_asm!(halt)),
-        }
-    }
-}
-
-impl From<Vec<LabelledInstruction>> for PubScript {
-    fn from(instrs: Vec<LabelledInstruction>) -> Self {
-        Self {
-            program: Program::new(&instrs),
-        }
-    }
-}
-
-impl From<&[LabelledInstruction]> for PubScript {
-    fn from(instrs: &[LabelledInstruction]) -> Self {
-        Self {
-            program: Program::new(instrs),
-        }
+impl PublicAnnouncement {
+    pub fn new(message: Vec<BFieldElement>) -> Self {
+        Self { message }
     }
 }
 
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct PrimitiveWitness {
+pub struct TransactionPrimitiveWitness {
     pub input_utxos: Vec<Utxo>,
     pub input_lock_scripts: Vec<LockScript>,
     pub type_scripts: Vec<TypeScript>,
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
     pub output_utxos: Vec<Utxo>,
-    pub pubscripts: Vec<PubScript>,
+    pub public_announcements: Vec<PublicAnnouncement>,
     pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
-}
-
-/// Single proofs are the final abstaction layer for transaction
-/// witnesses. It represents the merger of a set of linked proofs
-/// into one. It hides information that linked proofs expose, but
-/// the downside is that it requires multiple runs of the recursive
-/// prover to produce.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
-pub struct SingleProof(pub Proof);
-
-impl GetSize for SingleProof {
-    fn get_stack_size() -> usize {
-        std::mem::size_of::<Self>()
-    }
-
-    fn get_heap_size(&self) -> usize {
-        self.0.get_heap_size()
-    }
-
-    fn get_size(&self) -> usize {
-        Self::get_stack_size() + GetSize::get_heap_size(self)
-    }
-}
-
-// TODO: Remove this allow once `ValidityLogic` is more sane
-#[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub enum Witness {
-    Primitive(PrimitiveWitness),
-    SingleProof(SingleProof),
-    ValidityLogic((TransactionValidationLogic, PrimitiveWitness)),
-    Faith,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct Transaction {
     pub kernel: TransactionKernel,
 
-    pub witness: Witness,
+    pub witness: TransactionWitness,
 }
 
 /// Make `Transaction` hashable with `StdHash` for using it in `HashMap`.
@@ -139,15 +87,18 @@ impl Transaction {
     /// compatibility with a new block. Note that for SingleProof witnesses, this will
     /// invalidate the proof, requiring an update. For LinkedProofs or PrimitiveWitness
     /// witnesses the witness data can be and is updated.
-    pub fn update_mutator_set_records(&mut self, block: &Block) -> Result<()> {
-        let mut msa_state: MutatorSetAccumulator<Hash> =
-            block.body.previous_mutator_set_accumulator.to_owned();
+    pub fn update_mutator_set_records(
+        &mut self,
+        previous_mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+        block: &Block,
+    ) -> Result<()> {
+        let mut msa_state: MutatorSetAccumulator<Hash> = previous_mutator_set_accumulator.clone();
         let block_addition_records: Vec<AdditionRecord> =
-            block.body.transaction.kernel.outputs.clone();
+            block.kernel.body.transaction.kernel.outputs.clone();
         let mut transaction_removal_records: Vec<RemovalRecord<Hash>> = self.kernel.inputs.clone();
         let mut transaction_removal_records: Vec<&mut RemovalRecord<Hash>> =
             transaction_removal_records.iter_mut().collect();
-        let mut block_removal_records = block.body.transaction.kernel.inputs.clone();
+        let mut block_removal_records = block.kernel.body.transaction.kernel.inputs.clone();
         block_removal_records.reverse();
         let mut block_removal_records: Vec<&mut RemovalRecord<Hash>> =
             block_removal_records.iter_mut().collect::<Vec<_>>();
@@ -210,7 +161,7 @@ impl Transaction {
         }
 
         // Sanity check of block validity
-        let block_msa_hash = block.body.next_mutator_set_accumulator.clone().hash();
+        let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash();
         assert_eq!(
             msa_state.hash(),
             block_msa_hash,
@@ -243,7 +194,7 @@ impl Transaction {
     /// isolation, without the context of the canonical chain.
     pub fn is_valid(&self) -> bool {
         match &self.witness {
-            Witness::ValidityLogic((validity_logic, _)) => validity_logic.verify(),
+            Witness::ValidationLogic(validity_logic) => validity_logic.verify(),
             Witness::Primitive(primitive_witness) => {
                 warn!("Verifying transaction by raw witness; unlock key might be exposed!");
                 self.validate_primitive_witness(primitive_witness)
@@ -282,9 +233,9 @@ impl Transaction {
         let merged_kernel = TransactionKernel {
             inputs: [self.kernel.inputs, other.kernel.inputs].concat(),
             outputs: [self.kernel.outputs, other.kernel.outputs].concat(),
-            pubscript_hashes_and_inputs: [
-                self.kernel.pubscript_hashes_and_inputs,
-                other.kernel.pubscript_hashes_and_inputs,
+            public_announcements: [
+                self.kernel.public_announcements,
+                other.kernel.public_announcements,
             ]
             .concat(),
             fee: self.kernel.fee + other.kernel.fee,
@@ -295,7 +246,7 @@ impl Transaction {
 
         let merged_witness = match (&self.witness, &other.witness) {
             (Witness::Primitive(self_witness), Witness::Primitive(other_witness)) => {
-                Witness::Primitive(PrimitiveWitness {
+                Witness::Primitive(TransactionPrimitiveWitness {
                     input_utxos: [
                         self_witness.input_utxos.clone(),
                         other_witness.input_utxos.clone(),
@@ -328,9 +279,9 @@ impl Transaction {
                         other_witness.output_utxos.clone(),
                     ]
                     .concat(),
-                    pubscripts: [
-                        self_witness.pubscripts.clone(),
-                        other_witness.pubscripts.clone(),
+                    public_announcements: [
+                        self_witness.public_announcements.clone(),
+                        other_witness.public_announcements.clone(),
                     ]
                     .concat(),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
@@ -338,7 +289,9 @@ impl Transaction {
             }
 
             // TODO: Merge with recursion
-            (Witness::ValidityLogic(_self_vl), Witness::ValidityLogic(_other_vl)) => Witness::Faith,
+            (Witness::ValidationLogic(_self_vl), Witness::ValidationLogic(_other_vl)) => {
+                Witness::Faith
+            }
             (Witness::Faith, _) => Witness::Faith,
             (_, Witness::Faith) => Witness::Faith,
             _ => {
@@ -377,7 +330,7 @@ impl Transaction {
             .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
     }
 
-    fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
+    fn validate_primitive_witness(&self, primitive_witness: &TransactionPrimitiveWitness) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
             .input_lock_scripts
@@ -532,34 +485,7 @@ impl Transaction {
             return false;
         }
 
-        // verify pubscripts
-        for (
-            PubScriptHashAndInput {
-                pubscript_hash,
-                pubscript_input,
-            },
-            pubscript,
-        ) in self
-            .kernel
-            .pubscript_hashes_and_inputs
-            .iter()
-            .zip(primitive_witness.pubscripts.iter())
-        {
-            if *pubscript_hash != Hash::hash(pubscript) {
-                return false;
-            }
-
-            let secret_input: Vec<BFieldElement> = vec![];
-
-            // The pubscript is satisfied if it halts gracefully without crashing.
-            if let Err(err) = pubscript.program.run(
-                PublicInput::new(pubscript_input.to_vec()),
-                NonDeterminism::new(secret_input),
-            ) {
-                warn!("Could not verify pubscript for transaction; got err: \"{err}\".");
-                return false;
-            }
-        }
+        // in regards to public announcements: there isn't anything to verify
 
         true
     }
@@ -571,19 +497,19 @@ mod witness_tests {
 
     #[test]
     fn decode_encode_test_empty() {
-        let primitive_witness = PrimitiveWitness {
+        let primitive_witness = TransactionPrimitiveWitness {
             input_utxos: vec![],
             type_scripts: vec![],
             input_lock_scripts: vec![],
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: vec![],
-            pubscripts: vec![],
+            public_announcements: vec![],
             mutator_set_accumulator: MutatorSetAccumulator::new(),
         };
 
         let encoded = primitive_witness.encode();
-        let decoded = *PrimitiveWitness::decode(&encoded).unwrap();
+        let decoded = *TransactionPrimitiveWitness::decode(&encoded).unwrap();
         assert_eq!(primitive_witness, decoded);
     }
 }

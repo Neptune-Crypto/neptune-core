@@ -1,5 +1,8 @@
 use crate::prelude::twenty_first;
 
+use crate::models::consensus::mast_hash::HasDiscriminant;
+use crate::models::consensus::mast_hash::MastHash;
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -15,11 +18,10 @@ pub const PROOF_OF_WORK_COUNT_U32_SIZE: usize = 5;
 pub const TARGET_BLOCK_INTERVAL: u64 = 588000; // 9.8 minutes in milliseconds
 pub const MINIMUM_DIFFICULTY: u32 = 2;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, GetSize)]
 pub struct BlockHeader {
     pub version: BFieldElement,
     pub height: BlockHeight,
-    pub mutator_set_hash: Digest,
     pub prev_block_digest: Digest,
 
     // TODO: Reject blocks that are more than 10 seconds into the future
@@ -38,8 +40,6 @@ pub struct BlockHeader {
 
     // This is the difficulty for the *next* block. Unit: expected # hashes
     pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
-    pub block_body_merkle_root: Digest,
-    pub uncles: Vec<Digest>,
 }
 
 impl Display for BlockHeader {
@@ -61,10 +61,46 @@ impl Display for BlockHeader {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum BlockHeaderField {
+    Version,
+    Height,
+    PrevBlockDigest,
+    Timestamp,
+    Nonce,
+    MaxBlockSize,
+    ProofOfWorkLine,
+    ProofOfWorkFamily,
+    Difficulty,
+}
+
+impl HasDiscriminant for BlockHeaderField {
+    fn discriminant(&self) -> usize {
+        self.clone() as usize
+    }
+}
+
+impl MastHash for BlockHeader {
+    type FieldEnum = BlockHeaderField;
+
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+        vec![
+            self.version.encode(),
+            self.height.encode(),
+            self.prev_block_digest.encode(),
+            self.timestamp.encode(),
+            self.nonce.encode(),
+            self.max_block_size.encode(),
+            self.proof_of_work_line.encode(),
+            self.proof_of_work_family.encode(),
+            self.difficulty.encode(),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod block_header_tests {
-    use rand::{thread_rng, Rng, RngCore};
-    use twenty_first::shared_math::other::random_elements;
+    use rand::{thread_rng, Rng};
 
     use super::*;
 
@@ -73,7 +109,6 @@ mod block_header_tests {
         BlockHeader {
             version: rng.gen(),
             height: BlockHeight::from(rng.gen::<u64>()),
-            mutator_set_hash: rng.gen(),
             prev_block_digest: rng.gen(),
             timestamp: rng.gen(),
             nonce: rng.gen(),
@@ -81,8 +116,6 @@ mod block_header_tests {
             proof_of_work_line: rng.gen(),
             proof_of_work_family: rng.gen(),
             difficulty: rng.gen(),
-            block_body_merkle_root: rng.gen(),
-            uncles: random_elements((rng.next_u32() % 3) as usize),
         }
     }
     #[test]

@@ -1,5 +1,6 @@
 use crate::prelude::twenty_first;
 
+use get_size::GetSize;
 use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -9,7 +10,9 @@ use std::{
 };
 use twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Hash, BFieldCodec, GetSize,
+)]
 pub struct BlockHeight(BFieldElement);
 
 // Assuming a block time of 10 minutes, and a halving every three years,

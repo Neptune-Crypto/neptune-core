@@ -28,6 +28,8 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
 use tokio_util::codec::{Encoder, LengthDelimitedCodec};
@@ -47,19 +49,18 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::amount::pseudorandom_amount;
 use crate::models::blockchain::transaction::amount::Amount;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
-use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_pubscript_struct;
+use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
-use crate::models::blockchain::transaction::transaction_kernel::PubScriptHashAndInput;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::TypeScript;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
-use crate::models::blockchain::transaction::PrimitiveWitness;
-use crate::models::blockchain::transaction::Witness;
+use crate::models::blockchain::transaction::PublicAnnouncement;
+use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
+use crate::models::blockchain::transaction::TransactionWitness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
@@ -148,7 +149,7 @@ pub fn get_dummy_latest_block(
     };
 
     let latest_block_info: LatestBlockInfo = block.clone().into();
-    let block_header = block.header.clone();
+    let block_header = block.kernel.header.clone();
     (
         block,
         latest_block_info,
@@ -262,8 +263,8 @@ pub async fn add_block_to_light_state(
     light_state: &mut LightState,
     new_block: Block,
 ) -> Result<()> {
-    let previous_pow_family = light_state.header.proof_of_work_family;
-    if previous_pow_family < new_block.header.proof_of_work_family {
+    let previous_pow_family = light_state.kernel.header.proof_of_work_family;
+    if previous_pow_family < new_block.kernel.header.proof_of_work_family {
         light_state.set_block(new_block);
     } else {
         panic!("Attempted to add to light state an older block than the current light state block");
@@ -318,13 +319,13 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 
 /// Helper function for tests to update state with a new block
 pub async fn add_block(state: &mut GlobalState, new_block: Block) -> Result<()> {
-    let previous_pow_family = state.chain.light_state().header.proof_of_work_family;
+    let previous_pow_family = state.chain.light_state().kernel.header.proof_of_work_family;
     state
         .chain
         .archival_state_mut()
         .write_block(&new_block, Some(previous_pow_family))
         .await?;
-    if previous_pow_family < new_block.header.proof_of_work_family {
+    if previous_pow_family < new_block.kernel.header.proof_of_work_family {
         state.chain.light_state_mut().set_block(new_block);
     }
 
@@ -533,9 +534,9 @@ pub fn random_addition_record() -> AdditionRecord {
     pseudorandom_addition_record(rng.gen::<[u8; 32]>())
 }
 
-pub fn random_pubscript_struct() -> PubScriptHashAndInput {
+pub fn random_public_announcement() -> PublicAnnouncement {
     let mut rng = thread_rng();
-    pseudorandom_pubscript_struct(rng.gen::<[u8; 32]>())
+    pseudorandom_public_announcement(rng.gen::<[u8; 32]>())
 }
 
 pub fn random_amount() -> Amount {
@@ -757,12 +758,9 @@ pub fn make_mock_transaction_with_generation_key(
         outputs.push(addition_record);
     }
 
-    let pubscript_hashes_and_inputs = receiver_data
+    let public_announcements = receiver_data
         .iter()
-        .map(|x| PubScriptHashAndInput {
-            pubscript_hash: Hash::hash(&x.pubscript),
-            pubscript_input: x.pubscript_input.clone(),
-        })
+        .map(|x| x.public_announcement.clone())
         .collect_vec();
     let timestamp: u64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -774,7 +772,7 @@ pub fn make_mock_transaction_with_generation_key(
     let kernel = TransactionKernel {
         inputs,
         outputs,
-        pubscript_hashes_and_inputs,
+        public_announcements,
         fee,
         timestamp: BFieldElement::new(timestamp),
         coinbase: None,
@@ -802,17 +800,17 @@ pub fn make_mock_transaction_with_generation_key(
         .collect_vec();
     let pubscripts = receiver_data
         .iter()
-        .map(|rd| rd.pubscript.to_owned())
+        .map(|rd| rd.public_announcement.clone())
         .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
-    let primitive_witness = PrimitiveWitness {
+    let primitive_witness = TransactionPrimitiveWitness {
         input_utxos,
         type_scripts,
         input_lock_scripts,
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
         output_utxos,
-        pubscripts,
+        public_announcements: pubscripts,
         mutator_set_accumulator: tip_msa,
     };
     let validity_logic =
@@ -820,7 +818,7 @@ pub fn make_mock_transaction_with_generation_key(
 
     Transaction {
         kernel,
-        witness: Witness::ValidityLogic((validity_logic, primitive_witness)),
+        witness: TransactionWitness::ValidationLogic(validity_logic),
     }
 }
 
@@ -843,13 +841,13 @@ pub fn make_mock_transaction(
         kernel: TransactionKernel {
             inputs,
             outputs,
-            pubscript_hashes_and_inputs: vec![],
+            public_announcements: vec![],
             fee: 1.into(),
             timestamp,
             coinbase: None,
             mutator_set_hash: random(),
         },
-        witness: transaction::Witness::Faith,
+        witness: TransactionWitness::Faith,
     }
 }
 
@@ -875,7 +873,7 @@ pub fn make_mock_transaction_with_wallet(
     let kernel = TransactionKernel {
         inputs,
         outputs,
-        pubscript_hashes_and_inputs: vec![],
+        public_announcements: vec![],
         fee,
         timestamp,
         coinbase: None,
@@ -884,7 +882,7 @@ pub fn make_mock_transaction_with_wallet(
 
     Transaction {
         kernel,
-        witness: transaction::Witness::Faith,
+        witness: TransactionWitness::Faith,
     }
 }
 
@@ -898,7 +896,7 @@ pub fn make_mock_block(
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
 ) -> (Block, Utxo, Digest) {
-    let new_block_height: BlockHeight = previous_block.header.height.next();
+    let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
 
     // Build coinbase UTXO and associated data
     let lock_script = coinbase_beneficiary.lock_script();
@@ -907,8 +905,10 @@ pub fn make_mock_block(
     let coinbase_output_randomness: Digest = Digest::new(random_elements_array());
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
-    let mut next_mutator_set = previous_block.body.next_mutator_set_accumulator.clone();
+    let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
     let previous_mutator_set = next_mutator_set.clone();
+    let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
+    block_mmr.append(previous_block.hash());
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
     let coinbase_addition_record: AdditionRecord =
@@ -917,67 +917,64 @@ pub fn make_mock_block(
 
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
-        None => previous_block.header.timestamp.value() + TARGET_BLOCK_INTERVAL,
+        None => previous_block.kernel.header.timestamp.value() + TARGET_BLOCK_INTERVAL,
     };
 
     let tx_kernel = TransactionKernel {
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
-        pubscript_hashes_and_inputs: vec![],
+        public_announcements: vec![],
         fee: Amount::zero(),
         timestamp: BFieldElement::new(block_timestamp),
         coinbase: Some(coinbase_amount),
         mutator_set_hash: previous_mutator_set.hash(),
     };
 
-    let primitive_witness = PrimitiveWitness {
+    let primitive_witness = TransactionPrimitiveWitness {
         input_utxos: vec![],
         type_scripts: vec![TypeScript::native_coin()],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
         output_utxos: vec![coinbase_utxo.clone()],
-        pubscripts: vec![],
+        public_announcements: vec![],
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
     };
-    let validity_logic =
+    let validation_logic =
         TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &tx_kernel);
 
     let transaction = Transaction {
-        witness: transaction::Witness::ValidityLogic((validity_logic, primitive_witness)),
+        witness: TransactionWitness::ValidationLogic(validation_logic),
         kernel: tx_kernel,
     };
 
     let block_body: BlockBody = BlockBody {
         transaction,
-        next_mutator_set_accumulator: next_mutator_set.clone(),
-
-        previous_mutator_set_accumulator: previous_mutator_set,
-        stark_proof: vec![],
+        mutator_set_accumulator: next_mutator_set.clone(),
+        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        block_mmr_accumulator: block_mmr,
+        uncle_blocks: vec![],
     };
 
-    let block_target_difficulty = previous_block.header.difficulty;
-    let pow_line = previous_block.header.proof_of_work_line + block_target_difficulty;
+    let block_target_difficulty = previous_block.kernel.header.difficulty;
+    let pow_line = previous_block.kernel.header.proof_of_work_line + block_target_difficulty;
     let pow_family = pow_line;
     let zero = BFieldElement::zero();
     let target_difficulty = Block::difficulty_control(previous_block, block_timestamp);
     let block_header = BlockHeader {
         version: zero,
         height: new_block_height,
-        mutator_set_hash: next_mutator_set.hash(),
-        prev_block_digest: previous_block.hash,
+        prev_block_digest: previous_block.hash(),
         timestamp: block_body.transaction.kernel.timestamp,
         nonce: [zero, zero, zero],
         max_block_size: 1_000_000,
         proof_of_work_line: pow_family,
         proof_of_work_family: pow_family,
         difficulty: target_difficulty,
-        block_body_merkle_root: Hash::hash(&block_body),
-        uncles: vec![],
     };
 
     (
-        Block::new(block_header, block_body),
+        Block::new(block_header, block_body, Some(Proof(vec![]))),
         coinbase_utxo,
         coinbase_output_randomness,
     )

@@ -353,7 +353,7 @@ mod wallet_tests {
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
     use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
-    use crate::models::blockchain::transaction::PubScript;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
@@ -414,8 +414,10 @@ mod wallet_tests {
             let (nb, _coinbase_utxo, _sender_randomness) =
                 make_mock_block(&previous_block, None, other_receiver_address);
             next_block = nb;
+            let current_mutator_set_accumulator =
+                previous_block.kernel.body.mutator_set_accumulator.clone();
             wallet_state_premine_recipient
-                .update_wallet_state_with_new_block(&next_block)
+                .update_wallet_state_with_new_block(&current_mutator_set_accumulator, &next_block)
                 .await?;
         }
 
@@ -428,12 +430,13 @@ mod wallet_tests {
 
         let genesis_block_output_utxo = monitored_utxos[0].utxo.clone();
         let ms_membership_proof = monitored_utxos[0]
-            .get_membership_proof_for_block(next_block.hash)
+            .get_membership_proof_for_block(next_block.hash())
             .unwrap();
         assert!(
             next_block
+                .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(Hash::hash(&genesis_block_output_utxo), &ms_membership_proof),
             "Membership proof must be valid after updating wallet state with generated blocks"
         );
@@ -479,7 +482,10 @@ mod wallet_tests {
             "Expected UTXO list must have length 1 before block registration"
         );
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
         assert_eq!(
             1,
@@ -488,7 +494,7 @@ mod wallet_tests {
         let expected_utxos = own_wallet_state.expected_utxos.get_all_expected_utxos();
         assert_eq!(1, expected_utxos.len(), "B: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
         assert_eq!(
-            block_1.hash,
+            block_1.hash(),
             expected_utxos[0].mined_in_block.unwrap().0,
             "Expected UTXO must be registered as being mined"
         );
@@ -503,11 +509,12 @@ mod wallet_tests {
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
-                .get_membership_proof_for_block(block_1.hash)
+                .get_membership_proof_for_block(block_1.hash())
                 .unwrap();
             let membership_proof_is_valid = block_1
+                .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(membership_proof_is_valid);
         }
@@ -520,11 +527,12 @@ mod wallet_tests {
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
-                .get_membership_proof_for_block(block_1.hash)
+                .get_membership_proof_for_block(block_1.hash())
                 .unwrap();
             let membership_proof_is_valid = block_3
+                .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(
                 !membership_proof_is_valid,
@@ -533,21 +541,28 @@ mod wallet_tests {
         }
         // Verify that the membership proof is valid *after* running the updater
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_2)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
             .await?;
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_3)
+            .update_wallet_state_with_new_block(
+                &block_2.kernel.body.mutator_set_accumulator,
+                &block_3,
+            )
             .await?;
         monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
 
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
             let ms_membership_proof = monitored_utxos[0]
-                .get_membership_proof_for_block(block_3.hash)
+                .get_membership_proof_for_block(block_3.hash())
                 .unwrap();
             let membership_proof_is_valid = block_3
+                .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .verify(block_1_tx_output_digest, &ms_membership_proof);
             assert!(
                 membership_proof_is_valid,
@@ -583,14 +598,17 @@ mod wallet_tests {
             )
             .unwrap();
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
 
         // Verify that the allocater returns a sane amount
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(Amount::one(), block_1.hash)
+                .allocate_sufficient_input_funds(Amount::one(), block_1.hash())
                 .await
                 .unwrap()
                 .len()
@@ -600,7 +618,7 @@ mod wallet_tests {
             own_wallet_state
                 .allocate_sufficient_input_funds(
                     mining_reward.checked_sub(&Amount::one()).unwrap(),
-                    block_1.hash
+                    block_1.hash()
                 )
                 .await
                 .unwrap()
@@ -609,7 +627,7 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(mining_reward, block_1.hash)
+                .allocate_sufficient_input_funds(mining_reward, block_1.hash())
                 .await
                 .unwrap()
                 .len()
@@ -617,7 +635,7 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: `mining_reward`
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(mining_reward + Amount::one(), block_1.hash)
+            .allocate_sufficient_input_funds(mining_reward + Amount::one(), block_1.hash())
             .await
             .is_err());
 
@@ -637,7 +655,10 @@ mod wallet_tests {
                 )
                 .unwrap();
             own_wallet_state
-                .update_wallet_state_with_new_block(&next_block_prime)
+                .update_wallet_state_with_new_block(
+                    &previous_block.kernel.body.mutator_set_accumulator,
+                    &next_block_prime,
+                )
                 .await?;
             next_block = next_block_prime;
         }
@@ -645,7 +666,7 @@ mod wallet_tests {
         assert_eq!(
             5,
             own_wallet_state
-                .allocate_sufficient_input_funds(mining_reward.scalar_mul(5), next_block.hash)
+                .allocate_sufficient_input_funds(mining_reward.scalar_mul(5), next_block.hash())
                 .await
                 .unwrap()
                 .len()
@@ -655,7 +676,7 @@ mod wallet_tests {
             own_wallet_state
                 .allocate_sufficient_input_funds(
                     mining_reward.scalar_mul(5) + Amount::one(),
-                    next_block.hash
+                    next_block.hash()
                 )
                 .await
                 .unwrap()
@@ -666,7 +687,7 @@ mod wallet_tests {
         assert_eq!(
             22,
             own_wallet_state
-                .allocate_sufficient_input_funds(expected_balance, next_block.hash)
+                .allocate_sufficient_input_funds(expected_balance, next_block.hash())
                 .await
                 .unwrap()
                 .len()
@@ -674,14 +695,14 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: 22 * mining reward
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(expected_balance + Amount::one(), next_block.hash)
+            .allocate_sufficient_input_funds(expected_balance + Amount::one(), next_block.hash())
             .await
             .is_err());
 
         // Make a block that spends an input, then verify that this is reflected by
         // the allocator.
         let two_utxos = own_wallet_state
-            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), next_block.hash)
+            .allocate_sufficient_input_funds(mining_reward.scalar_mul(2), next_block.hash())
             .await
             .unwrap();
         assert_eq!(
@@ -695,11 +716,17 @@ mod wallet_tests {
         let other_wallet = WalletSecret::new_random();
         let other_wallet_recipient_address =
             other_wallet.nth_generation_spending_key(0).to_address();
-        assert_eq!(Into::<BlockHeight>::into(22u64), next_block.header.height);
+        assert_eq!(
+            Into::<BlockHeight>::into(22u64),
+            next_block.kernel.header.height
+        );
+        let msa_tip_previous = next_block.kernel.body.mutator_set_accumulator.clone();
         (next_block, _, _) =
             make_mock_block(&next_block.clone(), None, own_spending_key.to_address());
-        assert_eq!(Into::<BlockHeight>::into(23u64), next_block.header.height);
-        let msa_tip_previous = next_block.body.previous_mutator_set_accumulator.clone();
+        assert_eq!(
+            Into::<BlockHeight>::into(23u64),
+            next_block.kernel.header.height
+        );
 
         let receiver_data = vec![UtxoReceiverData {
             utxo: Utxo {
@@ -708,8 +735,7 @@ mod wallet_tests {
             },
             sender_randomness: random(),
             receiver_privacy_digest: other_wallet_recipient_address.privacy_digest,
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
         }];
         let input_utxos_mps_keys = two_utxos
             .into_iter()
@@ -719,18 +745,18 @@ mod wallet_tests {
             input_utxos_mps_keys,
             receiver_data,
             Amount::zero(),
-            msa_tip_previous,
+            msa_tip_previous.clone(),
         );
         next_block.accumulate_transaction(tx);
 
         own_wallet_state
-            .update_wallet_state_with_new_block(&next_block)
+            .update_wallet_state_with_new_block(&msa_tip_previous.clone(), &next_block)
             .await?;
 
         assert_eq!(
             20,
             own_wallet_state
-                .allocate_sufficient_input_funds(2000.into(), next_block.hash)
+                .allocate_sufficient_input_funds(2000.into(), next_block.hash())
                 .await
                 .unwrap()
                 .len()
@@ -738,7 +764,7 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: 2000
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(2001.into(), next_block.hash)
+            .allocate_sufficient_input_funds(2001.into(), next_block.hash())
             .await
             .is_err());
 
@@ -773,17 +799,17 @@ mod wallet_tests {
             "Premine must have non-zero synced balance"
         );
 
+        let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
 
         let receiver_data_12_to_other = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
             sender_randomness: premine_receiver_global_state
                 .wallet_state
                 .wallet_secret
                 .generate_sender_randomness(
-                    genesis_block.header.height,
+                    genesis_block.kernel.header.height,
                     own_address.privacy_digest,
                 ),
             utxo: Utxo {
@@ -792,14 +818,13 @@ mod wallet_tests {
             },
         };
         let receiver_data_one_to_other = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
             sender_randomness: premine_receiver_global_state
                 .wallet_state
                 .wallet_secret
                 .generate_sender_randomness(
-                    genesis_block.header.height,
+                    genesis_block.kernel.header.height,
                     own_address.privacy_digest,
                 ),
             utxo: Utxo {
@@ -838,14 +863,14 @@ mod wallet_tests {
                 .unwrap();
         }
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(&previous_msa, &block_1)
             .await?;
         add_block(&mut premine_receiver_global_state, block_1.clone())
             .await
             .unwrap();
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(&previous_msa, &block_1)
             .await?;
         assert_eq!(
             preminers_original_balance
@@ -870,10 +895,10 @@ mod wallet_tests {
         // Verify that all monitored UTXOs have valid membership proofs
         for monitored_utxo in monitored_utxos {
             assert!(
-                block_1.body.next_mutator_set_accumulator.verify(
+                block_1.kernel.body.mutator_set_accumulator.verify(
                     Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(block_1.hash)
+                        .get_membership_proof_for_block(block_1.hash())
                         .unwrap()
                 ),
                 "All membership proofs must be valid after block 1"
@@ -897,14 +922,20 @@ mod wallet_tests {
                 )
                 .unwrap();
             own_wallet_state
-                .update_wallet_state_with_new_block(&next_block)
+                .update_wallet_state_with_new_block(
+                    &previous_block.kernel.body.mutator_set_accumulator,
+                    &next_block,
+                )
                 .await?;
             add_block(&mut premine_receiver_global_state, block_1.clone())
                 .await
                 .unwrap();
             premine_receiver_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(&next_block)
+                .update_wallet_state_with_new_block(
+                    &previous_block.kernel.body.mutator_set_accumulator,
+                    &next_block,
+                )
                 .await?;
         }
 
@@ -917,10 +948,10 @@ mod wallet_tests {
             );
         for monitored_utxo in monitored_utxos {
             assert!(
-                block_18.body.next_mutator_set_accumulator.verify(
+                block_18.kernel.body.mutator_set_accumulator.verify(
                     Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(block_18.hash)
+                        .get_membership_proof_for_block(block_18.hash())
                         .unwrap()
                 ),
                 "All membership proofs must be valid after block 18"
@@ -930,12 +961,12 @@ mod wallet_tests {
         // Sanity check
         assert_eq!(
             Into::<BlockHeight>::into(18u64),
-            block_18.header.height,
+            block_18.kernel.header.height,
             "Block height must be 18 after genesis and 18 blocks being mined"
         );
 
         // Check that `WalletStatus` is returned correctly
-        let wallet_status = { own_wallet_state.get_wallet_status_from_lock(block_18.hash) };
+        let wallet_status = { own_wallet_state.get_wallet_status_from_lock(block_18.hash()) };
         assert_eq!(
             19,
             wallet_status.synced_unspent.len(),
@@ -962,20 +993,26 @@ mod wallet_tests {
         let (block_2_b, _, _) =
             make_mock_block(&block_1, None, premine_wallet_spending_key.to_address());
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_2_b)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2_b,
+            )
             .await?;
         add_block(&mut premine_receiver_global_state, block_2_b.clone())
             .await
             .unwrap();
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&block_2_b)
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2_b,
+            )
             .await
             .unwrap();
         let monitored_utxos_at_2b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|x| x.is_synced_to(block_2_b.hash))
+            .filter(|x| x.is_synced_to(block_2_b.hash()))
             .collect();
         assert_eq!(
             2,
@@ -986,10 +1023,10 @@ mod wallet_tests {
         // Verify that all monitored UTXOs (with synced MPs) have valid membership proofs
         for monitored_utxo in monitored_utxos_at_2b.iter() {
             assert!(
-                block_2_b.body.next_mutator_set_accumulator.verify(
+                block_2_b.kernel.body.mutator_set_accumulator.verify(
                     Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(block_2_b.hash)
+                        .get_membership_proof_for_block(block_2_b.hash())
                         .unwrap()
                 ),
                 "All synced membership proofs must be valid after block 2b fork"
@@ -1001,12 +1038,15 @@ mod wallet_tests {
         let (block_19, _, _) =
             make_mock_block(&block_18, None, premine_wallet_spending_key.to_address());
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_19)
+            .update_wallet_state_with_new_block(
+                &block_18.kernel.body.mutator_set_accumulator,
+                &block_19,
+            )
             .await?;
         let monitored_utxos_block_19: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|monitored_utxo| monitored_utxo.is_synced_to(block_19.hash))
+            .filter(|monitored_utxo| monitored_utxo.is_synced_to(block_19.hash()))
             .collect();
         assert_eq!(
             2 + 17,
@@ -1017,10 +1057,10 @@ mod wallet_tests {
         // Verify that all monitored UTXOs have valid membership proofs
         for monitored_utxo in monitored_utxos_block_19.iter() {
             assert!(
-                block_19.body.next_mutator_set_accumulator.verify(
+                block_19.kernel.body.mutator_set_accumulator.verify(
                     Hash::hash(&monitored_utxo.utxo),
                     &monitored_utxo
-                        .get_membership_proof_for_block(block_19.hash)
+                        .get_membership_proof_for_block(block_19.hash())
                         .unwrap()
                 ),
                 "All membership proofs must be valid after block 19"
@@ -1037,8 +1077,7 @@ mod wallet_tests {
         );
 
         let receiver_data_six = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
             utxo: Utxo {
                 coins: Into::<Amount>::into(6).to_native_coins(),
@@ -1074,13 +1113,16 @@ mod wallet_tests {
             )
             .unwrap();
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_3_b)
+            .update_wallet_state_with_new_block(
+                &block_2_b.kernel.body.mutator_set_accumulator,
+                &block_3_b,
+            )
             .await?;
 
         let monitored_utxos_3b: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|x| x.is_synced_to(block_3_b.hash))
+            .filter(|x| x.is_synced_to(block_3_b.hash()))
             .collect();
         assert_eq!(
             4,
@@ -1100,10 +1142,10 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_3b {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || block_3_b.body.next_mutator_set_accumulator.verify(
+                    || block_3_b.kernel.body.mutator_set_accumulator.verify(
                         Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
-                            .get_membership_proof_for_block(block_3_b.hash)
+                            .get_membership_proof_for_block(block_3_b.hash())
                             .unwrap()
                     ),
                 "All membership proofs of unspent UTXOs must be valid after block 3b"
@@ -1114,14 +1156,17 @@ mod wallet_tests {
         let (block_20, _, _) =
             make_mock_block(&block_19, None, premine_wallet_spending_key.to_address());
         own_wallet_state
-            .update_wallet_state_with_new_block(&block_20)
+            .update_wallet_state_with_new_block(
+                &block_19.kernel.body.mutator_set_accumulator,
+                &block_20,
+            )
             .await?;
 
         // Verify that we have two membership proofs of `forked_utxo`: one matching block20 and one matching block_3b
         let monitored_utxos_20: Vec<_> = get_monitored_utxos(&own_wallet_state)
             .await
             .into_iter()
-            .filter(|x| x.is_synced_to(block_20.hash))
+            .filter(|x| x.is_synced_to(block_20.hash()))
             .collect();
         assert_eq!(
                 19,
@@ -1131,10 +1176,10 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_20.iter() {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || block_20.body.next_mutator_set_accumulator.verify(
+                    || block_20.kernel.body.mutator_set_accumulator.verify(
                         Hash::hash(&monitored_utxo.utxo),
                         &monitored_utxo
-                            .get_membership_proof_for_block(block_20.hash)
+                            .get_membership_proof_for_block(block_20.hash())
                             .unwrap()
                     ),
                 "All membership proofs of unspent UTXOs must be valid after block 20"

@@ -8,7 +8,9 @@
 //! are interested in the transaction with either the highest or the lowest 'fee
 //! density'.
 
-use crate::prelude::twenty_first;
+use crate::{
+    prelude::twenty_first, util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
+};
 
 use bytesize::ByteSize;
 use get_size::GetSize;
@@ -62,8 +64,10 @@ fn now() -> Duration {
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct Mempool {
     max_total_size: usize,
+
     // Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
+
     // Maintain for fast min and max
     #[get_size(ignore)] // This is relatively small compared to `LookupTable`
     queue: DoublePriorityQueue<Digest, FeeDensity>,
@@ -288,12 +292,17 @@ impl Mempool {
     /// This function remove from the mempool all those transactions that become invalid because
     /// of this newly mined block. It also updates all mutator set data for the monitored
     /// transactions that were not removed due to being included in the block.
-    pub fn update_with_block(&mut self, block: &Block) {
+    pub fn update_with_block(
+        &mut self,
+        previous_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+        block: &Block,
+    ) {
         // Check if the sets of inserted indices in the block transaction
         // and transactions in the mempool are disjoint.
         // Removes the transaction from the mempool if they are not as this would
         // mean that at least on of the mempool transaction's inputs are spent in this block.
         let sbf_indices_set_by_block: HashSet<_> = block
+            .kernel
             .body
             .transaction
             .kernel
@@ -322,7 +331,7 @@ impl Mempool {
 
         // Update the remaining transactions so their mutator set data is still valid
         for tx in self.tx_dictionary.values_mut() {
-            tx.update_mutator_set_records(block)
+            tx.update_mutator_set_records(&previous_mutator_set_accumulator, block)
                 .expect("Updating mempool transaction must succeed");
         }
 
@@ -384,7 +393,7 @@ mod tests {
         models::{
             blockchain::{
                 block::block_height::BlockHeight,
-                transaction::{amount::Amount, utxo::Utxo, PubScript, Transaction},
+                transaction::{amount::Amount, utxo::Utxo, PublicAnnouncement, Transaction},
             },
             shared::SIZE_20MB_IN_BYTES,
             state::{
@@ -547,7 +556,10 @@ mod tests {
         // Update both states with block 1
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
         premine_receiver_global_state
             .chain
@@ -565,7 +577,10 @@ mod tests {
             .expect("UTXO notification from miner must be accepted");
         other_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
+            .update_wallet_state_with_new_block(
+                &genesis_block.kernel.body.mutator_set_accumulator,
+                &block_1,
+            )
             .await?;
         other_global_state
             .chain
@@ -582,8 +597,7 @@ mod tests {
             };
 
             output_utxos_generated_by_me.push(UtxoReceiverData {
-                pubscript: PubScript::default(),
-                pubscript_input: vec![],
+                public_announcement: PublicAnnouncement::default(),
                 receiver_privacy_digest: premine_receiver_address.privacy_digest,
                 sender_randomness: random(),
                 utxo: new_utxo,
@@ -610,8 +624,7 @@ mod tests {
             },
             sender_randomness: random(),
             receiver_privacy_digest: other_receiver_address.privacy_digest,
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
         }];
         let tx_by_other_original = other_global_state
             .create_transaction(output_utxo_data_by_miner, 1.into())
@@ -625,7 +638,7 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool.update_with_block(&block_2);
+        mempool.update_with_block(block_1.kernel.body.mutator_set_accumulator, &block_2);
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction still contains
@@ -639,17 +652,19 @@ mod tests {
 
         debug!(
             "Just made block with previous mutator set hash {}",
-            block_3_with_updated_tx
+            block_2
+                .kernel
                 .body
-                .previous_mutator_set_accumulator
+                .mutator_set_accumulator
                 .hash()
                 .emojihash()
         );
         debug!(
             "Just made block with next mutator set hash {}",
             block_3_with_updated_tx
+                .kernel
                 .body
-                .next_mutator_set_accumulator
+                .mutator_set_accumulator
                 .hash()
                 .emojihash()
         );
@@ -670,12 +685,15 @@ mod tests {
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
             let (next_block, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
-            mempool.update_with_block(&next_block);
+            mempool.update_with_block(
+                previous_block.kernel.body.mutator_set_accumulator,
+                &next_block,
+            );
             previous_block = next_block;
         }
 
         let (mut block_14, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
-        assert_eq!(Into::<BlockHeight>::into(14), block_14.header.height);
+        assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
         block_14.accumulate_transaction(tx_by_other_updated);
         assert!(
@@ -683,7 +701,10 @@ mod tests {
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        mempool.update_with_block(&block_14);
+        mempool.update_with_block(
+            previous_block.kernel.body.mutator_set_accumulator,
+            &block_14,
+        );
 
         assert!(
             mempool.is_empty(),
@@ -712,8 +733,7 @@ mod tests {
             utxo,
             receiver_privacy_digest: premine_address.privacy_digest,
             sender_randomness: random(),
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
         };
         let tx_by_preminer_low_fee = preminer_state
             .create_transaction(vec![receiver_data.clone()], 1.into())

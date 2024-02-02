@@ -1,13 +1,19 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 
+use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigUint;
 use num_traits::{abs, Zero};
 
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
+use tasm_lib::triton_vm::proof::Proof;
+use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -18,47 +24,65 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 pub mod block_body;
 pub mod block_header;
 pub mod block_height;
+pub mod block_kernel;
 pub mod mutator_set_update;
 pub mod transfer_block;
+pub mod validity;
 
 use self::block_body::BlockBody;
 use self::block_header::{
     BlockHeader, MINIMUM_DIFFICULTY, TARGET_BLOCK_INTERVAL, TARGET_DIFFICULTY_U32_SIZE,
 };
 use self::block_height::BlockHeight;
+use self::block_kernel::BlockKernel;
 use self::mutator_set_update::MutatorSetUpdate;
 use self::transfer_block::TransferBlock;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::{amount::Amount, Transaction};
 use crate::models::blockchain::shared::Hash;
+use crate::models::consensus::Witness;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::WalletSecret;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize)]
 pub struct Block {
-    pub hash: Digest,
-    pub header: BlockHeader,
-    pub body: BlockBody,
+    /// Everything but the proof
+    pub kernel: BlockKernel,
+
+    /// All blocks have proofs except:
+    ///  - the genesis block
+    ///  - blocks being generated
+    pub proof: Option<Proof>,
 }
 
 impl From<TransferBlock> for Block {
     fn from(t_block: TransferBlock) -> Self {
         Self {
-            hash: Hash::hash(&t_block.header),
-            header: t_block.header,
-            body: t_block.body,
+            kernel: BlockKernel {
+                header: t_block.header,
+                body: t_block.body,
+            },
+            proof: Some(t_block.proof),
         }
     }
 }
 
 impl From<Block> for TransferBlock {
     fn from(block: Block) -> Self {
+        let proof = match block.proof {
+            Some(p) => p,
+            None => {
+                error!("In order to be transferred, a Block must have a non-None proof field.");
+                panic!()
+            }
+        };
         Self {
-            header: block.header,
-            body: block.body,
+            header: block.kernel.header,
+            body: block.kernel.body,
+            proof,
         }
     }
 }
@@ -66,24 +90,23 @@ impl From<Block> for TransferBlock {
 impl Block {
     #[inline]
     pub fn hash(&self) -> Digest {
-        self.hash
+        self.kernel.mast_hash()
     }
 
     #[inline]
     pub fn header(&self) -> &BlockHeader {
-        &self.header
+        &self.kernel.header
     }
 
     #[inline]
     pub fn body(&self) -> &BlockBody {
-        &self.body
+        &self.kernel.body
     }
 
     #[inline]
     pub fn set_block(&mut self, block: Block) {
-        self.hash = block.hash;
-        self.header = block.header;
-        self.body = block.body;
+        self.kernel.header = block.kernel.header;
+        self.kernel.body = block.kernel.body;
     }
 
     pub fn get_mining_reward(block_height: BlockHeight) -> Amount {
@@ -97,8 +120,7 @@ impl Block {
     }
 
     pub fn genesis_block() -> Self {
-        let empty_mutator_set = MutatorSetAccumulator::default();
-        let mut genesis_mutator_set = MutatorSetAccumulator::default();
+        let mut genesis_mutator_set = MutatorSetAccumulator::<Hash>::default();
         let mut ms_update = MutatorSetUpdate::default();
 
         let premine_distribution = Self::premine_distribution();
@@ -116,11 +138,11 @@ impl Block {
                 outputs: vec![],
                 fee: 0u32.into(),
                 timestamp,
-                pubscript_hashes_and_inputs: vec![],
+                public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
                 mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
             },
-            witness: super::transaction::Witness::Faith,
+            witness: Witness::Faith,
         };
 
         for (receiving_address, amount) in premine_distribution {
@@ -144,15 +166,15 @@ impl Block {
 
         let body: BlockBody = BlockBody {
             transaction: genesis_coinbase_tx,
-            next_mutator_set_accumulator: genesis_mutator_set.clone(),
-            previous_mutator_set_accumulator: empty_mutator_set,
-            stark_proof: vec![],
+            mutator_set_accumulator: genesis_mutator_set.clone(),
+            block_mmr_accumulator: MmrAccumulator::new(vec![]),
+            lock_free_mmr_accumulator: MmrAccumulator::new(vec![]),
+            uncle_blocks: vec![],
         };
 
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
-            mutator_set_hash: genesis_mutator_set.hash(),
             prev_block_digest: Digest::default(),
             timestamp,
             nonce: [
@@ -164,11 +186,9 @@ impl Block {
             proof_of_work_line: U32s::zero(),
             proof_of_work_family: U32s::zero(),
             difficulty: MINIMUM_DIFFICULTY.into(),
-            block_body_merkle_root: Hash::hash(&body),
-            uncles: vec![],
         };
 
-        Self::new(header, body)
+        Self::new(header, body, None)
     }
 
     pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, Amount)> {
@@ -179,9 +199,11 @@ impl Block {
         vec![(authority_receiving_address, 20000.into())]
     }
 
-    pub fn new(header: BlockHeader, body: BlockBody) -> Self {
-        let hash = Hash::hash(&header);
-        Self { hash, header, body }
+    pub fn new(header: BlockHeader, body: BlockBody, proof: Option<Proof>) -> Self {
+        Self {
+            kernel: BlockKernel { body, header },
+            proof,
+        }
     }
 
     /// Merge a transaction into this block's transaction.
@@ -189,21 +211,22 @@ impl Block {
     pub fn accumulate_transaction(&mut self, transaction: Transaction) {
         // merge
         let merged_timestamp = BFieldElement::new(max(
-            self.header.timestamp.value(),
+            self.kernel.header.timestamp.value(),
             max(
-                self.body.transaction.kernel.timestamp.value(),
+                self.kernel.body.transaction.kernel.timestamp.value(),
                 transaction.kernel.timestamp.value(),
             ),
         ));
-        let new_transaction = self.body.transaction.clone().merge_with(transaction);
 
         // accumulate
-        let additions = new_transaction.kernel.outputs.clone();
-        let removals = new_transaction.kernel.inputs.clone();
-        let mut next_mutator_set_accumulator = self.body.previous_mutator_set_accumulator.clone();
+        let mut next_mutator_set_accumulator = self.kernel.body.mutator_set_accumulator.clone();
 
-        let mutator_set_update = MutatorSetUpdate::new(removals, additions);
+        let mutator_set_update = MutatorSetUpdate::new(
+            transaction.kernel.inputs.clone(),
+            transaction.kernel.outputs.clone(),
+        );
 
+        let new_transaction = self.kernel.body.transaction.clone().merge_with(transaction);
         // Apply the mutator set update to get the `next_mutator_set_accumulator`
         mutator_set_update
             .apply(&mut next_mutator_set_accumulator)
@@ -211,29 +234,26 @@ impl Block {
 
         let block_body: BlockBody = BlockBody {
             transaction: new_transaction,
-            next_mutator_set_accumulator: next_mutator_set_accumulator.clone(),
-            previous_mutator_set_accumulator: self.body.previous_mutator_set_accumulator.clone(),
-            stark_proof: vec![],
+            mutator_set_accumulator: next_mutator_set_accumulator.clone(),
+            lock_free_mmr_accumulator: self.kernel.body.lock_free_mmr_accumulator.clone(),
+            block_mmr_accumulator: self.kernel.body.block_mmr_accumulator.clone(),
+            uncle_blocks: self.kernel.body.uncle_blocks.clone(),
         };
 
         let block_header = BlockHeader {
-            version: self.header.version,
-            height: self.header.height,
-            mutator_set_hash: next_mutator_set_accumulator.hash(),
-            prev_block_digest: self.header.prev_block_digest,
+            version: self.kernel.header.version,
+            height: self.kernel.header.height,
+            prev_block_digest: self.kernel.header.prev_block_digest,
             timestamp: merged_timestamp,
-            nonce: self.header.nonce,
-            max_block_size: self.header.max_block_size,
-            proof_of_work_line: self.header.proof_of_work_line,
-            proof_of_work_family: self.header.proof_of_work_family,
-            difficulty: self.header.difficulty,
-            block_body_merkle_root: Hash::hash(&block_body),
-            uncles: vec![],
+            nonce: self.kernel.header.nonce,
+            max_block_size: self.kernel.header.max_block_size,
+            proof_of_work_line: self.kernel.header.proof_of_work_line,
+            proof_of_work_family: self.kernel.header.proof_of_work_family,
+            difficulty: self.kernel.header.difficulty,
         };
 
-        self.body = block_body;
-        self.hash = Hash::hash(&block_header);
-        self.header = block_header;
+        self.kernel.body = block_body;
+        self.kernel.header = block_header;
     }
 
     /// Verify a block. It is assumed that `previous_block` is valid.
@@ -249,49 +269,50 @@ impl Block {
         // 0. `previous_block` is consistent with current block
         //   a) Block height is previous plus one
         //   b) Block header points to previous block
-        //   c) Block timestamp is greater than previous block timestamp
-        //   d) Next mutator set of previous block matches previous MS of current block
-        //   e) Target difficulty was adjusted correctly
+        //   d) Block timestamp is greater than previous block timestamp
+        //   e) Target difficulty, and other control parameters, were adjusted correctly
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
-        //   a) verify that MS membership proof is valid, done against `previous_mutator_set_accumulator`,
-        //   b) Verify that MS removal record is valid, done against `previous_mutator_set_accumulator`,
+        //   a) verify that MS membership proof is valid, done against previous `mutator_set_accumulator`,
+        //   b) Verify that MS removal record is valid, done against previous `mutator_set_accumulator`,
         //   c) Verify that all removal records have unique index sets
-        //   d) verify that adding `mutator_set_update` to `previous_mutator_set_accumulator`
+        //   d) verify that adding `mutator_set_update` to previous `mutator_set_accumulator`
         //      gives `next_mutator_set_accumulator`,
         //   e) transaction timestamp <= block timestamp
         //   f) transaction coinbase <= miner reward
         //   g) transaction is valid (internally consistent)
 
         // 0.a) Block height is previous plus one
-        if previous_block.header.height.next() != block_copy.header.height {
+        if previous_block.kernel.header.height.next() != block_copy.kernel.header.height {
             warn!("Height does not match previous height");
             return false;
         }
 
         // 0.b) Block header points to previous block
-        if previous_block.hash != block_copy.header.prev_block_digest {
+        if previous_block.kernel.mast_hash() != block_copy.kernel.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }
 
-        // 0.c) Block timestamp is greater than that of previuos block
-        if previous_block.header.timestamp.value() >= block_copy.header.timestamp.value() {
+        // 0.c) Verify correct addition to block MMR
+        let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
+        mmra.append(previous_block.hash());
+        if mmra != self.kernel.body.block_mmr_accumulator {
+            warn!("Block MMRA was not updated correctly");
+            return false;
+        }
+
+        // 0.d) Block timestamp is greater than that of previuos block
+        if previous_block.kernel.header.timestamp.value()
+            >= block_copy.kernel.header.timestamp.value()
+        {
             warn!("Block does not have greater timestamp than that of previous block");
             return false;
         }
 
-        // 0.d) Next mutator set of previous block matches previous MS of current block
-        if previous_block.body.next_mutator_set_accumulator
-            != block_copy.body.previous_mutator_set_accumulator
-        {
-            warn!("Value for previous mutator set does not match previous block");
-            return false;
-        }
-
-        // 0.e) Target difficulty was updated correctly
-        if block_copy.header.difficulty
-            != Self::difficulty_control(previous_block, block_copy.header.timestamp.value())
+        // 0.e) Target difficulty, and other control parameters, were updated correctly
+        if block_copy.kernel.header.difficulty
+            != Self::difficulty_control(previous_block, block_copy.kernel.header.timestamp.value())
         {
             warn!("Value for new difficulty is incorrect.");
             return false;
@@ -299,10 +320,11 @@ impl Block {
 
         // 1.b) Verify validity of removal records: That their MMR MPs match the SWBF, and
         // that at least one of their listed indices is absent.
-        for removal_record in block_copy.body.transaction.kernel.inputs.iter() {
-            if !block_copy
+        for removal_record in block_copy.kernel.body.transaction.kernel.inputs.iter() {
+            if !previous_block
+                .kernel
                 .body
-                .previous_mutator_set_accumulator
+                .mutator_set_accumulator
                 .kernel
                 .can_remove(removal_record)
             {
@@ -313,6 +335,7 @@ impl Block {
 
         // 1.c) Verify that the removal records do not contain duplicate `AbsoluteIndexSet`s
         let mut absolute_index_sets = block_copy
+            .kernel
             .body
             .transaction
             .kernel
@@ -322,20 +345,20 @@ impl Block {
             .collect_vec();
         absolute_index_sets.sort();
         absolute_index_sets.dedup();
-        if absolute_index_sets.len() != block_copy.body.transaction.kernel.inputs.len() {
+        if absolute_index_sets.len() != block_copy.kernel.body.transaction.kernel.inputs.len() {
             warn!("Removal records contain duplicates");
             return false;
         }
 
-        // 1.d) Verify that the two mutator sets, previous and current, are
-        // consistent with the transactions.
+        // 1.d) Verify that the two mutator sets, the one from the current block and the
+        // one from the previous, are consistent with the transactions.
         // Construct all the addition records for all the transaction outputs. Then
         // use these addition records to insert into the mutator set.
         let mutator_set_update = MutatorSetUpdate::new(
-            block_copy.body.transaction.kernel.inputs.clone(),
-            block_copy.body.transaction.kernel.outputs.clone(),
+            block_copy.kernel.body.transaction.kernel.inputs.clone(),
+            block_copy.kernel.body.transaction.kernel.outputs.clone(),
         );
-        let mut ms = block_copy.body.previous_mutator_set_accumulator.clone();
+        let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
         let ms_update_result = mutator_set_update.apply(&mut ms);
         match ms_update_result {
             Ok(()) => (),
@@ -347,24 +370,18 @@ impl Block {
 
         // Verify that the locally constructed mutator set matches that in the received
         // block's body.
-        if ms.hash() != block_copy.body.next_mutator_set_accumulator.hash() {
+        if ms.hash() != block_copy.kernel.body.mutator_set_accumulator.hash() {
             warn!("Reported mutator set does not match calculated object.");
             debug!(
                 "From Block\n{:?}. \n\n\nCalculated\n{:?}",
-                block_copy.body.next_mutator_set_accumulator, ms
+                block_copy.kernel.body.mutator_set_accumulator, ms
             );
             return false;
         }
 
-        // Verify that the locally constructed mutator set matches that in the received block's header
-        if ms.hash() != block_copy.header.mutator_set_hash {
-            warn!("Mutator set commitment does not match calculated object");
-            return false;
-        }
-
         // 1.e) verify that the transaction timestamp is less than or equal to the block's timestamp.
-        if block_copy.body.transaction.kernel.timestamp.value()
-            > block_copy.header.timestamp.value()
+        if block_copy.kernel.body.transaction.kernel.timestamp.value()
+            > block_copy.kernel.header.timestamp.value()
         {
             warn!("Transaction with invalid timestamp found");
             return false;
@@ -372,9 +389,9 @@ impl Block {
 
         // 1.f) Verify that the coinbase claimed by the transaction does not exceed
         // the allowed coinbase based on block height, epoch, etc., and fee
-        let miner_reward: Amount =
-            Self::get_mining_reward(block_copy.header.height) + self.body.transaction.kernel.fee;
-        if let Some(claimed_reward) = block_copy.body.transaction.kernel.coinbase {
+        let miner_reward: Amount = Self::get_mining_reward(block_copy.kernel.header.height)
+            + self.kernel.body.transaction.kernel.fee;
+        if let Some(claimed_reward) = block_copy.kernel.body.transaction.kernel.coinbase {
             if claimed_reward > miner_reward {
                 warn!("Block is invalid because the claimed miner reward is too high relative to current network parameters.");
                 return false;
@@ -382,7 +399,7 @@ impl Block {
         }
 
         // 1.g) Verify transaction, but without relating it to the blockchain tip (that was done above).
-        if !block_copy.body.transaction.is_valid() {
+        if !block_copy.kernel.body.transaction.is_valid() {
             warn!("Invalid transaction found in block");
             return false;
         }
@@ -403,12 +420,6 @@ impl Block {
         //  4.1. verify that uncle's prev_block_digest matches with parent's prev_block_digest
         //  4.2. verify that all uncles' hash are below parent's target_difficulty
 
-        // 5. `block_body_merkle_root`
-        if block_copy.header.block_body_merkle_root != Hash::hash(&block_copy.body) {
-            warn!("Block body does not match referenced block body Merkle root");
-            return false;
-        }
-
         true
     }
 
@@ -417,7 +428,9 @@ impl Block {
     /// the previous.
     pub fn has_proof_of_work(&self, previous_block: &Block) -> bool {
         // check that hash is below threshold
-        if self.hash > Self::difficulty_to_digest_threshold(previous_block.header.difficulty) {
+        if self.hash()
+            > Self::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty)
+        {
             warn!("Block digest exceeds target difficulty");
             return false;
         }
@@ -448,12 +461,12 @@ impl Block {
         new_timestamp: u64,
     ) -> U32s<TARGET_DIFFICULTY_U32_SIZE> {
         // no adjustment if the previous block is the genesis block
-        if old_block.header.height.is_genesis() {
-            return old_block.header.difficulty;
+        if old_block.kernel.header.height.is_genesis() {
+            return old_block.kernel.header.difficulty;
         }
 
         // otherwise, compute PID control signal
-        let t = new_timestamp - old_block.header.timestamp.value();
+        let t = new_timestamp - old_block.kernel.header.timestamp.value();
 
         let new_error = t as i64 - TARGET_BLOCK_INTERVAL as i64;
 
@@ -465,11 +478,11 @@ impl Block {
         let adjustment_u32s =
             U32s::<TARGET_DIFFICULTY_U32_SIZE>::new([adj_lo, adj_hi, 0u32, 0u32, 0u32]);
         if adjustment_is_positive {
-            old_block.header.difficulty + adjustment_u32s
-        } else if adjustment_u32s > old_block.header.difficulty - MINIMUM_DIFFICULTY.into() {
+            old_block.kernel.header.difficulty + adjustment_u32s
+        } else if adjustment_u32s > old_block.kernel.header.difficulty - MINIMUM_DIFFICULTY.into() {
             MINIMUM_DIFFICULTY.into()
         } else {
-            old_block.header.difficulty - adjustment_u32s
+            old_block.kernel.header.difficulty - adjustment_u32s
         }
     }
 }
@@ -479,17 +492,24 @@ mod block_tests {
     use crate::{
         config_models::network::Network,
         models::{
-            blockchain::transaction::PubScript, state::wallet::WalletSecret,
+            blockchain::transaction::PublicAnnouncement, state::wallet::WalletSecret,
             state::UtxoReceiverData,
         },
-        tests::shared::{get_mock_global_state, make_mock_block},
+        tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
+    };
+    use tasm_lib::twenty_first::{
+        storage::level_db::DB,
+        util_types::{
+            emojihash_trait::Emojihash,
+            mmr::archival_mmr::ArchivalMmr,
+            storage_schema::{SimpleRustyStorage, StorageWriter},
+        },
     };
 
     use super::*;
 
-    use rand::random;
+    use rand::{random, thread_rng, Rng};
     use tracing_test::traced_test;
-    use twenty_first::util_types::emojihash_trait::Emojihash;
 
     #[traced_test]
     #[tokio::test]
@@ -520,8 +540,7 @@ mod block_tests {
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
         let new_utxo = Utxo::new_native_coin(other_address.lock_script(), 10.into());
         let reciever_data = UtxoReceiverData {
-            pubscript: PubScript::default(),
-            pubscript_input: vec![],
+            public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: other_address.privacy_digest,
             sender_randomness: random(),
             utxo: new_utxo,
@@ -538,14 +557,14 @@ mod block_tests {
         assert!(
             block_1.is_valid(&genesis_block),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
-            block_1
+            genesis_block.kernel
                 .body
-                .previous_mutator_set_accumulator
+                .mutator_set_accumulator
                 .hash()
                 .emojihash(),
-                block_1
+                block_1.kernel
                     .body
-                    .next_mutator_set_accumulator
+                    .mutator_set_accumulator
                     .hash()
                     .emojihash()
         );
@@ -553,12 +572,12 @@ mod block_tests {
         // Sanity checks
         assert_eq!(
             3,
-            block_1.body.transaction.kernel.outputs.len(),
+            block_1.kernel.body.transaction.kernel.outputs.len(),
             "New block must have three outputs: coinbase, transaction, and change"
         );
         assert_eq!(
             1,
-            block_1.body.transaction.kernel.inputs.len(),
+            block_1.kernel.body.transaction.kernel.inputs.len(),
             "New block must have one input: spending of genesis UTXO"
         );
     }
@@ -591,5 +610,78 @@ mod block_tests {
         assert_eq!(0u64, some_threshold_actual.values()[4].value());
         assert_eq!(some_threshold_actual, some_threshold_expected);
         assert_eq!(bfe_max_elem, some_threshold_actual.values()[3]);
+    }
+
+    #[test]
+    fn block_with_wrong_mmra_is_invalid() {
+        let genesis_block = Block::genesis_block();
+
+        let a_wallet_secret = WalletSecret::new_random();
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (mut block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+
+        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
+
+        assert!(!block_1.is_valid(&genesis_block));
+    }
+
+    #[test]
+    fn can_prove_block_ancestry() {
+        let genesis_block = Block::genesis_block();
+        let mut blocks = vec![];
+        blocks.push(genesis_block.clone());
+        let db = DB::open_new_test_database(true, None, None, None).unwrap();
+        let mut storage = SimpleRustyStorage::new(db);
+        storage.restore_or_new();
+        let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0");
+        let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage);
+        ammr.append(genesis_block.hash());
+        let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
+
+        for i in 0..55 {
+            let wallet_secret = WalletSecret::new_random();
+            let recipient_address = wallet_secret.nth_generation_spending_key(0).to_address();
+            let (new_block, _, _) =
+                make_mock_block(blocks.last().unwrap(), None, recipient_address);
+            if i != 54 {
+                ammr.append(new_block.hash());
+                mmra.append(new_block.hash());
+                assert_eq!(ammr.to_accumulator().bag_peaks(), mmra.bag_peaks());
+            }
+            blocks.push(new_block);
+        }
+
+        let last_block_mmra = blocks.last().unwrap().body().block_mmr_accumulator.clone();
+        assert_eq!(mmra, last_block_mmra);
+
+        let index = thread_rng().gen_range(0..blocks.len() - 1);
+        let block_digest = blocks[index].hash();
+        let (membership_proof, _) = ammr.prove_membership(index as u64);
+        let (v, _) = membership_proof.verify(
+            &last_block_mmra.get_peaks(),
+            block_digest,
+            last_block_mmra.count_leaves(),
+        );
+        assert!(
+            v,
+            "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {} leaf index: {}",
+            last_block_mmra
+                .get_peaks()
+                .iter()
+                .map(|d| d.emojihash())
+                .join(","),
+            last_block_mmra.get_peaks().len(),
+            last_block_mmra.count_leaves(),
+            membership_proof.leaf_index,
+            membership_proof
+                .authentication_path
+                .iter()
+                .map(|d| d.emojihash())
+                .join(","),
+            blocks.len(),
+            membership_proof.leaf_index
+        );
+        assert_eq!(last_block_mmra.count_leaves(), blocks.len() as u64 - 1);
     }
 }

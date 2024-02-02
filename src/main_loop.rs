@@ -307,17 +307,18 @@ impl MainLoopHandler {
                 // and we assume it is the longest chain even though we could have received
                 // a block from a peer thread before this event is triggered.
                 let new_block = new_block_info.block;
-                info!("Miner found new block: {}", new_block.header.height);
+                info!("Miner found new block: {}", new_block.kernel.header.height);
 
                 // Store block in database
                 // This block spans global state write lock for updating.
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 let (tip_hash, tip_proof_of_work_family) = (
-                    global_state_mut.chain.light_state().hash,
+                    global_state_mut.chain.light_state().hash(),
                     global_state_mut
                         .chain
                         .light_state()
+                        .kernel
                         .header
                         .proof_of_work_family,
                 );
@@ -325,8 +326,9 @@ impl MainLoopHandler {
                 // If we received a new block from a peer and updated the global state before this message from the miner was handled,
                 // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
                 // node considered the most canonical block.
-                let block_is_new = tip_proof_of_work_family < new_block.header.proof_of_work_family
-                    && new_block.header.prev_block_digest == tip_hash;
+                let block_is_new = tip_proof_of_work_family
+                    < new_block.kernel.header.proof_of_work_family
+                    && new_block.kernel.header.prev_block_digest == tip_hash;
                 if !block_is_new {
                     warn!("Got new block from miner thread that was not child of tip. Discarding.");
                     return Ok(());
@@ -380,11 +382,12 @@ impl MainLoopHandler {
                     let tip_proof_of_work_family = global_state_mut
                         .chain
                         .light_state()
+                        .kernel
                         .header
                         .proof_of_work_family;
 
                     let block_is_new =
-                        tip_proof_of_work_family < last_block.header.proof_of_work_family;
+                        tip_proof_of_work_family < last_block.kernel.header.proof_of_work_family;
                     if !block_is_new {
                         warn!("Blocks were not new. Not storing blocks.");
 
@@ -397,7 +400,7 @@ impl MainLoopHandler {
                     // Get out of sync mode if needed
                     if global_state_mut.net.syncing {
                         let stay_in_sync_mode = stay_in_sync_mode(
-                            &last_block.header,
+                            &last_block.kernel.header,
                             &main_loop_state.sync_state,
                             global_state_mut.cli.max_number_of_blocks_before_syncing,
                         );
@@ -410,10 +413,12 @@ impl MainLoopHandler {
                     for new_block in blocks {
                         debug!(
                             "Storing block {} in database. Height: {}, Mined: {}",
-                            new_block.hash.emojihash(),
-                            new_block.header.height,
-                            crate::utc_timestamp_to_localtime(new_block.header.timestamp.value())
-                                .to_string()
+                            new_block.hash().emojihash(),
+                            new_block.kernel.header.height,
+                            crate::utc_timestamp_to_localtime(
+                                new_block.kernel.header.timestamp.value()
+                            )
+                            .to_string()
                         );
 
                         global_state_mut.store_block(new_block).await?;
@@ -716,9 +721,14 @@ impl MainLoopHandler {
 
         // Check when latest batch of blocks was requested
         let (current_block_hash, current_block_height, current_block_proof_of_work_family) = (
-            global_state.chain.light_state().hash,
-            global_state.chain.light_state().header.height,
-            global_state.chain.light_state().header.proof_of_work_family,
+            global_state.chain.light_state().hash(),
+            global_state.chain.light_state().kernel.header.height,
+            global_state
+                .chain
+                .light_state()
+                .kernel
+                .header
+                .proof_of_work_family,
         );
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state

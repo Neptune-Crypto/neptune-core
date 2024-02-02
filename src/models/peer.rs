@@ -211,9 +211,9 @@ pub struct PeerBlockNotification {
 impl From<&Block> for PeerBlockNotification {
     fn from(block: &Block) -> Self {
         PeerBlockNotification {
-            hash: block.hash,
-            height: block.header.height,
-            proof_of_work_family: block.header.proof_of_work_family,
+            hash: block.hash(),
+            height: block.kernel.header.height,
+            proof_of_work_family: block.kernel.header.proof_of_work_family,
         }
     }
 }
@@ -221,9 +221,9 @@ impl From<&Block> for PeerBlockNotification {
 impl From<Block> for PeerBlockNotification {
     fn from(block: Block) -> Self {
         PeerBlockNotification {
-            hash: block.hash,
-            height: block.header.height,
-            proof_of_work_family: block.header.proof_of_work_family,
+            hash: block.hash(),
+            height: block.kernel.header.height,
+            proof_of_work_family: block.kernel.header.proof_of_work_family,
         }
     }
 }

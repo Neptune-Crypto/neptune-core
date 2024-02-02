@@ -1,12 +1,14 @@
+use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
+use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
 use crate::models::blockchain::transaction::{
     transaction_kernel::{TransactionKernel, TransactionKernelField},
     utxo::Utxo,
-    PrimitiveWitness,
 };
 
-use super::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
+use crate::models::consensus::{ClaimSupport, SupportedClaim};
+use crate::models::consensus::{SecretWitness, ValidationLogic};
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -46,8 +48,12 @@ impl KernelToLockScripts {
 }
 
 impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
+    type PrimitiveWitness = TransactionPrimitiveWitness;
+
+    type Kernel = TransactionKernel;
+
     fn new_from_primitive_witness(
-        primitive_witness: &PrimitiveWitness,
+        primitive_witness: &TransactionPrimitiveWitness,
         tx_kernel: &TransactionKernel,
     ) -> Self {
         let claim = Claim {
