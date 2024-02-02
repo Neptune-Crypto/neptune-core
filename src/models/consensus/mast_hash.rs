@@ -10,8 +10,11 @@ use tasm_lib::twenty_first::{
 
 use crate::models::blockchain::shared::Hash;
 
-pub trait HasDiscriminant {
+pub trait HasDiscriminant: Clone {
     fn discriminant(&self) -> usize;
+    // {
+    //     self.clone() as usize
+    // }
 }
 
 pub trait MastHash {
@@ -42,5 +45,45 @@ pub trait MastHash {
         self.merkle_tree()
             .authentication_structure(&[field.discriminant()])
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use strum::{EnumCount, FromRepr};
+
+    use super::HasDiscriminant;
+
+    #[derive(Debug, Clone, FromRepr, EnumCount, PartialEq, Eq, PartialOrd, Ord)]
+    enum TestEnum {
+        A,
+        B,
+        C,
+    }
+
+    impl HasDiscriminant for TestEnum {
+        fn discriminant(&self) -> usize {
+            self.clone() as usize
+        }
+    }
+
+    #[test]
+    fn enum_variants_are_onto_discriminants() {
+        let mut variant_set = vec![];
+        let mut uint_set = vec![];
+        for u in 0..TestEnum::COUNT {
+            let variant = TestEnum::from_repr(u).unwrap();
+            variant_set.push(variant.clone());
+            uint_set.push(variant.discriminant());
+        }
+
+        variant_set.sort();
+        variant_set.dedup();
+
+        uint_set.sort();
+        uint_set.dedup();
+
+        assert_eq!(variant_set.len(), TestEnum::COUNT);
+        assert_eq!(uint_set.len(), TestEnum::COUNT);
     }
 }

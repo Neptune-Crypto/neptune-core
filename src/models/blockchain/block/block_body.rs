@@ -3,6 +3,7 @@ use crate::prelude::twenty_first;
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use strum::EnumCount;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::Digest;
@@ -12,6 +13,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
+#[derive(Debug, Clone, EnumCount)]
 pub enum BlockBodyField {
     Transaction,
     MutatorSetAccumulator,
@@ -22,13 +24,7 @@ pub enum BlockBodyField {
 
 impl HasDiscriminant for BlockBodyField {
     fn discriminant(&self) -> usize {
-        match self {
-            BlockBodyField::Transaction => 0,
-            BlockBodyField::MutatorSetAccumulator => 1,
-            BlockBodyField::LockFreeMmrAccumulator => 2,
-            BlockBodyField::BlockMmrAccumulator => 3,
-            BlockBodyField::UncleBlocks => 4,
-        }
+        self.clone() as usize
     }
 }
 

@@ -45,6 +45,7 @@ pub struct TransactionKernel {
     pub mutator_set_hash: Digest,
 }
 
+#[derive(Debug, Clone)]
 pub enum TransactionKernelField {
     InputUtxos,
     OutputUtxos,
@@ -57,15 +58,7 @@ pub enum TransactionKernelField {
 
 impl HasDiscriminant for TransactionKernelField {
     fn discriminant(&self) -> usize {
-        match self {
-            TransactionKernelField::InputUtxos => 0,
-            TransactionKernelField::OutputUtxos => 1,
-            TransactionKernelField::Pubscript => 2,
-            TransactionKernelField::Fee => 3,
-            TransactionKernelField::Coinbase => 4,
-            TransactionKernelField::Timestamp => 5,
-            TransactionKernelField::MutatorSetHash => 6,
-        }
+        self.clone() as usize
     }
 }
 

@@ -61,6 +61,7 @@ impl Display for BlockHeader {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum BlockHeaderField {
     Version,
     Height,
@@ -75,17 +76,7 @@ pub enum BlockHeaderField {
 
 impl HasDiscriminant for BlockHeaderField {
     fn discriminant(&self) -> usize {
-        match self {
-            BlockHeaderField::Version => 0,
-            BlockHeaderField::Height => 1,
-            BlockHeaderField::PrevBlockDigest => 2,
-            BlockHeaderField::Timestamp => 3,
-            BlockHeaderField::Nonce => 4,
-            BlockHeaderField::MaxBlockSize => 5,
-            BlockHeaderField::ProofOfWorkLine => 6,
-            BlockHeaderField::ProofOfWorkFamily => 7,
-            BlockHeaderField::Difficulty => 8,
-        }
+        self.clone() as usize
     }
 }
 
