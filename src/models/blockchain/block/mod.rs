@@ -39,7 +39,7 @@ use self::mutator_set_update::MutatorSetUpdate;
 use self::transfer_block::TransferBlock;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
-use super::transaction::{amount::Amount, Transaction};
+use super::transaction::{neptune_coins::NeptuneCoins, Transaction};
 use crate::models::blockchain::shared::Hash;
 use crate::models::consensus::Witness;
 use crate::models::state::wallet::address::generation_address;
@@ -109,8 +109,8 @@ impl Block {
         self.kernel.body = block.kernel.body;
     }
 
-    pub fn get_mining_reward(block_height: BlockHeight) -> Amount {
-        let mut reward: Amount = Amount(U32s::new([100, 0, 0, 0]));
+    pub fn get_mining_reward(block_height: BlockHeight) -> NeptuneCoins {
+        let mut reward: NeptuneCoins = NeptuneCoins::new(100);
         let generation = block_height.get_generation();
         for _ in 0..generation {
             reward.div_two()
@@ -136,7 +136,7 @@ impl Block {
             kernel: TransactionKernel {
                 inputs: vec![],
                 outputs: vec![],
-                fee: 0u32.into(),
+                fee: NeptuneCoins::new(0),
                 timestamp,
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
@@ -191,12 +191,12 @@ impl Block {
         Self::new(header, body, None)
     }
 
-    pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, Amount)> {
+    pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
         // The premine UTXOs can be hardcoded here.
         let authority_wallet = WalletSecret::devnet_wallet();
         let authority_receiving_address =
             authority_wallet.nth_generation_spending_key(0).to_address();
-        vec![(authority_receiving_address, 20000.into())]
+        vec![(authority_receiving_address, NeptuneCoins::new(20000))]
     }
 
     pub fn new(header: BlockHeader, body: BlockBody, proof: Option<Proof>) -> Self {
@@ -389,7 +389,7 @@ impl Block {
 
         // 1.f) Verify that the coinbase claimed by the transaction does not exceed
         // the allowed coinbase based on block height, epoch, etc., and fee
-        let miner_reward: Amount = Self::get_mining_reward(block_copy.kernel.header.height)
+        let miner_reward: NeptuneCoins = Self::get_mining_reward(block_copy.kernel.header.height)
             + self.kernel.body.transaction.kernel.fee;
         if let Some(claimed_reward) = block_copy.kernel.body.transaction.kernel.coinbase {
             if claimed_reward > miner_reward {
@@ -538,7 +538,7 @@ mod block_tests {
         );
 
         // create a new transaction, merge it into block 1 and check that block 1 is still valid
-        let new_utxo = Utxo::new_native_coin(other_address.lock_script(), 10.into());
+        let new_utxo = Utxo::new_native_coin(other_address.lock_script(), NeptuneCoins::new(10));
         let reciever_data = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: other_address.privacy_digest,
@@ -548,7 +548,7 @@ mod block_tests {
         let new_tx = global_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(vec![reciever_data], 1.into())
+            .create_transaction(vec![reciever_data], NeptuneCoins::new(1))
             .await
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");

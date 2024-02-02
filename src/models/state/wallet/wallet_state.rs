@@ -29,7 +29,7 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
-use crate::models::blockchain::transaction::{amount::Amount, Transaction};
+use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -428,9 +428,9 @@ impl WalletState {
                     utxo.coins
                         .iter()
                         .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
-                        .map(|coin| *Amount::decode(&coin.state)
+                        .map(|coin| *NeptuneCoins::decode(&coin.state)
                             .expect("Failed to decode coin state as amount"))
-                        .sum::<Amount>(),
+                        .sum::<NeptuneCoins>(),
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =
@@ -667,7 +667,7 @@ impl WalletState {
 
     pub async fn allocate_sufficient_input_funds_from_lock(
         &self,
-        requested_amount: Amount,
+        requested_amount: NeptuneCoins,
         tip_digest: Digest,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
@@ -686,7 +686,7 @@ impl WalletState {
         }
 
         let mut ret: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = vec![];
-        let mut allocated_amount = Amount::zero();
+        let mut allocated_amount = NeptuneCoins::zero();
         let lock_script = self
             .wallet_secret
             .nth_generation_spending_key(0)
@@ -710,7 +710,7 @@ impl WalletState {
     // paid in the transaction.
     pub async fn allocate_sufficient_input_funds(
         &self,
-        requested_amount: Amount,
+        requested_amount: NeptuneCoins,
         tip_digest: Digest,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest)

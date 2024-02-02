@@ -12,7 +12,7 @@ use twenty_first::shared_math::{
     b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest,
 };
 
-use super::{amount::pseudorandom_amount, Amount, PublicAnnouncement};
+use super::{neptune_coins::pseudorandom_amount, NeptuneCoins, PublicAnnouncement};
 use crate::{
     util_types::mutator_set::{
         addition_record::{pseudorandom_addition_record, AdditionRecord},
@@ -36,8 +36,8 @@ pub struct TransactionKernel {
     pub outputs: Vec<AdditionRecord>,
 
     pub public_announcements: Vec<PublicAnnouncement>,
-    pub fee: Amount,
-    pub coinbase: Option<Amount>,
+    pub fee: NeptuneCoins,
+    pub coinbase: Option<NeptuneCoins>,
 
     // number of milliseconds since unix epoch
     pub timestamp: BFieldElement,
@@ -190,7 +190,7 @@ pub mod transaction_kernel_tests {
                 canonical_commitment: random(),
             }],
             public_announcements: Default::default(),
-            fee: Amount::one(),
+            fee: NeptuneCoins::one(),
             coinbase: None,
             timestamp: Default::default(),
             mutator_set_hash: rng.gen::<Digest>(),

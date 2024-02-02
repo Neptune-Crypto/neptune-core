@@ -29,10 +29,7 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::{LockScript, TypeScript, Utxo};
 use super::blockchain::transaction::validity::TransactionValidationLogic;
-use super::blockchain::transaction::{
-    amount::{Amount, Sign},
-    Transaction,
-};
+use super::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
 use super::blockchain::transaction::{PublicAnnouncement, TransactionPrimitiveWitness};
 use super::consensus::ValidationLogic;
 use crate::config_models::cli_args;
@@ -326,7 +323,7 @@ impl GlobalState {
     }
 
     /// Retrieve wallet balance history
-    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
+    pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, NeptuneCoins)> {
         let current_tip_digest = self.chain.light_state().hash();
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
@@ -350,18 +347,11 @@ impl GlobalState {
                     confirmation_timestamp,
                     confirmation_height,
                     amount,
-                    Sign::NonNegative,
                 ));
                 if let Some((spending_block, spending_timestamp, spending_height)) =
                     monitored_utxo.spent_in_block
                 {
-                    history.push((
-                        spending_block,
-                        spending_timestamp,
-                        spending_height,
-                        amount,
-                        Sign::Negative,
-                    ));
+                    history.push((spending_block, spending_timestamp, spending_height, -amount));
                 }
             }
         }
@@ -380,16 +370,16 @@ impl GlobalState {
     pub async fn create_transaction(
         &mut self,
         receiver_data: Vec<UtxoReceiverData>,
-        fee: Amount,
+        fee: NeptuneCoins,
     ) -> Result<Transaction> {
         // Get the block tip as the transaction is made relative to it
         let bc_tip = self.chain.light_state();
 
         // Get the UTXOs required for this transaction
-        let total_spend: Amount = receiver_data
+        let total_spend: NeptuneCoins = receiver_data
             .iter()
             .map(|x| x.utxo.get_native_coin_amount())
-            .sum::<Amount>()
+            .sum::<NeptuneCoins>()
             + fee;
 
         // todo: accomodate a future change whereby this function also returns the matching spending keys
@@ -401,7 +391,7 @@ impl GlobalState {
         // Create all removal records. These must be relative to the block tip.
         let msa_tip = &bc_tip.kernel.body.mutator_set_accumulator;
         let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
-        let mut input_amount: Amount = Amount::zero();
+        let mut input_amount: NeptuneCoins = NeptuneCoins::zero();
         for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
             let removal_record = msa_tip.kernel.drop(Hash::hash(spendable_utxo), mp);
             inputs.push(removal_record);
@@ -1130,7 +1120,7 @@ mod global_state_tests {
         let network = Network::Alpha;
         let other_wallet = WalletSecret::new_random();
         let global_state_lock = get_mock_global_state(network, 2, None).await;
-        let twenty_amount: Amount = 20.into();
+        let twenty_amount: NeptuneCoins = NeptuneCoins::new(20);
         let twenty_coins = twenty_amount.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
         let main_lock_script = recipient_address.lock_script();
@@ -1152,7 +1142,7 @@ mod global_state_tests {
         let tx: Transaction = global_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data, 1.into())
+            .create_transaction(receiver_data, NeptuneCoins::new(1))
             .await
             .unwrap();
 
@@ -1172,7 +1162,7 @@ mod global_state_tests {
         let mut other_receiver_data = vec![];
         let mut output_utxos: Vec<Utxo> = vec![];
         for i in 2..5 {
-            let amount: Amount = i.into();
+            let amount: NeptuneCoins = NeptuneCoins::new(i);
             let that_many_coins = amount.to_native_coins();
             let receiving_address = other_wallet.nth_generation_spending_key(0).to_address();
             let lock_script = receiving_address.lock_script();
@@ -1197,7 +1187,7 @@ mod global_state_tests {
         let new_tx: Transaction = global_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(other_receiver_data, 1.into())
+            .create_transaction(other_receiver_data, NeptuneCoins::new(1))
             .await
             .unwrap();
         assert!(new_tx.is_valid());

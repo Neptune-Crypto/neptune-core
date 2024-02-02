@@ -1,8 +1,8 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
-pub mod amount;
 pub mod native_coin;
+pub mod neptune_coins;
 pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
@@ -11,7 +11,7 @@ use crate::models::consensus::Witness;
 use anyhow::Result;
 use get_size::GetSize;
 use itertools::Itertools;
-use num_bigint::{BigInt, BigUint};
+use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
@@ -24,8 +24,8 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
-use self::amount::Amount;
 use self::native_coin::native_coin_program;
+use self::neptune_coins::NeptuneCoins;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::{LockScript, TypeScript, Utxo};
 use self::validity::TransactionValidationLogic;
@@ -312,7 +312,7 @@ impl Transaction {
     pub fn fee_density(&self) -> BigRational {
         let transaction_as_bytes = bincode::serialize(&self).unwrap();
         let transaction_size = BigInt::from(transaction_as_bytes.get_size());
-        let transaction_fee = BigInt::from(BigUint::from(self.kernel.fee.0));
+        let transaction_fee = self.kernel.fee.to_nau();
         BigRational::new_raw(transaction_fee, transaction_size)
     }
 
@@ -529,7 +529,7 @@ mod transaction_tests {
     #[test]
     fn tx_get_timestamp_test() {
         let output_1 = Utxo {
-            coins: Into::<Amount>::into(42).to_native_coins(),
+            coins: NeptuneCoins::new(42).to_native_coins(),
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
         let ar = commit::<Hash>(Hash::hash(&output_1), random(), random());

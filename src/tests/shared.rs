@@ -49,8 +49,8 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::transaction::amount::pseudorandom_amount;
-use crate::models::blockchain::transaction::amount::Amount;
+use crate::models::blockchain::transaction::neptune_coins::pseudorandom_amount;
+use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
@@ -430,7 +430,7 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     Utxo {
         lock_script_hash: rng.gen(),
-        coins: Amount::from(rng.next_u32()).to_native_coins(),
+        coins: NeptuneCoins::new(rng.gen_range(0..42000000)).to_native_coins(),
     }
 }
 
@@ -539,7 +539,7 @@ pub fn random_public_announcement() -> PublicAnnouncement {
     pseudorandom_public_announcement(rng.gen::<[u8; 32]>())
 }
 
-pub fn random_amount() -> Amount {
+pub fn random_amount() -> NeptuneCoins {
     let mut rng = thread_rng();
     pseudorandom_amount(rng.gen::<[u8; 32]>())
 }
@@ -738,7 +738,7 @@ pub fn make_mock_transaction_with_generation_key(
         generation_address::SpendingKey,
     )>,
     receiver_data: Vec<UtxoReceiverData>,
-    fee: Amount,
+    fee: NeptuneCoins,
     tip_msa: MutatorSetAccumulator<Hash>,
 ) -> Transaction {
     // Generate removal records
@@ -842,7 +842,7 @@ pub fn make_mock_transaction(
             inputs,
             outputs,
             public_announcements: vec![],
-            fee: 1.into(),
+            fee: NeptuneCoins::new(1),
             timestamp,
             coinbase: None,
             mutator_set_hash: random(),
@@ -855,7 +855,7 @@ pub fn make_mock_transaction(
 pub fn make_mock_transaction_with_wallet(
     inputs: Vec<RemovalRecord<Hash>>,
     outputs: Vec<AdditionRecord>,
-    fee: Amount,
+    fee: NeptuneCoins,
     _wallet_state: &WalletState,
     timestamp: Option<BFieldElement>,
 ) -> Transaction {
@@ -924,7 +924,7 @@ pub fn make_mock_block(
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
         public_announcements: vec![],
-        fee: Amount::zero(),
+        fee: NeptuneCoins::zero(),
         timestamp: BFieldElement::new(block_timestamp),
         coinbase: Some(coinbase_amount),
         mutator_set_hash: previous_mutator_set.hash(),

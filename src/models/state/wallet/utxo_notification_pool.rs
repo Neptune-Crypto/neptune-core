@@ -360,7 +360,7 @@ mod wallet_state_tests {
 
     use super::*;
     use crate::{
-        models::blockchain::transaction::{amount::Amount, utxo::LockScript},
+        models::blockchain::transaction::{neptune_coins::NeptuneCoins, utxo::LockScript},
         tests::shared::make_mock_transaction,
     };
 
@@ -372,7 +372,7 @@ mod wallet_state_tests {
         assert!(notification_pool.len().is_zero());
         let mock_utxo = Utxo {
             lock_script_hash: LockScript::anyone_can_spend().hash(),
-            coins: Into::<Amount>::into(10).to_native_coins(),
+            coins: NeptuneCoins::new(10).to_native_coins(),
         };
         let sender_randomness: Digest = random();
         let receiver_preimage: Digest = random();
@@ -435,7 +435,7 @@ mod wallet_state_tests {
         let spamming_peer: InstanceId = random();
         let mock_utxo = Utxo {
             lock_script_hash: LockScript::anyone_can_spend().hash(),
-            coins: Into::<Amount>::into(14).to_native_coins(),
+            coins: NeptuneCoins::new(14).to_native_coins(),
         };
         let receiver_preimage: Digest = random();
         let first_sender_randomness: Digest = random();
@@ -550,7 +550,7 @@ mod wallet_state_tests {
         let mut notification_pool = UtxoNotificationPool::new(ByteSize::mb(1), 100);
         let mock_utxo = Utxo {
             lock_script_hash: LockScript::anyone_can_spend().hash(),
-            coins: Into::<Amount>::into(14).to_native_coins(),
+            coins: NeptuneCoins::new(14).to_native_coins(),
         };
 
         // Add a UTXO notification

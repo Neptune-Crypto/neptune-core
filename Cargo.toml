@@ -32,6 +32,7 @@ num-traits = "0"
 priority-queue = "1"
 rand = "0.8"
 ratatui = "0.23"
+regex = "1.10.3"
 semver = "^1.0.21"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"

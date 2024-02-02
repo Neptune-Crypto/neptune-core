@@ -15,7 +15,7 @@ use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::models::blockchain::shared::Hash;
-use neptune_core::models::blockchain::transaction::amount::Amount;
+use neptune_core::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
 use ratatui::{
@@ -33,7 +33,7 @@ use super::screen::Screen;
 
 #[derive(Debug, Clone)]
 pub struct OverviewData {
-    synced_balance: Option<Amount>,
+    synced_balance: Option<NeptuneCoins>,
     confirmations: Option<BlockHeight>,
     synchronization_percentage: Option<f64>,
 
@@ -93,7 +93,7 @@ impl OverviewData {
     }
     pub fn test() -> Self {
         OverviewData {
-            synced_balance: Some(Amount::zero()),
+            synced_balance: Some(NeptuneCoins::zero()),
             confirmations: Some(17.into()),
             synchronization_percentage: Some(99.5),
 

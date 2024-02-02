@@ -9,8 +9,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind};
 use itertools::Itertools;
 use neptune_core::{
     models::blockchain::block::block_height::BlockHeight,
-    models::blockchain::transaction::amount::{Amount, Sign},
-    rpc_server::RPCClient,
+    models::blockchain::transaction::neptune_coins::NeptuneCoins, rpc_server::RPCClient,
 };
 use num_traits::{CheckedSub, Zero};
 use ratatui::{
@@ -23,7 +22,7 @@ use tokio::time::sleep;
 use tokio::{select, task::JoinHandle};
 use unicode_width::UnicodeWidthStr;
 
-type BalanceUpdate = (BlockHeight, Duration, Amount, Sign, Amount);
+type BalanceUpdate = (BlockHeight, Duration, NeptuneCoins, NeptuneCoins);
 type BalanceUpdateArc = Arc<std::sync::Mutex<Vec<BalanceUpdate>>>;
 type DashboardEventArc = Arc<std::sync::Mutex<Option<DashboardEvent>>>;
 type JoinHandleArc = Arc<Mutex<JoinHandle<()>>>;
@@ -147,18 +146,16 @@ impl HistoryScreen {
                 _ = &mut balance_history => {
                     let bh = rpc_client.history(context::current()).await.unwrap();
                     let mut history_builder = Vec::with_capacity(bh.len());
-                    let mut balance = Amount::zero();
-                    for (_, block_height, timestamp, amount, sign) in bh.iter() {
-                        match sign {
-                            Sign::NonNegative => { balance = balance + *amount; }
-                            Sign::Negative => {
-                                    balance = match balance.checked_sub(amount) {
-                                    Some(b) => b,
-                                    None => Amount::zero(),
-                                };
-                            }
+                    let mut balance = NeptuneCoins::zero();
+                    for (_, block_height, timestamp, amount) in bh.iter() {
+                        if amount.is_negative() {
+                            balance = match balance.checked_sub(amount) {
+                                Some(b) => b,
+                                None => NeptuneCoins::zero(),
+                            };
                         }
-                        history_builder.push((*block_height, *timestamp, *amount, *sign, balance));
+                        else { balance = balance + *amount; }
+                        history_builder.push((*block_height, *timestamp, *amount, balance));
                     }
                     *balance_updates.lock().unwrap() = history_builder;
 
@@ -267,14 +264,14 @@ impl Widget for HistoryScreen {
             .iter()
             .rev()
             .map(|bu| {
-                let (height, timestamp, amount, sign, balance) = *bu;
+                let (height, timestamp, amount, balance) = *bu;
                 vec![
                     height.to_string(),
                     neptune_core::utc_timestamp_to_localtime(timestamp.as_millis()).to_string(),
-                    if sign == Sign::NonNegative {
-                        "↘".to_string()
+                    if !amount.is_negative() {
+                        "⭸".to_string()
                     } else {
-                        "↗".to_string()
+                        "⭷".to_string()
                     },
                     amount.to_string(),
                     balance.to_string(),

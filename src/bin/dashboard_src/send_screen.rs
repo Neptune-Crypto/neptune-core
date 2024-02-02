@@ -13,7 +13,10 @@ use super::{
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use neptune_core::{
     config_models::network::Network,
-    models::{blockchain::transaction::amount::Amount, state::wallet::address::generation_address},
+    models::{
+        blockchain::transaction::neptune_coins::NeptuneCoins,
+        state::wallet::address::generation_address,
+    },
     rpc_server::RPCClient,
 };
 
@@ -123,7 +126,7 @@ impl SendScreen {
         *notice_arc.lock().await = "Validated inputs; sending ...".to_string();
 
         // TODO: Let user specify this number
-        let fee = Amount::zero();
+        let fee = NeptuneCoins::zero();
 
         // Allow the generation of proves to take some time...
         let mut send_ctx = context::current();

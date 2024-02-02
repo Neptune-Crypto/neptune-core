@@ -14,7 +14,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
 use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
-use super::{native_coin, Amount};
+use super::{native_coin, NeptuneCoins};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -60,7 +60,7 @@ impl Utxo {
         }
     }
 
-    pub fn new_native_coin(lock_script: LockScript, amount: Amount) -> Self {
+    pub fn new_native_coin(lock_script: LockScript, amount: NeptuneCoins) -> Self {
         Self::new(
             lock_script,
             vec![Coin {
@@ -70,13 +70,13 @@ impl Utxo {
         )
     }
 
-    pub fn get_native_coin_amount(&self) -> Amount {
+    pub fn get_native_coin_amount(&self) -> NeptuneCoins {
         self.coins
             .iter()
             .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
-            .map(|coin| match Amount::decode(&coin.state) {
+            .map(|coin| match NeptuneCoins::decode(&coin.state) {
                 Ok(boxed_amount) => *boxed_amount,
-                Err(_) => Amount::zero(),
+                Err(_) => NeptuneCoins::zero(),
             })
             .sum()
     }
@@ -98,7 +98,7 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     Utxo {
         lock_script_hash: rng.gen(),
-        coins: Amount::from(rng.next_u32()).to_native_coins(),
+        coins: NeptuneCoins::new(rng.next_u32() % 42000000).to_native_coins(),
     }
 }
 

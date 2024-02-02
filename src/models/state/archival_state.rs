@@ -785,7 +785,7 @@ mod archival_state_tests {
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::utxo::LockScript;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
+    use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, utxo::Utxo};
     use crate::models::consensus::mast_hash::MastHash;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
@@ -968,11 +968,11 @@ mod archival_state_tests {
                         receiver_privacy_digest: random(),
                         sender_randomness: random(),
                         utxo: Utxo {
-                            coins: Into::<Amount>::into(4).to_native_coins(),
+                            coins: NeptuneCoins::new(4).to_native_coins(),
                             lock_script_hash: LockScript::anyone_can_spend().hash(),
                         },
                     }],
-                    Into::<Amount>::into(2),
+                    NeptuneCoins::new(2),
                 )
                 .await
                 .unwrap();
@@ -1072,7 +1072,7 @@ mod archival_state_tests {
         );
         let genesis_block = archival_state.genesis_block.clone();
 
-        let one_money = Into::<Amount>::into(54).to_native_coins();
+        let one_money = NeptuneCoins::new(42).to_native_coins();
         let receiver_data = vec![
             UtxoReceiverData {
                 utxo: Utxo {
@@ -1096,7 +1096,7 @@ mod archival_state_tests {
         let sender_tx = global_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data, Into::<Amount>::into(4))
+            .create_transaction(receiver_data, NeptuneCoins::new(4))
             .await
             .unwrap();
 
@@ -1181,7 +1181,7 @@ mod archival_state_tests {
         // this variable might come in handy for reporting purposes
         let mut _aocl_index_of_consumed_input = 0;
 
-        let some_money = Into::<Amount>::into(54).to_native_coins();
+        let some_money = NeptuneCoins::new(54).to_native_coins();
 
         for i in 0..10 {
             // Create next block with inputs and outputs
@@ -1208,7 +1208,7 @@ mod archival_state_tests {
                 },
             ];
             let sender_tx = global_state
-                .create_transaction(receiver_data, Into::<Amount>::into(4))
+                .create_transaction(receiver_data, NeptuneCoins::new(4))
                 .await
                 .unwrap();
 
@@ -1337,7 +1337,7 @@ mod archival_state_tests {
         assert!(block_1_a.is_valid(&genesis_block));
 
         // Add a valid input to the block transaction
-        let one_money: Amount = Into::<Amount>::into(1);
+        let one_money: NeptuneCoins = NeptuneCoins::new(1);
         let receiver_data = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: random(),
@@ -1388,7 +1388,7 @@ mod archival_state_tests {
             make_mock_block_with_valid_pow(&genesis_block, None, genesis_spending_key.to_address());
 
         // Send two outputs each to Alice and Bob, from genesis receiver
-        let fee = Amount::one();
+        let fee = NeptuneCoins::one();
         let sender_randomness: Digest = random();
         let receiver_data_for_alice = vec![
             UtxoReceiverData {
@@ -1397,7 +1397,7 @@ mod archival_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(41).to_native_coins(),
+                    coins: NeptuneCoins::new(41).to_native_coins(),
                 },
             },
             UtxoReceiverData {
@@ -1406,7 +1406,7 @@ mod archival_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(59).to_native_coins(),
+                    coins: NeptuneCoins::new(59).to_native_coins(),
                 },
             },
         ];
@@ -1418,7 +1418,7 @@ mod archival_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(141).to_native_coins(),
+                    coins: NeptuneCoins::new(141).to_native_coins(),
                 },
             },
             UtxoReceiverData {
@@ -1427,7 +1427,7 @@ mod archival_state_tests {
                 sender_randomness,
                 utxo: Utxo {
                     lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(59).to_native_coins(),
+                    coins: NeptuneCoins::new(59).to_native_coins(),
                 },
             },
         ];
@@ -1552,7 +1552,7 @@ mod archival_state_tests {
         // Now Alice should have a balance of 100 and Bob a balance of 200
 
         assert_eq!(
-            Into::<Amount>::into(100),
+            NeptuneCoins::new(100),
             alice_state_lock
                 .lock_guard()
                 .await
@@ -1561,7 +1561,7 @@ mod archival_state_tests {
                 .synced_unspent_amount
         );
         assert_eq!(
-            Into::<Amount>::into(200),
+            NeptuneCoins::new(200),
             bob_state_lock
                 .lock_guard()
                 .await
@@ -1575,7 +1575,7 @@ mod archival_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(50).to_native_coins(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -1584,7 +1584,7 @@ mod archival_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(49).to_native_coins(),
+                    coins: NeptuneCoins::new(49).to_native_coins(),
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -1594,14 +1594,14 @@ mod archival_state_tests {
         let tx_from_alice = alice_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data_from_alice.clone(), Into::<Amount>::into(1))
+            .create_transaction(receiver_data_from_alice.clone(), NeptuneCoins::new(1))
             .await
             .unwrap();
         let receiver_data_from_bob = vec![
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(50).to_native_coins(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -1610,7 +1610,7 @@ mod archival_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(50).to_native_coins(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -1619,7 +1619,7 @@ mod archival_state_tests {
             UtxoReceiverData {
                 utxo: Utxo {
                     lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
-                    coins: Into::<Amount>::into(98).to_native_coins(),
+                    coins: NeptuneCoins::new(98).to_native_coins(),
                 },
                 sender_randomness: random(),
                 receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
@@ -1629,7 +1629,7 @@ mod archival_state_tests {
         let tx_from_bob = bob_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data_from_bob.clone(), Into::<Amount>::into(2))
+            .create_transaction(receiver_data_from_bob.clone(), NeptuneCoins::new(2))
             .await
             .unwrap();
 

@@ -3,7 +3,7 @@ use std::fmt::Display;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
+use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, utxo::Utxo};
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::Hash;
 
@@ -19,13 +19,13 @@ impl Display for WalletStatusElement {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WalletStatus {
-    pub synced_unspent_amount: Amount,
+    pub synced_unspent_amount: NeptuneCoins,
     pub synced_unspent: Vec<(WalletStatusElement, MsMembershipProof<Hash>)>,
-    pub unsynced_unspent_amount: Amount,
+    pub unsynced_unspent_amount: NeptuneCoins,
     pub unsynced_unspent: Vec<WalletStatusElement>,
-    pub synced_spent_amount: Amount,
+    pub synced_spent_amount: NeptuneCoins,
     pub synced_spent: Vec<WalletStatusElement>,
-    pub unsynced_spent_amount: Amount,
+    pub unsynced_spent_amount: NeptuneCoins,
     pub unsynced_spent: Vec<WalletStatusElement>,
 }
 

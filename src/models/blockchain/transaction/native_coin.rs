@@ -15,7 +15,7 @@ use twenty_first::{
 use crate::models::blockchain::{
     shared::Hash,
     transaction::{
-        amount::Amount,
+        neptune_coins::NeptuneCoins,
         utxo::{TypeScript, Utxo},
     },
 };
@@ -74,34 +74,34 @@ pub fn native_coin_reference(
     let output_utxos: Vec<Utxo> = *Vec::<Utxo>::decode(output_sequence)?;
 
     // parse amounts
-    let fee = *Amount::decode(fee_sequence)?;
+    let fee = *NeptuneCoins::decode(fee_sequence)?;
     let coinbase = if coinbase_sequence[0].value() == 1 {
-        *Amount::decode(coinbase_sequence)?
+        *NeptuneCoins::decode(coinbase_sequence)?
     } else {
-        Amount::zero()
+        NeptuneCoins::zero()
     };
 
     // calculate totals
-    let total_inputs: Amount = input_utxos
+    let total_inputs: NeptuneCoins = input_utxos
         .iter()
         .flat_map(|utxo| {
             utxo.coins
                 .iter()
                 .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
                 .map(|coin| {
-                    *Amount::decode(&coin.state)
+                    *NeptuneCoins::decode(&coin.state)
                         .expect("Native coin reference: failed to parse coin state as amount (1).")
                 })
         })
         .sum();
-    let total_outputs: Amount = output_utxos
+    let total_outputs: NeptuneCoins = output_utxos
         .iter()
         .flat_map(|utxo| {
             utxo.coins
                 .iter()
                 .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
                 .map(|coin| {
-                    *Amount::decode(&coin.state)
+                    *NeptuneCoins::decode(&coin.state)
                         .expect("Native coin reference: failed to parse coin state as amount (2).")
                 })
         })

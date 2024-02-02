@@ -351,7 +351,7 @@ mod wallet_tests {
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
-    use crate::models::blockchain::transaction::amount::{Amount, AmountLike};
+    use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
     use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
@@ -608,7 +608,7 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(Amount::one(), block_1.hash())
+                .allocate_sufficient_input_funds(NeptuneCoins::one(), block_1.hash())
                 .await
                 .unwrap()
                 .len()
@@ -617,7 +617,7 @@ mod wallet_tests {
             1,
             own_wallet_state
                 .allocate_sufficient_input_funds(
-                    mining_reward.checked_sub(&Amount::one()).unwrap(),
+                    mining_reward.checked_sub(&NeptuneCoins::one()).unwrap(),
                     block_1.hash()
                 )
                 .await
@@ -635,7 +635,7 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: `mining_reward`
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(mining_reward + Amount::one(), block_1.hash())
+            .allocate_sufficient_input_funds(mining_reward + NeptuneCoins::one(), block_1.hash())
             .await
             .is_err());
 
@@ -675,7 +675,7 @@ mod wallet_tests {
             6,
             own_wallet_state
                 .allocate_sufficient_input_funds(
-                    mining_reward.scalar_mul(5) + Amount::one(),
+                    mining_reward.scalar_mul(5) + NeptuneCoins::one(),
                     next_block.hash()
                 )
                 .await
@@ -695,7 +695,10 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: 22 * mining reward
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(expected_balance + Amount::one(), next_block.hash())
+            .allocate_sufficient_input_funds(
+                expected_balance + NeptuneCoins::one(),
+                next_block.hash()
+            )
             .await
             .is_err());
 
@@ -731,7 +734,7 @@ mod wallet_tests {
         let receiver_data = vec![UtxoReceiverData {
             utxo: Utxo {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
-                coins: Into::<Amount>::into(200).to_native_coins(),
+                coins: NeptuneCoins::new(200).to_native_coins(),
             },
             sender_randomness: random(),
             receiver_privacy_digest: other_wallet_recipient_address.privacy_digest,
@@ -744,7 +747,7 @@ mod wallet_tests {
         let tx = make_mock_transaction_with_generation_key(
             input_utxos_mps_keys,
             receiver_data,
-            Amount::zero(),
+            NeptuneCoins::zero(),
             msa_tip_previous.clone(),
         );
         next_block.accumulate_transaction(tx);
@@ -756,7 +759,7 @@ mod wallet_tests {
         assert_eq!(
             20,
             own_wallet_state
-                .allocate_sufficient_input_funds(2000.into(), next_block.hash())
+                .allocate_sufficient_input_funds(NeptuneCoins::new(2000), next_block.hash())
                 .await
                 .unwrap()
                 .len()
@@ -764,7 +767,7 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: 2000
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(2001.into(), next_block.hash())
+            .allocate_sufficient_input_funds(NeptuneCoins::new(2001), next_block.hash())
             .await
             .is_err());
 
@@ -813,7 +816,7 @@ mod wallet_tests {
                     own_address.privacy_digest,
                 ),
             utxo: Utxo {
-                coins: Into::<Amount>::into(12).to_native_coins(),
+                coins: NeptuneCoins::new(12).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
             },
         };
@@ -828,13 +831,13 @@ mod wallet_tests {
                     own_address.privacy_digest,
                 ),
             utxo: Utxo {
-                coins: Into::<Amount>::into(1).to_native_coins(),
+                coins: NeptuneCoins::new(1).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
             },
         };
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
         let valid_tx = premine_receiver_global_state
-            .create_transaction(receiver_data_to_other.clone(), Into::<Amount>::into(2))
+            .create_transaction(receiver_data_to_other.clone(), NeptuneCoins::new(2))
             .await
             .unwrap();
 
@@ -874,7 +877,7 @@ mod wallet_tests {
             .await?;
         assert_eq!(
             preminers_original_balance
-                .checked_sub(&Into::<Amount>::into(15))
+                .checked_sub(&NeptuneCoins::new(15))
                 .unwrap(),
             premine_receiver_global_state
                 .get_wallet_status_for_tip()
@@ -1080,13 +1083,13 @@ mod wallet_tests {
             public_announcement: PublicAnnouncement::default(),
             receiver_privacy_digest: own_address.privacy_digest,
             utxo: Utxo {
-                coins: Into::<Amount>::into(6).to_native_coins(),
+                coins: NeptuneCoins::new(4).to_native_coins(),
                 lock_script_hash: own_address.lock_script().hash(),
             },
             sender_randomness: random(),
         };
         let tx_from_preminer = premine_receiver_global_state
-            .create_transaction(vec![receiver_data_six.clone()], Into::<Amount>::into(4))
+            .create_transaction(vec![receiver_data_six.clone()], NeptuneCoins::new(4))
             .await
             .unwrap();
         block_3_b.accumulate_transaction(tx_from_preminer);

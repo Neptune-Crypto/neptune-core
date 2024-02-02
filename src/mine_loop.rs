@@ -4,7 +4,7 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::shared::*;
-use crate::models::blockchain::transaction::amount::Amount;
+use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
@@ -186,7 +186,7 @@ fn make_coinbase_transaction(
         .iter()
         .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
         .map(|coin| {
-            *Amount::decode(&coin.state)
+            *NeptuneCoins::decode(&coin.state)
                 .expect("Make coinbase transaction: failed to parse coin state as amount.")
         })
         .sum();
@@ -209,7 +209,7 @@ fn make_coinbase_transaction(
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
         public_announcements: vec![],
-        fee: Amount::zero(),
+        fee: NeptuneCoins::zero(),
         timestamp,
         coinbase: Some(coinbase_amount),
         mutator_set_hash: mutator_set_accumulator.hash(),
@@ -253,7 +253,7 @@ fn create_block_transaction(
     // Build coinbase UTXO
     let transaction_fees = transactions_to_include
         .iter()
-        .fold(Amount::zero(), |acc, tx| acc + tx.kernel.fee);
+        .fold(NeptuneCoins::zero(), |acc, tx| acc + tx.kernel.fee);
 
     let coinbase_recipient_spending_key = global_state
         .wallet_state
@@ -495,7 +495,7 @@ mod mine_loop_tests {
         );
 
         // Add a transaction to the mempool
-        let four_neptune_coins = Amount::from(4).to_native_coins();
+        let four_neptune_coins = NeptuneCoins::new(4).to_native_coins();
         let receiver_privacy_digest = Digest::default();
         let sender_randomness = Digest::default();
         let public_announcement = PublicAnnouncement::default();
@@ -513,7 +513,7 @@ mod mine_loop_tests {
                         public_announcement,
                     }),
                 ],
-                1.into(),
+                NeptuneCoins::new(1),
             )
             .await
             .unwrap();

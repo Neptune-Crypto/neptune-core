@@ -26,7 +26,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::{amount::Amount, Transaction};
+use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
 
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
 /// transactions.  Different strategies are possible for selecting transactions
@@ -203,7 +203,7 @@ impl Mempool {
     /// the highest fee density not using more than `remaining_storage` bytes.
     pub fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
         let mut transactions = vec![];
-        let mut _fee_acc = Amount::zero();
+        let mut _fee_acc = NeptuneCoins::zero();
 
         for (transaction_digest, _fee_density) in self.get_sorted_iter() {
             // No more transactions can possibly be packed
@@ -393,7 +393,9 @@ mod tests {
         models::{
             blockchain::{
                 block::block_height::BlockHeight,
-                transaction::{amount::Amount, utxo::Utxo, PublicAnnouncement, Transaction},
+                transaction::{
+                    neptune_coins::NeptuneCoins, utxo::Utxo, PublicAnnouncement, Transaction,
+                },
             },
             shared::SIZE_20MB_IN_BYTES,
             state::{
@@ -422,8 +424,13 @@ mod tests {
         let mut mempool = Mempool::new(ByteSize::gb(1));
         let network = Network::Alpha;
         let wallet_state = get_mock_wallet_state(None, network).await;
-        let transaction =
-            make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
+        let transaction = make_mock_transaction_with_wallet(
+            vec![],
+            vec![],
+            NeptuneCoins::zero(),
+            &wallet_state,
+            None,
+        );
         let transaction_digest = Hash::hash(&transaction);
         assert!(!mempool.contains(transaction_digest));
         mempool.insert(&transaction);
@@ -450,7 +457,7 @@ mod tests {
             let t = make_mock_transaction_with_wallet(
                 vec![],
                 vec![],
-                Amount::from(i),
+                NeptuneCoins::new(i),
                 &wallet_state,
                 None,
             );
@@ -459,13 +466,13 @@ mod tests {
         mempool
     }
 
-    #[traced_test]
+    // #[traced_test]
     #[tokio::test]
     async fn get_densest_transactions() {
         // Verify that transactions are returned ordered by fee density, with highest fee density first
         let mempool = setup(10, Network::RegTest).await;
 
-        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
+        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
         for curr_transaction in mempool.get_transactions_for_block(SIZE_20MB_IN_BYTES) {
             let curr_fee_density = curr_transaction.fee_density();
@@ -481,7 +488,7 @@ mod tests {
         // Verify that the function `get_sorted_iter` returns transactions sorted by fee density
         let mempool = setup(10, Network::Alpha).await;
 
-        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(999), BigInt::from(1));
+        let max_fee_density: FeeDensity = FeeDensity::new(BigInt::from(u128::MAX), BigInt::from(1));
         let mut prev_fee_density = max_fee_density;
         for (_transaction_id, curr_fee_density) in mempool.get_sorted_iter() {
             assert!(curr_fee_density <= prev_fee_density);
@@ -507,7 +514,7 @@ mod tests {
             let t = make_mock_transaction_with_wallet(
                 vec![],
                 vec![],
-                Amount::from(i),
+                NeptuneCoins::new(i),
                 &wallet_state,
                 timestamp,
             );
@@ -518,7 +525,7 @@ mod tests {
             let t = make_mock_transaction_with_wallet(
                 vec![],
                 vec![],
-                Amount::from(i),
+                NeptuneCoins::new(i),
                 &wallet_state,
                 None,
             );
@@ -590,7 +597,7 @@ mod tests {
         // Create a transaction that's valid to be included in block 2
         let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];
         for i in 0..7 {
-            let amount: Amount = i.into();
+            let amount: NeptuneCoins = NeptuneCoins::new(i);
             let new_utxo = Utxo {
                 coins: amount.to_native_coins(),
                 lock_script_hash: premine_receiver_address.lock_script().hash(),
@@ -605,7 +612,7 @@ mod tests {
         }
 
         let tx_by_preminer = premine_receiver_global_state
-            .create_transaction(output_utxos_generated_by_me, 1.into())
+            .create_transaction(output_utxos_generated_by_me, NeptuneCoins::new(1))
             .await?;
 
         // Add this transaction to the mempool
@@ -619,7 +626,7 @@ mod tests {
         // manager must keep mutator set data updated.
         let output_utxo_data_by_miner = vec![UtxoReceiverData {
             utxo: Utxo {
-                coins: Into::<Amount>::into(68).to_native_coins(),
+                coins: NeptuneCoins::new(68).to_native_coins(),
                 lock_script_hash: other_receiver_address.lock_script().hash(),
             },
             sender_randomness: random(),
@@ -627,7 +634,7 @@ mod tests {
             public_announcement: PublicAnnouncement::default(),
         }];
         let tx_by_other_original = other_global_state
-            .create_transaction(output_utxo_data_by_miner, 1.into())
+            .create_transaction(output_utxo_data_by_miner, NeptuneCoins::new(1))
             .await
             .unwrap();
         mempool.insert(&tx_by_other_original);
@@ -726,7 +733,7 @@ mod tests {
 
         // Create a transaction and insert it into the mempool
         let utxo = Utxo {
-            coins: Into::<Amount>::into(1).to_native_coins(),
+            coins: NeptuneCoins::new(1).to_native_coins(),
             lock_script_hash: premine_address.lock_script().hash(),
         };
         let receiver_data = UtxoReceiverData {
@@ -736,7 +743,7 @@ mod tests {
             public_announcement: PublicAnnouncement::default(),
         };
         let tx_by_preminer_low_fee = preminer_state
-            .create_transaction(vec![receiver_data.clone()], 1.into())
+            .create_transaction(vec![receiver_data.clone()], NeptuneCoins::new(1))
             .await?;
 
         assert_eq!(0, preminer_state.mempool.len());
@@ -754,7 +761,7 @@ mod tests {
         // Insert a transaction that spends the same UTXO and has a higher fee.
         // Verify that this replaces the previous transaction.
         let tx_by_preminer_high_fee = preminer_state
-            .create_transaction(vec![receiver_data.clone()], 10.into())
+            .create_transaction(vec![receiver_data.clone()], NeptuneCoins::new(10))
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_high_fee);
         assert_eq!(1, preminer_state.mempool.len());
@@ -769,7 +776,7 @@ mod tests {
         // Insert a conflicting transaction with a lower fee and verify that it
         // does *not* replace the existing transaction.
         let tx_by_preminer_medium_fee = preminer_state
-            .create_transaction(vec![receiver_data], 4.into())
+            .create_transaction(vec![receiver_data], NeptuneCoins::new(4))
             .await?;
         preminer_state.mempool.insert(&tx_by_preminer_medium_fee);
         assert_eq!(1, preminer_state.mempool.len());

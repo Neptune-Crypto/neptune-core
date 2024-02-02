@@ -18,8 +18,7 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::amount::Amount;
-use crate::models::blockchain::transaction::amount::Sign;
+use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;
@@ -33,7 +32,7 @@ use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 pub struct DashBoardOverviewDataFromClient {
     pub tip_header: BlockHeader,
     pub syncing: bool,
-    pub synced_balance: Amount,
+    pub synced_balance: NeptuneCoins,
     pub mempool_size: usize,
     pub mempool_tx_count: usize,
 
@@ -91,10 +90,10 @@ pub trait RPC {
     async fn header(hash: Digest) -> Option<BlockHeader>;
 
     /// Get sum of unspent UTXOs.
-    async fn synced_balance() -> Amount;
+    async fn synced_balance() -> NeptuneCoins;
 
     /// Get the client's wallet transaction history
-    async fn history() -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)>;
+    async fn history() -> Vec<(Digest, BlockHeight, Duration, NeptuneCoins)>;
 
     /// Return information about funds in the wallet
     async fn wallet_status() -> WalletStatus;
@@ -118,10 +117,10 @@ pub trait RPC {
     ) -> Option<generation_address::ReceivingAddress>;
 
     /// Determine whether the user-supplied string is a valid amount
-    async fn validate_amount(amount: String) -> Option<Amount>;
+    async fn validate_amount(amount: String) -> Option<NeptuneCoins>;
 
     /// Determine whether the given amount is less than (or equal to) the balance
-    async fn amount_leq_synced_balance(amount: Amount) -> bool;
+    async fn amount_leq_synced_balance(amount: NeptuneCoins) -> bool;
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
@@ -134,9 +133,9 @@ pub trait RPC {
 
     /// Send coins
     async fn send(
-        amount: Amount,
+        amount: NeptuneCoins,
         address: generation_address::ReceivingAddress,
-        fee: Amount,
+        fee: NeptuneCoins,
     ) -> Option<Digest>;
 
     /// Stop miner if running
@@ -292,9 +291,9 @@ impl RPC for NeptuneRPCServer {
         self,
         _ctx: context::Context,
         amount_string: String,
-    ) -> Option<Amount> {
+    ) -> Option<NeptuneCoins> {
         // parse string
-        let amount = if let Ok(amt) = Amount::from_str(&amount_string) {
+        let amount = if let Ok(amt) = NeptuneCoins::from_str(&amount_string) {
             amt
         } else {
             return None;
@@ -304,7 +303,7 @@ impl RPC for NeptuneRPCServer {
         Some(amount)
     }
 
-    async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: Amount) -> bool {
+    async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: NeptuneCoins) -> bool {
         // test inequality
         let wallet_status = self
             .state
@@ -315,7 +314,7 @@ impl RPC for NeptuneRPCServer {
         amount <= wallet_status.synced_unspent_amount
     }
 
-    async fn synced_balance(self, _context: tarpc::context::Context) -> Amount {
+    async fn synced_balance(self, _context: tarpc::context::Context) -> NeptuneCoins {
         let wallet_status = self
             .state
             .lock_guard()
@@ -382,13 +381,13 @@ impl RPC for NeptuneRPCServer {
     async fn history(
         self,
         _context: tarpc::context::Context,
-    ) -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)> {
+    ) -> Vec<(Digest, BlockHeight, Duration, NeptuneCoins)> {
         let history = self.state.lock_guard().await.get_balance_history().await;
 
         // sort
-        let mut display_history: Vec<(Digest, BlockHeight, Duration, Amount, Sign)> = history
+        let mut display_history: Vec<(Digest, BlockHeight, Duration, NeptuneCoins)> = history
             .iter()
-            .map(|(h, t, bh, a, s)| (*h, *bh, *t, *a, *s))
+            .map(|(h, t, bh, a)| (*h, *bh, *t, *a))
             .collect::<Vec<_>>();
         display_history.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
@@ -476,9 +475,9 @@ impl RPC for NeptuneRPCServer {
     async fn send(
         self,
         _ctx: context::Context,
-        amount: Amount,
+        amount: NeptuneCoins,
         address: generation_address::ReceivingAddress,
-        fee: Amount,
+        fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction objects");
         let _enter = span.enter();
@@ -703,7 +702,12 @@ mod rpc_server_tests {
             .await;
         let _ = rpc_server
             .clone()
-            .send(ctx, Amount::one(), own_receiving_address, Amount::one())
+            .send(
+                ctx,
+                NeptuneCoins::one(),
+                own_receiving_address,
+                NeptuneCoins::one(),
+            )
             .await;
         let _ = rpc_server.clone().pause_miner(ctx).await;
         let _ = rpc_server.clone().restart_miner(ctx).await;

@@ -6,7 +6,7 @@ use clap_complete::{generate, Shell};
 
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
-use neptune_core::models::blockchain::transaction::amount::Amount;
+use neptune_core::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::generation_address;
 use neptune_core::models::state::wallet::WalletSecret;
 use std::io;
@@ -54,9 +54,9 @@ enum Command {
         ip: IpAddr,
     },
     Send {
-        amount: Amount,
+        amount: NeptuneCoins,
         address: String,
-        fee: Amount,
+        fee: NeptuneCoins,
     },
     PauseMiner,
     RestartMiner,

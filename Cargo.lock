@@ -1679,6 +1679,7 @@ dependencies = [
  "priority-queue",
  "rand",
  "ratatui",
+ "regex",
  "semver",
  "serde",
  "serde_derive",
