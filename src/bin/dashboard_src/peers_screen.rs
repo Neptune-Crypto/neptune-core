@@ -184,7 +184,7 @@ impl Widget for PeersScreen {
                     pi.connected_address.to_string(),
                     neptune_core::utc_timestamp_to_localtime(last_seen_timestamp.as_millis())
                         .to_string(),
-                    pi.standing.standing.to_string(),
+                    pi.standing.score.to_string(),
                     if pi.is_archival_node {
                         "✓".to_string()
                     } else {

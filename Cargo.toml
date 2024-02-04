@@ -53,6 +53,7 @@ tracing-subscriber = { version = "0", features = [
 tracing-test = "0"
 unicode-width = "0"
 zeroize = "1.7.0"
+thiserror = "1.0.56"
 
 [dev-dependencies]
 pin-project-lite = "0.2.13"

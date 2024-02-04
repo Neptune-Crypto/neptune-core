@@ -350,7 +350,7 @@ impl<T> AtomicRw<T> {
     }
 }
 
-/// A wrapper for [RwLockReadGuard](tokio::sync::RwLockReadGuard) that
+/// A wrapper for [RwLockReadGuard] that
 /// can optionally call a callback to notify when the
 /// lock event occurs.
 pub struct AtomicRwReadGuard<'a, T> {
@@ -392,7 +392,7 @@ impl<'a, T> Deref for AtomicRwReadGuard<'a, T> {
     }
 }
 
-/// A wrapper for [RwLockWriteGuard](tokio::sync::RwLockWriteGuard) that
+/// A wrapper for [RwLockWriteGuard] that
 /// can optionally call a callback to notify when the
 /// lock event occurs.
 pub struct AtomicRwWriteGuard<'a, T> {

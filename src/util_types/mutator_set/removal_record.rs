@@ -81,7 +81,7 @@ impl serde::Serialize for AbsoluteIndexSet {
 
 /// ArrayVisitor
 /// Used for deserializing large arrays, with size known at compile time.
-/// Credit: MikailBag https://github.com/serde-rs/serde/issues/1937
+/// Credit: MikailBag <https://github.com/serde-rs/serde/issues/1937>
 struct ArrayVisitor<T, const N: usize>(PhantomData<T>);
 
 impl<'de, T, const N: usize> Visitor<'de> for ArrayVisitor<T, N>

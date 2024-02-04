@@ -1687,6 +1687,7 @@ dependencies = [
  "strum",
  "tarpc",
  "tasm-lib",
+ "thiserror",
  "tiny-bip39",
  "tokio",
  "tokio-serde",

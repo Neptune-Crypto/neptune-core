@@ -125,7 +125,7 @@ where
 }
 
 /// `NeptuneLevelDb` provides an async-friendly and clone-friendly wrapper
-/// around [`NeptuneLevelDbInternal`].
+/// around `NeptuneLevelDbInternal`.
 ///
 /// Methods in the underlying struct `LevelDB` from `rs-leveldb` crate are all sync
 /// and they sometimes perfom blocking file IO.  It is discouraged to

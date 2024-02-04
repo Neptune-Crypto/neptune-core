@@ -1,7 +1,6 @@
 use crate::prelude::twenty_first;
 
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use twenty_first::shared_math::digest::Digest;
@@ -17,6 +16,10 @@ use super::blockchain::shared::Hash;
 use super::blockchain::transaction::Transaction;
 use crate::config_models::network::Network;
 
+// PeerSanctionReason score modifiers.
+//
+// These represent how much a given `PeerSanctionReason` variant
+// will subtract from a `PeerStanding` score.  (higher is worse)
 const BAD_BLOCK_BATCH_REQUEST_SEVERITY: u16 = 10;
 const INVALID_BLOCK_SEVERITY: u16 = 10;
 const DIFFERENT_GENESIS_SEVERITY: u16 = u16::MAX;
@@ -28,7 +31,15 @@ const UNKNOWN_BLOCK_HEIGHT: u16 = 1;
 const INVALID_TRANSACTION: u16 = 10;
 const UNCONFIRMABLE_TRANSACTION: u16 = 2;
 const NO_STANDING_FOUND_MAYBE_CRASH: u16 = 10;
+pub(crate) const CONNECT_FAILED: u16 = 25;
 
+// PeerUnsanctionReason score modifiers.
+//
+// These represent how much a given `PeerUnsanctionReason` variant
+// will add to a `PeerStanding` score. (higher is better)
+pub(crate) const CONNECT_SUCCESS: u16 = CONNECT_FAILED; // should always match CONNECT_FAILED
+
+/// Globally unique identifier for our Node.  (and each Peer)
 pub type InstanceId = u128;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -52,55 +63,69 @@ impl PeerInfo {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, strum::Display)]
 pub enum PeerSanctionReason {
+    #[strum(to_string = "invalid block")]
     InvalidBlock((BlockHeight, Digest)),
+
+    #[strum(to_string = "different genesis")]
     DifferentGenesis,
+
+    #[strum(to_string = "fork resolution error")]
     ForkResolutionError((BlockHeight, u16, Digest)),
+
+    #[strum(to_string = "synchronization timeout")]
     SynchronizationTimeout,
+
+    #[strum(to_string = "flood peer list response")]
     FloodPeerListResponse,
+
+    #[strum(to_string = "block request unknown height")]
     BlockRequestUnknownHeight,
+
     // Be careful about using this too much as it's bad for log opportunities
+    #[strum(to_string = "invalid message")]
     InvalidMessage,
+
+    #[strum(to_string = "non mined transaction has coinbase")]
     NonMinedTransactionHasCoinbase,
+
+    #[strum(to_string = "too short block batch")]
     TooShortBlockBatch,
+
+    #[strum(to_string = "received block batch outside of sync")]
     ReceivedBatchBlocksOutsideOfSync,
+
+    #[strum(to_string = "invalid start height of batch blocks")]
     BatchBlocksInvalidStartHeight,
+
+    #[strum(to_string = "batch blocks unkonwn request")]
     BatchBlocksUnknownRequest,
+
+    #[strum(to_string = "invalid transaction")]
     InvalidTransaction,
+
+    #[strum(to_string = "unconfirmable transaction")]
     UnconfirmableTransaction,
 
+    #[strum(to_string = "connect failed")]
+    ConnectFailed,
+
+    #[strum(to_string = "No standing found in map. Did peer thread crash?")]
     NoStandingFoundMaybeCrash,
 }
 
-impl Display for PeerSanctionReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string = match self {
-            PeerSanctionReason::InvalidBlock(_) => "invalid block",
-            PeerSanctionReason::DifferentGenesis => "different genesis",
-            PeerSanctionReason::ForkResolutionError(_) => "fork resolution error",
-            PeerSanctionReason::SynchronizationTimeout => "synchronization timeout",
-            PeerSanctionReason::FloodPeerListResponse => "flood peer list response",
-            PeerSanctionReason::BlockRequestUnknownHeight => "block request unknown height",
-            PeerSanctionReason::InvalidMessage => "invalid message",
-            PeerSanctionReason::TooShortBlockBatch => "too short block batch",
-            PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync => {
-                "received block batch outside of sync"
-            }
-            PeerSanctionReason::BatchBlocksInvalidStartHeight => {
-                "invalid start height of batch blocks"
-            }
-            PeerSanctionReason::BatchBlocksUnknownRequest => "batch blocks unkonwn request",
-            PeerSanctionReason::InvalidTransaction => "invalid transaction",
-            PeerSanctionReason::UnconfirmableTransaction => "unconfirmable transaction",
-            PeerSanctionReason::NonMinedTransactionHasCoinbase => {
-                "non-mined transaction has coinbase"
-            }
-            PeerSanctionReason::NoStandingFoundMaybeCrash => {
-                "No standing found in map. Did peer thread crash?"
-            }
-        };
-        write!(f, "{string}")
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, strum::Display)]
+pub enum PeerUnsanctionReason {
+    #[strum(to_string = "connect success")]
+    ConnectSuccess, // reciprocal of PeerSanctionReason::ConnectFailed.
+}
+
+impl PeerUnsanctionReason {
+    pub fn as_severity(&self) -> u16 {
+        match self {
+            Self::ConnectSuccess => CONNECT_SUCCESS,
+        }
     }
 }
 
@@ -130,7 +155,7 @@ impl PeerSynchronizationState {
 }
 
 impl PeerSanctionReason {
-    pub fn to_severity(self) -> u16 {
+    pub fn as_severity(&self) -> u16 {
         match self {
             PeerSanctionReason::InvalidBlock(_) => INVALID_BLOCK_SEVERITY,
             PeerSanctionReason::DifferentGenesis => DIFFERENT_GENESIS_SEVERITY,
@@ -147,28 +172,67 @@ impl PeerSanctionReason {
             PeerSanctionReason::BlockRequestUnknownHeight => UNKNOWN_BLOCK_HEIGHT,
             PeerSanctionReason::InvalidTransaction => INVALID_TRANSACTION,
             PeerSanctionReason::UnconfirmableTransaction => UNCONFIRMABLE_TRANSACTION,
+            PeerSanctionReason::ConnectFailed => CONNECT_FAILED,
             PeerSanctionReason::NonMinedTransactionHasCoinbase => INVALID_TRANSACTION,
             PeerSanctionReason::NoStandingFoundMaybeCrash => NO_STANDING_FOUND_MAYBE_CRASH,
         }
     }
 }
 
-/// This is object that gets stored in the database to record how well a peer
-/// at a certain IP behaves. A lower number is better.
+/// This object gets stored in the database to record how well a peer
+/// identified by SocketAddr behaves. A higher score is better.
+///
+/// The default starting score for a peer is presently 0, but API users should
+/// use [default_score()](Self::default_score()) in case that ever changes.
+///
+/// The score can be increased by calling [unsanction()](Self::unsanction()) or
+/// decreased by calling [sanction()](Self::sanction()).
+///
+/// note that Peers are not banned in this model. That is a higher level
+/// concept that requires additional application state.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub struct PeerStanding {
-    pub standing: i32,
+    pub score: i32,
     pub latest_sanction: Option<PeerSanctionReason>,
     pub timestamp_of_latest_sanction: Option<SystemTime>,
 }
 
 impl PeerStanding {
     /// Sanction peer and return latest standing score
-    pub fn sanction(&mut self, reason: PeerSanctionReason) -> i32 {
-        self.standing = self.standing.saturating_sub(reason.to_severity().into());
+    ///
+    /// `min_score` represents the minimum possible score.  So the new score will
+    /// be `max(min_score, newly_calculated_score)`
+    pub fn sanction(&mut self, reason: PeerSanctionReason, min_score: i32) -> i32 {
+        let new_score = self.score.saturating_sub(reason.as_severity().into());
+
+        self.score = match new_score >= min_score {
+            true => new_score,
+            false => min_score,
+        };
+
         self.latest_sanction = Some(reason);
         self.timestamp_of_latest_sanction = Some(SystemTime::now());
-        self.standing
+        self.score
+    }
+
+    /// Un-Sanction peer and return latest standing score
+    ///
+    /// `max_score` represents the maximum possible score.  So the new score will
+    /// be `min(max_score, newly_calculated_score)`
+    pub fn unsanction(&mut self, reason: PeerUnsanctionReason, max_score: i32) -> i32 {
+        let new_score = self.score.saturating_add(reason.as_severity().into());
+
+        self.score = match new_score <= max_score {
+            true => new_score,
+            false => max_score,
+        };
+
+        self.score
+    }
+
+    /// returns the default (starting) score for a new/unknown peer.
+    pub fn default_score() -> i32 {
+        Default::default()
     }
 
     /// Clear peer standing record
@@ -176,13 +240,14 @@ impl PeerStanding {
         *self = PeerStanding::default();
     }
 
+    /// Indicates if the standing score is in the negative.
     pub fn is_negative(&self) -> bool {
-        self.standing.is_negative()
+        self.score.is_negative()
     }
 
     pub fn new_on_no_standing_found_in_map() -> Self {
         Self {
-            standing: -(NO_STANDING_FOUND_MAYBE_CRASH as i32),
+            score: -(NO_STANDING_FOUND_MAYBE_CRASH as i32),
             latest_sanction: Some(PeerSanctionReason::NoStandingFoundMaybeCrash),
             timestamp_of_latest_sanction: Some(SystemTime::now()),
         }

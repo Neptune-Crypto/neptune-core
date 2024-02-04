@@ -11,7 +11,6 @@ use neptune_core::models::state::wallet::address::generation_address;
 use neptune_core::models::state::wallet::WalletSecret;
 use std::io;
 use std::io::Write;
-use std::net::IpAddr;
 use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
 
@@ -50,8 +49,8 @@ enum Command {
     /******** CHANGE STATE ********/
     Shutdown,
     ClearAllStandings,
-    ClearStandingByIp {
-        ip: IpAddr,
+    ClearStandingBySocketAddr {
+        addr: SocketAddr,
     },
     Send {
         amount: NeptuneCoins,
@@ -294,15 +293,15 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string(&peers)?);
         }
         Command::AllSanctionedPeers => {
-            let peer_sanctions = client.all_sanctioned_peers(ctx).await?;
-            for (ip, sanction) in peer_sanctions {
-                let standing = sanction.standing;
-                let latest_sanction_str = match sanction.latest_sanction {
+            let peer_standings = client.all_sanctioned_peers(ctx).await?;
+            for (addr, standing) in peer_standings {
+                let score = standing.score;
+                let latest_sanction_str = match standing.latest_sanction {
                     Some(sanction) => sanction.to_string(),
                     None => String::default(),
                 };
                 println!(
-                    "{ip}\nstanding: {standing}\nlatest sanction: {} \n\n",
+                    "{addr}\nstanding: {score}\nlatest sanction: {} \n\n",
                     latest_sanction_str
                 );
             }
@@ -361,9 +360,9 @@ async fn main() -> Result<()> {
             client.clear_all_standings(ctx).await?;
             println!("Cleared all standings.");
         }
-        Command::ClearStandingByIp { ip } => {
-            client.clear_standing_by_ip(ctx, ip).await?;
-            println!("Cleared standing of {}", ip);
+        Command::ClearStandingBySocketAddr { addr } => {
+            client.clear_standing_by_socket_address(ctx, addr).await?;
+            println!("Cleared standing of {}", addr);
         }
         Command::Send {
             amount,

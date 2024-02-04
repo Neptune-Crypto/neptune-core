@@ -9,7 +9,7 @@ use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
 
-use crate::models::state::GlobalStateLock;
+use crate::models::state::{GlobalState, GlobalStateLock};
 use anyhow::Result;
 use itertools::Itertools;
 use rand::prelude::{IteratorRandom, SliceRandom};
@@ -26,13 +26,15 @@ use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
+use futures::StreamExt;
+
 use crate::models::channel::{
     MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
 };
 
-const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 120;
+const PEER_DISCOVERY_INTERVAL_IN_SECONDS: u64 = 2 * 60; // 2 mins
 const SYNC_REQUEST_INTERVAL_IN_SECONDS: u64 = 3;
-const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30mins
+const MEMPOOL_PRUNE_INTERVAL_IN_SECS: u64 = 30 * 60; // 30 mins
 const MP_RESYNC_INTERVAL_IN_SECS: u64 = 59;
 const UTXO_NOTIFICATION_POOL_PRUNE_INTERVAL_IN_SECS: u64 = 19 * 60; // 19 mins
 
@@ -224,8 +226,9 @@ impl PotentialPeersState {
 
     /// Return a random peer from the potential peer list that we aren't connected to
     /// and that isn't our own address. Returns (socket address, peer distance)
-    fn get_distant_candidate(
+    async fn get_distant_candidate(
         &self,
+        global_state: &GlobalState,
         connected_clients: &[PeerInfo],
         own_instance_id: u128,
     ) -> Option<(SocketAddr, u8)> {
@@ -251,8 +254,22 @@ impl PotentialPeersState {
             .filter(|potential_peer| !peers_listen_addresses.contains(potential_peer.0))
             .collect::<Vec<_>>();
 
+        // This filters out any peers that are not allowed to connect. (banned)
+        // The futures::stream::iter enables calling an async fn within .filter() closure.
+        let not_banned_unconnected_peers = futures::stream::iter(not_connected_peers)
+            .filter(|(socket_addr, _)| async {
+                global_state
+                    .allow_connect_to_peer(**socket_addr)
+                    .await
+                    .is_ok()
+            })
+            .collect::<Vec<_>>()
+            .await;
+
         // Get the candidate list with the highest distance
-        let max_distance_candidates = not_connected_peers.iter().max_by_key(|pp| pp.1.distance);
+        let max_distance_candidates = not_banned_unconnected_peers
+            .iter()
+            .max_by_key(|pp| pp.1.distance);
 
         // Pick a random candidate from the appropriate candidates
         let mut rng = rand::thread_rng();
@@ -592,19 +609,14 @@ impl MainLoopHandler {
             .collect_vec();
         for peer_with_lost_connection in peers_with_lost_connection {
             // Disallow reconnection if peer is in bad standing
-            let standing = global_state
-                .net
-                .get_peer_standing_from_database(peer_with_lost_connection.ip())
-                .await;
-
-            if standing.is_some()
-                && standing.unwrap().standing < -(global_state.cli.peer_tolerance as i32)
-            {
-                info!("Not reconnecting to peer with lost connection because it was banned: {peer_with_lost_connection}");
-            } else {
-                info!(
-                    "Attempting to reconnect to peer with lost connection: {peer_with_lost_connection}"
-                );
+            match global_state
+                .allow_connect_to_peer(peer_with_lost_connection)
+                .await {
+                Ok(_) => info!("Attempting reconnect to peer with lost connection: {peer_with_lost_connection}"),
+                Err(e) => {
+                    info!("Not reconnecting to peer {} with lost connection because {}", peer_with_lost_connection, e);
+                    continue;
+                }
             }
 
             let own_handshake_data: HandshakeData = global_state.get_own_handshakedata().await;
@@ -658,7 +670,12 @@ impl MainLoopHandler {
         // 1)
         let (peer_candidate, candidate_distance) = match main_loop_state
             .potential_peers
-            .get_distant_candidate(&connected_peers, global_state.net.instance_id)
+            .get_distant_candidate(
+                &global_state,
+                &connected_peers,
+                global_state.net.instance_id,
+            )
+            .await
         {
             Some(candidate) => candidate,
             None => return Ok(()),
