@@ -1,4 +1,4 @@
-use crate::prelude::{triton_vm, twenty_first};
+use crate::prelude::twenty_first;
 
 pub mod kernel_to_lock_scripts;
 pub mod kernel_to_type_scripts;
@@ -11,10 +11,6 @@ use anyhow::{Ok, Result};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use triton_vm::prelude::{Claim, NonDeterminism};
-use triton_vm::program::Program;
-use triton_vm::proof::Proof;
-use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::consensus::ValidationLogic;
@@ -27,48 +23,6 @@ use self::{
 };
 use super::transaction_kernel::TransactionKernel;
 use super::TransactionPrimitiveWitness;
-
-pub trait SecretWitness:
-    Clone + Serialize + PartialEq + Eq + GetSize + BFieldCodec + Sized
-{
-    /// The non-determinism for the VM that this witness corresponds to
-    fn nondeterminism(&self) -> NonDeterminism<BFieldElement>;
-
-    /// Returns the subprogram
-    fn subprogram(&self) -> Program;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub enum ClaimSupport<SubprogramWitness: SecretWitness> {
-    Proof(Proof),
-    MultipleSupports(Vec<SubprogramWitness>),
-    SecretWitness(SubprogramWitness),
-    DummySupport, // TODO: Remove this when all claims are implemented
-}
-
-/// SupportedClaim is a helper struct for ValiditySequence. It
-/// encodes a Claim with an optional witness.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct SupportedClaim<SubprogramWitness: SecretWitness> {
-    pub claim: Claim,
-    pub support: ClaimSupport<SubprogramWitness>,
-}
-
-impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
-    // TODO: REMOVE when all validity logic is implemented
-    pub fn dummy() -> Self {
-        let dummy_claim = Claim {
-            input: Default::default(),
-            output: Default::default(),
-            program_digest: Default::default(),
-        };
-
-        Self {
-            claim: dummy_claim,
-            support: ClaimSupport::DummySupport,
-        }
-    }
-}
 
 /// The validity of a transaction, in the base case, decomposes into
 /// these subclaims.
