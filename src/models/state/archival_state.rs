@@ -1063,6 +1063,7 @@ mod archival_state_tests {
         let own_receiving_address = genesis_wallet.nth_generation_spending_key(0).to_address();
         let global_state_lock =
             get_mock_global_state(Network::RegTest, 42, Some(genesis_wallet)).await;
+        let mut num_utxos = Block::premine_distribution().len();
 
         // 1. Create new block 1 with one input and four outputs and store it to disk
         let (mut block_1a, _, _) = make_mock_block_with_valid_pow(
@@ -1121,11 +1122,13 @@ mod archival_state_tests {
             );
             archival_state
                 .write_block(
-                    &block_1a,
+                    // &block_1a,
+                    &mock_block_1b,
                     Some(mock_block_1b.kernel.header.proof_of_work_family),
                 )
                 .await
                 .unwrap();
+            num_utxos += mock_block_1b.body().transaction.kernel.outputs.len();
 
             // 4. Update mutator set with that and verify rollback
             archival_state
@@ -1150,14 +1153,14 @@ mod archival_state_tests {
         );
 
         assert_eq!(
-            2,
+            num_utxos,
             archival_state
                 .archival_mutator_set
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves(),
-            "AOCL leaf count must be 2 after two blocks containing only coinbase transactions"
+                .count_leaves() as usize,
+            "AOCL leaf count must agree with blockchain after rollback"
         );
     }
 
@@ -1176,6 +1179,7 @@ mod archival_state_tests {
 
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
+        let mut num_utxos = Block::premine_distribution().len();
         let mut previous_block = genesis_block.clone();
 
         // this variable might come in handy for reporting purposes
@@ -1277,6 +1281,7 @@ mod archival_state_tests {
                     Some(mock_block_1b.kernel.header.proof_of_work_family),
                 )
                 .await?;
+            num_utxos += mock_block_1b.body().transaction.kernel.outputs.len();
 
             // 4. Update mutator set with that and verify rollback
             global_state
@@ -1305,7 +1310,7 @@ mod archival_state_tests {
         );
 
         assert_eq!(
-            2,
+            num_utxos,
             global_state
                 .chain
                 .archival_state()
@@ -1313,8 +1318,8 @@ mod archival_state_tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves(),
-            "AOCL leaf count must be 2 after two blocks containing only coinbase transactions"
+                .count_leaves() as usize,
+            "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"
         );
 
         Ok(())
