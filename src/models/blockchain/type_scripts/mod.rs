@@ -1,4 +1,7 @@
-use crate::Hash;
+use crate::{
+    models::consensus::{SecretWitness, ValidationLogic},
+    Hash,
+};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
@@ -10,8 +13,19 @@ use tasm_lib::{
 
 use native_currency::native_currency_program;
 
+use super::transaction::TransactionPrimitiveWitness;
+
 pub mod native_currency;
 pub mod neptune_coins;
+pub mod time_lock;
+
+trait TypeScriptValidationLogic<ExternalWitness>:
+    ValidationLogic<(TransactionPrimitiveWitness, ExternalWitness)>
+where
+    ExternalWitness: BFieldCodec,
+    (TransactionPrimitiveWitness, ExternalWitness): SecretWitness,
+{
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScript {
