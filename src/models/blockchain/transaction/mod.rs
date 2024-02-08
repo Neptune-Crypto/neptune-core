@@ -1,7 +1,7 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
-pub mod native_coin;
+pub mod native_currency;
 pub mod neptune_coins;
 pub mod transaction_kernel;
 pub mod utxo;
@@ -24,7 +24,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
-use self::native_coin::native_coin_program;
+use self::native_currency::native_coin_program;
 use self::neptune_coins::NeptuneCoins;
 use self::transaction_kernel::TransactionKernel;
 use self::utxo::{LockScript, TypeScript, Utxo};

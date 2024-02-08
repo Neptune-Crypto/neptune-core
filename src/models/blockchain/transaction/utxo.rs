@@ -13,8 +13,8 @@ use triton_vm::triton_asm;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
-use super::{native_coin, NeptuneCoins};
+use super::native_currency::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
+use super::{native_currency, NeptuneCoins};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -64,7 +64,7 @@ impl Utxo {
         Self::new(
             lock_script,
             vec![Coin {
-                type_script_hash: native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST,
+                type_script_hash: native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST,
                 state: amount.encode(),
             }],
         )

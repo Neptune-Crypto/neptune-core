@@ -16,7 +16,7 @@ use std::{
 };
 use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
 
-use super::{native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
+use super::{native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
 
 const NUM_LIMBS: usize = 4;
 

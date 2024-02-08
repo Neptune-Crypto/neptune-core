@@ -27,7 +27,7 @@ use super::{WalletSecret, WALLET_INCOMING_SECRETS_FILE_NAME};
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST;
+use crate::models::blockchain::transaction::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
