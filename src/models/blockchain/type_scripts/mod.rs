@@ -8,7 +8,7 @@ use tasm_lib::{
     Digest,
 };
 
-use native_currency::native_coin_program;
+use native_currency::native_currency_program;
 
 pub mod native_currency;
 pub mod neptune_coins;
@@ -52,7 +52,7 @@ impl TypeScript {
 
     pub fn native_coin() -> Self {
         Self {
-            program: native_coin_program(),
+            program: native_currency_program(),
         }
     }
 }

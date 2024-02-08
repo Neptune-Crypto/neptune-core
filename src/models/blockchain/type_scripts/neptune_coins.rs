@@ -16,7 +16,7 @@ use std::{
 };
 use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
 
-use super::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
+use super::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 
 const NUM_LIMBS: usize = 4;
 
@@ -68,7 +68,7 @@ impl NeptuneCoins {
     /// Create a `coins` object for use in a UTXO
     pub fn to_native_coins(&self) -> Vec<Coin> {
         let dictionary = vec![Coin {
-            type_script_hash: NATIVE_COIN_TYPESCRIPT_DIGEST,
+            type_script_hash: NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
             state: self.encode(),
         }];
         dictionary

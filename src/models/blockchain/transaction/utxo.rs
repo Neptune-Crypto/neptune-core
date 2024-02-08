@@ -15,7 +15,7 @@ use triton_vm::triton_asm;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-use crate::models::blockchain::type_scripts::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
+use crate::models::blockchain::type_scripts::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -65,7 +65,7 @@ impl Utxo {
         Self::new(
             lock_script,
             vec![Coin {
-                type_script_hash: native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST,
+                type_script_hash: native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
                 state: amount.encode(),
             }],
         )
@@ -74,7 +74,7 @@ impl Utxo {
     pub fn get_native_coin_amount(&self) -> NeptuneCoins {
         self.coins
             .iter()
-            .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+            .filter(|coin| coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST)
             .map(|coin| match NeptuneCoins::decode(&coin.state) {
                 Ok(boxed_amount) => *boxed_amount,
                 Err(_) => NeptuneCoins::zero(),

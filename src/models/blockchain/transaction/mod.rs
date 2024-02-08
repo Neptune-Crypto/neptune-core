@@ -27,7 +27,7 @@ use self::utxo::{LockScript, Utxo};
 use self::validity::TransactionValidationLogic;
 use super::block::Block;
 use super::shared::Hash;
-use super::type_scripts::native_currency::native_coin_program;
+use super::type_scripts::native_currency::native_currency_program;
 use super::type_scripts::TypeScript;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -389,11 +389,11 @@ impl Transaction {
 
         // verify type scripts
         for type_script_hash in type_scripts {
-            let type_script = if type_script_hash != native_coin_program().hash::<Hash>() {
+            let type_script = if type_script_hash != native_currency_program().hash::<Hash>() {
                 warn!("Observed non-native type script: {} Non-native type scripts are not supported yet.", type_script_hash.emojihash());
                 continue;
             } else {
-                native_coin_program()
+                native_currency_program()
             };
 
             let public_input = self.kernel.mast_hash().encode();

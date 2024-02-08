@@ -30,7 +30,7 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
 use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::type_scripts::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
+use crate::models::blockchain::type_scripts::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -429,7 +429,7 @@ impl WalletState {
                     new_block.kernel.header.height,
                     utxo.coins
                         .iter()
-                        .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+                        .filter(|coin| coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST)
                         .map(|coin| *NeptuneCoins::decode(&coin.state)
                             .expect("Failed to decode coin state as amount"))
                         .sum::<NeptuneCoins>(),

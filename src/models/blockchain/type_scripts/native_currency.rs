@@ -19,7 +19,7 @@ use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
 
 use super::neptune_coins::NeptuneCoins;
 
-pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
+pub const NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST: Digest = Digest::new([
     BFieldElement::new(4843866011885844809),
     BFieldElement::new(16618866032559590857),
     BFieldElement::new(18247689143239181392),
@@ -27,12 +27,12 @@ pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
     BFieldElement::new(9104890367162237026),
 ]);
 
-pub fn native_coin_program() -> Program {
+pub fn native_currency_program() -> Program {
     // todo: insert inflation check logic here
     Program::new(&triton_asm!(halt))
 }
 
-pub fn native_coin_reference(
+pub fn native_currency_rust_shadow(
     public_input: &mut VecDeque<BFieldElement>,
     secret_input: &mut VecDeque<BFieldElement>,
     _output: &mut VecDeque<BFieldElement>,
@@ -143,10 +143,10 @@ mod tests_native_coin {
 
     #[test]
     fn hash_is_really_hash() {
-        let calculated_digest = native_coin_program().hash::<Hash>();
+        let calculated_digest = native_currency_program().hash::<Hash>();
         assert_eq!(
-            calculated_digest, NATIVE_COIN_TYPESCRIPT_DIGEST,
-            "\ncalculated: ({calculated_digest})\nhardcoded: ({NATIVE_COIN_TYPESCRIPT_DIGEST})"
+            calculated_digest, NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
+            "\ncalculated: ({calculated_digest})\nhardcoded: ({NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST})"
         );
     }
 }
