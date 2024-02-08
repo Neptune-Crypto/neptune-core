@@ -1,6 +1,8 @@
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::type_scripts::native_currency;
 use get_size::GetSize;
 use num_traits::Zero;
 use rand::rngs::StdRng;
@@ -13,8 +15,7 @@ use triton_vm::triton_asm;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-use super::native_currency::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
-use super::{native_currency, NeptuneCoins};
+use crate::models::blockchain::type_scripts::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -142,52 +143,10 @@ impl LockScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct TypeScript {
-    pub program: Program,
-}
-
-// Standard hash needed for filtering out duplicates.
-impl std::hash::Hash for TypeScript {
-    fn hash<H: StdHasher>(&self, state: &mut H) {
-        self.program.instructions.hash(state);
-    }
-}
-
-impl From<Vec<LabelledInstruction>> for TypeScript {
-    fn from(instrs: Vec<LabelledInstruction>) -> Self {
-        Self {
-            program: Program::new(&instrs),
-        }
-    }
-}
-
-impl From<&[LabelledInstruction]> for TypeScript {
-    fn from(instrs: &[LabelledInstruction]) -> Self {
-        Self {
-            program: Program::new(instrs),
-        }
-    }
-}
-
-impl TypeScript {
-    pub fn new(program: Program) -> Self {
-        Self { program }
-    }
-
-    pub fn hash(&self) -> Digest {
-        self.program.hash::<Hash>()
-    }
-
-    pub fn native_coin() -> Self {
-        Self {
-            program: native_coin_program(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod utxo_tests {
+    use crate::models::blockchain::type_scripts::TypeScript;
+
     use super::*;
     use rand::{thread_rng, Rng};
     use tracing_test::traced_test;

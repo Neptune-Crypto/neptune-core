@@ -1,3 +1,4 @@
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::prelude::twenty_first;
 
 use anyhow::Result;
@@ -18,7 +19,6 @@ use crate::config_models::network::Network;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::channel::RPCServerToMain;
 use crate::models::peer::InstanceId;

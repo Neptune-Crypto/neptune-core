@@ -1,3 +1,5 @@
+use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::prelude::twenty_first;
 
 use anyhow::Result;
@@ -49,19 +51,17 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::transaction::neptune_coins::pseudorandom_amount;
-use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
-use crate::models::blockchain::transaction::utxo::TypeScript;
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
 use crate::models::blockchain::transaction::TransactionWitness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
+use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
 use crate::models::database::BlockIndexKey;
 use crate::models::database::BlockIndexValue;

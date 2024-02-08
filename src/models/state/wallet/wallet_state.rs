@@ -1,3 +1,4 @@
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::prelude::twenty_first;
 
 use anyhow::{bail, Result};
@@ -27,9 +28,9 @@ use super::{WalletSecret, WALLET_INCOMING_SECRETS_FILE_NAME};
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::models::blockchain::block::Block;
-use crate::models::blockchain::transaction::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
-use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
+use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::type_scripts::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;

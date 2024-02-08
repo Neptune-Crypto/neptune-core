@@ -14,7 +14,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind};
 use neptune_core::{
     config_models::network::Network,
     models::{
-        blockchain::transaction::neptune_coins::NeptuneCoins,
+        blockchain::type_scripts::neptune_coins::NeptuneCoins,
         state::wallet::address::generation_address,
     },
     rpc_server::RPCClient,

@@ -1,4 +1,7 @@
-use crate::prelude::{triton_vm, twenty_first};
+use crate::{
+    models::blockchain::type_scripts::TypeScript,
+    prelude::{triton_vm, twenty_first},
+};
 
 use anyhow::bail;
 use num_traits::Zero;
@@ -12,13 +15,9 @@ use twenty_first::{
     },
 };
 
-use crate::models::blockchain::{
-    shared::Hash,
-    transaction::{
-        neptune_coins::NeptuneCoins,
-        utxo::{TypeScript, Utxo},
-    },
-};
+use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
+
+use super::neptune_coins::NeptuneCoins;
 
 pub const NATIVE_COIN_TYPESCRIPT_DIGEST: Digest = Digest::new([
     BFieldElement::new(4843866011885844809),

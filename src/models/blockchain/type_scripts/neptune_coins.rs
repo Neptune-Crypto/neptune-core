@@ -1,4 +1,4 @@
-use crate::prelude::twenty_first;
+use crate::{models::blockchain::transaction::utxo::Coin, prelude::twenty_first};
 
 use anyhow::bail;
 use get_size::GetSize;
@@ -16,7 +16,7 @@ use std::{
 };
 use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
 
-use super::{native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
+use super::native_currency::NATIVE_COIN_TYPESCRIPT_DIGEST;
 
 const NUM_LIMBS: usize = 4;
 
@@ -306,8 +306,6 @@ mod amount_tests {
     use num_traits::FromPrimitive;
     use rand::{thread_rng, Rng, RngCore};
     use std::{ops::ShlAssign, str::FromStr};
-
-    use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 
     use super::*;
 

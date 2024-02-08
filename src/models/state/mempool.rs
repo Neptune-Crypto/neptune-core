@@ -9,7 +9,8 @@
 //! density'.
 
 use crate::{
-    prelude::twenty_first, util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
+    models::blockchain::type_scripts::neptune_coins::NeptuneCoins, prelude::twenty_first,
+    util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
 };
 
 use bytesize::ByteSize;
@@ -26,7 +27,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
+use crate::models::blockchain::transaction::Transaction;
 
 /// `FeeDensity` is a measure of 'Fee/Bytes' or 'reward per storage unit' for a
 /// transactions.  Different strategies are possible for selecting transactions
@@ -393,9 +394,8 @@ mod tests {
         models::{
             blockchain::{
                 block::block_height::BlockHeight,
-                transaction::{
-                    neptune_coins::NeptuneCoins, utxo::Utxo, PublicAnnouncement, Transaction,
-                },
+                transaction::{utxo::Utxo, PublicAnnouncement, Transaction},
+                type_scripts::neptune_coins::NeptuneCoins,
             },
             shared::SIZE_20MB_IN_BYTES,
             state::{

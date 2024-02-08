@@ -1,5 +1,5 @@
 use crate::{
-    models::consensus::mast_hash::MastHash,
+    models::{blockchain::type_scripts::TypeScript, consensus::mast_hash::MastHash},
     prelude::{triton_vm, twenty_first},
 };
 
@@ -11,9 +11,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::{
     blockchain::transaction::{
-        transaction_kernel::TransactionKernel,
-        utxo::{TypeScript, Utxo},
-        TransactionPrimitiveWitness,
+        transaction_kernel::TransactionKernel, utxo::Utxo, TransactionPrimitiveWitness,
     },
     consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic},
 };

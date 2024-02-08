@@ -1,3 +1,4 @@
+use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::prelude::twenty_first;
 
 use std::net::SocketAddr;
@@ -15,7 +16,6 @@ use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_header::BlockHeader;
 use neptune_core::models::blockchain::block::block_height::BlockHeight;
 use neptune_core::models::blockchain::shared::Hash;
-use neptune_core::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use neptune_core::rpc_server::RPCClient;
 use num_traits::Zero;
 use ratatui::{

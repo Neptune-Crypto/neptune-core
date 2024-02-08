@@ -358,9 +358,9 @@ mod wallet_tests {
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::block::Block;
     use crate::models::blockchain::shared::Hash;
-    use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
     use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
     use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{

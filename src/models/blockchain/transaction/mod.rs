@@ -1,8 +1,6 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
-pub mod native_currency;
-pub mod neptune_coins;
 pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
@@ -24,13 +22,13 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
-use self::native_currency::native_coin_program;
-use self::neptune_coins::NeptuneCoins;
 use self::transaction_kernel::TransactionKernel;
-use self::utxo::{LockScript, TypeScript, Utxo};
+use self::utxo::{LockScript, Utxo};
 use self::validity::TransactionValidationLogic;
 use super::block::Block;
 use super::shared::Hash;
+use super::type_scripts::native_currency::native_coin_program;
+use super::type_scripts::TypeScript;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -518,6 +516,7 @@ mod transaction_tests {
 
     use super::*;
     use crate::{
+        models::blockchain::type_scripts::neptune_coins::NeptuneCoins,
         tests::shared::make_mock_transaction, util_types::mutator_set::mutator_set_trait::commit,
     };
 

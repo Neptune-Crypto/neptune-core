@@ -1,5 +1,8 @@
 use crate::{
-    models::consensus::mast_hash::{HasDiscriminant, MastHash},
+    models::{
+        blockchain::type_scripts::neptune_coins::{pseudorandom_amount, NeptuneCoins},
+        consensus::mast_hash::{HasDiscriminant, MastHash},
+    },
     prelude::twenty_first,
 };
 
@@ -12,7 +15,7 @@ use twenty_first::shared_math::{
     b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest,
 };
 
-use super::{neptune_coins::pseudorandom_amount, NeptuneCoins, PublicAnnouncement};
+use super::PublicAnnouncement;
 use crate::util_types::mutator_set::{
     addition_record::{pseudorandom_addition_record, AdditionRecord},
     removal_record::{pseudorandom_removal_record, RemovalRecord},
