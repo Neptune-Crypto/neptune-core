@@ -68,7 +68,7 @@ impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
         }
     }
 
-    fn subprogram(&self) -> Program {
+    fn validation_program(&self) -> Program {
         todo!()
     }
 
@@ -94,7 +94,7 @@ impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
             .flat_map(|sc| sc.claim.program_digest.values().to_vec())
             .collect_vec();
         let output = vec![];
-        // let program_hash = AllLockScriptsHalt::program().hash();
+        // let program_hash = AllTypeScriptsHalt::program().hash();
         let program_digest = Default::default();
         Claim {
             program_digest,

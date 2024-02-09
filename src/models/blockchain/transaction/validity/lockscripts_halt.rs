@@ -67,7 +67,7 @@ impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
         }
     }
 
-    fn subprogram(&self) -> Program {
+    fn validation_program(&self) -> Program {
         todo!()
     }
 
@@ -85,15 +85,6 @@ impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
                 .collect(),
         )
     }
-
-    // fn support(&self) -> ClaimSupport<LockScriptHaltsWitness> {
-    // let supports = self
-    //     .supported_claims
-    //     .iter()
-    //     .map(|sc| sc.support.clone())
-    //     .collect_vec();
-    // ClaimSupport::MultipleSupports(supports)
-    // }
 
     fn claim(&self) -> Claim {
         let input = self

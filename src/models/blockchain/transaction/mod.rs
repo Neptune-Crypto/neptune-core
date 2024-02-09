@@ -13,8 +13,10 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
+use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::SystemTime;
+use tasm_lib::Digest;
 use tracing::{debug, error, warn};
 use triton_vm::prelude::NonDeterminism;
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -27,7 +29,6 @@ use self::utxo::{LockScript, Utxo};
 use self::validity::TransactionValidationLogic;
 use super::block::Block;
 use super::shared::Hash;
-use super::type_scripts::native_currency::native_currency_program;
 use super::type_scripts::TypeScript;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -323,6 +324,8 @@ impl Transaction {
             .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
     }
 
+    /// Verify the transaction directly from the primitive witness, without proofs or
+    /// decomposing into subclaims.
     fn validate_primitive_witness(&self, primitive_witness: &TransactionPrimitiveWitness) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
@@ -377,8 +380,8 @@ impl Transaction {
             witnessed_removal_records.push(removal_record);
         }
 
-        // collect type scripts
-        let type_scripts = primitive_witness
+        // collect type script hashes
+        let type_script_hashes = primitive_witness
             .output_utxos
             .iter()
             .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
@@ -386,13 +389,25 @@ impl Transaction {
             .dedup()
             .collect_vec();
 
+        // verify that all type script hashes are represented by the witness's type script list
+        let mut type_script_dictionary = HashMap::<Digest, TypeScript>::new();
+        for ts in primitive_witness.type_scripts.iter() {
+            type_script_dictionary.insert(ts.hash(), ts.clone());
+        }
+        if !type_script_hashes
+            .clone()
+            .into_iter()
+            .all(|tsh| type_script_dictionary.contains_key(&tsh))
+        {
+            warn!("Transaction contains input(s) or output(s) with unknown typescript.");
+            return false;
+        }
+
         // verify type scripts
-        for type_script_hash in type_scripts {
-            let type_script = if type_script_hash != native_currency_program().hash::<Hash>() {
-                warn!("Observed non-native type script: {} Non-native type scripts are not supported yet.", type_script_hash.emojihash());
-                continue;
-            } else {
-                native_currency_program()
+        for type_script_hash in type_script_hashes {
+            let Some(type_script) = type_script_dictionary.get(&type_script_hash) else {
+                warn!("Type script hash not found; should not get here.");
+                return false;
             };
 
             let public_input = self.kernel.mast_hash().encode();
@@ -405,7 +420,9 @@ impl Transaction {
 
             // The type script is satisfied if it halts gracefully, i.e.,
             // without panicking. So we don't care about the output
-            if let Err(e) = type_script.run(public_input.into(), NonDeterminism::new(secret_input))
+            if let Err(e) = type_script
+                .program
+                .run(public_input.into(), NonDeterminism::new(secret_input))
             {
                 warn!(
                     "Type script {} not satisfied for transaction: {}",

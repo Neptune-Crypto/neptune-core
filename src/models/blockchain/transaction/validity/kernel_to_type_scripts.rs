@@ -84,7 +84,7 @@ impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
         todo!()
     }
 
-    fn subprogram(&self) -> Program {
+    fn validation_program(&self) -> Program {
         todo!()
     }
 

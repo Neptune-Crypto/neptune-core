@@ -74,7 +74,7 @@ impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
         Self { supported_claim }
     }
 
-    fn subprogram(&self) -> Program {
+    fn validation_program(&self) -> Program {
         todo!()
     }
 

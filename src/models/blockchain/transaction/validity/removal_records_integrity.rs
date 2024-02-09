@@ -114,7 +114,7 @@ impl ValidationLogic<RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrity
         }
     }
 
-    fn subprogram(&self) -> Program {
+    fn validation_program(&self) -> Program {
         Self::program()
     }
 

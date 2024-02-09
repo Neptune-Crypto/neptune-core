@@ -63,7 +63,7 @@ pub trait SecretWitness:
     /// The non-determinism for the VM that this witness corresponds to
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement>;
 
-    /// Returns the subprogram
+    /// Returns the subprogram that this secret witness relates to
     fn subprogram(&self) -> Program;
 }
 
@@ -75,7 +75,7 @@ pub struct SupportedClaim<SubprogramWitness: SecretWitness> {
     pub support: ClaimSupport<SubprogramWitness>,
 }
 
-/// When a claimto validity decomposes into multiple subclaims via variant
+/// When a claim to validity decomposes into multiple subclaims via variant
 /// `ValidationLogic` of `Witness`, those subclaims pertain to the graceful halting of
 /// programs ("subprograms"), which is itself supported by either a proof or some witness
 /// that can help the prover produce one.
@@ -111,7 +111,7 @@ impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
 pub trait ValidationLogic<T: SecretWitness> {
     type PrimitiveWitness;
 
-    fn subprogram(&self) -> Program;
+    fn validation_program(&self) -> Program;
     fn support(&self) -> ClaimSupport<T>;
     fn claim(&self) -> Claim;
 
@@ -131,7 +131,7 @@ pub trait ValidationLogic<T: SecretWitness> {
             }
             ClaimSupport::SecretWitness(witness) => {
                 // Run program before proving
-                self.subprogram()
+                self.validation_program()
                     .run(
                         self.claim().public_input().into(),
                         witness.nondeterminism().clone(),
@@ -141,7 +141,7 @@ pub trait ValidationLogic<T: SecretWitness> {
                 let proof = triton_vm::prove(
                     StarkParameters::default(),
                     &self.claim(),
-                    &self.subprogram(),
+                    &self.validation_program(),
                     witness.nondeterminism().clone(),
                 )
                 .expect("Proving integrity of removal records must succeed.");

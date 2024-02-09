@@ -10,6 +10,7 @@ use get_size::GetSize;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
+use strum::EnumCount;
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::shared_math::{
     b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest,
@@ -45,7 +46,7 @@ pub struct TransactionKernel {
     pub mutator_set_hash: Digest,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumCount)]
 pub enum TransactionKernelField {
     InputUtxos,
     OutputUtxos,

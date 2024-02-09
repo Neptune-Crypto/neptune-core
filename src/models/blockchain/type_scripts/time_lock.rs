@@ -7,16 +7,12 @@ use tasm_lib::{
         triton_asm,
     },
     twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
+    Digest,
 };
 
-use crate::models::consensus::mast_hash::MastHash;
-use crate::models::{
-    blockchain::transaction::{
-        transaction_kernel::TransactionKernelField, TransactionPrimitiveWitness,
-    },
-    consensus::{SecretWitness, ValidationLogic},
-};
+use crate::models::consensus::SecretWitness;
 
+#[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock {
     /// milliseconds since the unix epoch (00:00 UTC am on Jan 1 1970).
     release_date: u64,
@@ -291,46 +287,20 @@ impl TimeLock {
     }
 }
 
-#[derive(BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize, Clone)]
-struct NoExternalWitness;
+#[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
+pub struct TimeLockWitness {
+    time_lock: TimeLock,
+    transaction_timestamp: u64,
+    mast_path: Vec<Digest>,
+}
 
-impl SecretWitness for (TransactionPrimitiveWitness, NoExternalWitness) {
+impl SecretWitness for TimeLockWitness {
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
-        //  - individual elements: timestamp (1)
-        //  - digests: authentication path
-
-        let timestamp = self.0.kernel.timestamp;
-        let individual_tokens = vec![timestamp];
-        let digests = self.0.kernel.mast_path(TransactionKernelField::Timestamp);
-        NonDeterminism::new(individual_tokens).with_digests(digests)
+        NonDeterminism::new(vec![BFieldElement::new(self.transaction_timestamp)])
+            .with_digests(self.mast_path.clone())
     }
 
     fn subprogram(&self) -> Program {
-        todo!()
-    }
-}
-
-// impl TypeScriptValidationLogic<NoExternalWitness> for TimeLock
-// Not yet; type aliases are still experimental ;-)
-impl ValidationLogic<(TransactionPrimitiveWitness, NoExternalWitness)> for TimeLock {
-    type PrimitiveWitness = (TransactionPrimitiveWitness, NoExternalWitness);
-
-    fn subprogram(&self) -> tasm_lib::prelude::triton_vm::program::Program {
-        todo!()
-    }
-
-    fn support(
-        &self,
-    ) -> crate::models::consensus::ClaimSupport<(TransactionPrimitiveWitness, NoExternalWitness)>
-    {
-        todo!()
-    }
-
-    fn claim(&self) -> tasm_lib::prelude::triton_vm::proof::Claim {
-        todo!()
-    }
-
-    fn new_from_primitive_witness(_primitive_witness: &Self::PrimitiveWitness) -> Self {
-        todo!()
+        Program::new(&self.time_lock.code())
     }
 }
