@@ -48,14 +48,11 @@ pub struct RemovalRecordsIntegrityWitness {
 }
 
 impl RemovalRecordsIntegrityWitness {
-    pub fn new(
-        primitive_witness: &TransactionPrimitiveWitness,
-        tx_kernel: &TransactionKernel,
-    ) -> Self {
+    pub fn new(primitive_witness: &TransactionPrimitiveWitness) -> Self {
         Self {
             input_utxos: primitive_witness.input_utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
-            kernel: tx_kernel.to_owned(),
+            kernel: primitive_witness.kernel.clone(),
             aocl: primitive_witness
                 .mutator_set_accumulator
                 .kernel
@@ -95,20 +92,16 @@ pub struct RemovalRecordsIntegrity {
 impl ValidationLogic<RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrity {
     type PrimitiveWitness = TransactionPrimitiveWitness;
 
-    type Kernel = TransactionKernel;
-
-    fn new_from_primitive_witness(
-        primitive_witness: &crate::models::blockchain::transaction::TransactionPrimitiveWitness,
-        tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
-    ) -> Self {
+    fn new_from_primitive_witness(primitive_witness: &TransactionPrimitiveWitness) -> Self {
         let removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::new(primitive_witness, tx_kernel);
+            RemovalRecordsIntegrityWitness::new(primitive_witness);
 
         Self {
             supported_claim: SupportedClaim {
                 claim: Claim {
                     program_digest: Hash::hash_varlen(&Self::program().encode()),
-                    input: tx_kernel
+                    input: primitive_witness
+                        .kernel
                         .mast_hash()
                         .values()
                         .into_iter()

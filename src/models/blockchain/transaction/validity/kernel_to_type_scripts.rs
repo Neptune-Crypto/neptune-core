@@ -1,4 +1,3 @@
-use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
@@ -47,12 +46,7 @@ impl KernelToTypeScripts {
 impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
     type PrimitiveWitness = TransactionPrimitiveWitness;
 
-    type Kernel = TransactionKernel;
-
-    fn new_from_primitive_witness(
-        primitive_witness: &crate::models::blockchain::transaction::TransactionPrimitiveWitness,
-        tx_kernel: &crate::models::blockchain::transaction::transaction_kernel::TransactionKernel,
-    ) -> Self {
+    fn new_from_primitive_witness(primitive_witness: &TransactionPrimitiveWitness) -> Self {
         let mut type_script_digests = primitive_witness
             .input_utxos
             .iter()
@@ -67,7 +61,7 @@ impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
         type_script_digests.sort();
         type_script_digests.dedup();
         let claim = Claim {
-            input: tx_kernel.mast_hash().values().to_vec(),
+            input: primitive_witness.kernel.mast_hash().values().to_vec(),
             output: type_script_digests
                 .into_iter()
                 .flat_map(|d| d.values().to_vec())

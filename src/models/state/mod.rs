@@ -557,14 +557,14 @@ impl GlobalState {
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
             output_utxos: output_utxos.clone(),
-            public_announcements,
             mutator_set_accumulator,
+            kernel: kernel.clone(),
         };
 
         // Convert the secret-supported claim to a proof, several proofs, or
         // at the very least hide sensitive data.
         let mut transaction_validity_logic =
-            TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
+            TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
 
         if self.cli().privacy {
             transaction_validity_logic

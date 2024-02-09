@@ -21,7 +21,6 @@ use self::{
     kernel_to_lock_scripts::KernelToLockScripts, kernel_to_type_scripts::KernelToTypeScripts,
     typescripts_halt::TypeScriptsHalt,
 };
-use super::transaction_kernel::TransactionKernel;
 use super::TransactionPrimitiveWitness;
 
 /// The validity of a transaction, in the base case, decomposes into
@@ -45,20 +44,15 @@ pub struct TransactionValidationLogic {
 }
 
 impl TransactionValidationLogic {
-    pub fn new_from_primitive_witness(
-        primitive_witness: &TransactionPrimitiveWitness,
-        tx_kernel: &TransactionKernel,
-    ) -> Self {
-        let lock_scripts_halt =
-            LockScriptsHalt::new_from_primitive_witness(primitive_witness, tx_kernel);
+    pub fn new_from_primitive_witness(primitive_witness: &TransactionPrimitiveWitness) -> Self {
+        let lock_scripts_halt = LockScriptsHalt::new_from_primitive_witness(primitive_witness);
         let kernel_to_lock_scripts =
-            KernelToLockScripts::new_from_primitive_witness(primitive_witness, tx_kernel);
+            KernelToLockScripts::new_from_primitive_witness(primitive_witness);
         let removal_records_integrity =
-            RemovalRecordsIntegrity::new_from_primitive_witness(primitive_witness, tx_kernel);
+            RemovalRecordsIntegrity::new_from_primitive_witness(primitive_witness);
         let kernel_to_typescripts =
-            KernelToTypeScripts::new_from_primitive_witness(primitive_witness, tx_kernel);
-        let type_scripts_halt =
-            TypeScriptsHalt::new_from_primitive_witness(primitive_witness, tx_kernel);
+            KernelToTypeScripts::new_from_primitive_witness(primitive_witness);
+        let type_scripts_halt = TypeScriptsHalt::new_from_primitive_witness(primitive_witness);
         Self {
             lock_scripts_halt,
             kernel_to_lock_scripts,

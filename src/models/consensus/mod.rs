@@ -110,7 +110,6 @@ impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
 /// sometimes with and sometimes without witness data.
 pub trait ValidationLogic<T: SecretWitness> {
     type PrimitiveWitness;
-    type Kernel;
 
     fn subprogram(&self) -> Program;
     fn support(&self) -> ClaimSupport<T>;
@@ -121,10 +120,7 @@ pub trait ValidationLogic<T: SecretWitness> {
         todo!()
     }
 
-    fn new_from_primitive_witness(
-        primitive_witness: &Self::PrimitiveWitness,
-        tx_kernel: &Self::Kernel,
-    ) -> Self;
+    fn new_from_primitive_witness(primitive_witness: &Self::PrimitiveWitness) -> Self;
 
     /// Prove the claim.
     fn prove(&mut self) -> Result<()> {

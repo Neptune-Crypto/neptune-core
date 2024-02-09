@@ -58,8 +58,8 @@ pub struct TransactionPrimitiveWitness {
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof>,
     pub output_utxos: Vec<Utxo>,
-    pub public_announcements: Vec<PublicAnnouncement>,
     pub mutator_set_accumulator: MutatorSetAccumulator,
+    pub kernel: TransactionKernel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -240,6 +240,9 @@ impl Transaction {
 
         let merged_witness = match (&self.witness, &other.witness) {
             (Witness::Primitive(self_witness), Witness::Primitive(other_witness)) => {
+                if self_witness.kernel.mutator_set_hash != other_witness.kernel.mutator_set_hash {
+                    error!("Cannot merge two transactions with distinct mutator set hashes.");
+                }
                 Witness::Primitive(TransactionPrimitiveWitness {
                     input_utxos: [
                         self_witness.input_utxos.clone(),
@@ -273,12 +276,8 @@ impl Transaction {
                         other_witness.output_utxos.clone(),
                     ]
                     .concat(),
-                    public_announcements: [
-                        self_witness.public_announcements.clone(),
-                        other_witness.public_announcements.clone(),
-                    ]
-                    .concat(),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
+                    kernel: merged_kernel.clone(),
                 })
             }
 
@@ -487,10 +486,23 @@ impl Transaction {
 
 #[cfg(test)]
 mod witness_tests {
+    use tasm_lib::Digest;
+
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+
     use super::*;
 
     #[test]
     fn decode_encode_test_empty() {
+        let empty_kernel = TransactionKernel {
+            inputs: vec![],
+            outputs: vec![],
+            public_announcements: vec![],
+            fee: NeptuneCoins::new(0),
+            coinbase: None,
+            timestamp: BFieldElement::new(0),
+            mutator_set_hash: Digest::default(),
+        };
         let primitive_witness = TransactionPrimitiveWitness {
             input_utxos: vec![],
             type_scripts: vec![],
@@ -498,8 +510,8 @@ mod witness_tests {
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
             output_utxos: vec![],
-            public_announcements: vec![],
             mutator_set_accumulator: MutatorSetAccumulator::new(),
+            kernel: empty_kernel,
         };
 
         let encoded = primitive_witness.encode();

@@ -440,7 +440,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let num_inputs = 2;
     let num_outputs = 2;
-    let num_pubscripts = 1;
+    let num_public_announcements = 1;
 
     let input_utxos = (0..num_inputs)
         .map(|_| pseudorandom_utxo(rng.gen::<[u8; 32]>()))
@@ -479,8 +479,12 @@ pub fn pseudorandom_removal_record_integrity_witness(
     }
     let swbfi = pseudorandom_mmra(rng.gen::<[u8; 32]>());
     let swbfa_hash: Digest = rng.gen();
-    let mut kernel =
-        pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts);
+    let mut kernel = pseudorandom_transaction_kernel(
+        rng.gen(),
+        num_inputs,
+        num_outputs,
+        num_public_announcements,
+    );
     kernel.mutator_set_hash = Hash::hash_pair(
         Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
         Hash::hash_pair(swbfa_hash, Digest::default()),
@@ -525,8 +529,8 @@ pub fn random_transaction_kernel() -> TransactionKernel {
     let mut rng = thread_rng();
     let num_inputs = 1 + (rng.next_u32() % 5) as usize;
     let num_outputs = 1 + (rng.next_u32() % 6) as usize;
-    let num_pubscripts = (rng.next_u32() % 5) as usize;
-    pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_pubscripts)
+    let num_public_announcements = (rng.next_u32() % 5) as usize;
+    pseudorandom_transaction_kernel(rng.gen(), num_inputs, num_outputs, num_public_announcements)
 }
 
 pub fn random_addition_record() -> AdditionRecord {
@@ -794,10 +798,6 @@ pub fn make_mock_transaction_with_generation_key(
         .iter()
         .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
         .collect_vec();
-    let pubscripts = receiver_data
-        .iter()
-        .map(|rd| rd.public_announcement.clone())
-        .collect();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = TransactionPrimitiveWitness {
         input_utxos,
@@ -806,11 +806,10 @@ pub fn make_mock_transaction_with_generation_key(
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
         output_utxos,
-        public_announcements: pubscripts,
         mutator_set_accumulator: tip_msa,
+        kernel: kernel.clone(),
     };
-    let validity_logic =
-        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
+    let validity_logic = TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
 
     Transaction {
         kernel,
@@ -932,12 +931,12 @@ pub fn make_mock_block(
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
         output_utxos: vec![coinbase_utxo.clone()],
-        public_announcements: vec![],
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
+        kernel: tx_kernel.clone(),
     };
     let validation_logic =
-        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &tx_kernel);
+        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
 
     let transaction = Transaction {
         witness: TransactionWitness::ValidationLogic(validation_logic),

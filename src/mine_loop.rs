@@ -197,21 +197,19 @@ fn make_coinbase_transaction(
         receiver_digest,
     );
 
-    let timestamp: BFieldElement = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
-            .as_millis()
-            .try_into()
-            .expect("Must call this function before 584 million years from genesis."),
-    );
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Got bad time timestamp in mining process")
+        .as_millis()
+        .try_into()
+        .expect("Must call this function before 584 million years from genesis.");
 
     let kernel = TransactionKernel {
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
         public_announcements: vec![],
         fee: NeptuneCoins::zero(),
-        timestamp,
+        timestamp: BFieldElement::new(timestamp),
         coinbase: Some(coinbase_amount),
         mutator_set_hash: mutator_set_accumulator.hash(),
     };
@@ -223,15 +221,15 @@ fn make_coinbase_transaction(
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
         output_utxos: vec![coinbase_utxo.clone()],
-        public_announcements: vec![],
         mutator_set_accumulator,
+        kernel,
     };
-    let validity_logic =
-        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
+    let transaction_validation_logic =
+        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
     (
         Transaction {
-            kernel,
-            witness: TransactionWitness::ValidationLogic(validity_logic),
+            kernel: primitive_witness.kernel,
+            witness: TransactionWitness::ValidationLogic(transaction_validation_logic),
         },
         sender_randomness,
     )
