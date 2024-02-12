@@ -54,10 +54,10 @@ use std::net::SocketAddr;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
+use tarpc::tokio_serde::formats::*;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
-use tokio_serde::formats::*;
 use tracing::{info, trace};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};

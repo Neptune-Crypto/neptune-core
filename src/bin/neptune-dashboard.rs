@@ -16,8 +16,8 @@ use clap::Parser;
 use dashboard_src::dashboard_app::DashboardApp;
 use neptune_core::rpc_server::RPCClient;
 use std::net::{Ipv4Addr, SocketAddr};
+use tarpc::tokio_serde::formats::Json;
 use tarpc::{client, context};
-use tokio_serde::formats::Json;
 
 pub mod dashboard_src;
 
