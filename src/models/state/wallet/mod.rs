@@ -11,7 +11,8 @@ use anyhow::{bail, Context, Result};
 use bip39::Mnemonic;
 use itertools::Itertools;
 use num_traits::Zero;
-use rand::{thread_rng, Rng};
+use rand::rngs::StdRng;
+use rand::{thread_rng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::fs::{self};
 use std::path::{Path, PathBuf};
@@ -91,9 +92,15 @@ impl WalletSecret {
     /// Create a new `Wallet` and populate it with a new secret seed, with entropy
     /// obtained via `thread_rng()` from the operating system.
     pub fn new_random() -> Self {
+        Self::new_pseudorandom(thread_rng().gen())
+    }
+
+    /// Create a new `Wallet` and populate it by expanding a given seed.
+    pub fn new_pseudorandom(seed: [u8; 32]) -> Self {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed: SecretKeyMaterial(thread_rng().gen()),
+            secret_seed: SecretKeyMaterial(rng.gen()),
             version: STANDARD_WALLET_VERSION,
         }
     }
