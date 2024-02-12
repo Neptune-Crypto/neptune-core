@@ -321,7 +321,7 @@ impl WalletState {
             return Ok(());
         }
 
-        // Find the membership proofs that were valid at the previous tip, as these all have
+        // Find the membership proofs that were valid at the previous tip. They have
         // to be updated to the mutator set of the new block.
         let mut valid_membership_proofs_and_own_utxo_count: HashMap<
             StrongUtxoKey,
@@ -335,12 +335,12 @@ impl WalletState {
             {
                 Some(ms_mp) => {
                     debug!("Found valid mp for UTXO");
-                    let insert_ret = valid_membership_proofs_and_own_utxo_count.insert(
+                    let replacement_success = valid_membership_proofs_and_own_utxo_count.insert(
                         StrongUtxoKey::new(utxo_digest, ms_mp.auth_path_aocl.leaf_index),
                         (ms_mp, i),
                     );
                     assert!(
-                        insert_ret.is_none(),
+                        replacement_success.is_none(),
                         "Strong key must be unique in wallet DB"
                     );
                 }
@@ -365,8 +365,8 @@ impl WalletState {
             }
         }
 
-        // Loop over all input UTXOs, applying all addition records. To
-        // a) update all existing MS membership proofs
+        // Loop over all input UTXOs, applying all addition records. In each iteration,
+        // a) Update all existing MS membership proofs
         // b) Register incoming transactions and derive their membership proofs
         let mut changed_mps = vec![];
         let mut msa_state: MutatorSetAccumulator<Hash> = current_mutator_set_accumulator.clone();
@@ -376,15 +376,7 @@ impl WalletState {
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
-        for addition_record in new_block
-            .kernel
-            .body
-            .transaction
-            .kernel
-            .outputs
-            .clone()
-            .into_iter()
-        {
+        for addition_record in new_block.kernel.body.transaction.kernel.outputs.iter() {
             // Don't pull this declaration out of the for-loop since the hash map can grow
             // within this loop.
             let utxo_digests = valid_membership_proofs_and_own_utxo_count
@@ -393,7 +385,7 @@ impl WalletState {
                 .collect_vec();
 
             {
-                let res: Result<Vec<usize>, Box<dyn Error>> =
+                let updated_mp_indices: Result<Vec<usize>, Box<dyn Error>> =
                     MsMembershipProof::batch_update_from_addition(
                         &mut valid_membership_proofs_and_own_utxo_count
                             .values_mut()
@@ -401,9 +393,9 @@ impl WalletState {
                             .collect_vec(),
                         &utxo_digests,
                         &msa_state.kernel,
-                        &addition_record,
+                        addition_record,
                     );
-                match res {
+                match updated_mp_indices {
                     Ok(mut indices_of_mutated_mps) => {
                         changed_mps.append(&mut indices_of_mutated_mps)
                     }
@@ -412,12 +404,11 @@ impl WalletState {
             }
 
             // Batch update removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel)
-                .expect("MS removal record update from add must succeed in wallet handler");
+            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel);
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
-            if addition_record_to_utxo_info.contains_key(&addition_record) {
+            if addition_record_to_utxo_info.contains_key(addition_record) {
                 let utxo = addition_record_to_utxo_info[&addition_record].0.clone();
                 let sender_randomness = addition_record_to_utxo_info[&addition_record].1;
                 let receiver_preimage = addition_record_to_utxo_info[&addition_record].2;
@@ -467,7 +458,7 @@ impl WalletState {
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
-            msa_state.add(&addition_record);
+            msa_state.add(addition_record);
         }
 
         // sanity check

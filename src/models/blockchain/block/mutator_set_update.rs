@@ -36,14 +36,10 @@ impl MutatorSetUpdate {
         let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
             removal_records.iter_mut().collect::<Vec<_>>();
         while let Some(addition_record) = addition_records.pop() {
-            let update_res = RemovalRecord::batch_update_from_addition(
+            RemovalRecord::batch_update_from_addition(
                 &mut removal_records,
                 &mut ms_accumulator.kernel,
             );
-
-            if update_res.is_err() {
-                bail!("Failed to update removal records with addition record");
-            }
 
             ms_accumulator.add(&addition_record);
         }

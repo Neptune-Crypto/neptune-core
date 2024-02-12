@@ -109,15 +109,13 @@ impl Transaction {
             RemovalRecord::batch_update_from_addition(
                 &mut block_removal_records,
                 &mut msa_state.kernel,
-            )
-            .expect("MS removal record update from add must succeed in wallet handler");
+            );
 
             // Batch update transaction's removal records
             RemovalRecord::batch_update_from_addition(
                 &mut transaction_removal_records,
                 &mut msa_state.kernel,
-            )
-            .expect("MS removal record update from add must succeed in wallet handler");
+            );
 
             // Batch update primitive witness membership proofs
             if let Witness::Primitive(witness) = &mut self.witness {

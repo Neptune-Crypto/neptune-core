@@ -65,7 +65,8 @@ impl<H: AlgebraicHasher + BFieldCodec> MsMembershipProof<H> {
         ))
     }
 
-    /// Update a list of membership proofs in anticipation of an addition
+    /// Update a list of membership proofs in anticipation of an addition. If successful,
+    /// return (wrapped in an Ok) a vector of all indices of updated membership proofs.
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         membership_proofs: &mut [&mut Self],
         own_items: &[Digest],
@@ -695,7 +696,6 @@ mod ms_proof_tests {
 
             archival_mutator_set.add(&addition_record);
         }
-        println!("Added {n} items.");
 
         // assert that own mp is valid
         assert!(
@@ -742,8 +742,6 @@ mod ms_proof_tests {
             }
         }
 
-        println!("Removed {} items.", removal_records.len());
-
         // assert valid
         assert!(
             archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
@@ -764,8 +762,6 @@ mod ms_proof_tests {
             // keep other removal records up-to-date?
             // - nah, we don't need them for anything anymore
         }
-
-        println!("Reverted {} removals.", reversions.len());
 
         // assert valid
         assert!(
@@ -1063,7 +1059,6 @@ mod ms_proof_tests {
                 // assert!(previous_mutator_set.set_commitment.verify(own_item, self));
             }
         }
-        println!("Added {n} items.");
 
         // revert additions
         let (_petrified, revertible) = addition_records.split_at(own_index + 1);

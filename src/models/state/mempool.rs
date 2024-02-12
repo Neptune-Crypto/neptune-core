@@ -641,7 +641,8 @@ mod tests {
 
         // Create next block which includes preminer's transaction
         let (mut block_2, _, _) = make_mock_block(&block_1, None, premine_receiver_address);
-        block_2.accumulate_transaction(tx_by_preminer);
+        block_2
+            .accumulate_transaction(tx_by_preminer, &block_1.kernel.body.mutator_set_accumulator);
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
@@ -680,7 +681,10 @@ mod tests {
             "tx_by_other_updated has mutator set hash: {}",
             tx_by_other_updated.kernel.mutator_set_hash.emojihash()
         );
-        block_3_with_updated_tx.accumulate_transaction(tx_by_other_updated.clone());
+        block_3_with_updated_tx.accumulate_transaction(
+            tx_by_other_updated.clone(),
+            &block_2.kernel.body.mutator_set_accumulator,
+        );
         assert!(
             block_3_with_updated_tx.is_valid(&block_2),
             "Block with tx with updated mutator set data must be valid"
@@ -702,7 +706,10 @@ mod tests {
         let (mut block_14, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
         assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
-        block_14.accumulate_transaction(tx_by_other_updated);
+        block_14.accumulate_transaction(
+            tx_by_other_updated,
+            &previous_block.kernel.body.mutator_set_accumulator,
+        );
         assert!(
             block_14.is_valid(&previous_block),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"

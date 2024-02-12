@@ -133,15 +133,18 @@ pub struct RemovalRecord<H: AlgebraicHasher> {
 }
 
 impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
+    /// Update a batch of removal records that are synced to a given mutator set, given
+    /// that that mutator set will be updated with an addition. (The addition record
+    /// does not matter; all necessary information is in the mutator set.)
     pub fn batch_update_from_addition<MMR: Mmr<H>>(
         removal_records: &mut [&mut Self],
         mutator_set: &mut MutatorSetKernel<H, MMR>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) {
         let new_item_index = mutator_set.aocl.count_leaves();
 
         // if window does not slide, do nothing
         if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
-            return Ok(());
+            return;
         }
 
         // window does slide
@@ -236,8 +239,6 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
             new_chunk_digest,
             &mutator_set.swbf_inactive.get_peaks(),
         );
-
-        Ok(())
     }
 
     pub fn batch_update_from_remove(
@@ -474,17 +475,12 @@ mod removal_record_tests {
                 let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
                 // Update all removal records from addition, then add the element
-                let update_res_rr = RemovalRecord::batch_update_from_addition(
+                RemovalRecord::batch_update_from_addition(
                     &mut removal_records
                         .iter_mut()
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
                     &mut accumulator.kernel,
-                );
-                assert!(
-                    update_res_rr.is_ok(),
-                    "batch update must return OK, i = {}",
-                    i
                 );
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
@@ -563,17 +559,12 @@ mod removal_record_tests {
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             // Update all removal records from addition, then add the element
-            let update_res_rr = RemovalRecord::batch_update_from_addition(
+            RemovalRecord::batch_update_from_addition(
                 &mut removal_records
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
                 &mut accumulator.kernel,
-            );
-            assert!(
-                update_res_rr.is_ok(),
-                "batch update must return OK, i = {}",
-                i
             );
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
