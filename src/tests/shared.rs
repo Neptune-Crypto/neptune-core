@@ -204,7 +204,12 @@ pub async fn get_mock_global_state(
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
+    let cli_args = cli_args::Args {
+        network,
+        ..Default::default()
+    };
+    let networking_state =
+        NetworkingState::new(peer_map, peer_db, syncing, cli_args.peer_tolerance as i32);
     let (block, _, _) = get_dummy_latest_block(None);
     let light_state: LightState = LightState::from(block);
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
@@ -212,10 +217,6 @@ pub async fn get_mock_global_state(
         archival_state,
     });
     let mempool = Mempool::new(ByteSize::gb(1));
-    let cli_args = cli_args::Args {
-        network,
-        ..Default::default()
-    };
 
     GlobalStateLock::new(
         get_mock_wallet_state(wallet, network).await,

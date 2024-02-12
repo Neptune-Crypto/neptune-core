@@ -6,6 +6,7 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::{CheckedSub, Zero};
 use std::cmp::max;
+use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
@@ -32,9 +33,11 @@ use super::blockchain::transaction::validity::TransactionValidationLogic;
 use super::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
 use super::blockchain::transaction::{PublicAnnouncement, TransactionPrimitiveWitness};
 use super::consensus::ValidationLogic;
+use super::peer::{ConnectionStatus, PeerSanctionReason, PeerStanding, PeerUnsanctionReason};
 use crate::config_models::cli_args;
 use crate::models::consensus::Witness;
 use crate::models::peer::HandshakeData;
+use crate::models::state::networking_state::AllowConnectToPeerError;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::time_fn_call_async;
@@ -57,8 +60,7 @@ pub mod wallet;
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::util_types::sync::tokio::AtomicRw)
 /// ([`RwLock`](std::sync::RwLock)) over [`GlobalState`].
 ///
-/// Conceptually** all reads and writes of application state
-/// require acuiring this lock.
+/// All reads and writes of application state require acquiring this lock.
 ///
 /// Having a single lock is useful for a few reasons:
 ///  1. Enables write serialization over all application state.
@@ -76,15 +78,9 @@ pub mod wallet;
 /// Readers do not block eachother.  Only a writer blocks readers.
 /// See [`RwLock`](std::sync::RwLock) docs for details.
 ///
-/// ** At the present time, storage types in twenty_first::storage
-/// implement their own locking, which means they can be mutated
-/// without acquiring the `GlobalStateLock`.  This may change in
-/// the future.
-///
 /// Usage conventions:
 ///
 /// ```text
-///
 /// // property naming:
 /// struct Foo {
 ///     global_state_lock: GlobalStateLock
@@ -180,6 +176,76 @@ impl GlobalStateLock {
         self.lock_guard_mut()
             .await
             .prune_abandoned_monitored_utxos(block_depth_threshhold)
+            .await
+    }
+}
+
+/// Wrappers around [GlobalState::net] methods.
+impl GlobalStateLock {
+    /// Acquires write lock and invokes [NetworkingState::sanction_peer()]
+    #[inline]
+    pub async fn sanction_peer(
+        &mut self,
+        peer_address: SocketAddr,
+        reason: PeerSanctionReason,
+    ) -> Result<PeerStanding> {
+        self.lock_guard_mut()
+            .await
+            .net
+            .sanction_peer(peer_address, reason)
+            .await
+    }
+
+    /// Acquires write lock and invokes [NetworkingState::unsanction_peer()]
+    #[inline]
+    pub async fn unsanction_peer(
+        &mut self,
+        peer_address: SocketAddr,
+        reason: PeerUnsanctionReason,
+    ) -> Result<PeerStanding> {
+        self.lock_guard_mut()
+            .await
+            .net
+            .unsanction_peer(peer_address, reason)
+            .await
+    }
+
+    /// Acquires read lock and returns [NetworkingState::peer_tolerance]
+    #[inline]
+    pub async fn peer_tolerance(&self) -> i32 {
+        self.lock_guard().await.net.peer_tolerance
+    }
+
+    /// Acquires read lock and returns [NetworkingState::check_if_connection_is_allowed()]
+    pub async fn check_if_connection_is_allowed(
+        &self,
+        own_handshake: &HandshakeData,
+        other_handshake: &HandshakeData,
+        peer_address: SocketAddr,
+    ) -> ConnectionStatus {
+        let global_state = self.lock_guard().await;
+        let cli = &global_state.cli;
+
+        global_state
+            .net
+            .check_if_connection_is_allowed(
+                &cli.ban,
+                cli.max_peers as usize,
+                own_handshake,
+                other_handshake,
+                peer_address,
+            )
+            .await
+    }
+
+    /// Acquires read lock and returns [GlobalState::allow_connect_to_peer()]
+    pub async fn allow_connect_to_peer(
+        &self,
+        socket_addr: SocketAddr,
+    ) -> Result<(), AllowConnectToPeerError> {
+        self.lock_guard()
+            .await
+            .allow_connect_to_peer(socket_addr)
             .await
     }
 }
@@ -1074,6 +1140,17 @@ impl GlobalState {
 
         // Ok(())
     }
+
+    /// Invokes [NetworkingState::allow_connect_to_peer()]
+    /// with the peer `ban` list and `max_peers` from CLI args.
+    pub async fn allow_connect_to_peer(
+        &self,
+        socket_addr: SocketAddr,
+    ) -> Result<(), AllowConnectToPeerError> {
+        self.net
+            .allow_connect_to_peer(socket_addr, &self.cli.ban, self.cli.max_peers as usize)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -1081,7 +1158,10 @@ mod global_state_tests {
     use crate::{
         config_models::network::Network,
         models::{blockchain::block::Block, state::wallet::utxo_notification_pool::UtxoNotifier},
-        tests::shared::{add_block_to_light_state, get_mock_global_state, make_mock_block},
+        tests::shared::{
+            add_block_to_light_state, get_mock_global_state, get_test_genesis_setup,
+            make_mock_block,
+        },
     };
     use num_traits::One;
     use tracing_test::traced_test;
@@ -1670,6 +1750,68 @@ mod global_state_tests {
                 .await
         );
 
+        Ok(())
+    }
+
+    /// Verifies that PeerStanding is identifiable by SocketAddr (host+port).
+    ///
+    /// In previous versions, PeerStanding was identified by IP only.
+    /// This means that if two or more peers are running on the same IP but
+    /// different ports then they would share the same PeerStanding information
+    /// which then makes it impossible to distinguish them and sanction one
+    /// but not the other.  This is particularly problematic when attempting
+    /// to run multiple peers on localhost.
+    #[tokio::test]
+    async fn can_track_peer_standing_by_port() -> Result<()> {
+        let network = Network::RegTest;
+        let (.., mut global_state, _) = get_test_genesis_setup(network, 0).await?;
+
+        // peers 1 and 2 are on the same host with different port.
+        let peer1_socket_addr: SocketAddr = "127.0.0.1:8081".parse().unwrap();
+        let peer2_socket_addr: SocketAddr = "127.0.0.1:8082".parse().unwrap();
+
+        // sanction both peers, but for different things.
+        let peer1_standing_ret = global_state
+            .sanction_peer(peer1_socket_addr, PeerSanctionReason::ConnectFailed)
+            .await?;
+        let peer2_standing_ret = global_state
+            .sanction_peer(peer2_socket_addr, PeerSanctionReason::DifferentGenesis)
+            .await?;
+
+        // get peer standing from DBs.
+        // this is to ensure standings were properly (and separately) stored.
+        let peer1_standing_db = global_state
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(peer1_socket_addr)
+            .await
+            .unwrap();
+
+        let peer2_standing_db = global_state
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(peer2_socket_addr)
+            .await
+            .unwrap();
+
+        // verify that return values from sanction_peer() match db values
+        assert_eq!(
+            peer1_standing_ret, peer1_standing_db,
+            "sanction_peer() return value and db value must match"
+        );
+        assert_eq!(
+            peer2_standing_ret, peer2_standing_db,
+            "sanction_peer() return value and db value must match"
+        );
+
+        // This final assert is really the point of this test.
+        // verifies that standing for each peer is stored independently.
+        assert_ne!(
+            peer1_standing_db.latest_sanction, peer2_standing_db.latest_sanction,
+            "Peer standings must be different for these peers on different ports"
+        );
         Ok(())
     }
 }

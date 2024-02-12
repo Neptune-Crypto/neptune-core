@@ -65,30 +65,12 @@ impl PeerLoopHandler {
         }
     }
 
-    // TODO: Add a reward function that mutates the peer status
-
     /// Locking:
     ///   * acquires `global_state_lock` for write
-    async fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
-        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
-        warn!(
-            "Sanctioning peer {} for {:?}",
-            self.peer_address.ip(),
-            reason
-        );
-        let new_standing = global_state_mut
-            .net
-            .peer_map
-            .get_mut(&self.peer_address)
-            .map(|p| p.standing.sanction(reason))
-            .unwrap_or(0);
-
-        if new_standing < -(global_state_mut.cli.peer_tolerance as PeerStandingNumber) {
-            warn!("Banning peer");
-            bail!("Banning peer");
-        }
-
-        Ok(())
+    async fn sanction(&mut self, reason: PeerSanctionReason) -> Result<PeerStanding> {
+        self.global_state_lock
+            .sanction_peer(self.peer_address, reason)
+            .await
     }
 
     /// Handle validation and send all blocks to the main thread if they're all
@@ -98,9 +80,9 @@ impl PeerLoopHandler {
     /// `parent_of_first_block`.
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * acquires `global_state_lock` for write via Self::sanction()
     async fn handle_blocks(
-        &self,
+        &mut self,
         received_blocks: Vec<Block>,
         parent_of_first_block: Block,
     ) -> Result<BlockHeight> {
@@ -126,7 +108,7 @@ impl PeerLoopHandler {
                     Block::difficulty_to_digest_threshold(previous_block.kernel.header.difficulty),
                     new_block.hash().values().iter().join(", ")
                 );
-                self.punish(PeerSanctionReason::InvalidBlock((
+                self.sanction(PeerSanctionReason::InvalidBlock((
                     new_block.kernel.header.height,
                     new_block.hash(),
                 )))
@@ -137,7 +119,7 @@ impl PeerLoopHandler {
                     "Received invalid block of height {} from peer with IP {}",
                     new_block.kernel.header.height, self.peer_address
                 );
-                self.punish(PeerSanctionReason::InvalidBlock((
+                self.sanction(PeerSanctionReason::InvalidBlock((
                     new_block.kernel.header.height,
                     new_block.hash(),
                 )))
@@ -172,9 +154,9 @@ impl PeerLoopHandler {
     /// Function for handling the receiving of single new block from a peer
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * acquires `global_state_lock` for write via Self::sanction()
     async fn receive_new_block<S>(
-        &self,
+        &mut self,
         received_block: Box<Block>,
         peer: &mut S,
         peer_state: &mut MutablePeerState,
@@ -235,7 +217,7 @@ impl PeerLoopHandler {
             } else {
                 // Blocks received out of order. Or more than allowed received without
                 // going into sync mode. Give up on block resolution attempt.
-                self.punish(PeerSanctionReason::ForkResolutionError((
+                self.sanction(PeerSanctionReason::ForkResolutionError((
                     received_block.kernel.header.height,
                     peer_state.fork_reconciliation_blocks.len() as u16,
                     received_block.hash(),
@@ -257,7 +239,7 @@ impl PeerLoopHandler {
 
         // We got all the way back to genesis, but disagree about genesis. Ban peer.
         if parent_block.is_none() && parent_height == BlockHeight::genesis() {
-            self.punish(PeerSanctionReason::DifferentGenesis).await?;
+            self.sanction(PeerSanctionReason::DifferentGenesis).await?;
             return Ok(());
         }
 
@@ -273,7 +255,7 @@ impl PeerLoopHandler {
         // Sanity check, that the blocks are correctly sorted (they should be)
         // TODO: This has failed: Investigate!
         // See: https://neptune.builders/core-team/neptune-core/issues/125
-        // TODO: This assert should be replaced with something to punish or disconnect
+        // TODO: This assert should be replaced with something to sanction or disconnect
         // from a peer instead. It can be used by a malevolent peer to crash peer nodes.
         let mut new_blocks_sorted_check = new_blocks.clone();
         new_blocks_sorted_check.sort_by(|a, b| a.kernel.header.height.cmp(&b.kernel.header.height));
@@ -312,9 +294,9 @@ impl PeerLoopHandler {
     ///
     /// Locking:
     ///   * acquires `global_state_lock` for read
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * acquires `global_state_lock` for write via Self::sanction()
     async fn handle_peer_message<S>(
-        &self,
+        &mut self,
         msg: PeerMessage,
         peer: &mut S,
         peer_state_info: &mut MutablePeerState,
@@ -367,7 +349,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::PeerListResponse(peers) => {
                 if peers.len() > MAX_PEER_LIST_LENGTH {
-                    self.punish(PeerSanctionReason::FloodPeerListResponse)
+                    self.sanction(PeerSanctionReason::FloodPeerListResponse)
                         .await?;
                 }
                 self.to_main_tx
@@ -482,7 +464,7 @@ impl PeerLoopHandler {
                 let peers_latest_canonical_block = match peers_latest_canonical_block {
                     Some(plcb) => plcb,
                     None => {
-                        self.punish(PeerSanctionReason::BatchBlocksUnknownRequest)
+                        self.sanction(PeerSanctionReason::BatchBlocksUnknownRequest)
                             .await?;
                         return Ok(false);
                     }
@@ -565,7 +547,8 @@ impl PeerLoopHandler {
                 );
                 if t_blocks.len() < MINIMUM_BLOCK_BATCH_SIZE {
                     warn!("Got smaller batch response than allowed");
-                    self.punish(PeerSanctionReason::TooShortBlockBatch).await?;
+                    self.sanction(PeerSanctionReason::TooShortBlockBatch)
+                        .await?;
                     return Ok(false);
                 }
 
@@ -574,7 +557,7 @@ impl PeerLoopHandler {
                 // and those that are not
                 if !self.global_state_lock.lock_guard().await.net.syncing {
                     warn!("Received a batch of blocks without being in syncing mode");
-                    self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)
+                    self.sanction(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)
                         .await?;
                     return Ok(false);
                 }
@@ -596,7 +579,7 @@ impl PeerLoopHandler {
                     Some(block) => block,
                     None => {
                         warn!("Got batch reponse with invalid start height");
-                        self.punish(PeerSanctionReason::BatchBlocksInvalidStartHeight)
+                        self.sanction(PeerSanctionReason::BatchBlocksInvalidStartHeight)
                             .await?;
                         return Ok(false);
                     }
@@ -684,7 +667,7 @@ impl PeerLoopHandler {
                     .await?
                 {
                     None => {
-                        // TODO: Consider punishing here
+                        // TODO: Consider sanctioning here
                         warn!("Peer requested unkown block with hash {}", block_digest);
                         Ok(false)
                     }
@@ -709,7 +692,7 @@ impl PeerLoopHandler {
 
                 if block_digests.is_empty() {
                     warn!("Got block request by height for unknown block");
-                    self.punish(PeerSanctionReason::BlockRequestUnknownHeight)
+                    self.sanction(PeerSanctionReason::BlockRequestUnknownHeight)
                         .await?;
                     return Ok(false);
                 }
@@ -749,11 +732,11 @@ impl PeerLoopHandler {
                 Ok(false)
             }
             PeerMessage::Handshake(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage).await?;
+                self.sanction(PeerSanctionReason::InvalidMessage).await?;
                 Ok(false)
             }
             PeerMessage::ConnectionStatus(_) => {
-                self.punish(PeerSanctionReason::InvalidMessage).await?;
+                self.sanction(PeerSanctionReason::InvalidMessage).await?;
                 Ok(false)
             }
             PeerMessage::Transaction(transaction) => {
@@ -764,24 +747,25 @@ impl PeerLoopHandler {
                     transaction.kernel.mutator_set_hash
                 );
 
-                // If transaction is invalid, punish
+                // If transaction is invalid, sanction
                 if !transaction.is_valid() {
                     warn!("Received invalid tx");
-                    self.punish(PeerSanctionReason::InvalidTransaction).await?;
-                    return Ok(KEEP_CONNECTION_ALIVE);
-                }
-
-                // If transaction has coinbase, punish.
-                // Transactions received from peers have not been mined yet.
-                // Only the miner is allowed to produce transactions with non-empty coinbase fields.
-                if transaction.kernel.coinbase.is_some() {
-                    warn!("Received non-mined transaction with coinbase.");
-                    self.punish(PeerSanctionReason::NonMinedTransactionHasCoinbase)
+                    self.sanction(PeerSanctionReason::InvalidTransaction)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
-                // if transaction is not confirmable, punish
+                // If transaction has coinbase, sanction.
+                // Transactions received from peers have not been mined yet.
+                // Only the miner is allowed to produce transactions with non-empty coinbase fields.
+                if transaction.kernel.coinbase.is_some() {
+                    warn!("Received non-mined transaction with coinbase.");
+                    self.sanction(PeerSanctionReason::NonMinedTransactionHasCoinbase)
+                        .await?;
+                    return Ok(KEEP_CONNECTION_ALIVE);
+                }
+
+                // if transaction is not confirmable, sanction
                 let confirmable = transaction.is_confirmable_relative_to(
                     &self
                         .global_state_lock
@@ -795,7 +779,7 @@ impl PeerLoopHandler {
                 );
                 if !confirmable {
                     warn!("Received unconfirmable tx");
-                    self.punish(PeerSanctionReason::UnconfirmableTransaction)
+                    self.sanction(PeerSanctionReason::UnconfirmableTransaction)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -814,7 +798,7 @@ impl PeerLoopHandler {
                 if tx_timestamp
                     < now - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
                 {
-                    // TODO: Consider punishing here
+                    // TODO: Consider sanctioning here
                     warn!("Received too old tx");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -826,7 +810,7 @@ impl PeerLoopHandler {
                             MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
                         )
                 {
-                    // TODO: Consider punishing here
+                    // TODO: Consider sanctioning here
                     warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
@@ -893,9 +877,9 @@ impl PeerLoopHandler {
     /// the connection should be closed.
     ///
     /// Locking:
-    ///   * acquires `global_state_lock` for write via Self::punish()
+    ///   * acquires `global_state_lock` for write via Self::sanction()
     async fn handle_main_thread_message<S>(
-        &self,
+        &mut self,
         msg: MainToPeerThread,
         peer: &mut S,
         peer_state_info: &mut MutablePeerState,
@@ -946,7 +930,7 @@ impl PeerLoopHandler {
                     return Ok(false);
                 }
 
-                self.punish(PeerSanctionReason::SynchronizationTimeout)
+                self.sanction(PeerSanctionReason::SynchronizationTimeout)
                     .await?;
 
                 // If this peer failed the last synchronization attempt, we only
@@ -985,7 +969,7 @@ impl PeerLoopHandler {
     /// Loop for the peer threads. Awaits either a message from the peer over TCP,
     /// or a message from main over the main-to-peer-threads broadcast channel.
     async fn run<S>(
-        &self,
+        &mut self,
         mut peer: S,
         mut from_main_rx: broadcast::Receiver<MainToPeerThread>,
         peer_state_info: &mut MutablePeerState,
@@ -1073,7 +1057,7 @@ impl PeerLoopHandler {
     /// Locking:
     ///   * acquires `global_state_lock` for write
     pub async fn run_wrapper<S>(
-        &self,
+        &mut self,
         mut peer: S,
         from_main_rx: broadcast::Receiver<MainToPeerThread>,
     ) -> Result<()>
@@ -1088,7 +1072,7 @@ impl PeerLoopHandler {
             .net
             .peer_databases
             .peer_standings
-            .get(self.peer_address.ip())
+            .get(self.peer_address)
             .await
             .unwrap_or_default();
 
@@ -1204,7 +1188,7 @@ mod peer_loop_tests {
 
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
-        let peer_loop_handler =
+        let mut peer_loop_handler =
             PeerLoopHandler::new(to_main_tx, state_lock.clone(), peer_address, hsd, true, 1);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -1253,7 +1237,7 @@ mod peer_loop_tests {
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-        let peer_loop_handler =
+        let mut peer_loop_handler =
             PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa2, hsd2, true, 0);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -1297,7 +1281,7 @@ mod peer_loop_tests {
             block_1_with_different_genesis.into(),
         )))]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1336,12 +1320,20 @@ mod peer_loop_tests {
             .lock_guard()
             .await
             .net
-            .get_peer_standing_from_database(peer_address.ip())
-            .await;
-        assert_eq!(-(u16::MAX as i32), peer_standing.unwrap().standing);
+            .get_peer_standing_from_database(peer_address)
+            .await
+            .unwrap();
         assert_eq!(
-            PeerSanctionReason::DifferentGenesis,
-            peer_standing.unwrap().latest_sanction.unwrap()
+            state_lock
+                .lock_guard()
+                .await
+                .net
+                .peer_standing_banned_score(),
+            peer_standing.score
+        );
+        assert_eq!(
+            Some(PeerSanctionReason::DifferentGenesis),
+            peer_standing.latest_sanction
         );
 
         Ok(())
@@ -1380,7 +1372,7 @@ mod peer_loop_tests {
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1426,11 +1418,11 @@ mod peer_loop_tests {
             .net
             .peer_databases
             .peer_standings
-            .get(peer_address.ip())
+            .get(peer_address)
             .await
             .unwrap();
         assert!(
-            standing.standing < 0,
+            standing.score < 0,
             "Peer must be sanctioned for sending a bad block"
         );
 
@@ -1468,7 +1460,7 @@ mod peer_loop_tests {
 
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1550,7 +1542,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler_1 = PeerLoopHandler::new(
+        let mut peer_loop_handler_1 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1576,7 +1568,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler_2 = PeerLoopHandler::new(
+        let mut peer_loop_handler_2 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1639,7 +1631,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler_2 = PeerLoopHandler::new(
+        let mut peer_loop_handler_2 = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1697,7 +1689,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1739,7 +1731,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1805,7 +1797,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -1892,7 +1884,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address1,
@@ -1926,10 +1918,10 @@ mod peer_loop_tests {
             .lock_guard()
             .await
             .net
-            .get_peer_standing_from_database(peer_address1.ip())
+            .get_peer_standing_from_database(peer_address1)
             .await
             .unwrap()
-            .standing
+            .score
             .is_negative());
 
         Ok(())
@@ -1972,7 +1964,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -2047,7 +2039,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
@@ -2147,7 +2139,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx.clone(),
             state_lock.clone(),
             peer_socket_address,
@@ -2253,7 +2245,7 @@ mod peer_loop_tests {
             Action::Read(PeerMessage::Bye),
         ]);
 
-        let peer_loop_handler =
+        let mut peer_loop_handler =
             PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa_1, hsd_1, true, 1);
         peer_loop_handler
             .run_wrapper(mock, from_main_rx_clone)
@@ -2317,7 +2309,7 @@ mod peer_loop_tests {
         ]);
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),
             get_dummy_socket_address(0),
@@ -2362,7 +2354,7 @@ mod peer_loop_tests {
         ]);
 
         let (hsd_1, _sa_1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
-        let peer_loop_handler = PeerLoopHandler::new(
+        let mut peer_loop_handler = PeerLoopHandler::new(
             to_main_tx,
             state_lock.clone(),
             get_dummy_socket_address(0),

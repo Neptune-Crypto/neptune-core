@@ -15,9 +15,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     models::{
         channel::{MainToPeerThread, PeerThreadToMain},
-        peer::{
-            ConnectionRefusedReason, ConnectionStatus, HandshakeData, PeerMessage, PeerStanding,
-        },
+        peer::{ConnectionStatus, HandshakeData, PeerMessage, PeerSanctionReason, PeerStanding},
         state::GlobalStateLock,
     },
     peer_loop::PeerLoopHandler,
@@ -34,99 +32,6 @@ fn get_codec_rules() -> LengthDelimitedCodec {
     let mut codec_rules = LengthDelimitedCodec::new();
     codec_rules.set_max_frame_length(MAX_PEER_FRAME_LENGTH_IN_BYTES);
     codec_rules
-}
-
-/// Check if connection is allowed. Used for both ingoing and outgoing connections.
-///
-/// Locking:
-///   * acquires `global_state_lock` for read
-async fn check_if_connection_is_allowed(
-    global_state_lock: GlobalStateLock,
-    own_handshake: &HandshakeData,
-    other_handshake: &HandshakeData,
-    peer_address: &SocketAddr,
-) -> ConnectionStatus {
-    let global_state = global_state_lock.lock_guard().await;
-    fn versions_are_compatible(own_version: &str, other_version: &str) -> bool {
-        let own_version = semver::Version::parse(own_version)
-            .expect("Must be able to parse own version string. Got: {own_version}");
-        let other_version = match semver::Version::parse(other_version) {
-            Ok(version) => version,
-            Err(err) => {
-                warn!("Peer version is not a valid semver version. Got error: {err}",);
-                return false;
-            }
-        };
-
-        // All alphanet versions are incompatible with each other. Alphanet has versions
-        // "0.0.n". Alphanet is also incompatible with mainnet or any other versions.
-        if own_version.major == 0 && own_version.minor == 0
-            || other_version.major == 0 && other_version.minor == 0
-        {
-            return own_version == other_version;
-        }
-
-        true
-    }
-
-    // Disallow connection if peer is banned via CLI arguments
-    if global_state.cli.ban.contains(&peer_address.ip()) {
-        warn!(
-            "Banned peer {} attempted to connect. Disallowing.",
-            peer_address.ip()
-        );
-        return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
-    }
-
-    // Disallow connection if peer is in bad standing
-    let standing = global_state
-        .net
-        .get_peer_standing_from_database(peer_address.ip())
-        .await;
-
-    if standing.is_some() && standing.unwrap().standing < -(global_state.cli.peer_tolerance as i32)
-    {
-        return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
-    }
-
-    if let Some(status) = {
-        // Disallow connection if max number of &peers has been attained
-        if (global_state.cli.max_peers as usize) <= global_state.net.peer_map.len() {
-            Some(ConnectionStatus::Refused(
-                ConnectionRefusedReason::MaxPeerNumberExceeded,
-            ))
-        }
-        // Disallow connection to already connected peer.
-        else if global_state.net.peer_map.values().any(|peer| {
-            peer.instance_id == other_handshake.instance_id
-                || *peer_address == peer.connected_address
-        }) {
-            Some(ConnectionStatus::Refused(
-                ConnectionRefusedReason::AlreadyConnected,
-            ))
-        } else {
-            None
-        }
-    } {
-        return status;
-    }
-
-    // Disallow connection to self
-    if own_handshake.instance_id == other_handshake.instance_id {
-        return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect);
-    }
-
-    // Disallow connection if versions are incompatible
-    if !versions_are_compatible(&own_handshake.version, &other_handshake.version) {
-        warn!(
-            "Attempting to connect to incompatible version. You might have to upgrade, or the other node does. Own version: {}, other version: {}",
-            own_handshake.version,
-            other_handshake.version);
-        return ConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion);
-    }
-
-    info!("ConnectionStatus::Accepted");
-    ConnectionStatus::Accepted
 }
 
 pub async fn answer_peer_wrapper<S>(
@@ -221,13 +126,9 @@ where
             }
 
             // Check if incoming connection is allowed
-            let connection_status = check_if_connection_is_allowed(
-                state.clone(),
-                &own_handshake_data,
-                &hsd,
-                &peer_address,
-            )
-            .await;
+            let connection_status = state
+                .check_if_connection_is_allowed(&own_handshake_data, &hsd, peer_address)
+                .await;
 
             peer.send(PeerMessage::ConnectionStatus(connection_status))
                 .await?;
@@ -247,7 +148,7 @@ where
     // Whether the incoming connection comes from a peer in bad standing is checked in `get_connection_status`
     info!("Connection accepted from {}", peer_address);
     let peer_distance = 1; // All incoming connections have distance 1
-    let peer_loop_handler = PeerLoopHandler::new(
+    let mut peer_loop_handler = PeerLoopHandler::new(
         peer_thread_to_main_tx,
         state,
         peer_address,
@@ -273,16 +174,28 @@ pub async fn call_peer_wrapper(
     own_handshake_data: HandshakeData,
     distance: u8,
 ) {
-    let state_clone = state.clone();
+    let mut state_clone = state.clone();
     let peer_thread_to_main_tx_clone = peer_thread_to_main_tx.clone();
     let panic_result = std::panic::AssertUnwindSafe(async {
         debug!("Attempting to initiate connection");
         match tokio::net::TcpStream::connect(peer_address).await {
             Err(e) => {
+                state_clone
+                    .sanction_peer(peer_address, PeerSanctionReason::ConnectFailed)
+                    .await
+                    .unwrap();
                 warn!("Failed to establish connection: {}", e);
             }
             Ok(stream) => {
-                match call_peer(
+                state_clone
+                    .unsanction_peer(
+                        peer_address,
+                        crate::models::peer::PeerUnsanctionReason::ConnectSuccess,
+                    )
+                    .await
+                    .unwrap();
+
+                let result = call_peer(
                     stream,
                     state,
                     peer_address,
@@ -291,10 +204,10 @@ pub async fn call_peer_wrapper(
                     &own_handshake_data,
                     distance,
                 )
-                .await
-                {
-                    Ok(()) => (),
-                    Err(e) => error!("An error occurred: {}. Connection closing", e),
+                .await;
+
+                if let Err(e) = result {
+                    error!("An error occurred: {}. Connection closing", e);
                 }
             }
         };
@@ -386,23 +299,19 @@ where
     // Peer accepted us. Check if we accept the peer. Note that the protocol does not stipulate
     // that we answer with a connection status here, so if the connection is *not* accepted, we
     // simply hang up but log the reason for the refusal.
-    let connection_status = check_if_connection_is_allowed(
-        state.clone(),
-        own_handshake,
-        &other_handshake,
-        &peer_address,
-    )
-    .await;
+    let connection_status = state
+        .check_if_connection_is_allowed(own_handshake, &other_handshake, peer_address)
+        .await;
     if let ConnectionStatus::Refused(refused_reason) = connection_status {
         warn!(
-            "Outgoing connection refused. Reason: {:?}\nNow hanging up.",
+            "Outgoing connection not allowed due to local rules. Status: Refused. Reason: {:?}\nNow hanging up.",
             refused_reason
         );
         peer.send(PeerMessage::Bye).await?;
         bail!("Attempted to connect to peer that was not allowed. This connection attempt should not have been made.");
     }
 
-    let peer_loop_handler = PeerLoopHandler::new(
+    let mut peer_loop_handler = PeerLoopHandler::new(
         peer_thread_to_main_tx,
         state,
         peer_address,
@@ -442,7 +351,7 @@ pub async fn close_peer_connected_callback(
     debug!("Fetched peer info standing for {}", peer_address);
     global_state_mut
         .net
-        .write_peer_standing_on_decrease(peer_address.ip(), new_standing)
+        .write_peer_standing_on_decrease(peer_address, new_standing)
         .await;
     debug!("Stored peer info standing for {}", peer_address);
 
@@ -458,7 +367,7 @@ pub async fn close_peer_connected_callback(
 mod connect_tests {
     use crate::prelude::twenty_first;
 
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
 
     use super::*;
 
@@ -469,8 +378,10 @@ mod connect_tests {
 
     use crate::config_models::network::Network;
     use crate::models::peer::{
-        ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason, PeerStanding,
+        self, ConnectionRefusedReason, ConnectionStatus, PeerInfo, PeerMessage, PeerSanctionReason,
+        PeerStanding, PeerUnsanctionReason,
     };
+    use crate::models::state::networking_state::CONNECT_FAILED_TIMEOUT_SECS;
     use crate::tests::shared::{
         get_dummy_handshake_data_for_genesis, get_dummy_latest_block,
         get_dummy_peer_connection_data_genesis, get_dummy_socket_address, get_test_genesis_setup,
@@ -532,36 +443,24 @@ mod connect_tests {
         let (other_handshake, peer_sa) = get_dummy_peer_connection_data_genesis(network, 1);
         let own_handshake = get_dummy_handshake_data_for_genesis(network);
 
-        let mut status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &other_handshake,
-            &peer_sa,
-        )
-        .await;
+        let mut status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &other_handshake, peer_sa)
+            .await;
         if status != ConnectionStatus::Accepted {
             bail!("Must return ConnectionStatus::Accepted");
         }
 
-        status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &own_handshake,
-            &peer_sa,
-        )
-        .await;
+        status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &own_handshake, peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
         }
 
         state_lock.lock_mut(|s| s.cli.max_peers = 1).await;
-        status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &other_handshake,
-            &peer_sa,
-        )
-        .await;
+        status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &other_handshake, peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded) {
             bail!(
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
@@ -575,13 +474,9 @@ mod connect_tests {
             .await;
         let mut mutated_other_handshake = other_handshake.clone();
         mutated_other_handshake.instance_id = connected_peer.instance_id;
-        status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &mutated_other_handshake,
-            &peer_sa,
-        )
-        .await;
+        status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &mutated_other_handshake, peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected) {
             bail!(
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected))"
@@ -591,32 +486,24 @@ mod connect_tests {
         // Verify that banned peers are rejected by this check
         // First check that peers can be banned by command-line arguments
         state_lock.lock_mut(|s| s.cli.ban.push(peer_sa.ip())).await;
-        status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &other_handshake,
-            &peer_sa,
-        )
-        .await;
+        status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &other_handshake, peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on CLI-ban");
         }
 
         state_lock.lock_mut(|s| s.cli.ban.pop()).await;
-        status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &other_handshake,
-            &peer_sa,
-        )
-        .await;
+        status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &other_handshake, peer_sa)
+            .await;
         if status != ConnectionStatus::Accepted {
             bail!("Must return ConnectionStatus::Accepted after unban");
         }
 
         // Then check that peers can be banned by bad behavior
         let bad_standing: PeerStanding = PeerStanding {
-            standing: i32::MIN,
+            score: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
@@ -628,16 +515,12 @@ mod connect_tests {
             .lock_guard_mut()
             .await
             .net
-            .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
+            .write_peer_standing_on_decrease(peer_sa, bad_standing)
             .await;
 
-        status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &other_handshake,
-            &peer_sa,
-        )
-        .await;
+        status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &other_handshake, peer_sa)
+            .await;
         if status != ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding) {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on db-ban");
         }
@@ -771,13 +654,9 @@ mod connect_tests {
         other_handshake.version = "0.0.0".to_owned();
 
         let peer_address = get_dummy_socket_address(55);
-        let connection_status = check_if_connection_is_allowed(
-            state_lock.clone(),
-            &own_handshake,
-            &other_handshake,
-            &peer_address,
-        )
-        .await;
+        let connection_status = state_lock
+            .check_if_connection_is_allowed(&own_handshake, &other_handshake, peer_address)
+            .await;
         assert_eq!(
             ConnectionStatus::Refused(ConnectionRefusedReason::IncompatibleVersion),
             connection_status,
@@ -890,7 +769,7 @@ mod connect_tests {
             )
             .await?;
         let bad_standing: PeerStanding = PeerStanding {
-            standing: i32::MIN,
+            score: i32::MIN,
             latest_sanction: Some(PeerSanctionReason::InvalidBlock((
                 7u64.into(),
                 Digest::default(),
@@ -903,7 +782,7 @@ mod connect_tests {
             .lock_guard_mut()
             .await
             .net
-            .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
+            .write_peer_standing_on_decrease(peer_address, bad_standing)
             .await;
 
         let answer = answer_peer(
@@ -925,6 +804,170 @@ mod connect_tests {
             3 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
+
+        Ok(())
+    }
+
+    // This tests the entire sequence of banning a peer for ConnectFail,
+    // timing out, allowing further attempt, and unbanning on connect success
+    //
+    // Test steps:
+    // 1. Initialization
+    // 2. Clear all standings.
+    // 3. Verify that peer is not in DB and is not banned.
+    // 4. Attempt connections, that peer refuses.
+    // 5. Verify that peer's standing score decreases each time
+    // 6. Verify that peer becomes banned after N attempts
+    // 7. Verify that connection attempt is not allowed.
+    // 8. Adjust timestamp of last peer sanction to simulate timeout
+    // 9. Verify that connection attempt is allowed.
+    // 10. Unsanction peer for successful connect. (manual workaround)
+    // 11. todo: perform an actual connection attempt.
+    // 12. todo: Verify that peer's standing score has improved and is no longer banned.
+    #[traced_test]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ban_peer_connect_fail_and_unban_connect_success() -> Result<()> {
+        // 1. Initialization
+        let network = Network::RegTest;
+        let own_handshake = get_dummy_handshake_data_for_genesis(network);
+
+        // 0.0.0.0 can never be connected to, per RFC 1122
+        let peer_socket_addr: SocketAddr = "0.0.0.0:8080".parse().unwrap();
+
+        let (from_main_tx, _from_main_rx, to_main_tx, _to_main_rx1, mut global_state_lock, _hsd) =
+            get_test_genesis_setup(network, 0).await?;
+
+        {
+            let mut global_state_mut = global_state_lock.lock_guard_mut().await;
+
+            // 2. Clear peer's standing in DB
+            global_state_mut
+                .net
+                .clear_peer_standing_in_database(peer_socket_addr)
+                .await;
+
+            // 3. Verify that peer is not in DB and is not banned.
+            let peer_standing_score = global_state_mut
+                .net
+                .get_peer_standing_from_database(peer_socket_addr)
+                .await;
+            let banned = global_state_mut.net.peer_is_banned(peer_socket_addr).await;
+            assert_eq!(
+                peer_standing_score, None,
+                "Peer should be unknown at this point"
+            );
+            assert_eq!(banned, None, "Peer should be unknown at this point");
+        };
+
+        // 4. Attempt connections, that peer refuses.
+
+        let peer_tolerance = global_state_lock.peer_tolerance().await;
+        let connect_failed_i32 = peer::CONNECT_FAILED as i32;
+
+        // at time of writing: 100 / 25 == 4.
+        let max_tries = peer_tolerance / connect_failed_i32;
+
+        for i in 0..max_tries {
+            call_peer_wrapper(
+                peer_socket_addr,
+                global_state_lock.clone(),
+                from_main_tx.subscribe(),
+                to_main_tx.clone(),
+                own_handshake.clone(),
+                1,
+            )
+            .await;
+
+            let global_state = global_state_lock.lock_guard().await;
+
+            let expected_score = PeerStanding::default_score() - connect_failed_i32 * (i + 1);
+
+            let new_peer_standing = global_state
+                .net
+                .get_peer_standing_from_database(peer_socket_addr)
+                .await
+                .unwrap();
+            assert_eq!(expected_score, new_peer_standing.score);
+
+            let banned = global_state
+                .net
+                .peer_is_banned(peer_socket_addr)
+                .await
+                .unwrap();
+
+            if i == max_tries - 1 {
+                assert!(
+                    banned,
+                    "Peer should be banned after exceeding peer_tolerance threshold"
+                )
+            } else {
+                assert!(!banned, "Peer should not be banned yet")
+            }
+        }
+
+        // note: ideally here we would setup an actual listening peer and attempt
+        // to connect, but we don't seem to have unit test infrastructure for that (yet?)
+
+        // 7. Verify that connection attempt is not allowed.
+        let allow_connect = global_state_lock
+            .allow_connect_to_peer(peer_socket_addr)
+            .await
+            .is_ok();
+        assert!(
+            !allow_connect,
+            "We should not be allowed to connect to banned peer"
+        );
+
+        // 8. Adjust timestamp of last peer sanction to simulate timeout
+        let mut peer_standing = global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(peer_socket_addr)
+            .await
+            .unwrap();
+
+        let expired_timestamp =
+            SystemTime::now() - Duration::from_secs(CONNECT_FAILED_TIMEOUT_SECS as u64 + 1);
+        peer_standing.timestamp_of_latest_sanction = Some(expired_timestamp);
+        global_state_lock
+            .lock_guard_mut()
+            .await
+            .net
+            .write_peer_standing(peer_socket_addr, peer_standing)
+            .await;
+
+        // 9. Verify that connection attempt is allowed.
+        let allow_connect2 = global_state_lock
+            .allow_connect_to_peer(peer_socket_addr)
+            .await
+            .is_ok();
+        assert!(
+            allow_connect2,
+            "We should be allowed to connect to banned peer after timeout expires"
+        );
+
+        // 10. Unsanction peer for successful connect.  This is a manual
+        //     workaround/simulation because we aren't presently able to call
+        //     `call_peer_wrapper` to connect to a listening peer.
+        global_state_lock
+            .unsanction_peer(peer_socket_addr, PeerUnsanctionReason::ConnectSuccess)
+            .await
+            .unwrap();
+
+        let new_peer_standing = global_state_lock
+            .lock_guard()
+            .await
+            .net
+            .get_peer_standing_from_database(peer_socket_addr)
+            .await
+            .unwrap();
+        let expected_score =
+            peer_standing.score + peer::PeerUnsanctionReason::ConnectSuccess.as_severity() as i32;
+        assert_eq!(expected_score, new_peer_standing.score);
+
+        // 11. todo: perform an actual connection attempt.
+        // 12. todo: Verify that peer's standing score has improved and is no longer banned.
 
         Ok(())
     }
