@@ -15,7 +15,7 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
  - Enter the repository: `cd neptune-core`
  - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
 
- - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --path .` (needs at least 3 GB of RAM and a few minutes)
+ - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `cargo install --locked --path .` (needs at least 3 GB of RAM and a few minutes)
 
 ### Windows
 
@@ -28,7 +28,7 @@ With a functioning version of cargo, compilation on Windows should just work out
 - Enter the repository: `cd neptune-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
 
-- Run `cargo install --path .`
+- Run `cargo install --locked --path .`
 
 
 ## Running & Connecting
