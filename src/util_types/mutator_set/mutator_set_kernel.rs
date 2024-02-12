@@ -562,9 +562,22 @@ mod accumulation_scheme_tests {
     use rand::prelude::*;
     use rand::Rng;
 
+    use tasm_lib::twenty_first::util_types::storage_vec::StorageVec;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::UtxoReceiverData;
+    use crate::tests::shared::add_block;
+    use crate::tests::shared::get_mock_global_state;
+    use crate::tests::shared::get_mock_wallet_state;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::commit;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -1123,5 +1136,448 @@ mod accumulation_scheme_tests {
             !s_back_one_add_one_remove.verify(item, &mp),
             "Membership proof must fail after removal"
         );
+    }
+
+    #[tokio::test]
+    async fn flaky_mutator_set_test() {
+        let mut rng: StdRng =
+            SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
+        // let seed: [u8; 32] = rng.gen();
+        let seed = [
+            0xf4, 0xc2, 0x1c, 0xd0, 0x5a, 0xac, 0x99, 0xe7, 0x3a, 0x1e, 0x29, 0x7f, 0x16, 0xc1,
+            0x50, 0x5e, 0x1e, 0xd, 0x4b, 0x49, 0x51, 0x9c, 0x1b, 0xa0, 0x38, 0x3c, 0xd, 0x83, 0x29,
+            0xdb, 0xab, 0xe2,
+        ];
+        println!(
+            "seed: [{}]",
+            seed.iter().map(|h| format!("{:#x}", h)).join(", ")
+        );
+        rng = SeedableRng::from_seed(seed);
+
+        // Test various parts of the state update when a block contains multiple inputs and outputs
+        let network = Network::Alpha;
+        let genesis_wallet_state = get_mock_wallet_state(None, network).await;
+        let genesis_spending_key = genesis_wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let genesis_state_lock =
+            get_mock_global_state(network, 3, Some(genesis_wallet_state.wallet_secret)).await;
+
+        let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
+        let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
+        let alice_state_lock = get_mock_global_state(network, 3, Some(wallet_secret_alice)).await;
+
+        let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
+        let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
+        let bob_state_lock = get_mock_global_state(network, 3, Some(wallet_secret_bob)).await;
+
+        let genesis_block = Block::genesis_block();
+
+        let (mut block_1, cb_utxo, cb_output_randomness) =
+            make_mock_block_with_valid_pow(&genesis_block, None, genesis_spending_key.to_address());
+
+        // Send two outputs each to Alice and Bob, from genesis receiver
+        let fee = NeptuneCoins::one();
+        let sender_randomness: Digest = rng.gen();
+        let receiver_data_for_alice = vec![
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(41).to_native_coins(),
+                },
+            },
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(59).to_native_coins(),
+                },
+            },
+        ];
+        // Two outputs for Bob
+        let receiver_data_for_bob = vec![
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(141).to_native_coins(),
+                },
+            },
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(59).to_native_coins(),
+                },
+            },
+        ];
+        {
+            let tx_to_alice_and_bob = genesis_state_lock
+                .lock_guard_mut()
+                .await
+                .create_transaction(
+                    [
+                        receiver_data_for_alice.clone(),
+                        receiver_data_for_bob.clone(),
+                    ]
+                    .concat(),
+                    fee,
+                )
+                .await
+                .unwrap();
+
+            // Absorb and verify validity
+            block_1.accumulate_transaction(tx_to_alice_and_bob);
+            assert!(block_1.is_valid(&genesis_block));
+        }
+
+        println!("Accumulated transaction into block_1.");
+        println!(
+            "Transaction has {} inputs (removal records) and {} outputs (addition records)",
+            block_1.kernel.body.transaction.kernel.inputs.len(),
+            block_1.kernel.body.transaction.kernel.outputs.len()
+        );
+
+        // Update chain states
+        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+            let mut state = state_lock.lock_guard_mut().await;
+            add_block(&mut state, block_1.clone()).await.unwrap();
+            state
+                .chain
+                .archival_state_mut()
+                .update_mutator_set(&block_1)
+                .await
+                .unwrap();
+        }
+
+        {
+            // Update wallets
+            let mut genesis_state = genesis_state_lock.lock_guard_mut().await;
+            genesis_state
+                .wallet_state
+                .expected_utxos
+                .add_expected_utxo(
+                    cb_utxo,
+                    cb_output_randomness,
+                    genesis_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                )
+                .unwrap();
+            genesis_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                3,
+                genesis_state
+                    .wallet_state
+                    .wallet_db
+                    .monitored_utxos()
+                    .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+            );
+        }
+
+        {
+            let mut alice_state = alice_state_lock.lock_guard_mut().await;
+            for rec_data in receiver_data_for_alice {
+                alice_state
+                    .wallet_state
+                    .expected_utxos
+                    .add_expected_utxo(
+                        rec_data.utxo.clone(),
+                        rec_data.sender_randomness,
+                        alice_spending_key.privacy_preimage,
+                        UtxoNotifier::Cli,
+                    )
+                    .unwrap();
+            }
+            alice_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
+                .await
+                .unwrap();
+        }
+
+        {
+            let mut bob_state = bob_state_lock.lock_guard_mut().await;
+            for rec_data in receiver_data_for_bob {
+                bob_state
+                    .wallet_state
+                    .expected_utxos
+                    .add_expected_utxo(
+                        rec_data.utxo.clone(),
+                        rec_data.sender_randomness,
+                        bob_spending_key.privacy_preimage,
+                        UtxoNotifier::Cli,
+                    )
+                    .unwrap();
+            }
+            bob_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Now Alice should have a balance of 100 and Bob a balance of 200
+
+        assert_eq!(
+            NeptuneCoins::new(100),
+            alice_state_lock
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_amount
+        );
+        assert_eq!(
+            NeptuneCoins::new(200),
+            bob_state_lock
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_amount
+        );
+
+        // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
+        let receiver_data_from_alice = vec![
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(49).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+        ];
+        let tx_from_alice = alice_state_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction(receiver_data_from_alice.clone(), NeptuneCoins::new(1))
+            .await
+            .unwrap();
+        let receiver_data_from_bob = vec![
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(98).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+        ];
+        let tx_from_bob = bob_state_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction(receiver_data_from_bob.clone(), NeptuneCoins::new(2))
+            .await
+            .unwrap();
+
+        // Make block_2 with tx that contains:
+        // - 4 inputs: 2 from Alice and 2 from Bob
+        // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
+        let (mut block_2, cb_utxo_block_2, cb_sender_randomness_block_2) =
+            make_mock_block_with_valid_pow(&block_1, None, genesis_spending_key.to_address());
+        block_2.accumulate_transaction(tx_from_alice);
+        assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
+        assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
+
+        // This test is flaky!
+        // It fails roughly every 3 out of 10 runs. If you run with `-- --nocapture` then
+        // (on Alan's machine) it runs with a 100% success rate. But doing that *and*
+        // commenting out the next two print statements boosts the failure rate again.
+        println!("accumulated Alice's transaction into block; number of inputs: {}; number of outputs: {}", block_2.kernel.body.transaction.kernel.inputs.len(), block_2.kernel.body.transaction.kernel.outputs.len());
+        println!(
+            "Transaction from Bob has {} inputs and {} outputs",
+            tx_from_bob.kernel.inputs.len(),
+            tx_from_bob.kernel.outputs.len()
+        );
+
+        block_2.accumulate_transaction(tx_from_bob);
+
+        // Sanity checks
+        assert_eq!(4, block_2.kernel.body.transaction.kernel.inputs.len());
+        assert_eq!(6, block_2.kernel.body.transaction.kernel.outputs.len());
+        assert!(block_2.is_valid(&block_1));
+
+        // Update chain states
+        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+            let mut state = state_lock.lock_guard_mut().await;
+
+            add_block(&mut state, block_2.clone()).await.unwrap();
+            state
+                .chain
+                .archival_state_mut()
+                .update_mutator_set(&block_2)
+                .await
+                .unwrap();
+        }
+
+        // Update wallets and verify that Alice and Bob's balances are zero
+        alice_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
+            .await
+            .unwrap();
+        bob_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
+            .await
+            .unwrap();
+        assert!(alice_state_lock
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await
+            .synced_unspent_amount
+            .is_zero());
+        assert!(bob_state_lock
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await
+            .synced_unspent_amount
+            .is_zero());
+
+        // Update genesis wallet and verify that all ingoing UTXOs are recorded
+        for rec_data in receiver_data_from_alice {
+            genesis_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .expected_utxos
+                .add_expected_utxo(
+                    rec_data.utxo.clone(),
+                    rec_data.sender_randomness,
+                    genesis_spending_key.privacy_preimage,
+                    UtxoNotifier::Cli,
+                )
+                .unwrap();
+        }
+        for rec_data in receiver_data_from_bob {
+            genesis_state_lock
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .expected_utxos
+                .add_expected_utxo(
+                    rec_data.utxo.clone(),
+                    rec_data.sender_randomness,
+                    genesis_spending_key.privacy_preimage,
+                    UtxoNotifier::Cli,
+                )
+                .unwrap();
+        }
+        genesis_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .expected_utxos
+            .add_expected_utxo(
+                cb_utxo_block_2,
+                cb_sender_randomness_block_2,
+                genesis_spending_key.privacy_preimage,
+                UtxoNotifier::Cli,
+            )
+            .unwrap();
+        genesis_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .update_wallet_state_with_new_block(
+                &block_1.kernel.body.mutator_set_accumulator,
+                &block_2,
+            )
+            .await
+            .unwrap();
+
+        // Verify that states and wallets can be updated successfully
+        assert_eq!(
+            9,
+            genesis_state_lock.lock_guard().await
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .len(), "Genesis receiver must have 9 UTXOs after block 2: 3 after block 1, and 6 added by block 2"
+        );
+
+        // Verify that mutator sets are updated correctly and that last block is block 2
+        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+            let state = state_lock.lock_guard().await;
+
+            assert_eq!(
+                block_2.kernel.body.mutator_set_accumulator,
+                state
+                    .chain
+                    .archival_state()
+                    .archival_mutator_set
+                    .ams()
+                    .accumulator(),
+                "AMS must be correctly updated"
+            );
+            assert_eq!(
+                block_2,
+                state.chain.archival_state().get_latest_block().await
+            );
+        }
     }
 }
