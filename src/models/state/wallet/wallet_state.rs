@@ -279,7 +279,7 @@ impl WalletState {
     /// is valid and that the wallet state is not up to date yet.
     pub async fn update_wallet_state_with_new_block(
         &mut self,
-        current_mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+        current_mutator_set_accumulator: &MutatorSetAccumulator,
         new_block: &Block,
     ) -> Result<()> {
         let transaction: Transaction = new_block.kernel.body.transaction.clone();
@@ -325,7 +325,7 @@ impl WalletState {
         // to be updated to the mutator set of the new block.
         let mut valid_membership_proofs_and_own_utxo_count: HashMap<
             StrongUtxoKey,
-            (MsMembershipProof<Hash>, u64),
+            (MsMembershipProof, u64),
         > = HashMap::default();
         for (i, monitored_utxo) in monitored_utxos.iter() {
             let utxo_digest = Hash::hash(&monitored_utxo.utxo);
@@ -369,11 +369,11 @@ impl WalletState {
         // a) Update all existing MS membership proofs
         // b) Register incoming transactions and derive their membership proofs
         let mut changed_mps = vec![];
-        let mut msa_state: MutatorSetAccumulator<Hash> = current_mutator_set_accumulator.clone();
+        let mut msa_state: MutatorSetAccumulator = current_mutator_set_accumulator.clone();
 
         let mut removal_records = transaction.kernel.inputs.clone();
         removal_records.reverse();
-        let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
+        let mut removal_records: Vec<&mut RemovalRecord> =
             removal_records.iter_mut().collect::<Vec<_>>();
 
         for addition_record in new_block.kernel.body.transaction.kernel.outputs.iter() {
@@ -496,8 +496,7 @@ impl WalletState {
             };
 
             // Batch update removal records to keep them valid after next removal
-            RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record)
-                .expect("MS removal record update from remove must succeed in wallet handler");
+            RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
 
             // TODO: We mark membership proofs as spent, so they can be deleted. But
             // how do we ensure that we can recover them in case of a fork? For now we maintain
@@ -660,7 +659,7 @@ impl WalletState {
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
+    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
@@ -676,7 +675,7 @@ impl WalletState {
                 tip_digest.emojihash());
         }
 
-        let mut ret: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = vec![];
+        let mut ret: Vec<(Utxo, LockScript, MsMembershipProof)> = vec![];
         let mut allocated_amount = NeptuneCoins::zero();
         let lock_script = self
             .wallet_secret
@@ -703,7 +702,7 @@ impl WalletState {
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
-    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
+    ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
         self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest)
             .await
     }

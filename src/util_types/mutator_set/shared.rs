@@ -1,9 +1,9 @@
+use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
 use std::collections::{HashMap, HashSet};
 
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::shared_math::tip5::Digest;
+use tasm_lib::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
@@ -54,12 +54,12 @@ pub fn indices_to_hash_map(all_indices: &[u128; NUM_TRIALS as usize]) -> HashMap
 /// This function is factored out because it is shared by `update_from_remove`
 /// and `batch_update_from_remove`.
 #[allow(clippy::type_complexity)]
-pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher + BFieldCodec>(
-    removal_record: &RemovalRecord<H>,
-    chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
-) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, Digest)>) {
+pub fn get_batch_mutation_argument_for_removal_record(
+    removal_record: &RemovalRecord,
+    chunk_dictionaries: &mut [&mut ChunkDictionary],
+) -> (HashSet<usize>, Vec<(MmrMembershipProof<Hash>, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
-    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<H>, Digest)> =
+    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
         HashMap::new();
     // `mutated_chunk_dictionaries` records the indices into the
     // input `chunk_dictionaries` slice that shows which elements
@@ -85,7 +85,7 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher + BFiel
                     // *old* (non-updated) MMR membership proof.
                     if !batch_modification_hash_map.contains_key(chunk_index) {
                         batch_modification_hash_map
-                            .insert(*chunk_index, (mmr_mp.to_owned(), H::hash(chunk)));
+                            .insert(*chunk_index, (mmr_mp.to_owned(), Hash::hash(chunk)));
                     }
                 }
 
@@ -110,8 +110,10 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher + BFiel
 
                                 // Since all indices have been applied to the chunk in the above
                                 // for-loop, we can calculate the hash of the updated chunk now.
-                                batch_modification_hash_map
-                                    .insert(*chunk_index, (mp.to_owned(), H::hash(&target_chunk)));
+                                batch_modification_hash_map.insert(
+                                    *chunk_index,
+                                    (mp.to_owned(), Hash::hash(&target_chunk)),
+                                );
                             }
                         }
                     };
@@ -151,14 +153,12 @@ pub fn get_batch_mutation_argument_for_removal_record<H: AlgebraicHasher + BFiel
 /// This function is factored out because it is shared by
 /// `revert_update_from_remove` and `batch_revert_update_from_remove`.
 #[allow(clippy::type_complexity)]
-pub fn prepare_authenticated_batch_modification_for_removal_record_reversion<
-    H: AlgebraicHasher + BFieldCodec,
->(
-    removal_record: &RemovalRecord<H>,
-    chunk_dictionaries: &mut [&mut ChunkDictionary<H>],
-) -> (HashSet<usize>, Vec<(MmrMembershipProof<H>, Digest)>) {
+pub fn prepare_authenticated_batch_modification_for_removal_record_reversion(
+    removal_record: &RemovalRecord,
+    chunk_dictionaries: &mut [&mut ChunkDictionary],
+) -> (HashSet<usize>, Vec<(MmrMembershipProof<Hash>, Digest)>) {
     // chunk index -> (mmr mp, chunk hash)
-    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<H>, Digest)> =
+    let mut batch_modification_hash_map: HashMap<u64, (MmrMembershipProof<Hash>, Digest)> =
         HashMap::new();
 
     // `mutated_chunk_dictionaries` records the indices in `chunk_dictionaries`
@@ -180,7 +180,7 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion<
                     // *old* (before reversion) MMR membership proof.
                     if !batch_modification_hash_map.contains_key(chunk_index) {
                         batch_modification_hash_map
-                            .insert(*chunk_index, (mmr_mp.to_owned(), H::hash(chunk)));
+                            .insert(*chunk_index, (mmr_mp.to_owned(), Hash::hash(chunk)));
                     }
                 }
 
@@ -209,8 +209,10 @@ pub fn prepare_authenticated_batch_modification_for_removal_record_reversion<
 
                                 // Since all indices have been applied to the chunk in the above
                                 // for-loop, we can calculate the hash of the updated chunk now.
-                                batch_modification_hash_map
-                                    .insert(*chunk_index, (mp.to_owned(), H::hash(&target_chunk)));
+                                batch_modification_hash_map.insert(
+                                    *chunk_index,
+                                    (mp.to_owned(), Hash::hash(&target_chunk)),
+                                );
                             }
                         }
                     };

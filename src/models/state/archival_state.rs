@@ -20,7 +20,6 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::database::{create_db_if_missing, NeptuneLevelDb};
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::shared::Hash;
 use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
 };
@@ -60,7 +59,7 @@ pub struct ArchivalState {
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
-    pub archival_mutator_set: RustyArchivalMutatorSet<Hash>,
+    pub archival_mutator_set: RustyArchivalMutatorSet,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -95,7 +94,7 @@ impl ArchivalState {
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
     pub async fn initialize_mutator_set(
         data_dir: &DataDirectory,
-    ) -> Result<RustyArchivalMutatorSet<Hash>> {
+    ) -> Result<RustyArchivalMutatorSet> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
 
@@ -118,7 +117,7 @@ impl ArchivalState {
             }
         };
 
-        let mut archival_set = RustyArchivalMutatorSet::<Hash>::connect(db);
+        let mut archival_set = RustyArchivalMutatorSet::connect(db);
         archival_set.restore_or_new();
 
         Ok(archival_set)
@@ -190,7 +189,7 @@ impl ArchivalState {
     pub async fn new(
         data_dir: DataDirectory,
         block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
-        mut archival_mutator_set: RustyArchivalMutatorSet<Hash>,
+        mut archival_mutator_set: RustyArchivalMutatorSet,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block());
 
@@ -730,7 +729,7 @@ impl ArchivalState {
                 .inputs
                 .clone();
             removal_records.reverse();
-            let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
+            let mut removal_records: Vec<&mut RemovalRecord> =
                 removal_records.iter_mut().collect::<Vec<_>>();
 
             // Add items, thus adding the output UTXOs to the mutator set
@@ -748,10 +747,7 @@ impl ArchivalState {
             // Remove items, thus removing the input UTXOs from the mutator set
             while let Some(removal_record) = removal_records.pop() {
                 // Batch-update all removal records to keep them valid after next removal
-                RemovalRecord::batch_update_from_remove(
-                    &mut removal_records,
-                    removal_record,
-                ).expect("MS removal record update from remove must succeed in update_mutator_set as block should already be verified");
+                RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
 
                 // Remove the element from the mutator set
                 self.archival_mutator_set.ams_mut().remove(removal_record);

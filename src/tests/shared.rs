@@ -452,7 +452,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
         .iter()
         .zip(membership_proofs.iter())
         .map(|(utxo, msmp)| {
-            commit::<Hash>(
+            commit(
                 Hash::hash(utxo),
                 msmp.sender_randomness,
                 msmp.receiver_preimage.hash::<Hash>(),
@@ -496,7 +496,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
                 msmp.auth_path_aocl.leaf_index,
             )
         })
-        .map(|(item, sr, rp, li)| get_swbf_indices::<Hash>(item, sr, rp, li))
+        .map(|(item, sr, rp, li)| get_swbf_indices(item, sr, rp, li))
         .map(|ais| RemovalRecord {
             absolute_indices: AbsoluteIndexSet::new(&ais),
             target_chunks: pseudorandom_chunk_dictionary(rng.gen()),
@@ -732,14 +732,10 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 // TODO: Consider moving this to to the appropriate place in global state,
 // keep fn interface. Can be helper function to `create_transaction`.
 pub fn make_mock_transaction_with_generation_key(
-    input_utxos_mps_keys: Vec<(
-        Utxo,
-        MsMembershipProof<Hash>,
-        generation_address::SpendingKey,
-    )>,
+    input_utxos_mps_keys: Vec<(Utxo, MsMembershipProof, generation_address::SpendingKey)>,
     receiver_data: Vec<UtxoReceiverData>,
     fee: NeptuneCoins,
-    tip_msa: MutatorSetAccumulator<Hash>,
+    tip_msa: MutatorSetAccumulator,
 ) -> Transaction {
     // Generate removal records
     let mut inputs = vec![];
@@ -750,7 +746,7 @@ pub fn make_mock_transaction_with_generation_key(
 
     let mut outputs = vec![];
     for rd in receiver_data.iter() {
-        let addition_record = commit::<Hash>(
+        let addition_record = commit(
             Hash::hash(&rd.utxo),
             rd.sender_randomness,
             rd.receiver_privacy_digest,
@@ -825,7 +821,7 @@ pub fn make_mock_transaction_with_generation_key(
 // `make_mock_transaction`, in contrast to `make_mock_transaction2`, assumes you
 // already have created `DevNetInput`s.
 pub fn make_mock_transaction(
-    inputs: Vec<RemovalRecord<Hash>>,
+    inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
 ) -> Transaction {
     let timestamp: BFieldElement = BFieldElement::new(
@@ -853,7 +849,7 @@ pub fn make_mock_transaction(
 
 // TODO: Change this function into something more meaningful!
 pub fn make_mock_transaction_with_wallet(
-    inputs: Vec<RemovalRecord<Hash>>,
+    inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
     fee: NeptuneCoins,
     _wallet_state: &WalletState,
@@ -912,7 +908,7 @@ pub fn make_mock_block(
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
     let coinbase_addition_record: AdditionRecord =
-        commit::<Hash>(coinbase_digest, coinbase_output_randomness, receiver_digest);
+        commit(coinbase_digest, coinbase_output_randomness, receiver_digest);
     next_mutator_set.add(&coinbase_addition_record);
 
     let block_timestamp = match block_timestamp {

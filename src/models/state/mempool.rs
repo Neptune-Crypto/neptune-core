@@ -294,7 +294,7 @@ impl Mempool {
     /// transactions that were not removed due to being included in the block.
     pub fn update_with_block(
         &mut self,
-        previous_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+        previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
     ) {
         // Check if the sets of inserted indices in the block transaction

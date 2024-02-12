@@ -6,16 +6,13 @@ use tasm_lib::{
 };
 
 use crate::{
-    models::{
-        blockchain::shared::Hash,
-        consensus::{SecretWitness, SupportedClaim},
-    },
+    models::consensus::{SecretWitness, SupportedClaim},
     util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
 };
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectMutatorSetUpdateWitness {
-    previous_mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+    previous_mutator_set_accumulator: MutatorSetAccumulator,
 }
 
 impl SecretWitness for CorrectMutatorSetUpdateWitness {

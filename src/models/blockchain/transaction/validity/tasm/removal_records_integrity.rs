@@ -129,7 +129,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             .iter()
             .zip(removal_record_integrity_witness.membership_proofs.iter())
             .map(|(&item, msmp)| {
-                AbsoluteIndexSet::new(&get_swbf_indices::<Hash>(
+                AbsoluteIndexSet::new(&get_swbf_indices(
                     item,
                     msmp.sender_randomness,
                     msmp.receiver_preimage,
@@ -157,7 +157,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             .zip(removal_record_integrity_witness.membership_proofs.iter())
             .map(|(item, msmp)| {
                 (
-                    commit::<Hash>(
+                    commit(
                         item,
                         msmp.sender_randomness,
                         msmp.receiver_preimage.hash::<Hash>(),

@@ -40,7 +40,7 @@ impl BasicSnippet for HashRemovalRecordIndices {
     }
 
     fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
-        type Rrh = RemovalRecord<Hash>;
+        type Rrh = RemovalRecord;
         let rr_to_ais_with_size = tasm_lib::field_with_size!(Rrh::absolute_indices);
         let hash_varlen = library.import(Box::new(HashVarlen));
         let entrypoint = self.entrypoint();
@@ -79,7 +79,7 @@ impl Function for HashRemovalRecordIndices {
         for i in 0..size {
             encoding.push(*memory.get(&(address + BFieldElement::new(i))).unwrap());
         }
-        let removal_record = *RemovalRecord::<Hash>::decode(&encoding).unwrap();
+        let removal_record = *RemovalRecord::decode(&encoding).unwrap();
 
         // hash absolute index set
         let digest = Hash::hash_varlen(&removal_record.absolute_indices.encode());
@@ -98,7 +98,7 @@ impl Function for HashRemovalRecordIndices {
         _bench_case: Option<BenchmarkCase>,
     ) -> FunctionInitialState {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let removal_record = pseudorandom_removal_record::<Hash>(rng.gen());
+        let removal_record = pseudorandom_removal_record(rng.gen());
         let address: BFieldElement = BFieldElement::new(rng.gen_range(2..(1 << 20)));
 
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
@@ -160,7 +160,7 @@ mod tests {
         // generate removal records list
         let num_removal_records = 2;
         let removal_records = (0..num_removal_records)
-            .map(|_| pseudorandom_removal_record::<Hash>(rng.gen()))
+            .map(|_| pseudorandom_removal_record(rng.gen()))
             .collect_vec();
         let address = BFieldElement::new(rng.gen_range(2..(1 << 20)));
 
@@ -173,7 +173,7 @@ mod tests {
         // populate memory
         let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
         let removal_records_encoded = removal_records.encode();
-        Vec::<RemovalRecord<Hash>>::decode(&removal_records_encoded).unwrap();
+        Vec::<RemovalRecord>::decode(&removal_records_encoded).unwrap();
         for (i, v) in removal_records_encoded.iter().enumerate() {
             memory.insert(address + BFieldElement::new(i as u64), *v);
         }
@@ -240,8 +240,7 @@ mod tests {
                         .unwrap(),
                 );
             }
-            read_removal_records
-                .push(*RemovalRecord::<Hash>::decode(&removal_record_encoding).unwrap());
+            read_removal_records.push(*RemovalRecord::decode(&removal_record_encoding).unwrap());
         }
 
         // assert equality of removal records lists

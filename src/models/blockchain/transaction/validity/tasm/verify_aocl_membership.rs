@@ -57,7 +57,7 @@ impl BasicSnippet for VerifyAoclMembership {
         // We do not need to use get field for MmrMembershipProof because
         // it has a custom implementation of BFieldCodec. However, we do
         // need it for MsMembershipProof.
-        type MsMpH = MsMembershipProof<Hash>;
+        type MsMpH = MsMembershipProof;
         type MmrMpH = MmrMembershipProof<Hash>;
         let msmp_to_mmrmp = tasm_lib::field!(MsMpH::auth_path_aocl);
         let mmr_mp_to_li = tasm_lib::field!(MmrMpH::leaf_index);
@@ -164,7 +164,7 @@ impl Function for VerifyAoclMembership {
         for i in 0..mp_size {
             mp_encoding.push(*memory.get(&(mp_ptr + BFieldElement::new(i))).unwrap());
         }
-        let memproof = *MsMembershipProof::<Hash>::decode(&mp_encoding).unwrap();
+        let memproof = *MsMembershipProof::decode(&mp_encoding).unwrap();
         println!("memproof li: {}", memproof.auth_path_aocl.leaf_index);
         println!(
             "memproof ap: {}",
@@ -199,7 +199,7 @@ impl Function for VerifyAoclMembership {
         let leaf_index = rng.next_u64() % num_leafs;
         let leaf = mmr.get_leaf(leaf_index);
         let (mmr_mp, peaks) = mmr.prove_membership(leaf_index);
-        let mut msmp = pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen());
+        let mut msmp = pseudorandom_mutator_set_membership_proof(rng.gen());
         msmp.auth_path_aocl = mmr_mp;
 
         // populate memory

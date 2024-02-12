@@ -46,7 +46,7 @@ impl BasicSnippet for ComputeIndices {
     }
 
     fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
-        type MsMpH = MsMembershipProof<Hash>;
+        type MsMpH = MsMembershipProof;
         let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
         let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
         let mp_to_ap = tasm_lib::field!(MsMpH::auth_path_aocl);
@@ -159,7 +159,7 @@ impl Function for ComputeIndices {
         for i in 0..size {
             sequence.push(*memory.get(&BFieldElement::new(2u64 + i)).unwrap());
         }
-        let msmp = *MsMembershipProof::<Hash>::decode(&sequence).unwrap();
+        let msmp = *MsMembershipProof::decode(&sequence).unwrap();
         let leaf_index = msmp.auth_path_aocl.leaf_index;
         let leaf_index_hi = leaf_index >> 32;
         let leaf_index_lo = leaf_index & (u32::MAX as u64);
@@ -218,8 +218,7 @@ impl Function for ComputeIndices {
 
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
-        let mut msmp =
-            pseudorandom_mutator_set_membership_proof::<crate::Hash>(rand::Rng::gen(&mut rng));
+        let mut msmp = pseudorandom_mutator_set_membership_proof(rand::Rng::gen(&mut rng));
         msmp.auth_path_aocl.leaf_index = rng.next_u32() as u64;
 
         let msmp_encoded = twenty_first::shared_math::bfield_codec::BFieldCodec::encode(&msmp);
@@ -271,7 +270,6 @@ mod tests {
     use triton_vm::prelude::NonDeterminism;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-    use crate::models::blockchain::shared::Hash;
     use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 
     use super::*;
@@ -292,7 +290,7 @@ mod tests {
 
         // sample membership proofs
         let membership_proofs = (0..num_items)
-            .map(|_| pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen()))
+            .map(|_| pseudorandom_mutator_set_membership_proof(rng.gen()))
             .collect_vec();
 
         // sample items
@@ -400,7 +398,7 @@ mod tests {
             .into_iter()
             .zip(membership_proofs)
             .map(|(item, mp)| {
-                get_swbf_indices::<Hash>(
+                get_swbf_indices(
                     item,
                     mp.sender_randomness,
                     mp.receiver_preimage,

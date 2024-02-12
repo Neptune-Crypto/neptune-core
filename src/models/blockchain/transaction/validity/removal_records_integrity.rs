@@ -40,7 +40,7 @@ use crate::{
 )]
 pub struct RemovalRecordsIntegrityWitness {
     pub input_utxos: Vec<Utxo>,
-    pub membership_proofs: Vec<MsMembershipProof<Hash>>,
+    pub membership_proofs: Vec<MsMembershipProof>,
     pub aocl: MmrAccumulator<Hash>,
     pub swbfi: MmrAccumulator<Hash>,
     pub swbfa_hash: Digest,

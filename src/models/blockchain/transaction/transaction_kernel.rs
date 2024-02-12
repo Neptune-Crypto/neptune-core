@@ -13,12 +13,9 @@ use twenty_first::shared_math::{
 };
 
 use super::{neptune_coins::pseudorandom_amount, NeptuneCoins, PublicAnnouncement};
-use crate::{
-    util_types::mutator_set::{
-        addition_record::{pseudorandom_addition_record, AdditionRecord},
-        removal_record::{pseudorandom_removal_record, RemovalRecord},
-    },
-    Hash,
+use crate::util_types::mutator_set::{
+    addition_record::{pseudorandom_addition_record, AdditionRecord},
+    removal_record::{pseudorandom_removal_record, RemovalRecord},
 };
 
 pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
@@ -30,7 +27,7 @@ pub fn pseudorandom_public_announcement(seed: [u8; 32]) -> PublicAnnouncement {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct TransactionKernel {
-    pub inputs: Vec<RemovalRecord<Hash>>,
+    pub inputs: Vec<RemovalRecord>,
 
     // `outputs` contains the commitments (addition records) that go into the AOCL
     pub outputs: Vec<AdditionRecord>,

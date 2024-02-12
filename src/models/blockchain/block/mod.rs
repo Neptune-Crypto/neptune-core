@@ -121,7 +121,7 @@ impl Block {
     }
 
     pub fn genesis_block() -> Self {
-        let mut genesis_mutator_set = MutatorSetAccumulator::<Hash>::default();
+        let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
 
         let premine_distribution = Self::premine_distribution();
@@ -141,7 +141,7 @@ impl Block {
                 timestamp,
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
-                mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
+                mutator_set_hash: MutatorSetAccumulator::new().hash(),
             },
             witness: Witness::Faith,
         };
@@ -157,7 +157,7 @@ impl Block {
             let receiver_digest = receiving_address.privacy_digest;
 
             // Add pre-mine UTXO to MutatorSet
-            let addition_record = commit::<Hash>(utxo_digest, bad_randomness, receiver_digest);
+            let addition_record = commit(utxo_digest, bad_randomness, receiver_digest);
             ms_update.additions.push(addition_record);
             genesis_mutator_set.add(&addition_record);
 
@@ -218,7 +218,7 @@ impl Block {
     pub fn accumulate_transaction(
         &mut self,
         transaction: Transaction,
-        old_mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+        old_mutator_set_accumulator: &MutatorSetAccumulator,
     ) {
         // merge transactions
         let merged_timestamp = BFieldElement::new(max(

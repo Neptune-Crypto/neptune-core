@@ -1,3 +1,4 @@
+use crate::models::blockchain::shared::Hash;
 use crate::prelude::{triton_vm, twenty_first};
 
 use anyhow::bail;
@@ -12,30 +13,21 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq)]
-pub struct ChunkDictionary<H: AlgebraicHasher> {
+#[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default)]
+pub struct ChunkDictionary {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
-    pub dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>,
+    pub dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>,
 }
 
-impl<H: AlgebraicHasher> ChunkDictionary<H> {
-    pub fn new(dictionary: HashMap<u64, (MmrMembershipProof<H>, Chunk)>) -> Self {
+impl ChunkDictionary {
+    pub fn new(dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>) -> Self {
         Self { dictionary }
     }
 }
 
-impl<H: AlgebraicHasher> Default for ChunkDictionary<H> {
-    fn default() -> Self {
-        Self {
-            dictionary: HashMap::new(),
-        }
-    }
-}
-
-impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
+impl BFieldCodec for ChunkDictionary {
     type Error = anyhow::Error;
 
     fn encode(&self) -> Vec<BFieldElement> {
@@ -74,9 +66,8 @@ impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
             }
             let memproof_length = sequence[read_index].value() as usize;
             read_index += 1;
-            let membership_proof = *MmrMembershipProof::<H>::decode(
-                &sequence[read_index..read_index + memproof_length],
-            )?;
+            let membership_proof =
+                *MmrMembershipProof::decode(&sequence[read_index..read_index + memproof_length])?;
             read_index += memproof_length;
 
             // read chunk
@@ -100,7 +91,7 @@ impl<H: AlgebraicHasher> BFieldCodec for ChunkDictionary<H> {
 }
 
 /// Generate pseudorandom chunk dictionary from the given seed, for testing purposes.
-pub fn pseudorandom_chunk_dictionary<H: AlgebraicHasher>(seed: [u8; 32]) -> ChunkDictionary<H> {
+pub fn pseudorandom_chunk_dictionary(seed: [u8; 32]) -> ChunkDictionary {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
     let mut dictionary = HashMap::new();
@@ -119,7 +110,7 @@ pub fn pseudorandom_chunk_dictionary<H: AlgebraicHasher>(seed: [u8; 32]) -> Chun
             ),
         );
     }
-    ChunkDictionary::<H>::new(dictionary)
+    ChunkDictionary::new(dictionary)
 }
 
 #[cfg(test)]
@@ -127,6 +118,7 @@ mod chunk_dict_tests {
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
+    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::{Digest, Tip5};
     use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
@@ -138,9 +130,9 @@ mod chunk_dict_tests {
     fn hash_test() {
         type H = Tip5;
 
-        let chunkdict0 = ChunkDictionary::<H>::default();
-        let chunkdict00 = ChunkDictionary::<H>::default();
-        assert_eq!(H::hash(&chunkdict0), H::hash(&chunkdict00));
+        let chunkdict0 = ChunkDictionary::default();
+        let chunkdict00 = ChunkDictionary::default();
+        assert_eq!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict00));
 
         // Insert elements
         let num_leaves = 3;
@@ -155,7 +147,7 @@ mod chunk_dict_tests {
             }
         };
         let value1 = (mp1, chunk1);
-        let chunkdict1 = ChunkDictionary::<H>::new(HashMap::from([(key1, value1.clone())]));
+        let chunkdict1 = ChunkDictionary::new(HashMap::from([(key1, value1.clone())]));
 
         // Insert two more element and verify that the hash is deterministic which implies that the
         // elements in the preimage are sorted deterministically.
@@ -164,27 +156,27 @@ mod chunk_dict_tests {
         let mut chunk2 = Chunk::empty_chunk();
         chunk2.insert(CHUNK_SIZE / 2 + 1);
         let value2 = (mp2, chunk2);
-        let chunkdict2 = ChunkDictionary::<H>::new(HashMap::from([
+        let chunkdict2 = ChunkDictionary::new(HashMap::from([
             (key1, value1.clone()),
             (key2, value2.clone()),
         ]));
 
         let key3: u64 = 89;
-        let chunkdict3 = ChunkDictionary::<H>::new(HashMap::from([
+        let chunkdict3 = ChunkDictionary::new(HashMap::from([
             (key1, value1.clone()),
             (key2, value2.clone()),
             (key3, value2.clone()),
         ]));
 
-        assert_ne!(H::hash(&chunkdict0), H::hash(&chunkdict1));
-        assert_ne!(H::hash(&chunkdict0), H::hash(&chunkdict2));
-        assert_ne!(H::hash(&chunkdict0), H::hash(&chunkdict3));
-        assert_ne!(H::hash(&chunkdict1), H::hash(&chunkdict2));
-        assert_ne!(H::hash(&chunkdict1), H::hash(&chunkdict3));
-        assert_ne!(H::hash(&chunkdict2), H::hash(&chunkdict3));
+        assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict1));
+        assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict2));
+        assert_ne!(Hash::hash(&chunkdict0), Hash::hash(&chunkdict3));
+        assert_ne!(Hash::hash(&chunkdict1), Hash::hash(&chunkdict2));
+        assert_ne!(Hash::hash(&chunkdict1), Hash::hash(&chunkdict3));
+        assert_ne!(Hash::hash(&chunkdict2), Hash::hash(&chunkdict3));
 
         // Construct similar data structure to `two_elements` but insert key/value pairs in opposite order
-        let chunkdict3_alt = ChunkDictionary::<H>::new(HashMap::from([
+        let chunkdict3_alt = ChunkDictionary::new(HashMap::from([
             (key3, value2.clone()),
             (key1, value1.clone()),
             (key2, value2.clone()),
@@ -193,17 +185,17 @@ mod chunk_dict_tests {
         // Verify that keys are sorted deterministically when hashing chunk dictionary.
         // This test fails if the hash method does not sort the keys
         for _ in 0..10 {
-            assert_eq!(H::hash(&chunkdict3), H::hash(&chunkdict3_alt));
+            assert_eq!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_alt));
         }
 
         // Negative: Construct data structure where the keys and values are switched
-        let chunkdict3_switched = ChunkDictionary::<H>::new(HashMap::from([
+        let chunkdict3_switched = ChunkDictionary::new(HashMap::from([
             (key1, value2.clone()),
             (key2, value1),
             (key3, value2),
         ]));
 
-        assert_ne!(H::hash(&chunkdict3), H::hash(&chunkdict3_switched));
+        assert_ne!(Hash::hash(&chunkdict3), Hash::hash(&chunkdict3_switched));
     }
 
     #[test]
@@ -212,10 +204,10 @@ mod chunk_dict_tests {
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
         type H = Tip5;
-        let s_empty: ChunkDictionary<H> = ChunkDictionary::new(HashMap::new());
+        let s_empty: ChunkDictionary = ChunkDictionary::new(HashMap::new());
         let json = serde_json::to_string(&s_empty).unwrap();
         println!("json = {}", json);
-        let s_back = serde_json::from_str::<ChunkDictionary<H>>(&json).unwrap();
+        let s_back = serde_json::from_str::<ChunkDictionary>(&json).unwrap();
         assert!(s_back.dictionary.is_empty());
 
         // Build a non-empty chunk dict and verify that it still works
@@ -227,11 +219,10 @@ mod chunk_dict_tests {
             relative_indices: (0..CHUNK_SIZE).collect(),
         };
 
-        let s_non_empty =
-            ChunkDictionary::<H>::new(HashMap::from([(key, (mp.clone(), chunk.clone()))]));
+        let s_non_empty = ChunkDictionary::new(HashMap::from([(key, (mp.clone(), chunk.clone()))]));
         let json_non_empty = serde_json::to_string(&s_non_empty).unwrap();
         println!("json_non_empty = {}", json_non_empty);
-        let s_back_non_empty = serde_json::from_str::<ChunkDictionary<H>>(&json_non_empty).unwrap();
+        let s_back_non_empty = serde_json::from_str::<ChunkDictionary>(&json_non_empty).unwrap();
         assert!(!s_back_non_empty.dictionary.is_empty());
         assert!(s_back_non_empty.dictionary.contains_key(&key));
         assert_eq!((mp, chunk), s_back_non_empty.dictionary[&key]);
@@ -239,8 +230,7 @@ mod chunk_dict_tests {
 
     #[test]
     fn test_chunk_dictionary_decode() {
-        type H = Tip5;
-        let chunk_dictionary = random_chunk_dictionary::<H>();
+        let chunk_dictionary = random_chunk_dictionary();
 
         let encoded = chunk_dictionary.encode();
         let decoded = *ChunkDictionary::decode(&encoded).unwrap();

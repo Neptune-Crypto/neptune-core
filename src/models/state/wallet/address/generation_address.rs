@@ -196,8 +196,7 @@ impl SpendingKey {
             // Note: the commitment is computed in the same way as in the mutator set.
             let receiver_preimage = self.privacy_preimage;
             let receiver_digest = receiver_preimage.hash::<Hash>();
-            let addition_record =
-                commit::<Hash>(Hash::hash(&utxo), sender_randomness, receiver_digest);
+            let addition_record = commit(Hash::hash(&utxo), sender_randomness, receiver_digest);
 
             // push to list
             received_utxos_with_randomnesses.push((
@@ -592,7 +591,7 @@ mod test_generation_addresses {
             announced_txs[0].clone();
         assert_eq!(utxo, read_utxo);
 
-        let expected_addition_record = commit::<Hash>(
+        let expected_addition_record = commit(
             Hash::hash(&utxo),
             sender_randomness,
             receiving_address.privacy_digest,

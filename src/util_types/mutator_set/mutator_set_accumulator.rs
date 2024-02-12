@@ -1,3 +1,4 @@
+use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
@@ -16,15 +17,15 @@ use super::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
-pub struct MutatorSetAccumulator<H: AlgebraicHasher + BFieldCodec> {
-    pub kernel: MutatorSetKernel<H, MmrAccumulator<H>>,
+pub struct MutatorSetAccumulator {
+    pub kernel: MutatorSetKernel<MmrAccumulator<Hash>>,
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> MutatorSetAccumulator<H> {
+impl MutatorSetAccumulator {
     pub fn new() -> Self {
-        let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
-            aocl: MmrAccumulator::<H>::new(vec![]),
-            swbf_inactive: MmrAccumulator::<H>::new(vec![]),
+        let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
+            aocl: MmrAccumulator::new(vec![]),
+            swbf_inactive: MmrAccumulator::new(vec![]),
             swbf_active: ActiveWindow::new(),
         };
 
@@ -34,11 +35,11 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSetAccumulator<H> {
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> Default for MutatorSetAccumulator<H> {
+impl Default for MutatorSetAccumulator {
     fn default() -> Self {
-        let set_commitment = MutatorSetKernel::<H, MmrAccumulator<H>> {
-            aocl: MmrAccumulator::<H>::new(vec![]),
-            swbf_inactive: MmrAccumulator::<H>::new(vec![]),
+        let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
+            aocl: MmrAccumulator::new(vec![]),
+            swbf_inactive: MmrAccumulator::new(vec![]),
             swbf_active: ActiveWindow::new(),
         };
 
@@ -48,22 +49,22 @@ impl<H: AlgebraicHasher + BFieldCodec> Default for MutatorSetAccumulator<H> {
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H> {
+impl MutatorSet for MutatorSetAccumulator {
     fn prove(
         &mut self,
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
-    ) -> MsMembershipProof<H> {
+    ) -> MsMembershipProof {
         self.kernel
             .prove(item, sender_randomness, receiver_preimage)
     }
 
-    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
         self.kernel.verify(item, membership_proof)
     }
 
-    fn drop(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
+    fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
         self.kernel.drop(item, membership_proof)
     }
 
@@ -71,26 +72,26 @@ impl<H: AlgebraicHasher + BFieldCodec> MutatorSet<H> for MutatorSetAccumulator<H
         self.kernel.add_helper(addition_record);
     }
 
-    fn remove(&mut self, removal_record: &RemovalRecord<H>) {
+    fn remove(&mut self, removal_record: &RemovalRecord) {
         self.kernel.remove_helper(removal_record);
     }
 
     fn hash(&self) -> Digest {
         let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
         let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
-        let active_swbf_bagged = H::hash(&self.kernel.swbf_active);
+        let active_swbf_bagged = Hash::hash(&self.kernel.swbf_active);
         let default = Digest::default();
 
-        H::hash_pair(
-            H::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged),
-            H::hash_pair(active_swbf_bagged, default),
+        Hash::hash_pair(
+            Hash::hash_pair(aocl_mmr_bagged, inactive_swbf_bagged),
+            Hash::hash_pair(active_swbf_bagged, default),
         )
     }
 
     fn batch_remove(
         &mut self,
-        removal_records: Vec<RemovalRecord<H>>,
-        preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
+        removal_records: Vec<RemovalRecord>,
+        preserved_membership_proofs: &mut [&mut MsMembershipProof],
     ) {
         self.kernel
             .batch_remove(removal_records, preserved_membership_proofs);
@@ -105,7 +106,6 @@ mod ms_accumulator_tests {
     };
     use itertools::{izip, Itertools};
     use rand::{thread_rng, Rng};
-    use twenty_first::shared_math::tip5::Tip5;
 
     use crate::util_types::mutator_set::mutator_set_trait::commit;
 
@@ -114,9 +114,8 @@ mod ms_accumulator_tests {
     #[test]
     fn mutator_set_batch_remove_accumulator_test() {
         // Test the batch-remove function for mutator set accumulator
-        type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let mut membership_proofs: Vec<MsMembershipProof> = vec![];
         let mut items: Vec<Digest> = vec![];
 
         // Add N elements to the MS
@@ -124,8 +123,7 @@ mod ms_accumulator_tests {
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record =
-                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             MsMembershipProof::batch_update_from_addition(
@@ -145,7 +143,7 @@ mod ms_accumulator_tests {
         // Now build removal records for about half of the elements
         let mut rng = rand::thread_rng();
         let mut skipped_removes: Vec<bool> = vec![];
-        let mut removal_records: Vec<RemovalRecord<H>> = vec![];
+        let mut removal_records: Vec<RemovalRecord> = vec![];
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
             let skipped = rng.gen_range(0.0..1.0) < 0.5;
             skipped_removes.push(skipped);
@@ -185,12 +183,11 @@ mod ms_accumulator_tests {
         // This function mixes both archival and accumulator testing.
         // It *may* be considered bad style to do it this way, but there is a
         // lot of code duplication that is avoided by doing that.
-        type H = Tip5;
 
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-        let mut rms_after = empty_rusty_mutator_set::<H>();
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+        let mut rms_after = empty_rusty_mutator_set();
         let archival_after_remove = rms_after.ams_mut();
-        let mut rms_before = empty_rusty_mutator_set::<H>();
+        let mut rms_before = empty_rusty_mutator_set();
         let archival_before_remove = rms_before.ams_mut();
         let number_of_interactions = 100;
         let mut rng = rand::thread_rng();
@@ -200,8 +197,8 @@ mod ms_accumulator_tests {
         // 2. Randomly insert and remove `number_of_interactions` times
         // This should test both inserting/removing in an empty MS and in a non-empty MS
         for start_fill in [false, true] {
-            let mut membership_proofs_batch: Vec<MsMembershipProof<H>> = vec![];
-            let mut membership_proofs_sequential: Vec<MsMembershipProof<H>> = vec![];
+            let mut membership_proofs_batch: Vec<MsMembershipProof> = vec![];
+            let mut membership_proofs_sequential: Vec<MsMembershipProof> = vec![];
             let mut items: Vec<Digest> = vec![];
             let mut rands: Vec<(Digest, Digest)> = vec![];
             let mut last_ms_commitment: Option<Digest> = None;
@@ -227,7 +224,7 @@ mod ms_accumulator_tests {
                     let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                     let addition_record: AdditionRecord =
-                        commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+                        commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
                     let membership_proof_acc =
                         accumulator.prove(item, sender_randomness, receiver_preimage);
 
@@ -299,8 +296,7 @@ mod ms_accumulator_tests {
                     let _removal_rand = rands.remove(item_index);
 
                     // generate removal record
-                    let removal_record: RemovalRecord<H> =
-                        accumulator.drop(removal_item, &removal_mp);
+                    let removal_record: RemovalRecord = accumulator.drop(removal_item, &removal_mp);
                     assert!(removal_record.validate(&accumulator.kernel));
 
                     // update membership proofs
@@ -411,12 +407,10 @@ mod ms_accumulator_tests {
 
     #[test]
     fn test_mutator_set_accumulator_decode() {
-        type H = Tip5;
         for _ in 0..100 {
-            let msa = random_mutator_set_accumulator::<H>();
+            let msa = random_mutator_set_accumulator();
             let encoded = msa.encode();
-            let decoded: MutatorSetAccumulator<H> =
-                *MutatorSetAccumulator::decode(&encoded).unwrap();
+            let decoded: MutatorSetAccumulator = *MutatorSetAccumulator::decode(&encoded).unwrap();
             assert_eq!(msa, decoded);
         }
     }
@@ -432,7 +426,7 @@ mod ms_accumulator_tests {
             WINDOW_SIZE, BATCH_SIZE, CHUNK_SIZE, NUM_TRIALS
         );
         let mut msa = MutatorSetAccumulator::new();
-        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<Tip5>)> = vec![];
+        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
         let target_set_size = 100;
         let num_iterations = 10000;
 
@@ -463,7 +457,7 @@ mod ms_accumulator_tests {
                 let item = rng.gen::<Digest>();
                 let sender_randomness = rng.gen::<Digest>();
                 let receiver_preimage = rng.gen::<Digest>();
-                let addition_record = commit::<Tip5>(item, sender_randomness, receiver_preimage);
+                let addition_record = commit(item, sender_randomness, receiver_preimage);
                 for (it, mp) in items_and_membership_proofs.iter_mut() {
                     mp.update_from_addition(*it, &msa, &addition_record)
                         .unwrap();

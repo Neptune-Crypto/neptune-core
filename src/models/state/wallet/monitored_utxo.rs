@@ -5,7 +5,6 @@ use std::{collections::VecDeque, time::Duration};
 use crate::{
     models::{blockchain::block::block_height::BlockHeight, state::archival_state::ArchivalState},
     util_types::mutator_set::ms_membership_proof::MsMembershipProof,
-    Hash,
 };
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::tip5::Digest;
@@ -17,7 +16,7 @@ pub struct MonitoredUtxo {
     pub utxo: Utxo,
 
     // Mapping from block digest to membership proof
-    pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof<Hash>)>,
+    pub blockhash_to_membership_proof: VecDeque<(Digest, MsMembershipProof)>,
 
     pub number_of_mps_per_utxo: usize,
 
@@ -52,7 +51,7 @@ impl MonitoredUtxo {
     pub fn add_membership_proof_for_tip(
         &mut self,
         block_digest: Digest,
-        updated_membership_proof: MsMembershipProof<Hash>,
+        updated_membership_proof: MsMembershipProof,
     ) {
         while self.blockhash_to_membership_proof.len() >= self.number_of_mps_per_utxo {
             self.blockhash_to_membership_proof.pop_back();
@@ -65,14 +64,14 @@ impl MonitoredUtxo {
     pub fn get_membership_proof_for_block(
         &self,
         block_digest: Digest,
-    ) -> Option<MsMembershipProof<Hash>> {
+    ) -> Option<MsMembershipProof> {
         self.blockhash_to_membership_proof
             .iter()
             .find(|x| x.0 == block_digest)
             .map(|x| x.1.clone())
     }
 
-    pub fn get_latest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof<Hash>)> {
+    pub fn get_latest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof)> {
         self.blockhash_to_membership_proof.iter().next().cloned()
     }
 
