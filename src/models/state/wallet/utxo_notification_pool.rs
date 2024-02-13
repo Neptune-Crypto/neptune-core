@@ -49,7 +49,7 @@ impl ExpectedUtxo {
         received_from: UtxoNotifier,
     ) -> Self {
         Self {
-            addition_record: commit::<Hash>(
+            addition_record: commit(
                 Hash::hash(&utxo),
                 sender_randomness,
                 receiver_preimage.hash::<Hash>(),
@@ -228,7 +228,7 @@ impl UtxoNotificationPool {
         // TODO: Add check that we can actually unlock the UTXO's lock script.
         // Also check that receiver preimage belongs to us etc.
         // Or should this be the caller's responsibility?
-        let addition_record = commit::<Hash>(
+        let addition_record = commit(
             Hash::hash(&utxo),
             sender_randomness,
             receiver_preimage.hash::<Hash>(),
@@ -377,7 +377,7 @@ mod wallet_state_tests {
         let sender_randomness: Digest = random();
         let receiver_preimage: Digest = random();
         let peer_instance_id: InstanceId = random();
-        let expected_addition_record = commit::<Hash>(
+        let expected_addition_record = commit(
             Hash::hash(&mock_utxo),
             sender_randomness,
             receiver_preimage.hash::<Hash>(),
@@ -405,7 +405,7 @@ mod wallet_state_tests {
         assert_eq!(1, ret_with_tx_containing_utxo.len());
 
         // Call scan but with another input. Verify that it returns the empty list
-        let another_addition_record = commit::<Hash>(
+        let another_addition_record = commit(
             Hash::hash(&mock_utxo),
             random(),
             receiver_preimage.hash::<Hash>(),
@@ -501,7 +501,7 @@ mod wallet_state_tests {
         // notification can be stored.
         notification_pool
             .mark_as_received(
-                commit::<Hash>(
+                commit(
                     Hash::hash(&mock_utxo),
                     first_sender_randomness,
                     receiver_preimage.hash::<Hash>(),

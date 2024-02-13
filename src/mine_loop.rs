@@ -50,7 +50,7 @@ fn make_block_template(
 ) -> (BlockHeader, BlockBody) {
     let additions = transaction.kernel.outputs.clone();
     let removals = transaction.kernel.inputs.clone();
-    let mut next_mutator_set_accumulator: MutatorSetAccumulator<Hash> =
+    let mut next_mutator_set_accumulator: MutatorSetAccumulator =
         previous_block.kernel.body.mutator_set_accumulator.clone();
 
     // Apply the mutator set update to the mutator set accumulator
@@ -176,7 +176,7 @@ fn make_coinbase_transaction(
     receiver_digest: Digest,
     wallet_secret: &WalletSecret,
     block_height: BlockHeight,
-    mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+    mutator_set_accumulator: MutatorSetAccumulator,
 ) -> (Transaction, Digest) {
     let sender_randomness: Digest =
         wallet_secret.generate_sender_randomness(block_height, receiver_digest);
@@ -190,7 +190,7 @@ fn make_coinbase_transaction(
                 .expect("Make coinbase transaction: failed to parse coin state as amount.")
         })
         .sum();
-    let coinbase_addition_record = commit::<Hash>(
+    let coinbase_addition_record = commit(
         Hash::hash(coinbase_utxo),
         sender_randomness,
         receiver_digest,

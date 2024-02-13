@@ -383,14 +383,14 @@ impl GlobalState {
             + fee;
 
         // todo: accomodate a future change whereby this function also returns the matching spending keys
-        let spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof<Hash>)> = self
+        let spendable_utxos_and_mps: Vec<(Utxo, LockScript, MsMembershipProof)> = self
             .wallet_state
             .allocate_sufficient_input_funds_from_lock(total_spend, bc_tip.hash())
             .await?;
 
         // Create all removal records. These must be relative to the block tip.
         let msa_tip = &bc_tip.kernel.body.mutator_set_accumulator;
-        let mut inputs: Vec<RemovalRecord<Hash>> = vec![];
+        let mut inputs: Vec<RemovalRecord> = vec![];
         let mut input_amount: NeptuneCoins = NeptuneCoins::zero();
         for (spendable_utxo, _lock_script, mp) in spendable_utxos_and_mps.iter() {
             let removal_record = msa_tip.kernel.drop(Hash::hash(spendable_utxo), mp);
@@ -402,7 +402,7 @@ impl GlobalState {
         let mut transaction_outputs: Vec<AdditionRecord> = vec![];
         let mut output_utxos: Vec<Utxo> = vec![];
         for rd in receiver_data.iter() {
-            let addition_record = commit::<Hash>(
+            let addition_record = commit(
                 Hash::hash(&rd.utxo),
                 rd.sender_randomness,
                 rd.receiver_privacy_digest,
@@ -437,7 +437,7 @@ impl GlobalState {
                 .wallet_state
                 .wallet_secret
                 .generate_sender_randomness(bc_tip.kernel.header.height, receiver_digest);
-            let change_addition_record = commit::<Hash>(
+            let change_addition_record = commit(
                 Hash::hash(&change_utxo),
                 change_sender_randomness,
                 receiver_digest,
@@ -772,7 +772,7 @@ impl GlobalState {
                     .await?;
                 let previous_mutator_set = match maybe_revert_block_predecessor {
                     Some(block) => block.kernel.body.mutator_set_accumulator,
-                    None => MutatorSetAccumulator::<Hash>::default(),
+                    None => MutatorSetAccumulator::default(),
                 };
 
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
@@ -824,7 +824,7 @@ impl GlobalState {
                     .await?;
                 let mut block_msa = match maybe_apply_block_predecessor {
                     Some(block) => block.kernel.body.mutator_set_accumulator,
-                    None => MutatorSetAccumulator::<Hash>::default(),
+                    None => MutatorSetAccumulator::default(),
                 };
                 let addition_records = apply_block.kernel.body.transaction.kernel.outputs;
                 let removal_records = apply_block.kernel.body.transaction.kernel.inputs;

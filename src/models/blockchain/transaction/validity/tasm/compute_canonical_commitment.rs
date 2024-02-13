@@ -45,7 +45,7 @@ impl BasicSnippet for ComputeCanonicalCommitment {
     }
 
     fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
-        type MsMpH = MsMembershipProof<Hash>;
+        type MsMpH = MsMembershipProof;
         let mp_to_sr = tasm_lib::field!(MsMpH::sender_randomness);
         let mp_to_rp = tasm_lib::field!(MsMpH::receiver_preimage);
         let commit = library.import(Box::new(Commit));
@@ -135,7 +135,7 @@ impl Function for ComputeCanonicalCommitment {
         }
 
         // decode object
-        let membership_proof = *MsMembershipProof::<Hash>::decode(&encoding).unwrap();
+        let membership_proof = *MsMembershipProof::decode(&encoding).unwrap();
 
         // compute commitment
         println!("receiver_preimage: {}", membership_proof.receiver_preimage);
@@ -146,7 +146,7 @@ impl Function for ComputeCanonicalCommitment {
             membership_proof.sender_randomness
         );
         println!("\nitem:\n{}", item);
-        let c = commit::<Hash>(item, membership_proof.sender_randomness, receiver_digest);
+        let c = commit(item, membership_proof.sender_randomness, receiver_digest);
 
         // push onto stack
         stack.push(mp_pointer);
@@ -165,7 +165,7 @@ impl Function for ComputeCanonicalCommitment {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         // generate random ms membership proof object
-        let membership_proof = pseudorandom_mutator_set_membership_proof::<Hash>(rng.gen());
+        let membership_proof = pseudorandom_mutator_set_membership_proof(rng.gen());
 
         // populate memory, with the size of the encoding prepended
         let address = BFieldElement::new(rng.next_u64() % (1 << 20));

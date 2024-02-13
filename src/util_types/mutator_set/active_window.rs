@@ -3,40 +3,33 @@ use crate::prelude::twenty_first;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
 use std::ops::Range;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 
 #[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
-pub struct ActiveWindow<H: AlgebraicHasher + BFieldCodec> {
+pub struct ActiveWindow {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     pub sbf: Vec<u32>,
-    #[bfield_codec(ignore)]
-    _hasher: PhantomData<H>,
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> PartialEq for ActiveWindow<H> {
+impl PartialEq for ActiveWindow {
     fn eq(&self, other: &Self) -> bool {
         self.sbf == other.sbf
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> Default for ActiveWindow<H> {
+impl Default for ActiveWindow {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
+impl ActiveWindow {
     pub fn new() -> Self {
-        Self {
-            sbf: Vec::new(),
-            _hasher: PhantomData,
-        }
+        Self { sbf: Vec::new() }
     }
 
     /// Grab a slice from the sparse Bloom filter by supplying an
@@ -174,7 +167,6 @@ impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
     pub fn from_vec_u32(vector: &[u32]) -> Self {
         Self {
             sbf: vector.to_vec(),
-            _hasher: PhantomData,
         }
     }
 }
@@ -182,23 +174,22 @@ impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
 #[cfg(test)]
 mod active_window_tests {
 
+    use crate::models::blockchain::shared::Hash;
+
     use super::*;
     use rand::{thread_rng, RngCore};
-    use twenty_first::shared_math::tip5::Tip5;
+    use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-    impl<H: AlgebraicHasher + BFieldCodec> ActiveWindow<H> {
+    impl ActiveWindow {
         fn new_from(sbf: Vec<u32>) -> Self {
-            Self {
-                sbf,
-                _hasher: PhantomData,
-            }
+            Self { sbf }
         }
     }
 
     #[test]
     fn aw_is_reversible_bloom_filter() {
         let sbf = Vec::<u32>::new();
-        let mut aw = ActiveWindow::<Tip5>::new_from(sbf);
+        let mut aw = ActiveWindow::new_from(sbf);
 
         // Insert an index twice, remove it once and the verify that
         // it is still there
@@ -217,7 +208,7 @@ mod active_window_tests {
     #[test]
     fn insert_remove_probe_indices_pbt() {
         let sbf = Vec::<u32>::new();
-        let mut aw = ActiveWindow::<Tip5>::new_from(sbf);
+        let mut aw = ActiveWindow::new_from(sbf);
         for i in 0..100 {
             assert!(!aw.contains(i as u32));
         }
@@ -242,7 +233,7 @@ mod active_window_tests {
 
     #[test]
     fn test_slide_window() {
-        let mut aw = ActiveWindow::<Tip5>::new();
+        let mut aw = ActiveWindow::new();
 
         let num_insertions = 100;
         let mut rng = thread_rng();
@@ -258,9 +249,7 @@ mod active_window_tests {
 
     #[test]
     fn test_slide_window_back() {
-        type Hasher = Tip5;
-
-        let mut active_window = ActiveWindow::<Hasher>::new();
+        let mut active_window = ActiveWindow::new();
         let num_insertions = 1000;
         let mut rng = thread_rng();
         for _ in 0..num_insertions {
@@ -278,9 +267,7 @@ mod active_window_tests {
 
     #[test]
     fn test_slide_window_and_back() {
-        type Hasher = Tip5;
-
-        let mut active_window = ActiveWindow::<Hasher>::new();
+        let mut active_window = ActiveWindow::new();
         let num_insertions = 1000;
         let mut rng = thread_rng();
         for _ in 0..num_insertions {
@@ -301,14 +288,14 @@ mod active_window_tests {
         );
     }
 
-    fn hash_unequal_prop<H: AlgebraicHasher + BFieldCodec>() {
-        H::hash(&ActiveWindow::<H>::new());
+    fn hash_unequal_prop() {
+        Hash::hash(&ActiveWindow::new());
 
-        let mut aw_1 = ActiveWindow::<H>::new();
+        let mut aw_1 = ActiveWindow::new();
         aw_1.insert(1u32);
-        let aw_2 = ActiveWindow::<H>::new();
+        let aw_2 = ActiveWindow::new();
 
-        assert_ne!(H::hash(&aw_1), H::hash(&aw_2));
+        assert_ne!(Hash::hash(&aw_1), Hash::hash(&aw_2));
     }
 
     #[test]
@@ -316,25 +303,22 @@ mod active_window_tests {
         // This is just a test to ensure that the hashing of the active part of the SWBF
         // works in the runtime, for relevant hash functions. It also tests that different
         // indices being inserted results in different digests.
-        hash_unequal_prop::<Tip5>();
+        hash_unequal_prop();
     }
 
     #[test]
     fn test_active_window_serialization() {
-        type H = Tip5;
-
-        let aw0 = ActiveWindow::<H>::new();
+        let aw0 = ActiveWindow::new();
         let json_aw0 = serde_json::to_string(&aw0).unwrap();
-        let aw0_back = serde_json::from_str::<ActiveWindow<H>>(&json_aw0).unwrap();
+        let aw0_back = serde_json::from_str::<ActiveWindow>(&json_aw0).unwrap();
         assert_eq!(aw0.sbf, aw0_back.sbf);
     }
 
     #[test]
     fn test_active_window_decode() {
-        type H = Tip5;
         let mut rng = thread_rng();
 
-        let mut aw0 = ActiveWindow::<H>::new();
+        let mut aw0 = ActiveWindow::new();
         for _ in 0..37 {
             aw0.insert(rng.next_u32() % WINDOW_SIZE);
         }

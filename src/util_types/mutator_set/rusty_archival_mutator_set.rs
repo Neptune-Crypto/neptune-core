@@ -1,11 +1,9 @@
 use crate::prelude::twenty_first;
+use crate::Hash;
 
 use twenty_first::storage::level_db::DB;
 use twenty_first::storage::storage_schema::{traits::*, DbtSingleton, DbtVec, SimpleRustyStorage};
-use twenty_first::{
-    shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{algebraic_hasher::AlgebraicHasher, mmr::archival_mmr::ArchivalMmr},
-};
+use twenty_first::{shared_math::tip5::Digest, util_types::mmr::archival_mmr::ArchivalMmr};
 
 use super::{
     active_window::ActiveWindow, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
@@ -14,17 +12,14 @@ use super::{
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
-pub struct RustyArchivalMutatorSet<H>
-where
-    H: AlgebraicHasher + BFieldCodec,
-{
-    ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
+pub struct RustyArchivalMutatorSet {
+    ams: ArchivalMutatorSet<AmsMmrStorage, AmsChunkStorage>,
     storage: SimpleRustyStorage,
     active_window_storage: DbtSingleton<Vec<u32>>,
     sync_label: DbtSingleton<Digest>,
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
+impl RustyArchivalMutatorSet {
     pub fn connect(db: DB) -> Self {
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
@@ -39,13 +34,13 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
         let sync_label = storage.schema.new_singleton::<Digest>("sync_label");
         storage.restore_or_new();
 
-        let kernel = MutatorSetKernel::<H, ArchivalMmr<H, AmsMmrStorage>> {
-            aocl: ArchivalMmr::<H, AmsMmrStorage>::new(aocl),
-            swbf_inactive: ArchivalMmr::<H, AmsMmrStorage>::new(swbfi),
-            swbf_active: ActiveWindow::<H>::new(),
+        let kernel = MutatorSetKernel::<ArchivalMmr<Hash, AmsMmrStorage>> {
+            aocl: ArchivalMmr::<Hash, AmsMmrStorage>::new(aocl),
+            swbf_inactive: ArchivalMmr::<Hash, AmsMmrStorage>::new(swbfi),
+            swbf_active: ActiveWindow::new(),
         };
 
-        let ams = ArchivalMutatorSet::<H, AmsMmrStorage, AmsChunkStorage> { chunks, kernel };
+        let ams = ArchivalMutatorSet::<AmsMmrStorage, AmsChunkStorage> { chunks, kernel };
 
         Self {
             ams,
@@ -56,12 +51,12 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     }
 
     #[inline]
-    pub fn ams(&self) -> &ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage> {
+    pub fn ams(&self) -> &ArchivalMutatorSet<AmsMmrStorage, AmsChunkStorage> {
         &self.ams
     }
 
     #[inline]
-    pub fn ams_mut(&mut self) -> &mut ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage> {
+    pub fn ams_mut(&mut self) -> &mut ArchivalMutatorSet<AmsMmrStorage, AmsChunkStorage> {
         &mut self.ams
     }
 
@@ -76,7 +71,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet<H> {
+impl StorageWriter for RustyArchivalMutatorSet {
     fn persist(&mut self) {
         self.active_window_storage
             .set(self.ams().kernel.swbf_active.sbf.clone());
@@ -122,8 +117,7 @@ mod tests {
 
         let db = DB::open_new_test_database(false, None, None, None).unwrap();
         let db_path = db.path().clone();
-        let mut rusty_mutator_set: RustyArchivalMutatorSet<H> =
-            RustyArchivalMutatorSet::connect(db);
+        let mut rusty_mutator_set: RustyArchivalMutatorSet = RustyArchivalMutatorSet::connect(db);
         println!("Connected to database");
         rusty_mutator_set.restore_or_new();
         println!("Restored or new odne.");
@@ -138,8 +132,7 @@ mod tests {
 
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record =
-                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<H>());
             let mp =
                 rusty_mutator_set
                     .ams()
@@ -213,7 +206,7 @@ mod tests {
         // new database
         let new_db = DB::open_test_database(&db_path, true, None, None, None)
             .expect("should open existing database");
-        let mut new_rusty_mutator_set: RustyArchivalMutatorSet<H> =
+        let mut new_rusty_mutator_set: RustyArchivalMutatorSet =
             RustyArchivalMutatorSet::connect(new_db);
         new_rusty_mutator_set.restore_or_new();
 

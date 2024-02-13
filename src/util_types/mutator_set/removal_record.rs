@@ -1,3 +1,4 @@
+use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
@@ -9,7 +10,6 @@ use serde::ser::SerializeTuple;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::marker::PhantomData;
 use std::ops::IndexMut;
 use tasm_lib::structure::tasm_object::TasmObject;
@@ -127,26 +127,29 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
-pub struct RemovalRecord<H: AlgebraicHasher> {
+pub struct RemovalRecord {
     pub absolute_indices: AbsoluteIndexSet,
-    pub target_chunks: ChunkDictionary<H>,
+    pub target_chunks: ChunkDictionary,
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
-    pub fn batch_update_from_addition<MMR: Mmr<H>>(
+impl RemovalRecord {
+    /// Update a batch of removal records that are synced to a given mutator set, given
+    /// that that mutator set will be updated with an addition. (The addition record
+    /// does not matter; all necessary information is in the mutator set.)
+    pub fn batch_update_from_addition<MMR: Mmr<Hash>>(
         removal_records: &mut [&mut Self],
-        mutator_set: &mut MutatorSetKernel<H, MMR>,
-    ) -> Result<(), Box<dyn Error>> {
+        mutator_set: &mut MutatorSetKernel<MMR>,
+    ) {
         let new_item_index = mutator_set.aocl.count_leaves();
 
         // if window does not slide, do nothing
-        if !MutatorSetKernel::<H, MMR>::window_slides(new_item_index) {
-            return Ok(());
+        if !MutatorSetKernel::<MMR>::window_slides(new_item_index) {
+            return;
         }
 
         // window does slide
         let new_chunk = mutator_set.swbf_active.slid_chunk();
-        let new_chunk_digest: Digest = H::hash(&new_chunk);
+        let new_chunk_digest: Digest = Hash::hash(&new_chunk);
 
         // Insert the new chunk digest into the accumulator-version of the
         // SWBF MMR to get its authentication path. It's important to convert the MMR
@@ -154,8 +157,8 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<H> = mutator_set.swbf_inactive.to_accumulator();
-        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<H> =
+        let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator();
+        let new_swbf_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
             mmra.append(new_chunk_digest);
 
         // Collect all indices for all removal records that are being updated
@@ -219,7 +222,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
         // So relegating that bookkeeping to this function instead would not be more
         // efficient.
         let mut mmr_membership_proofs_for_append: Vec<
-            &mut mmr::mmr_membership_proof::MmrMembershipProof<H>,
+            &mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>,
         > = vec![];
         for (i, rr) in removal_records.iter_mut().enumerate() {
             if rrs_for_batch_append.contains(&i) {
@@ -230,23 +233,21 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
         }
 
         // Perform the update of all the MMR membership proofs contained in the removal records
-        mmr::mmr_membership_proof::MmrMembershipProof::<H>::batch_update_from_append(
+        mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
             &mut mmr_membership_proofs_for_append,
             mutator_set.swbf_inactive.count_leaves(),
             new_chunk_digest,
             &mutator_set.swbf_inactive.get_peaks(),
         );
-
-        Ok(())
     }
 
     pub fn batch_update_from_remove(
         removal_records: &mut [&mut Self],
-        applied_removal_record: &RemovalRecord<H>,
-    ) -> Result<(), Box<dyn Error>> {
+        applied_removal_record: &RemovalRecord,
+    ) {
         // Set all chunk values to the new values and calculate the mutation argument
         // for the batch updating of the MMR membership proofs.
-        let mut chunk_dictionaries: Vec<&mut ChunkDictionary<H>> = removal_records
+        let mut chunk_dictionaries: Vec<&mut ChunkDictionary> = removal_records
             .iter_mut()
             .map(|mp| &mut mp.target_chunks)
             .collect();
@@ -257,7 +258,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
             );
 
         // Collect all the MMR membership proofs from the chunk dictionaries.
-        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<H>> = vec![];
+        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
         for chunk_dict in chunk_dictionaries.iter_mut() {
             for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
                 own_mmr_mps.push(mp);
@@ -269,21 +270,19 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
             &mut own_mmr_mps,
             mutation_argument,
         );
-
-        Ok(())
     }
 
     /// Validates that a removal record is synchronized against the inactive part of the SWBF
-    pub fn validate<M>(&self, mutator_set: &MutatorSetKernel<H, M>) -> bool
+    pub fn validate<M>(&self, mutator_set: &MutatorSetKernel<M>) -> bool
     where
-        M: Mmr<H>,
+        M: Mmr<Hash>,
     {
         let peaks = mutator_set.swbf_inactive.get_peaks();
         self.target_chunks
             .dictionary
             .iter()
             .all(|(_i, (proof, chunk))| {
-                let leaf_digest = H::hash(chunk);
+                let leaf_digest = Hash::hash(chunk);
                 let leaf_count = mutator_set.swbf_inactive.count_leaves();
                 let (verified, _final_state) = proof.verify(&peaks, leaf_digest, leaf_count);
 
@@ -298,7 +297,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RemovalRecord<H> {
 }
 
 /// Generate a pseudorandom removal record from the given seed, for testing purposes.
-pub fn pseudorandom_removal_record<H: AlgebraicHasher>(seed: [u8; 32]) -> RemovalRecord<H> {
+pub fn pseudorandom_removal_record(seed: [u8; 32]) -> RemovalRecord {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let absolute_indices = AbsoluteIndexSet::new(
         &(0..NUM_TRIALS as usize)
@@ -320,7 +319,6 @@ mod removal_record_tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use rand::{thread_rng, Rng, RngCore};
-    use twenty_first::shared_math::tip5::Tip5;
 
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
     use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -331,13 +329,11 @@ mod removal_record_tests {
 
     use super::*;
 
-    fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof<Tip5>, RemovalRecord<Tip5>) {
-        type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+    fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let mp: MsMembershipProof<H> =
-            accumulator.prove(item, sender_randomness, receiver_preimage);
-        let removal_record: RemovalRecord<H> = accumulator.drop(item, &mp);
+        let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage);
+        let removal_record: RemovalRecord = accumulator.drop(item, &mp);
         (item, mp, removal_record)
     }
 
@@ -371,22 +367,20 @@ mod removal_record_tests {
 
     #[test]
     fn hash_test() {
-        type H = Tip5;
-
         let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
 
-        let mut removal_record_alt: RemovalRecord<H> = removal_record.clone();
+        let mut removal_record_alt: RemovalRecord = removal_record.clone();
         assert_eq!(
-            H::hash(&removal_record),
-            H::hash(&removal_record_alt),
+            Hash::hash(&removal_record),
+            Hash::hash(&removal_record_alt),
             "Same removal record must hash to same value"
         );
 
         // Verify that changing the absolute indices, changes the hash value
         removal_record_alt.absolute_indices.to_array_mut()[NUM_TRIALS as usize / 4] += 1;
         assert_ne!(
-            H::hash(&removal_record),
-            H::hash(&removal_record_alt),
+            Hash::hash(&removal_record),
+            Hash::hash(&removal_record_alt),
             "Changing an index must produce a new hash"
         );
     }
@@ -418,12 +412,11 @@ mod removal_record_tests {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
-        type H = Tip5;
 
         let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
-        let s_back = serde_json::from_str::<RemovalRecord<H>>(&json).unwrap();
+        let s_back = serde_json::from_str::<RemovalRecord>(&json).unwrap();
         assert_eq!(s_back.absolute_indices, removal_record.absolute_indices);
         assert_eq!(s_back.target_chunks, removal_record.target_chunks);
     }
@@ -431,11 +424,10 @@ mod removal_record_tests {
     #[test]
     fn simple_remove_test() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
-            commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
         let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
         assert!(
@@ -458,33 +450,27 @@ mod removal_record_tests {
     #[test]
     fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = Tip5;
 
         let test_iterations = 10;
         for _ in 0..test_iterations {
-            let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
-            let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
+            let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+            let mut removal_records: Vec<(usize, RemovalRecord)> = vec![];
             let mut items = vec![];
             let mut mps = vec![];
             for i in 0..2 * BATCH_SIZE + 4 {
                 let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
                 let addition_record: AdditionRecord =
-                    commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+                    commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
                 let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
                 // Update all removal records from addition, then add the element
-                let update_res_rr = RemovalRecord::batch_update_from_addition(
+                RemovalRecord::batch_update_from_addition(
                     &mut removal_records
                         .iter_mut()
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
                     &mut accumulator.kernel,
-                );
-                assert!(
-                    update_res_rr.is_ok(),
-                    "batch update must return OK, i = {}",
-                    i
                 );
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
@@ -548,10 +534,10 @@ mod removal_record_tests {
     #[test]
     fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
-        type H = Tip5;
-        let mut accumulator: MutatorSetAccumulator<H> = MutatorSetAccumulator::default();
 
-        let mut removal_records: Vec<(usize, RemovalRecord<H>)> = vec![];
+        let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
+
+        let mut removal_records: Vec<(usize, RemovalRecord)> = vec![];
         let mut original_first_removal_record = None;
         let mut items = vec![];
         let mut mps = vec![];
@@ -559,21 +545,16 @@ mod removal_record_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             let mp = accumulator.prove(item, sender_randomness, receiver_preimage);
 
             // Update all removal records from addition, then add the element
-            let update_res_rr = RemovalRecord::batch_update_from_addition(
+            RemovalRecord::batch_update_from_addition(
                 &mut removal_records
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
                 &mut accumulator.kernel,
-            );
-            assert!(
-                update_res_rr.is_ok(),
-                "batch update must return OK, i = {}",
-                i
             );
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
@@ -615,17 +596,12 @@ mod removal_record_tests {
         for i in 0..12 * BATCH_SIZE + 4 {
             let remove_idx = rand::thread_rng().gen_range(0..removal_records.len());
             let random_removal_record = removal_records.remove(remove_idx).1;
-            let update_res_rr = RemovalRecord::batch_update_from_remove(
+            RemovalRecord::batch_update_from_remove(
                 &mut removal_records
                     .iter_mut()
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
                 &random_removal_record,
-            );
-            assert!(
-                update_res_rr.is_ok(),
-                "batch update must return OK, i = {}",
-                i
             );
 
             accumulator.remove(&random_removal_record);
@@ -670,9 +646,8 @@ mod removal_record_tests {
 
     #[test]
     fn test_removal_record_decode() {
-        type H = Tip5;
         for _ in 0..10 {
-            let removal_record = random_removal_record::<H>();
+            let removal_record = random_removal_record();
             let encoded = removal_record.encode();
             let decoded = *RemovalRecord::decode(&encoded).unwrap();
             assert_eq!(removal_record, decoded);
@@ -681,22 +656,20 @@ mod removal_record_tests {
 
     #[test]
     fn test_removal_record_vec_decode() {
-        type H = Tip5;
         let mut rng = thread_rng();
         for _ in 0..10 {
             let length = rng.gen_range(0..10);
-            let removal_records = vec![random_removal_record::<H>(); length];
+            let removal_records = vec![random_removal_record(); length];
             let encoded = removal_records.encode();
-            let decoded = *Vec::<RemovalRecord<H>>::decode(&encoded).unwrap();
+            let decoded = *Vec::<RemovalRecord>::decode(&encoded).unwrap();
             assert_eq!(removal_records, decoded);
         }
     }
 
     #[test]
     fn test_absindexset_record_decode() {
-        type H = Tip5;
         for _ in 0..100 {
-            let removal_record = random_removal_record::<H>();
+            let removal_record = random_removal_record();
             let encoded_absindexset = removal_record.absolute_indices.encode();
             let decoded_absindexset = *AbsoluteIndexSet::decode(&encoded_absindexset).unwrap();
             assert_eq!(removal_record.absolute_indices, decoded_absindexset);

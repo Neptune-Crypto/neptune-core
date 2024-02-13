@@ -11,7 +11,8 @@ use anyhow::{bail, Context, Result};
 use bip39::Mnemonic;
 use itertools::Itertools;
 use num_traits::Zero;
-use rand::{thread_rng, Rng};
+use rand::rngs::StdRng;
+use rand::{thread_rng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::fs::{self};
 use std::path::{Path, PathBuf};
@@ -91,9 +92,15 @@ impl WalletSecret {
     /// Create a new `Wallet` and populate it with a new secret seed, with entropy
     /// obtained via `thread_rng()` from the operating system.
     pub fn new_random() -> Self {
+        Self::new_pseudorandom(thread_rng().gen())
+    }
+
+    /// Create a new `Wallet` and populate it by expanding a given seed.
+    pub fn new_pseudorandom(seed: [u8; 32]) -> Self {
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
         Self {
             name: STANDARD_WALLET_NAME.to_string(),
-            secret_seed: SecretKeyMaterial(thread_rng().gen()),
+            secret_seed: SecretKeyMaterial(rng.gen()),
             version: STANDARD_WALLET_VERSION,
         }
     }
@@ -750,7 +757,7 @@ mod wallet_tests {
             NeptuneCoins::zero(),
             msa_tip_previous.clone(),
         );
-        next_block.accumulate_transaction(tx);
+        next_block.accumulate_transaction(tx, &msa_tip_previous);
 
         own_wallet_state
             .update_wallet_state_with_new_block(&msa_tip_previous.clone(), &next_block)
@@ -841,7 +848,7 @@ mod wallet_tests {
             .await
             .unwrap();
 
-        block_1.accumulate_transaction(valid_tx);
+        block_1.accumulate_transaction(valid_tx, &previous_msa);
 
         // Verify the validity of the merged transaction and block
         assert!(block_1.is_valid(&genesis_block));
@@ -1092,7 +1099,10 @@ mod wallet_tests {
             .create_transaction(vec![receiver_data_six.clone()], NeptuneCoins::new(4))
             .await
             .unwrap();
-        block_3_b.accumulate_transaction(tx_from_preminer);
+        block_3_b.accumulate_transaction(
+            tx_from_preminer,
+            &block_2_b.kernel.body.mutator_set_accumulator,
+        );
         assert!(
             block_3_b.is_valid(&block_2_b),
             "Block must be valid after accumulating txs"

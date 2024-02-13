@@ -30,59 +30,65 @@ pub fn pseudorandom_addition_record(seed: [u8; 32]) -> AdditionRecord {
 
 #[cfg(test)]
 mod addition_record_tests {
+    use crate::models::blockchain::shared::Hash;
     use crate::util_types::mutator_set::mutator_set_trait::commit;
 
     use rand::random;
-    use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
     use super::*;
 
     #[test]
     fn get_size_test() {
-        type H = Tip5;
-
-        let addition_record_0: AdditionRecord =
-            commit::<H>(H::hash(&1492u128), H::hash(&1522u128), H::hash(&1521u128));
+        let addition_record_0: AdditionRecord = commit(
+            Hash::hash(&1492u128),
+            Hash::hash(&1522u128),
+            Hash::hash(&1521u128),
+        );
 
         assert_eq!(std::mem::size_of::<Digest>(), addition_record_0.get_size());
     }
 
     #[test]
     fn hash_identity_test() {
-        type H = Tip5;
+        let addition_record_0: AdditionRecord = commit(
+            Hash::hash(&1492u128),
+            Hash::hash(&1522u128),
+            Hash::hash(&1521u128),
+        );
 
-        let addition_record_0: AdditionRecord =
-            commit::<H>(H::hash(&1492u128), H::hash(&1522u128), H::hash(&1521u128));
-
-        let addition_record_1: AdditionRecord =
-            commit::<H>(H::hash(&1492u128), H::hash(&1522u128), H::hash(&1521u128));
+        let addition_record_1: AdditionRecord = commit(
+            Hash::hash(&1492u128),
+            Hash::hash(&1522u128),
+            Hash::hash(&1521u128),
+        );
 
         assert_eq!(
-            H::hash(&addition_record_0),
-            H::hash(&addition_record_1),
+            Hash::hash(&addition_record_0),
+            Hash::hash(&addition_record_1),
             "Two addition records with same commitments and same MMR AOCLs must agree."
         );
 
-        let addition_record_2: AdditionRecord =
-            commit::<H>(H::hash(&1451u128), H::hash(&1480u128), H::hash(&1481u128));
+        let addition_record_2: AdditionRecord = commit(
+            Hash::hash(&1451u128),
+            Hash::hash(&1480u128),
+            Hash::hash(&1481u128),
+        );
 
         // Verify behavior with empty mutator sets. All empty MS' are the same.
         assert_ne!(
-            H::hash(&addition_record_0),
-            H::hash(&addition_record_2),
+            Hash::hash(&addition_record_0),
+            Hash::hash(&addition_record_2),
             "Two addition records with differing commitments but same MMR AOCLs must differ."
         );
     }
 
     #[test]
     fn serialization_test() {
-        type H = Tip5;
-
-        let item = H::hash(&1492u128);
-        let sender_randomness = H::hash(&1522u128);
-        let receiver_digest = H::hash(&1583u128);
-        let addition_record: AdditionRecord = commit::<H>(item, sender_randomness, receiver_digest);
+        let item = Hash::hash(&1492u128);
+        let sender_randomness = Hash::hash(&1522u128);
+        let receiver_digest = Hash::hash(&1583u128);
+        let addition_record: AdditionRecord = commit(item, sender_randomness, receiver_digest);
         let json = serde_json::to_string(&addition_record).unwrap();
         let s_back = serde_json::from_str::<AdditionRecord>(&json).unwrap();
         assert_eq!(

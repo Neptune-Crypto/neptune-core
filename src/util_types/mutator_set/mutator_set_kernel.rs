@@ -1,3 +1,4 @@
+use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
@@ -39,14 +40,14 @@ pub enum MutatorSetKernelError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
-pub struct MutatorSetKernel<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H>> {
+pub struct MutatorSetKernel<MMR: Mmr<Hash>> {
     pub aocl: MMR,
     pub swbf_inactive: MMR,
-    pub swbf_active: ActiveWindow<H>,
+    pub swbf_active: ActiveWindow,
 }
 
-// FIXME: Apply over-sampling to circumvent risk of duplicates.
-pub fn get_swbf_indices<H: AlgebraicHasher>(
+/// Get the (absolute) indices for removing this item from the mutator set.
+pub fn get_swbf_indices(
     item: Digest,
     sender_randomness: Digest,
     receiver_preimage: Digest,
@@ -74,9 +75,9 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
         "Input to sponge must be a multiple digest length"
     );
 
-    let mut sponge = <H as SpongeHasher>::init();
-    H::absorb_repeatedly(&mut sponge, input.iter());
-    H::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
+    let mut sponge = <Hash as SpongeHasher>::init();
+    Hash::absorb_repeatedly(&mut sponge, input.iter());
+    Hash::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
         .into_iter()
         .map(|sample_index| sample_index as u128 + batch_offset)
         .collect_vec()
@@ -84,10 +85,10 @@ pub fn get_swbf_indices<H: AlgebraicHasher>(
         .unwrap()
 }
 
-impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
+impl<M: Mmr<Hash>> MutatorSetKernel<M> {
     /// Generates a removal record with which to update the set commitment.
-    pub fn drop(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> RemovalRecord<H> {
-        let indices: AbsoluteIndexSet = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
+    pub fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
+        let indices: AbsoluteIndexSet = AbsoluteIndexSet::new(&get_swbf_indices(
             item,
             membership_proof.sender_randomness,
             membership_proof.receiver_preimage,
@@ -144,30 +145,29 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
 
         // if window slides, update filter
         // First update the inactive part of the SWBF, the SWBF MMR
-        let chunk: Chunk = self.swbf_active.slid_chunk();
-        let chunk_digest: Digest = H::hash(&chunk);
+        let new_chunk: Chunk = self.swbf_active.slid_chunk();
+        let chunk_digest: Digest = Hash::hash(&new_chunk);
+        let new_chunk_index = self.swbf_inactive.count_leaves();
         self.swbf_inactive.append(chunk_digest); // ignore auth path
 
         // Then move window to the right, equivalent to moving values
         // inside window to the left.
         self.swbf_active.slide_window();
 
-        let chunk_index_for_inserted_chunk = self.swbf_inactive.count_leaves() - 1;
-
         // Return the chunk that was added to the inactive part of the SWBF.
         // This chunk is needed by the Archival mutator set. The Regular
         // mutator set can ignore it.
-        Some((chunk_index_for_inserted_chunk, chunk))
+        Some((new_chunk_index, new_chunk))
     }
 
     /// Remove a record and return the chunks that have been updated in this process,
     /// after applying the update. Does not mutate the removal record.
-    pub fn remove_helper(&mut self, removal_record: &RemovalRecord<H>) -> HashMap<u64, Chunk> {
+    pub fn remove_helper(&mut self, removal_record: &RemovalRecord) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index();
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
         // insert all indices
-        let mut new_target_chunks: ChunkDictionary<H> = removal_record.target_chunks.clone();
+        let mut new_target_chunks: ChunkDictionary = removal_record.target_chunks.clone();
         let chunkindices_to_indices_dict: HashMap<u64, Vec<u128>> =
             removal_record.get_chunkidx_to_indices_dict();
 
@@ -189,8 +189,10 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
                 .get_mut(&chunk_index)
                 .unwrap_or_else(|| {
                     panic!(
-                        "Can't get chunk index {chunk_index} from dictionary! dictionary: {:?}",
-                        new_target_chunks_clone.dictionary
+                        "Can't get chunk index {chunk_index} from dictionary! dictionary: {:?}\nAOCL size: {}\nbatch index: {}",
+                        new_target_chunks_clone.dictionary,
+                        self.aocl.count_leaves(),
+                        batch_index
                     )
                 });
             for index in indices {
@@ -208,8 +210,8 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         let all_leafs = new_target_chunks
             .dictionary
             .values()
-            .map(|(_p, chunk)| H::hash(chunk));
-        let mutation_data: Vec<(MmrMembershipProof<H>, Digest)> =
+            .map(|(_p, chunk)| Hash::hash(chunk));
+        let mutation_data: Vec<(MmrMembershipProof<Hash>, Digest)> =
             all_mmr_membership_proofs.zip(all_leafs).collect();
 
         // If we want to update the membership proof with this removal, we
@@ -231,13 +233,13 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
-    ) -> MsMembershipProof<H> {
+    ) -> MsMembershipProof {
         // compute commitment
-        let item_commitment = H::hash_pair(item, sender_randomness);
+        let item_commitment = Hash::hash_pair(item, sender_randomness);
 
         // simulate adding to commitment list
         let auth_path_aocl = self.aocl.to_accumulator().append(item_commitment);
-        let target_chunks: ChunkDictionary<H> = ChunkDictionary::default();
+        let target_chunks: ChunkDictionary = ChunkDictionary::default();
 
         // return membership proof
         MsMembershipProof {
@@ -248,7 +250,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         }
     }
 
-    pub fn verify(&self, item: Digest, membership_proof: &MsMembershipProof<H>) -> bool {
+    pub fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
         // If data index does not exist in AOCL, return false
         // This also ensures that no "future" indices will be
         // returned from `get_indices`, so we don't have to check for
@@ -258,9 +260,9 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         }
 
         // verify that a commitment to the item lives in the aocl mmr
-        let leaf = H::hash_pair(
-            H::hash_pair(item, membership_proof.sender_randomness),
-            H::hash_pair(
+        let leaf = Hash::hash_pair(
+            Hash::hash_pair(item, membership_proof.sender_randomness),
+            Hash::hash_pair(
                 membership_proof.receiver_preimage,
                 Digest::new([BFieldElement::zero(); DIGEST_LENGTH]),
             ),
@@ -284,7 +286,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         let window_start = current_batch_index as u128 * CHUNK_SIZE as u128;
 
         // Get all bloom filter indices
-        let all_indices = AbsoluteIndexSet::new(&get_swbf_indices::<H>(
+        let all_indices = AbsoluteIndexSet::new(&get_swbf_indices(
             item,
             membership_proof.sender_randomness,
             membership_proof.receiver_preimage,
@@ -304,7 +306,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
                     break 'outer;
                 }
 
-                let mp_and_chunk: &(mmr::mmr_membership_proof::MmrMembershipProof<H>, Chunk) =
+                let mp_and_chunk: &(mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Chunk) =
                     membership_proof
                         .target_chunks
                         .dictionary
@@ -312,7 +314,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
                         .unwrap();
                 let (valid_auth_path, _) = mp_and_chunk.0.verify(
                     &self.swbf_inactive.get_peaks(),
-                    H::hash(&mp_and_chunk.1),
+                    Hash::hash(&mp_and_chunk.1),
                     self.swbf_inactive.count_leaves(),
                 );
 
@@ -345,8 +347,8 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
     /// { chunk index => updated_chunk }.
     pub fn batch_remove(
         &mut self,
-        mut removal_records: Vec<RemovalRecord<H>>,
-        preserved_membership_proofs: &mut [&mut MsMembershipProof<H>],
+        mut removal_records: Vec<RemovalRecord>,
+        preserved_membership_proofs: &mut [&mut MsMembershipProof],
     ) -> HashMap<u64, Chunk> {
         let batch_index = self.get_batch_index();
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
@@ -376,19 +378,19 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
 
         // Collect all affected chunks as they look before these removal records are applied
         // These chunks are part of the removal records, so we fetch them there.
-        let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof<H>)> =
+        let mut mutation_data_preimage: HashMap<u64, (&mut Chunk, MmrMembershipProof<Hash>)> =
             HashMap::new();
         for removal_record in removal_records.iter_mut() {
             for (chunk_index, (mmr_mp, chunk)) in removal_record.target_chunks.dictionary.iter_mut()
             {
-                let chunk_hash = H::hash(chunk);
+                let chunk_hash = Hash::hash(chunk);
                 let prev_val =
                     mutation_data_preimage.insert(*chunk_index, (chunk, mmr_mp.to_owned()));
 
                 // Sanity check that all removal records agree on both chunks and MMR membership
                 // proofs.
                 if let Some((chnk, mm)) = prev_val {
-                    assert!(mm == *mmr_mp && chunk_hash == H::hash(chnk))
+                    assert!(mm == *mmr_mp && chunk_hash == Hash::hash(chnk))
                 }
             }
         }
@@ -416,16 +418,16 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
         // Calculate the digests of the affected leafs in the inactive part of the sliding-window
         // Bloom filter such that we can apply a batch-update operation to the MMR through which
         // this part of the Bloom filter is represented.
-        let swbf_inactive_mutation_data: Vec<(MmrMembershipProof<H>, Digest)> =
+        let swbf_inactive_mutation_data: Vec<(MmrMembershipProof<Hash>, Digest)> =
             mutation_data_preimage
                 .into_values()
-                .map(|x| (x.1, H::hash(x.0)))
+                .map(|x| (x.1, Hash::hash(x.0)))
                 .collect();
 
         // Create a vector of pointers to the MMR-membership part of the mutator set membership
         // proofs that we want to preserve. This is used as input to a batch-call to the
         // underlying MMR.
-        let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof<H>> =
+        let mut preseved_mmr_membership_proofs: Vec<&mut MmrMembershipProof<Hash>> =
             preserved_membership_proofs
                 .iter_mut()
                 .flat_map(|x| {
@@ -449,7 +451,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
 
     /// Check if a removal record can be applied to a mutator set. Returns false if either
     /// the MMR membership proofs are unsynced, or if all its indices are already set.
-    pub fn can_remove(&self, removal_record: &RemovalRecord<H>) -> bool {
+    pub fn can_remove(&self, removal_record: &RemovalRecord) -> bool {
         let mut have_absent_index = false;
         if !removal_record.validate(self) {
             return false;
@@ -485,9 +487,7 @@ impl<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>> MutatorSetKernel<H, M> {
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec, MMR: Mmr<H> + BFieldCodec> BFieldCodec
-    for MutatorSetKernel<H, MMR>
-{
+impl<MMR: Mmr<Hash> + BFieldCodec> BFieldCodec for MutatorSetKernel<MMR> {
     type Error = anyhow::Error;
     fn decode(sequence: &[BFieldElement]) -> anyhow::Result<Box<Self>> {
         let mut index = 0;
@@ -562,9 +562,21 @@ mod accumulation_scheme_tests {
     use rand::prelude::*;
     use rand::Rng;
 
-    use twenty_first::shared_math::tip5::Tip5;
+    use tasm_lib::twenty_first::util_types::storage_vec::StorageVec;
     use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
+    use crate::config_models::network::Network;
+    use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
+    use crate::models::blockchain::transaction::utxo::Utxo;
+    use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
+    use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::UtxoReceiverData;
+    use crate::tests::shared::add_block;
+    use crate::tests::shared::get_mock_global_state;
+    use crate::tests::shared::get_mock_wallet_state;
+    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::commit;
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -575,8 +587,8 @@ mod accumulation_scheme_tests {
     #[test]
     fn get_batch_index_test() {
         // Verify that the method to get batch index returns sane results
-        type H = Tip5;
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+
+        let mut mutator_set = MutatorSetAccumulator::default();
         assert_eq!(
             0,
             mutator_set.kernel.get_batch_index(),
@@ -585,8 +597,7 @@ mod accumulation_scheme_tests {
 
         for i in 0..BATCH_SIZE {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let addition_record =
-                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             mutator_set.add(&addition_record);
             assert_eq!(
                 0,
@@ -597,7 +608,7 @@ mod accumulation_scheme_tests {
         }
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let addition_record = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+        let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
         mutator_set.add(&addition_record);
         assert_eq!(
             1,
@@ -608,13 +619,11 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn mutator_set_hash_test() {
-        type H = Tip5;
-
-        let empty_set = MutatorSetAccumulator::<H>::default();
+        let empty_set = MutatorSetAccumulator::default();
         let empty_hash = empty_set.hash();
 
         // Add one element to append-only commitment list
-        let mut set_with_aocl_append = MutatorSetAccumulator::<H>::default();
+        let mut set_with_aocl_append = MutatorSetAccumulator::default();
 
         let (item0, _sender_randomness, _receiver_preimage) = make_item_and_randomnesses();
 
@@ -627,7 +636,7 @@ mod accumulation_scheme_tests {
         );
 
         // Manipulate inactive SWBF
-        let mut set_with_swbf_inactive_append = MutatorSetAccumulator::<H>::default();
+        let mut set_with_swbf_inactive_append = MutatorSetAccumulator::default();
         set_with_swbf_inactive_append
             .kernel
             .swbf_inactive
@@ -665,11 +674,10 @@ mod accumulation_scheme_tests {
         // Test that `get_indices` behaves as expected, i.e.
         // that it always returns something of length `NUM_TRIALS`, and that the
         // returned values are in the expected range.
-        type H = Tip5;
 
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let ret: [u128; NUM_TRIALS as usize] =
-            get_swbf_indices::<H>(item, sender_randomness, receiver_preimage, 0);
+            get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
         assert_eq!(NUM_TRIALS as usize, ret.len());
         assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
     }
@@ -678,18 +686,18 @@ mod accumulation_scheme_tests {
     fn ms_get_indices_test_big() {
         // Test that `get_indices` behaves as expected. I.e. that it returns indices in the correct range,
         // and always returns something of length `NUM_TRIALS`.
-        type H = Tip5;
+
         for _ in 0..1000 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let ret: [u128; NUM_TRIALS as usize] =
-                get_swbf_indices::<H>(item, sender_randomness, receiver_preimage, 0);
+                get_swbf_indices(item, sender_randomness, receiver_preimage, 0);
             assert_eq!(NUM_TRIALS as usize, ret.len());
             assert!(ret.iter().all(|&x| x < WINDOW_SIZE as u128));
         }
 
         for _ in 0..1000 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices::<H>(
+            let ret: [u128; NUM_TRIALS as usize] = get_swbf_indices(
                 item,
                 sender_randomness,
                 receiver_preimage,
@@ -705,10 +713,8 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn init_test() {
-        type H = Tip5;
-
-        let accumulator = MutatorSetAccumulator::<H>::default();
-        let mut rms = empty_rusty_mutator_set::<H>();
+        let accumulator = MutatorSetAccumulator::default();
+        let mut rms = empty_rusty_mutator_set();
         let archival = rms.ams_mut();
 
         // Verify that function to get batch index does not overflow for the empty MS
@@ -728,16 +734,16 @@ mod accumulation_scheme_tests {
     fn verify_future_indices_test() {
         // Ensure that `verify` does not crash when given a membership proof
         // that represents a future addition to the AOCL.
-        type H = Tip5;
-        let mut mutator_set = MutatorSetAccumulator::<H>::default().kernel;
-        let empty_mutator_set = MutatorSetAccumulator::<H>::default().kernel;
+
+        let mut mutator_set = MutatorSetAccumulator::default().kernel;
+        let empty_mutator_set = MutatorSetAccumulator::default().kernel;
 
         for _ in 0..2 * BATCH_SIZE + 2 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record: AdditionRecord =
-                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let membership_proof: MsMembershipProof<H> =
+                commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
+            let membership_proof: MsMembershipProof =
                 mutator_set.prove(item, sender_randomness, receiver_preimage);
             mutator_set.add_helper(&addition_record);
             assert!(mutator_set.verify(item, &membership_proof));
@@ -749,23 +755,24 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_membership_proof_update_from_add() {
-        type H = Tip5;
-
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::default();
         let (own_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-        let addition_record =
-            commit::<H>(own_item, sender_randomness, receiver_preimage.hash::<H>());
+        let addition_record = commit(
+            own_item,
+            sender_randomness,
+            receiver_preimage.hash::<Hash>(),
+        );
         let mut membership_proof =
             mutator_set.prove(own_item, sender_randomness, receiver_preimage);
         mutator_set.kernel.add_helper(&addition_record);
 
         // Update membership proof with add operation. Verify that it has changed, and that it now fails to verify.
         let (new_item, new_sender_randomness, new_receiver_preimage) = make_item_and_randomnesses();
-        let new_addition_record = commit::<H>(
+        let new_addition_record = commit(
             new_item,
             new_sender_randomness,
-            new_receiver_preimage.hash::<H>(),
+            new_receiver_preimage.hash::<Hash>(),
         );
         let original_membership_proof = membership_proof.clone();
         let changed_mp = match membership_proof.update_from_addition(
@@ -808,10 +815,9 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn membership_proof_updating_from_add_pbt() {
-        type H = Tip5;
         let mut rng = thread_rng();
 
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::default();
 
         let num_additions = rng.gen_range(0..=100i32);
         println!(
@@ -819,14 +825,13 @@ mod accumulation_scheme_tests {
             num_additions
         );
 
-        let mut membership_proofs_and_items: Vec<(MsMembershipProof<H>, Digest)> = vec![];
+        let mut membership_proofs_and_items: Vec<(MsMembershipProof, Digest)> = vec![];
         for i in 0..num_additions {
             println!("loop iteration {}", i);
 
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record =
-                commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             let membership_proof = mutator_set.prove(item, sender_randomness, receiver_preimage);
 
             // Update all membership proofs
@@ -855,13 +860,10 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_add_and_prove() {
-        type H = Tip5;
-
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::default();
         let (item0, sender_randomness0, receiver_preimage0) = make_item_and_randomnesses();
 
-        let addition_record =
-            commit::<H>(item0, sender_randomness0, receiver_preimage0.hash::<H>());
+        let addition_record = commit(item0, sender_randomness0, receiver_preimage0.hash::<Hash>());
         let membership_proof = mutator_set.prove(item0, sender_randomness0, receiver_preimage0);
 
         assert!(!mutator_set.verify(item0, &membership_proof));
@@ -872,7 +874,7 @@ mod accumulation_scheme_tests {
 
         // Insert a new item and verify that this still works
         let (item1, sender_randomness1, receiver_preimage1) = make_item_and_randomnesses();
-        let new_ar = commit::<H>(item1, sender_randomness1, receiver_preimage1.hash::<H>());
+        let new_ar = commit(item1, sender_randomness1, receiver_preimage1.hash::<Hash>());
         let new_mp = mutator_set.prove(item1, sender_randomness1, receiver_preimage1);
         assert!(!mutator_set.verify(item1, &new_mp));
 
@@ -885,7 +887,7 @@ mod accumulation_scheme_tests {
         // position.
         for _ in 0..2 * BATCH_SIZE + 4 {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-            let other_ar = commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
+            let other_ar = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
             let other_mp = mutator_set.prove(item, sender_randomness, receiver_preimage);
             assert!(!mutator_set.verify(item, &other_mp));
 
@@ -896,8 +898,7 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn batch_update_from_addition_and_removal_test() {
-        type H = Tip5;
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::default();
 
         // It's important to test number of additions around the shifting of the window,
         // i.e. around batch size.
@@ -912,20 +913,23 @@ mod accumulation_scheme_tests {
             6 * BATCH_SIZE + 1,
         ];
 
-        let mut membership_proofs: Vec<MsMembershipProof<H>> = vec![];
+        let mut membership_proofs: Vec<MsMembershipProof> = vec![];
         let mut items = vec![];
 
         for num_additions in num_additions_list {
             for _ in 0..num_additions {
                 let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-                let addition_record =
-                    commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
+                let addition_record = commit(
+                    new_item,
+                    sender_randomness,
+                    receiver_preimage.hash::<Hash>(),
+                );
                 let membership_proof =
                     mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 
                 // Update *all* membership proofs with newly added item
-                let batch_update_res = MsMembershipProof::<H>::batch_update_from_addition(
+                let batch_update_res = MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
                     &mutator_set.kernel,
@@ -951,7 +955,7 @@ mod accumulation_scheme_tests {
                 assert!(mutator_set.verify(item, &mp));
 
                 // generate removal record
-                let removal_record: RemovalRecord<H> = mutator_set.drop(item, &mp);
+                let removal_record: RemovalRecord = mutator_set.drop(item, &mp);
                 assert!(removal_record.validate(&mutator_set.kernel));
                 assert!(mutator_set.kernel.can_remove(&removal_record));
 
@@ -975,19 +979,20 @@ mod accumulation_scheme_tests {
 
     #[test]
     fn test_multiple_adds() {
-        type H = Tip5;
-
-        let mut mutator_set = MutatorSetAccumulator::<H>::default();
+        let mut mutator_set = MutatorSetAccumulator::default();
 
         let num_additions = 65;
 
-        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof<H>)> = vec![];
+        let mut items_and_membership_proofs: Vec<(Digest, MsMembershipProof)> = vec![];
 
         for _ in 0..num_additions {
             let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-            let addition_record =
-                commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
+            let addition_record = commit(
+                new_item,
+                sender_randomness,
+                receiver_preimage.hash::<Hash>(),
+            );
             let membership_proof =
                 mutator_set.prove(new_item, sender_randomness, receiver_preimage);
 
@@ -1035,7 +1040,7 @@ mod accumulation_scheme_tests {
             assert!(mutator_set.verify(item, &mp));
 
             // generate removal record
-            let removal_record: RemovalRecord<H> = mutator_set.drop(item, &mp);
+            let removal_record: RemovalRecord = mutator_set.drop(item, &mp);
             assert!(removal_record.validate(&mutator_set.kernel));
             assert!(mutator_set.kernel.can_remove(&removal_record));
             (i..items_and_membership_proofs.len()).for_each(|k| {
@@ -1078,10 +1083,9 @@ mod accumulation_scheme_tests {
         // in the runtime. This test is to verify that that does not happen.
         // Cf. https://stackoverflow.com/questions/72618777/how-to-deserialize-a-nested-big-array
         // and https://stackoverflow.com/questions/72621410/how-do-i-use-serde-stacker-in-my-deserialize-implementation
-        type H = Tip5;
-        type Mmr = MmrAccumulator<H>;
-        type Ms = MutatorSetKernel<H, Mmr>;
-        let mut mutator_set: Ms = MutatorSetAccumulator::<H>::default().kernel;
+        type Mmr = MmrAccumulator<Hash>;
+        type Ms = MutatorSetKernel<Mmr>;
+        let mut mutator_set: Ms = MutatorSetAccumulator::default().kernel;
 
         let json_empty = serde_json::to_string(&mutator_set).unwrap();
         println!("json = \n{}", json_empty);
@@ -1123,5 +1127,304 @@ mod accumulation_scheme_tests {
             !s_back_one_add_one_remove.verify(item, &mp),
             "Membership proof must fail after removal"
         );
+    }
+
+    #[tokio::test]
+    async fn flaky_mutator_set_test() {
+        // let mut rng: StdRng =
+        //     SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
+        // let seed: [u8; 32] = rng.gen();
+        let seed = [
+            0xf4, 0xc2, 0x1c, 0xd0, 0x5a, 0xac, 0x99, 0xe7, 0x3a, 0x1e, 0x29, 0x7f, 0x16, 0xc1,
+            0x50, 0x5e, 0x1e, 0xd, 0x4b, 0x49, 0x51, 0x9c, 0x1b, 0xa0, 0x38, 0x3c, 0xd, 0x83, 0x29,
+            0xdb, 0xab, 0xe2,
+        ];
+        println!(
+            "seed: [{}]",
+            seed.iter().map(|h| format!("{:#x}", h)).join(", ")
+        );
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+
+        // Test various parts of the state update when a block contains multiple inputs and outputs
+        let network = Network::Alpha;
+        let genesis_wallet_state = get_mock_wallet_state(None, network).await;
+        let genesis_spending_key = genesis_wallet_state
+            .wallet_secret
+            .nth_generation_spending_key(0);
+        let genesis_state_lock =
+            get_mock_global_state(network, 3, Some(genesis_wallet_state.wallet_secret)).await;
+
+        let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
+        let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
+        let alice_state_lock = get_mock_global_state(network, 3, Some(wallet_secret_alice)).await;
+
+        let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
+        let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
+        let bob_state_lock = get_mock_global_state(network, 3, Some(wallet_secret_bob)).await;
+
+        let genesis_block = Block::genesis_block();
+
+        let (mut block_1, cb_utxo, cb_output_randomness) =
+            make_mock_block_with_valid_pow(&genesis_block, None, genesis_spending_key.to_address());
+
+        // Send two outputs each to Alice and Bob, from genesis receiver
+        let fee = NeptuneCoins::one();
+        let sender_randomness: Digest = rng.gen();
+        let receiver_data_for_alice = vec![
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(41).to_native_coins(),
+                },
+            },
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: alice_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: alice_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(59).to_native_coins(),
+                },
+            },
+        ];
+        // Two outputs for Bob
+        let receiver_data_for_bob = vec![
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(141).to_native_coins(),
+                },
+            },
+            UtxoReceiverData {
+                public_announcement: PublicAnnouncement::default(),
+                receiver_privacy_digest: bob_spending_key.to_address().privacy_digest,
+                sender_randomness,
+                utxo: Utxo {
+                    lock_script_hash: bob_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(59).to_native_coins(),
+                },
+            },
+        ];
+        {
+            let tx_to_alice_and_bob = genesis_state_lock
+                .lock_guard_mut()
+                .await
+                .create_transaction(
+                    [
+                        receiver_data_for_alice.clone(),
+                        receiver_data_for_bob.clone(),
+                    ]
+                    .concat(),
+                    fee,
+                )
+                .await
+                .unwrap();
+
+            // Absorb and verify validity
+            block_1.accumulate_transaction(
+                tx_to_alice_and_bob,
+                &genesis_block.kernel.body.mutator_set_accumulator,
+            );
+            assert!(block_1.is_valid(&genesis_block));
+        }
+
+        println!("Accumulated transaction into block_1.");
+        println!(
+            "Transaction has {} inputs (removal records) and {} outputs (addition records)",
+            block_1.kernel.body.transaction.kernel.inputs.len(),
+            block_1.kernel.body.transaction.kernel.outputs.len()
+        );
+
+        // Update chain states
+        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+            let mut state = state_lock.lock_guard_mut().await;
+            add_block(&mut state, block_1.clone()).await.unwrap();
+            state
+                .chain
+                .archival_state_mut()
+                .update_mutator_set(&block_1)
+                .await
+                .unwrap();
+        }
+
+        {
+            // Update wallets
+            let mut genesis_state = genesis_state_lock.lock_guard_mut().await;
+            genesis_state
+                .wallet_state
+                .expected_utxos
+                .add_expected_utxo(
+                    cb_utxo,
+                    cb_output_randomness,
+                    genesis_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
+                )
+                .unwrap();
+            genesis_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                3,
+                genesis_state
+                    .wallet_state
+                    .wallet_db
+                    .monitored_utxos()
+                    .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+            );
+        }
+
+        {
+            let mut alice_state = alice_state_lock.lock_guard_mut().await;
+            for rec_data in receiver_data_for_alice {
+                alice_state
+                    .wallet_state
+                    .expected_utxos
+                    .add_expected_utxo(
+                        rec_data.utxo.clone(),
+                        rec_data.sender_randomness,
+                        alice_spending_key.privacy_preimage,
+                        UtxoNotifier::Cli,
+                    )
+                    .unwrap();
+            }
+            alice_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
+                .await
+                .unwrap();
+        }
+
+        {
+            let mut bob_state = bob_state_lock.lock_guard_mut().await;
+            for rec_data in receiver_data_for_bob {
+                bob_state
+                    .wallet_state
+                    .expected_utxos
+                    .add_expected_utxo(
+                        rec_data.utxo.clone(),
+                        rec_data.sender_randomness,
+                        bob_spending_key.privacy_preimage,
+                        UtxoNotifier::Cli,
+                    )
+                    .unwrap();
+            }
+            bob_state
+                .wallet_state
+                .update_wallet_state_with_new_block(
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                    &block_1,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Now Alice should have a balance of 100 and Bob a balance of 200
+
+        assert_eq!(
+            NeptuneCoins::new(100),
+            alice_state_lock
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_amount
+        );
+        assert_eq!(
+            NeptuneCoins::new(200),
+            bob_state_lock
+                .lock_guard()
+                .await
+                .get_wallet_status_for_tip()
+                .await
+                .synced_unspent_amount
+        );
+
+        // Make two transactions: Alice sends two UTXOs to Genesis and Bob sends three UTXOs to genesis
+        let receiver_data_from_alice = vec![
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(49).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+        ];
+        let tx_from_alice = alice_state_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction(receiver_data_from_alice.clone(), NeptuneCoins::new(1))
+            .await
+            .unwrap();
+        let receiver_data_from_bob = vec![
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(50).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+            UtxoReceiverData {
+                utxo: Utxo {
+                    lock_script_hash: genesis_spending_key.to_address().lock_script().hash(),
+                    coins: NeptuneCoins::new(98).to_native_coins(),
+                },
+                sender_randomness: rng.gen(),
+                receiver_privacy_digest: genesis_spending_key.to_address().privacy_digest,
+                public_announcement: PublicAnnouncement::default(),
+            },
+        ];
+        let tx_from_bob = bob_state_lock
+            .lock_guard_mut()
+            .await
+            .create_transaction(receiver_data_from_bob.clone(), NeptuneCoins::new(2))
+            .await
+            .unwrap();
+
+        // Make block_2 with tx that contains:
+        // - 4 inputs: 2 from Alice and 2 from Bob
+        // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
+        let (mut block_2, _cb_utxo_block_2, _cb_sender_randomness_block_2) =
+            make_mock_block_with_valid_pow(&block_1, None, genesis_spending_key.to_address());
+        block_2.accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator);
+        assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
+        assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
+
+        block_2.accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator);
     }
 }

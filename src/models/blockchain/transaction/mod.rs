@@ -58,10 +58,10 @@ pub struct TransactionPrimitiveWitness {
     pub input_lock_scripts: Vec<LockScript>,
     pub type_scripts: Vec<TypeScript>,
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
-    pub input_membership_proofs: Vec<MsMembershipProof<Hash>>,
+    pub input_membership_proofs: Vec<MsMembershipProof>,
     pub output_utxos: Vec<Utxo>,
     pub public_announcements: Vec<PublicAnnouncement>,
-    pub mutator_set_accumulator: MutatorSetAccumulator<Hash>,
+    pub mutator_set_accumulator: MutatorSetAccumulator,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -89,18 +89,18 @@ impl Transaction {
     /// witnesses the witness data can be and is updated.
     pub fn update_mutator_set_records(
         &mut self,
-        previous_mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+        previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
     ) -> Result<()> {
-        let mut msa_state: MutatorSetAccumulator<Hash> = previous_mutator_set_accumulator.clone();
+        let mut msa_state: MutatorSetAccumulator = previous_mutator_set_accumulator.clone();
         let block_addition_records: Vec<AdditionRecord> =
             block.kernel.body.transaction.kernel.outputs.clone();
-        let mut transaction_removal_records: Vec<RemovalRecord<Hash>> = self.kernel.inputs.clone();
-        let mut transaction_removal_records: Vec<&mut RemovalRecord<Hash>> =
+        let mut transaction_removal_records: Vec<RemovalRecord> = self.kernel.inputs.clone();
+        let mut transaction_removal_records: Vec<&mut RemovalRecord> =
             transaction_removal_records.iter_mut().collect();
         let mut block_removal_records = block.kernel.body.transaction.kernel.inputs.clone();
         block_removal_records.reverse();
-        let mut block_removal_records: Vec<&mut RemovalRecord<Hash>> =
+        let mut block_removal_records: Vec<&mut RemovalRecord> =
             block_removal_records.iter_mut().collect::<Vec<_>>();
 
         // Apply all addition records in the block
@@ -109,15 +109,13 @@ impl Transaction {
             RemovalRecord::batch_update_from_addition(
                 &mut block_removal_records,
                 &mut msa_state.kernel,
-            )
-            .expect("MS removal record update from add must succeed in wallet handler");
+            );
 
             // Batch update transaction's removal records
             RemovalRecord::batch_update_from_addition(
                 &mut transaction_removal_records,
                 &mut msa_state.kernel,
-            )
-            .expect("MS removal record update from add must succeed in wallet handler");
+            );
 
             // Batch update primitive witness membership proofs
             if let Witness::Primitive(witness) = &mut self.witness {
@@ -138,16 +136,14 @@ impl Transaction {
 
         while let Some(removal_record) = block_removal_records.pop() {
             // Batch update block's removal records to keep them valid after next removal
-            RemovalRecord::batch_update_from_remove(&mut block_removal_records, removal_record)
-                .expect("MS removal record update from remove must succeed in wallet handler");
+            RemovalRecord::batch_update_from_remove(&mut block_removal_records, removal_record);
 
             // batch update transaction's removal records
             // Batch update block's removal records to keep them valid after next removal
             RemovalRecord::batch_update_from_remove(
                 &mut transaction_removal_records,
                 removal_record,
-            )
-            .expect("MS removal record update from remove must succeed in wallet handler");
+            );
 
             // Batch update primitive witness membership proofs
             if let Witness::Primitive(witness) = &mut self.witness {
@@ -322,7 +318,7 @@ impl Transaction {
     /// window Bloom filter, and whether the MMR membership proofs are valid.
     pub fn is_confirmable_relative_to(
         &self,
-        mutator_set_accumulator: &MutatorSetAccumulator<Hash>,
+        mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> bool {
         self.kernel
             .inputs
@@ -532,7 +528,7 @@ mod transaction_tests {
             coins: NeptuneCoins::new(42).to_native_coins(),
             lock_script_hash: LockScript::anyone_can_spend().hash(),
         };
-        let ar = commit::<Hash>(Hash::hash(&output_1), random(), random());
+        let ar = commit(Hash::hash(&output_1), random(), random());
 
         // Verify that a sane timestamp is returned. `make_mock_transaction` must follow
         // the correct time convention for this test to work.

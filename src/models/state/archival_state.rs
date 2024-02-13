@@ -20,7 +20,6 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::database::{create_db_if_missing, NeptuneLevelDb};
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
-use crate::models::blockchain::shared::Hash;
 use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
 };
@@ -60,7 +59,7 @@ pub struct ArchivalState {
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
-    pub archival_mutator_set: RustyArchivalMutatorSet<Hash>,
+    pub archival_mutator_set: RustyArchivalMutatorSet,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -95,7 +94,7 @@ impl ArchivalState {
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
     pub async fn initialize_mutator_set(
         data_dir: &DataDirectory,
-    ) -> Result<RustyArchivalMutatorSet<Hash>> {
+    ) -> Result<RustyArchivalMutatorSet> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
 
@@ -118,7 +117,7 @@ impl ArchivalState {
             }
         };
 
-        let mut archival_set = RustyArchivalMutatorSet::<Hash>::connect(db);
+        let mut archival_set = RustyArchivalMutatorSet::connect(db);
         archival_set.restore_or_new();
 
         Ok(archival_set)
@@ -190,7 +189,7 @@ impl ArchivalState {
     pub async fn new(
         data_dir: DataDirectory,
         block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
-        mut archival_mutator_set: RustyArchivalMutatorSet<Hash>,
+        mut archival_mutator_set: RustyArchivalMutatorSet,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block());
 
@@ -730,7 +729,7 @@ impl ArchivalState {
                 .inputs
                 .clone();
             removal_records.reverse();
-            let mut removal_records: Vec<&mut RemovalRecord<Hash>> =
+            let mut removal_records: Vec<&mut RemovalRecord> =
                 removal_records.iter_mut().collect::<Vec<_>>();
 
             // Add items, thus adding the output UTXOs to the mutator set
@@ -739,7 +738,7 @@ impl ArchivalState {
                 RemovalRecord::batch_update_from_addition(
                     &mut removal_records,
                     &mut self.archival_mutator_set.ams_mut().kernel,
-                ).expect("MS removal record update from add must succeed in update_mutator_set as block should already be verified");
+                );
 
                 // Add the element to the mutator set
                 self.archival_mutator_set.ams_mut().add(&addition_record);
@@ -748,10 +747,7 @@ impl ArchivalState {
             // Remove items, thus removing the input UTXOs from the mutator set
             while let Some(removal_record) = removal_records.pop() {
                 // Batch-update all removal records to keep them valid after next removal
-                RemovalRecord::batch_update_from_remove(
-                    &mut removal_records,
-                    removal_record,
-                ).expect("MS removal record update from remove must succeed in update_mutator_set as block should already be verified");
+                RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
 
                 // Remove the element from the mutator set
                 self.archival_mutator_set.ams_mut().remove(removal_record);
@@ -976,7 +972,10 @@ mod archival_state_tests {
                 )
                 .await
                 .unwrap();
-            mock_block_2.accumulate_transaction(sender_tx);
+            mock_block_2.accumulate_transaction(
+                sender_tx,
+                &mock_block_1.kernel.body.mutator_set_accumulator,
+            );
 
             // Remove an element from the mutator set, verify that the active window DB is updated.
             add_block(&mut genesis_receiver_global_state, mock_block_2.clone()).await?;
@@ -1101,7 +1100,14 @@ mod archival_state_tests {
             .await
             .unwrap();
 
-        block_1a.accumulate_transaction(sender_tx);
+        block_1a.accumulate_transaction(
+            sender_tx,
+            &archival_state
+                .genesis_block
+                .kernel
+                .body
+                .mutator_set_accumulator,
+        );
 
         assert!(block_1a.is_valid(&genesis_block));
 
@@ -1216,7 +1222,10 @@ mod archival_state_tests {
                 .await
                 .unwrap();
 
-            next_block.accumulate_transaction(sender_tx);
+            next_block.accumulate_transaction(
+                sender_tx,
+                &previous_block.kernel.body.mutator_set_accumulator,
+            );
 
             assert!(
                 next_block.is_valid(&previous_block),
@@ -1359,7 +1368,10 @@ mod archival_state_tests {
             .await
             .unwrap();
 
-        block_1_a.accumulate_transaction(sender_tx);
+        block_1_a.accumulate_transaction(
+            sender_tx,
+            &genesis_block.kernel.body.mutator_set_accumulator,
+        );
 
         // Block with signed transaction must validate
         assert!(block_1_a.is_valid(&genesis_block));
@@ -1452,7 +1464,10 @@ mod archival_state_tests {
                 .unwrap();
 
             // Absorb and verify validity
-            block_1.accumulate_transaction(tx_to_alice_and_bob);
+            block_1.accumulate_transaction(
+                tx_to_alice_and_bob,
+                &genesis_block.kernel.body.mutator_set_accumulator,
+            );
             assert!(block_1.is_valid(&genesis_block));
         }
 
@@ -1643,22 +1658,11 @@ mod archival_state_tests {
         // - 6 outputs: 2 from Alice to Genesis, 3 from Bob to Genesis, and 1 coinbase to Genesis
         let (mut block_2, cb_utxo_block_2, cb_sender_randomness_block_2) =
             make_mock_block_with_valid_pow(&block_1, None, genesis_spending_key.to_address());
-        block_2.accumulate_transaction(tx_from_alice);
+        block_2.accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator);
         assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
         assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
 
-        // This test is flaky!
-        // It fails roughly every 3 out of 10 runs. If you run with `-- --nocapture` then
-        // (on Alan's machine) it runs with a 100% success rate. But doing that *and*
-        // commenting out the next two print statements boosts the failure rate again.
-        println!("accumulated Alice's transaction into block; number of inputs: {}; number of outputs: {}", block_2.kernel.body.transaction.kernel.inputs.len(), block_2.kernel.body.transaction.kernel.outputs.len());
-        println!(
-            "Transaction from Bob has {} inputs and {} outputs",
-            tx_from_bob.kernel.inputs.len(),
-            tx_from_bob.kernel.outputs.len()
-        );
-
-        block_2.accumulate_transaction(tx_from_bob);
+        block_2.accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator);
 
         // Sanity checks
         assert_eq!(4, block_2.kernel.body.transaction.kernel.inputs.len());

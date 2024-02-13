@@ -7,7 +7,6 @@ use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
 
-use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::storage::level_db::DB;
@@ -33,18 +32,18 @@ use crate::util_types::mutator_set::mutator_set_trait::commit;
 use crate::util_types::mutator_set::removal_record::{pseudorandom_removal_record, RemovalRecord};
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 use crate::util_types::mutator_set::shared::{CHUNK_SIZE, WINDOW_SIZE};
+use crate::Hash;
 
-pub fn random_chunk_dictionary<H: AlgebraicHasher>() -> ChunkDictionary<H> {
+pub fn random_chunk_dictionary() -> ChunkDictionary {
     let mut rng = thread_rng();
     pseudorandom_chunk_dictionary(rng.gen::<[u8; 32]>())
 }
 
 pub fn get_all_indices_with_duplicates<
-    H: AlgebraicHasher + BFieldCodec,
     MmrStorage: StorageVec<Digest>,
     ChunkStorage: StorageVec<Chunk>,
 >(
-    archival_mutator_set: &mut ArchivalMutatorSet<H, MmrStorage, ChunkStorage>,
+    archival_mutator_set: &mut ArchivalMutatorSet<MmrStorage, ChunkStorage>,
 ) -> Vec<u128> {
     let mut ret: Vec<u128> = vec![];
 
@@ -72,43 +71,45 @@ pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn empty_rusty_mutator_set<H: AlgebraicHasher + BFieldCodec>() -> RustyArchivalMutatorSet<H> {
+pub fn empty_rusty_mutator_set() -> RustyArchivalMutatorSet {
     let db = DB::open_new_test_database(true, None, None, None).unwrap();
-    let rusty_mutator_set: RustyArchivalMutatorSet<H> = RustyArchivalMutatorSet::connect(db);
+    let rusty_mutator_set: RustyArchivalMutatorSet = RustyArchivalMutatorSet::connect(db);
     rusty_mutator_set
 }
 
-pub fn insert_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
-    mutator_set: &mut MutatorSetKernel<H, M>,
-) -> (MsMembershipProof<H>, Digest) {
+pub fn insert_mock_item<M: Mmr<Hash>>(
+    mutator_set: &mut MutatorSetKernel<M>,
+) -> (MsMembershipProof, Digest) {
     let (new_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
-    let addition_record = commit::<H>(new_item, sender_randomness, receiver_preimage.hash::<H>());
+    let addition_record = commit(
+        new_item,
+        sender_randomness,
+        receiver_preimage.hash::<Hash>(),
+    );
     let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage);
     mutator_set.add_helper(&addition_record);
 
     (membership_proof, new_item)
 }
 
-pub fn remove_mock_item<H: AlgebraicHasher + BFieldCodec, M: Mmr<H>>(
-    mutator_set: &mut MutatorSetKernel<H, M>,
+pub fn remove_mock_item<M: Mmr<Hash>>(
+    mutator_set: &mut MutatorSetKernel<M>,
     item: Digest,
-    mp: &MsMembershipProof<H>,
+    mp: &MsMembershipProof,
 ) {
-    let removal_record: RemovalRecord<H> = mutator_set.drop(item, mp);
+    let removal_record: RemovalRecord = mutator_set.drop(item, mp);
     mutator_set.remove_helper(&removal_record);
 }
 
 /// Generate a random MSA. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_accumulator<H: AlgebraicHasher + BFieldCodec>() -> MutatorSetAccumulator<H>
-{
+pub fn random_mutator_set_accumulator() -> MutatorSetAccumulator {
     let kernel = random_mutator_set_kernel();
     MutatorSetAccumulator { kernel }
 }
 
 /// Generate a random MSK. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_kernel<H: AlgebraicHasher + BFieldCodec>(
-) -> MutatorSetKernel<H, MmrAccumulator<H>> {
+pub fn random_mutator_set_kernel() -> MutatorSetKernel<MmrAccumulator<Hash>> {
     let aocl = random_mmra();
     let swbf_inactive = random_mmra();
     let swbf_active = random_swbf_active();
@@ -345,11 +346,11 @@ pub fn pseudorandom_merkle_root_with_authentication_paths<H: AlgebraicHasher>(
     (root, paths)
 }
 
-pub fn random_swbf_active<H: AlgebraicHasher + BFieldCodec>() -> ActiveWindow<H> {
+pub fn random_swbf_active() -> ActiveWindow {
     let mut rng = thread_rng();
     let num_indices = 10 + (rng.next_u32() % 100) as usize;
 
-    let mut aw = ActiveWindow::<H>::new();
+    let mut aw = ActiveWindow::new();
     for _ in 0..num_indices {
         aw.insert(rng.next_u32() % WINDOW_SIZE);
     }
@@ -362,11 +363,11 @@ pub fn _random_mmr_membership_proof<H: AlgebraicHasher>() -> MmrMembershipProof<
 }
 
 /// Generate a random MsMembershipProof. For serialization testing. Might not be a consistent or valid object.
-pub fn random_mutator_set_membership_proof<H: AlgebraicHasher>() -> MsMembershipProof<H> {
+pub fn random_mutator_set_membership_proof() -> MsMembershipProof {
     pseudorandom_mutator_set_membership_proof(thread_rng().gen())
 }
 
-pub fn random_removal_record<H: AlgebraicHasher>() -> RemovalRecord<H> {
+pub fn random_removal_record() -> RemovalRecord {
     let mut rng = thread_rng();
     pseudorandom_removal_record(rng.gen::<[u8; 32]>())
 }
@@ -391,17 +392,14 @@ fn merkle_verify_tester_helper<H: AlgebraicHasher>(
 #[cfg(test)]
 mod shared_tests_test {
 
-    use twenty_first::shared_math::tip5::Tip5;
-
     use super::*;
 
     #[test]
     fn can_call() {
-        type H = Tip5;
-        let rcd = random_chunk_dictionary::<H>();
+        let rcd = random_chunk_dictionary();
         assert!(!rcd.dictionary.is_empty());
-        let _ = random_removal_record::<H>();
-        let mut rms = empty_rusty_mutator_set::<H>();
+        let _ = random_removal_record();
+        let mut rms = empty_rusty_mutator_set();
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams);
         let _ = make_item_and_randomnesses();
@@ -410,16 +408,14 @@ mod shared_tests_test {
 
     #[test]
     fn test_pseudorandom_mmra_with_single_mp() {
-        type H = Tip5;
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
-        let (mmra, mp) = pseudorandom_mmra_with_mp::<H>(rng.gen(), leaf);
+        let (mmra, mp) = pseudorandom_mmra_with_mp::<Hash>(rng.gen(), leaf);
         assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
     }
 
     #[test]
     fn test_pseudorandom_root_with_authentication_paths() {
-        type H = Tip5;
         let seed: [u8; 32] = thread_rng().gen();
         let mut outer_rng: StdRng = SeedableRng::from_seed(seed);
         for num_leafs in 0..20 {
@@ -438,14 +434,14 @@ mod shared_tests_test {
             }
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
             let leafs_and_indices = leafs.into_iter().zip(indices.into_iter()).collect_vec();
-            let (root, paths) = pseudorandom_merkle_root_with_authentication_paths::<H>(
+            let (root, paths) = pseudorandom_merkle_root_with_authentication_paths::<Hash>(
                 inner_rng.gen(),
                 tree_height,
                 &leafs_and_indices,
             );
             for ((leaf, index), path) in leafs_and_indices.into_iter().zip(paths.into_iter()) {
                 assert!(
-                    merkle_verify_tester_helper::<H>(root, index, &path, leaf),
+                    merkle_verify_tester_helper::<Hash>(root, index, &path, leaf),
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
                 );
             }
@@ -454,7 +450,6 @@ mod shared_tests_test {
 
     #[test]
     fn test_pseudorandom_mmra_with_mps() {
-        type H = Tip5;
         let seed: [u8; 32] = thread_rng().gen();
         let mut outer_rng: StdRng = SeedableRng::from_seed(seed);
         for num_leafs in 0..20 {
@@ -462,7 +457,7 @@ mod shared_tests_test {
             let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
 
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
-            let (mmra, mps) = pseudorandom_mmra_with_mps::<H>(inner_rng.gen(), &leafs);
+            let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs);
             for (leaf, mp) in leafs.into_iter().zip(mps) {
                 assert!(
                     mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0,

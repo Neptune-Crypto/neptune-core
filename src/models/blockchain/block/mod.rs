@@ -121,7 +121,7 @@ impl Block {
     }
 
     pub fn genesis_block() -> Self {
-        let mut genesis_mutator_set = MutatorSetAccumulator::<Hash>::default();
+        let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
 
         let premine_distribution = Self::premine_distribution();
@@ -141,7 +141,7 @@ impl Block {
                 timestamp,
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
-                mutator_set_hash: MutatorSetAccumulator::<Hash>::new().hash(),
+                mutator_set_hash: MutatorSetAccumulator::new().hash(),
             },
             witness: Witness::Faith,
         };
@@ -157,7 +157,7 @@ impl Block {
             let receiver_digest = receiving_address.privacy_digest;
 
             // Add pre-mine UTXO to MutatorSet
-            let addition_record = commit::<Hash>(utxo_digest, bad_randomness, receiver_digest);
+            let addition_record = commit(utxo_digest, bad_randomness, receiver_digest);
             ms_update.additions.push(addition_record);
             genesis_mutator_set.add(&addition_record);
 
@@ -215,8 +215,12 @@ impl Block {
 
     /// Merge a transaction into this block's transaction.
     /// The mutator set data must be valid in all inputs.
-    pub fn accumulate_transaction(&mut self, transaction: Transaction) {
-        // merge
+    pub fn accumulate_transaction(
+        &mut self,
+        transaction: Transaction,
+        old_mutator_set_accumulator: &MutatorSetAccumulator,
+    ) {
+        // merge transactions
         let merged_timestamp = BFieldElement::new(max(
             self.kernel.header.timestamp.value(),
             max(
@@ -224,24 +228,37 @@ impl Block {
                 transaction.kernel.timestamp.value(),
             ),
         ));
+        let new_transaction = self
+            .kernel
+            .body
+            .transaction
+            .clone()
+            .merge_with(transaction.clone());
 
-        // accumulate
-        let mut next_mutator_set_accumulator = self.kernel.body.mutator_set_accumulator.clone();
-
+        // accumulate mutator set updates
+        // Can't use the current mutator sat accumulator because it is in an in-between state.
+        let mut new_mutator_set_accumulator = old_mutator_set_accumulator.clone();
         let mutator_set_update = MutatorSetUpdate::new(
-            transaction.kernel.inputs.clone(),
-            transaction.kernel.outputs.clone(),
+            [
+                self.kernel.body.transaction.kernel.inputs.clone(),
+                transaction.kernel.inputs,
+            ]
+            .concat(),
+            [
+                self.kernel.body.transaction.kernel.outputs.clone(),
+                transaction.kernel.outputs.clone(),
+            ]
+            .concat(),
         );
 
-        let new_transaction = self.kernel.body.transaction.clone().merge_with(transaction);
         // Apply the mutator set update to get the `next_mutator_set_accumulator`
         mutator_set_update
-            .apply(&mut next_mutator_set_accumulator)
+            .apply(&mut new_mutator_set_accumulator)
             .expect("Mutator set mutation must work");
 
         let block_body: BlockBody = BlockBody {
             transaction: new_transaction,
-            mutator_set_accumulator: next_mutator_set_accumulator.clone(),
+            mutator_set_accumulator: new_mutator_set_accumulator.clone(),
             lock_free_mmr_accumulator: self.kernel.body.lock_free_mmr_accumulator.clone(),
             block_mmr_accumulator: self.kernel.body.block_mmr_accumulator.clone(),
             uncle_blocks: self.kernel.body.uncle_blocks.clone(),
@@ -560,7 +577,7 @@ mod block_tests {
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");
 
-        block_1.accumulate_transaction(new_tx);
+        block_1.accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator);
         assert!(
             block_1.is_valid(&genesis_block),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
