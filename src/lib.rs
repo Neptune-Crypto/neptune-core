@@ -303,36 +303,44 @@ where
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
 pub(crate) fn log_lock_event(lock_event: LockEvent) {
-    let tokio_id = match tokio::task::try_id() {
-        Some(id) => format!("{}", id),
-        None => "?".to_string(),
-    };
+    // Disabling lock-event logging for now.
+    // Reasons:
+    //    1. It is very verbose in the logs.
+    //    2. It's not really needed right now.
+    //    3. tracing-tests is causing a big mem-leak for tests.
+    //    4. We can re-enable if needed by toggling false/true.
+    if false {
+        let tokio_id = match tokio::task::try_id() {
+            Some(id) => format!("{}", id),
+            None => "?".to_string(),
+        };
 
-    let (event_type, info, acquisition) = match lock_event {
-        LockEvent::TryAcquire {
-            ref info,
-            acquisition,
-        } => ("TryAcquire", info, acquisition),
-        LockEvent::Acquire {
-            ref info,
-            acquisition,
-        } => ("Acquire", info, acquisition),
-        LockEvent::Release {
-            ref info,
-            acquisition,
-        } => ("Release", info, acquisition),
-    };
-    trace!(
-            ?lock_event,
-            "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
-            event_type,
-            info.name().unwrap_or("?"),
-            info.lock_type(),
-            acquisition,
-            current_thread_id(),
-            std::thread::current().name().unwrap_or("?"),
-            tokio_id,
-    );
+        let (event_type, info, acquisition) = match lock_event {
+            LockEvent::TryAcquire {
+                ref info,
+                acquisition,
+            } => ("TryAcquire", info, acquisition),
+            LockEvent::Acquire {
+                ref info,
+                acquisition,
+            } => ("Acquire", info, acquisition),
+            LockEvent::Release {
+                ref info,
+                acquisition,
+            } => ("Release", info, acquisition),
+        };
+        trace!(
+                ?lock_event,
+                "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
+                event_type,
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquisition,
+                current_thread_id(),
+                std::thread::current().name().unwrap_or("?"),
+                tokio_id,
+        );
+    }
 }
 const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 
@@ -360,35 +368,43 @@ pub(crate) fn current_thread_id() -> u64 {
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
 pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
-    let tokio_id = match tokio::task::try_id() {
-        Some(id) => format!("{}", id),
-        None => "?".to_string(),
-    };
+    // Disabling lock-event logging for now.
+    // Reasons:
+    //    1. It is very verbose in the logs.
+    //    2. It's not really needed right now.
+    //    3. tracing-tests is causing a big mem-leak for tests.
+    //    4. We can re-enable if needed by toggling false/true.
+    if false {
+        let tokio_id = match tokio::task::try_id() {
+            Some(id) => format!("{}", id),
+            None => "?".to_string(),
+        };
 
-    let (event_type, info, acquisition) = match lock_event {
-        sync_tokio::LockEvent::TryAcquire {
-            ref info,
-            acquisition,
-        } => ("TryAcquire", info, acquisition),
-        sync_tokio::LockEvent::Acquire {
-            ref info,
-            acquisition,
-        } => ("Acquire", info, acquisition),
-        sync_tokio::LockEvent::Release {
-            ref info,
-            acquisition,
-        } => ("Release", info, acquisition),
-    };
-    trace!(
-            ?lock_event,
-            "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
-            event_type,
-            info.name().unwrap_or("?"),
-            info.lock_type(),
-            acquisition,
-            current_thread_id(),
-            std::thread::current().name().unwrap_or("?"),
-            tokio_id,
-    );
+        let (event_type, info, acquisition) = match lock_event {
+            sync_tokio::LockEvent::TryAcquire {
+                ref info,
+                acquisition,
+            } => ("TryAcquire", info, acquisition),
+            sync_tokio::LockEvent::Acquire {
+                ref info,
+                acquisition,
+            } => ("Acquire", info, acquisition),
+            sync_tokio::LockEvent::Release {
+                ref info,
+                acquisition,
+            } => ("Release", info, acquisition),
+        };
+        trace!(
+                ?lock_event,
+                "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
+                event_type,
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquisition,
+                current_thread_id(),
+                std::thread::current().name().unwrap_or("?"),
+                tokio_id,
+        );
+    }
 }
 const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
