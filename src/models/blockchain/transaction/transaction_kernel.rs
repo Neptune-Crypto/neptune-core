@@ -103,7 +103,7 @@ pub fn pseudorandom_transaction_kernel(
     seed: [u8; 32],
     num_inputs: usize,
     num_outputs: usize,
-    num_pubscripts: usize,
+    num_public_announcements: usize,
 ) -> TransactionKernel {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let inputs = (0..num_inputs)
@@ -112,7 +112,7 @@ pub fn pseudorandom_transaction_kernel(
     let outputs = (0..num_outputs)
         .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
         .collect_vec();
-    let pubscripts = (0..num_pubscripts)
+    let pubscripts = (0..num_public_announcements)
         .map(|_| pseudorandom_public_announcement(rng.gen::<[u8; 32]>()))
         .collect_vec();
     let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
