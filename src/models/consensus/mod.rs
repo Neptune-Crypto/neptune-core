@@ -14,6 +14,7 @@ use triton_vm::prelude::PublicInput;
 use triton_vm::prelude::StarkParameters;
 
 pub mod mast_hash;
+pub mod tasm;
 
 /// This file contains abstractions for verifying consensus logic using TritonVM STARK
 /// proofs. The concrete logic is specified in the directories `transaction` and `block`.

@@ -1,5 +1,14 @@
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::utxo::Coin;
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::consensus::SecretWitness;
+use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
+use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
+use crate::util_types::mutator_set::shared::NUM_TRIALS;
+use crate::Hash;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::{
     triton_vm::{
         instruction::LabelledInstruction,
@@ -10,7 +19,8 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::consensus::SecretWitness;
+use crate::models::consensus::tasm::builtins as tasm;
+use crate::models::consensus::tasm::program::ConsensusProgram;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock {
@@ -25,8 +35,99 @@ impl TimeLock {
     pub fn until(date: u64) -> TimeLock {
         Self { release_date: date }
     }
+}
 
-    pub fn code(&self) -> Vec<LabelledInstruction> {
+impl ConsensusProgram for TimeLock {
+    #[allow(clippy::needless_return)]
+    fn source(&self) {
+        // get in the current program's hash digest
+        let self_digest: Digest = tasm::own_program_digest();
+
+        // read standard input: the transaction kernel mast hash
+        let tx_kernel_digest: Digest = tasm::tasm_io_read_stdin___digest();
+
+        // divine the timestamp and authenticate it against the kernel mast hash
+        let leaf_index: u32 = 5;
+        let timestamp: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let leaf: Digest = Hash::hash_varlen(&timestamp.encode());
+        let tree_height: u32 = 3;
+        tasm::tasm_hashing_merkle_verify(tx_kernel_digest, leaf_index, leaf, tree_height);
+
+        // get pointers to objects living in nondeterministic memory:
+        //  - list of input UTXOs
+        //  - list of input UTXOs' membership proofs in the mutator set
+        //  - transaction kernel
+        let input_utxos_pointer: u64 = tasm::tasm_io_read_secin___bfe().value();
+        let input_utxos: Vec<Utxo> =
+            tasm::decode_from_memory(BFieldElement::new(input_utxos_pointer));
+        let input_mps_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let input_mps: Vec<MsMembershipProof> = tasm::decode_from_memory(input_mps_pointer);
+        let transaction_kernel_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let transaction_kernel: TransactionKernel =
+            tasm::decode_from_memory(transaction_kernel_pointer);
+
+        // authenticate kernel
+        let transaction_kernel_hash = Hash::hash(&transaction_kernel);
+        assert_eq!(transaction_kernel_hash, tx_kernel_digest);
+
+        // compute the inputs (removal records' absolute index sets)
+        let mut inputs_derived: Vec<Digest> = Vec::with_capacity(input_utxos.len());
+        let mut i: usize = 0;
+        while i < input_utxos.len() {
+            let aocl_leaf_index: u64 = input_mps[i].auth_path_aocl.leaf_index;
+            let receiver_preimage: Digest = input_mps[i].receiver_preimage;
+            let sender_randomness: Digest = input_mps[i].sender_randomness;
+            let item: Digest = Hash::hash(&input_utxos[i]);
+            let index_set: [u128; NUM_TRIALS as usize] =
+                get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_leaf_index);
+            inputs_derived.push(Hash::hash(&index_set));
+            i += 1;
+        }
+
+        // read inputs (absolute index sets) from kernel
+        let mut inputs_kernel: Vec<Digest> = Vec::with_capacity(transaction_kernel.inputs.len());
+        i = 0;
+        while i < transaction_kernel.inputs.len() {
+            let index_set = transaction_kernel.inputs[i].absolute_indices.to_vec();
+            inputs_kernel.push(Hash::hash(&index_set));
+            i += 1;
+        }
+
+        // authenticate inputs
+        tasm::tasm_list_unsafeimplu32_multiset_equality(inputs_derived, inputs_kernel);
+
+        // iterate over inputs
+        i = 0;
+        while i < input_utxos.len() {
+            // get coins
+            let coins: &Vec<Coin> = &input_utxos[i].coins;
+
+            // if this typescript is present
+            let mut j: usize = 0;
+            while j < coins.len() {
+                let coin: &Coin = &coins[j];
+                if coin.type_script_hash == self_digest {
+                    // extract state
+                    let state: &Vec<BFieldElement> = &coin.state;
+
+                    // assert format
+                    assert!(state.len() == 1);
+
+                    // extract timestamp
+                    let release_date: BFieldElement = state[0];
+
+                    // test time lock
+                    assert!(release_date.value() < timestamp.value());
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+
+        return;
+    }
+
+    fn code(&self) -> Vec<LabelledInstruction> {
         let unlock_hi = self.release_date >> 32;
         let unlock_lo = self.release_date & 0xffffffff;
 
