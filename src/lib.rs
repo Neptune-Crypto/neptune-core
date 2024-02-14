@@ -157,11 +157,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         .await?;
     info!("UTXO restoration check complete");
 
-    let global_state = global_state_lock.lock_guard().await;
-
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];
-    for peer_address in global_state.cli.peers.clone() {
+    for peer_address in global_state_lock.cli().peers.clone() {
         let peer_state_var = global_state_lock.clone(); // bump arc refcount
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
@@ -189,7 +187,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     let miner_state_lock = global_state_lock.clone(); // bump arc refcount.
-    if global_state.cli.mine {
+    if global_state_lock.cli().mine {
         let miner_join_handle = tokio::task::Builder::new()
             .name("miner")
             .spawn(async move {
@@ -211,13 +209,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
-        format!("127.0.0.1:{}", global_state.cli.rpc_port),
+        format!("127.0.0.1:{}", global_state_lock.cli().rpc_port),
         Json::default,
     )
     .await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
-
-    drop(global_state);
 
     let rpc_state_lock = global_state_lock.clone();
 

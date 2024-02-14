@@ -70,7 +70,7 @@ async fn check_if_connection_is_allowed(
     }
 
     // Disallow connection if peer is banned via CLI arguments
-    if global_state.cli.ban.contains(&peer_address.ip()) {
+    if global_state.cli().ban.contains(&peer_address.ip()) {
         warn!(
             "Banned peer {} attempted to connect. Disallowing.",
             peer_address.ip()
@@ -84,14 +84,15 @@ async fn check_if_connection_is_allowed(
         .get_peer_standing_from_database(peer_address.ip())
         .await;
 
-    if standing.is_some() && standing.unwrap().standing < -(global_state.cli.peer_tolerance as i32)
+    if standing.is_some()
+        && standing.unwrap().standing < -(global_state.cli().peer_tolerance as i32)
     {
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
     if let Some(status) = {
         // Disallow connection if max number of &peers has been attained
-        if (global_state.cli.max_peers as usize) <= global_state.net.peer_map.len() {
+        if (global_state.cli().max_peers as usize) <= global_state.net.peer_map.len() {
             Some(ConnectionStatus::Refused(
                 ConnectionRefusedReason::MaxPeerNumberExceeded,
             ))
@@ -525,8 +526,14 @@ mod connect_tests {
     #[tokio::test]
     async fn test_get_connection_status() -> Result<()> {
         let network = Network::Alpha;
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(network, 1).await?;
+        let (
+            _peer_broadcast_tx,
+            _from_main_rx_clone,
+            _to_main_tx,
+            _to_main_rx1,
+            mut state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(network, 1).await?;
 
         // Get an address for a peer that's not already connected
         let (other_handshake, peer_sa) = get_dummy_peer_connection_data_genesis(network, 1);
@@ -554,7 +561,11 @@ mod connect_tests {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
         }
 
-        state_lock.lock_mut(|s| s.cli.max_peers = 1).await;
+        // pretend --max_peers is 1.
+        let mut cli = state_lock.cli().clone();
+        cli.max_peers = 1;
+        state_lock.set_cli(cli.clone()).await;
+
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -567,7 +578,10 @@ mod connect_tests {
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
             );
         }
-        state_lock.lock_mut(|s| s.cli.max_peers = 100).await;
+
+        // pretend --max-peers is 100
+        cli.max_peers = 100;
+        state_lock.set_cli(cli.clone()).await;
 
         // Attempt to connect to already connected peer
         let connected_peer: PeerInfo = state_lock
@@ -588,9 +602,12 @@ mod connect_tests {
             );
         }
 
+        // pretend --ban <peer_sa>
+        cli.ban.push(peer_sa.ip());
+        state_lock.set_cli(cli.clone()).await;
+
         // Verify that banned peers are rejected by this check
         // First check that peers can be banned by command-line arguments
-        state_lock.lock_mut(|s| s.cli.ban.push(peer_sa.ip())).await;
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -602,7 +619,10 @@ mod connect_tests {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on CLI-ban");
         }
 
-        state_lock.lock_mut(|s| s.cli.ban.pop()).await;
+        // pretend --ban ""
+        cli.ban.pop();
+        state_lock.set_cli(cli).await;
+
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -839,11 +859,19 @@ mod connect_tests {
             ))?)
             .build();
 
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await?;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            _to_main_rx1,
+            mut state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Alpha, 2).await?;
 
         // set max_peers to 2 to ensure failure on next connection attempt
-        state_lock.lock_mut(|s| s.cli.max_peers = 2).await;
+        let mut cli = state_lock.cli().clone();
+        cli.max_peers = 2;
+        state_lock.set_cli(cli).await;
 
         let (_, _, _latest_block_header) = get_dummy_latest_block(None);
         let answer = answer_peer(

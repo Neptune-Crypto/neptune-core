@@ -402,7 +402,7 @@ impl MainLoopHandler {
                         let stay_in_sync_mode = stay_in_sync_mode(
                             &last_block.kernel.header,
                             &main_loop_state.sync_state,
-                            global_state_mut.cli.max_number_of_blocks_before_syncing,
+                            global_state_mut.cli().max_number_of_blocks_before_syncing,
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
@@ -426,7 +426,7 @@ impl MainLoopHandler {
                 }
 
                 // Inform miner to work on a new block
-                if self.global_state_lock.lock(|s| s.cli.mine).await {
+                if self.global_state_lock.cli().mine {
                     self.main_to_miner_tx
                         .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
                 }
@@ -456,7 +456,7 @@ impl MainLoopHandler {
                 if enter_sync_mode(
                     global_state_mut.chain.light_state().header(),
                     claimed_state,
-                    global_state_mut.cli.max_number_of_blocks_before_syncing / 3,
+                    global_state_mut.cli().max_number_of_blocks_before_syncing / 3,
                 ) {
                     info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
@@ -482,7 +482,7 @@ impl MainLoopHandler {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         global_state_mut.chain.light_state().header(),
                         &main_loop_state.sync_state,
-                        global_state_mut.cli.max_number_of_blocks_before_syncing,
+                        global_state_mut.cli().max_number_of_blocks_before_syncing,
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
@@ -491,8 +491,7 @@ impl MainLoopHandler {
                 }
             }
             PeerThreadToMain::PeerDiscoveryAnswer((pot_peers, reported_by, distance)) => {
-                let global_state = self.global_state_lock.lock_guard().await;
-                let max_peers = global_state.cli.max_peers;
+                let max_peers = self.global_state_lock.cli().max_peers;
                 for pot_peer in pot_peers {
                     main_loop_state.potential_peers.add(
                         reported_by,
@@ -550,21 +549,21 @@ impl MainLoopHandler {
         let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
 
         // Check if we are connected to too many peers
-        if connected_peers.len() > global_state.cli.max_peers as usize {
+        if connected_peers.len() > global_state.cli().max_peers as usize {
             // This would indicate a race-condition on the peer map field in the state which
             // we unfortunately cannot exclude. So we just disconnect from a peer that the user
             // didn't request a connection to.
             warn!(
                 "Max peer parameter is exceeded. max is {} but we are connected to {}. Attempting to fix.",
                 connected_peers.len(),
-                global_state.cli.max_peers
+                global_state.cli().max_peers
             );
             let mut rng = thread_rng();
 
             // pick a peer that was not specified in the CLI arguments to disconnect from
             let peer_to_disconnect = connected_peers
                 .iter()
-                .filter(|peer| !global_state.cli.peers.contains(&peer.connected_address))
+                .filter(|peer| !global_state.cli().peers.contains(&peer.connected_address))
                 .choose(&mut rng);
             match peer_to_disconnect {
                 Some(peer) => {
@@ -584,7 +583,7 @@ impl MainLoopHandler {
             .map(|x| x.connected_address)
             .collect_vec();
         let peers_with_lost_connection = global_state
-            .cli
+            .cli()
             .peers
             .iter()
             .filter(|peer| !connected_peer_addresses.contains(peer))
@@ -598,7 +597,7 @@ impl MainLoopHandler {
                 .await;
 
             if standing.is_some()
-                && standing.unwrap().standing < -(global_state.cli.peer_tolerance as i32)
+                && standing.unwrap().standing < -(global_state.cli().peer_tolerance as i32)
             {
                 info!("Not reconnecting to peer with lost connection because it was banned: {peer_with_lost_connection}");
             } else {
@@ -635,9 +634,9 @@ impl MainLoopHandler {
 
         // We don't make an outgoing connection if we've reached the peer limit, *or* if we are
         // one below the peer limit as we reserve this last slot for an ingoing connection.
-        if connected_peers.len() == global_state.cli.max_peers as usize
+        if connected_peers.len() == global_state.cli().max_peers as usize
             || connected_peers.len() > 2
-                && connected_peers.len() - 1 == global_state.cli.max_peers as usize
+                && connected_peers.len() - 1 == global_state.cli().max_peers as usize
         {
             return Ok(());
         }

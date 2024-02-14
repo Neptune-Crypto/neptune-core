@@ -111,16 +111,11 @@ pub mod wallet;
 /// (read or write) and just scroll up to find the previous `Acquire` for
 /// write event to see which thread is holding the lock.
 #[derive(Debug, Clone)]
-pub struct GlobalStateLock(sync_tokio::AtomicRw<GlobalState>);
+pub struct GlobalStateLock {
+    global_state_lock: sync_tokio::AtomicRw<GlobalState>,
 
-impl From<GlobalState> for GlobalStateLock {
-    fn from(global_state: GlobalState) -> Self {
-        Self(sync_tokio::AtomicRw::from((
-            global_state,
-            Some("GlobalState"),
-            Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
-        )))
-    }
+    /// The `cli_args::Args` are read-only and accessible by all threads.
+    cli: cli_args::Args,
 }
 
 impl GlobalStateLock {
@@ -132,8 +127,17 @@ impl GlobalStateLock {
         mempool: Mempool,
         mining: bool,
     ) -> Self {
-        let global_state = GlobalState::new(wallet_state, chain, net, cli, mempool, mining);
-        Self::from(global_state)
+        let global_state = GlobalState::new(wallet_state, chain, net, cli.clone(), mempool, mining);
+        let global_state_lock = sync_tokio::AtomicRw::from((
+            global_state,
+            Some("GlobalState"),
+            Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
+        ));
+
+        Self {
+            global_state_lock,
+            cli,
+        }
     }
 
     // check if mining
@@ -182,19 +186,31 @@ impl GlobalStateLock {
             .prune_abandoned_monitored_utxos(block_depth_threshhold)
             .await
     }
+
+    #[inline]
+    pub fn cli(&self) -> &cli_args::Args {
+        &self.cli
+    }
+
+    // Only for tests to simulate different CLI params.
+    #[cfg(test)]
+    pub async fn set_cli(&mut self, cli: cli_args::Args) {
+        self.lock_guard_mut().await.cli = cli.clone();
+        self.cli = cli;
+    }
 }
 
 impl Deref for GlobalStateLock {
     type Target = sync_tokio::AtomicRw<GlobalState>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.global_state_lock
     }
 }
 
 impl DerefMut for GlobalStateLock {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.global_state_lock
     }
 }
 
@@ -213,7 +229,7 @@ pub struct GlobalState {
     pub net: NetworkingState,
 
     /// The `cli_args::Args` are read-only and accessible by all threads.
-    pub cli: cli_args::Args,
+    cli: cli_args::Args,
 
     /// The `Mempool` may only be updated by the main thread.
     pub mempool: Mempool,
@@ -548,7 +564,7 @@ impl GlobalState {
         let mut transaction_validity_logic =
             TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
 
-        if self.cli.privacy {
+        if self.cli().privacy {
             transaction_validity_logic
                 .prove()
                 .expect("Proof generation must work when creating a new transaction");
@@ -571,8 +587,8 @@ impl GlobalState {
         HandshakeData {
             tip_header: self.chain.light_state().header().clone(),
             // TODO: Should be `None` if incoming connections are not accepted
-            listen_port: Some(self.cli.peer_port),
-            network: self.cli.network,
+            listen_port: Some(self.cli().peer_port),
+            network: self.cli().network,
             instance_id: self.net.instance_id,
             version: VERSION.to_string(),
             // For now, all nodes are archival nodes
@@ -1073,6 +1089,11 @@ impl GlobalState {
         todo!("We don't yet support non-archival nodes");
 
         // Ok(())
+    }
+
+    #[inline]
+    pub fn cli(&self) -> &cli_args::Args {
+        &self.cli
     }
 }
 

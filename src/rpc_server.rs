@@ -182,13 +182,12 @@ impl NeptuneRPCServer {
 
 impl RPC for NeptuneRPCServer {
     async fn network(self, _: context::Context) -> Network {
-        self.state.lock_guard().await.cli.network
+        self.state.cli().network
     }
 
     async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
-        let state = self.state.lock_guard().await;
-        let listen_for_peers_ip = state.cli.listen_addr;
-        let listen_for_peers_socket = state.cli.peer_port;
+        let listen_for_peers_ip = self.state.cli().listen_addr;
+        let listen_for_peers_socket = self.state.cli().peer_port;
         let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
         Some(socket_address)
     }
@@ -575,7 +574,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn pause_miner(self, _context: tarpc::context::Context) {
-        if self.state.lock_guard().await.cli.mine {
+        if self.state.cli().mine {
             let _ = self
                 .rpc_server_to_main_tx
                 .send(RPCServerToMain::PauseMiner)
@@ -586,7 +585,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn restart_miner(self, _context: tarpc::context::Context) {
-        if self.state.lock_guard().await.cli.mine {
+        if self.state.cli().mine {
             let _ = self
                 .rpc_server_to_main_tx
                 .send(RPCServerToMain::RestartMiner)

@@ -83,7 +83,7 @@ impl PeerLoopHandler {
             .map(|p| p.standing.sanction(reason))
             .unwrap_or(0);
 
-        if new_standing < -(global_state_mut.cli.peer_tolerance as PeerStandingNumber) {
+        if new_standing < -(global_state_mut.cli().peer_tolerance as PeerStandingNumber) {
             warn!("Banning peer");
             bail!("Banning peer");
         }
@@ -207,7 +207,7 @@ impl PeerLoopHandler {
         // If parent is not known, request the parent, and add the current to the peer fork resolution list
         if parent_block.is_none() && parent_height > BlockHeight::genesis() {
             info!(
-                "Parent not know: Requesting previous block with height {} from peer",
+                "Parent not known: Requesting previous block with height {} from peer",
                 parent_height
             );
 
@@ -226,9 +226,7 @@ impl PeerLoopHandler {
                     && peer_state.fork_reconciliation_blocks.len() + 1
                         < self
                             .global_state_lock
-                            .lock_guard()
-                            .await
-                            .cli
+                            .cli()
                             .max_number_of_blocks_before_syncing
             {
                 peer_state.fork_reconciliation_blocks.push(*received_block);
@@ -493,9 +491,7 @@ impl PeerLoopHandler {
                 let responded_batch_size = cmp::min(
                     requested_batch_size,
                     self.global_state_lock
-                        .lock_guard()
-                        .await
-                        .cli
+                        .cli()
                         .max_number_of_blocks_before_syncing
                         / 2,
                 );
@@ -929,8 +925,8 @@ impl PeerLoopHandler {
                 let request_batch_size = std::cmp::min(
                     STANDARD_BLOCK_BATCH_SIZE,
                     self.global_state_lock
-                        .lock(|s| s.cli.max_number_of_blocks_before_syncing)
-                        .await,
+                        .cli()
+                        .max_number_of_blocks_before_syncing,
                 );
 
                 peer.send(PeerMessage::BlockRequestBatch(
@@ -1117,7 +1113,7 @@ impl PeerLoopHandler {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
 
-        if global_state.net.peer_map.len() >= global_state.cli.max_peers as usize {
+        if global_state.net.peer_map.len() >= global_state.cli().max_peers as usize {
             bail!("Attempted to connect to more peers than allowed. Aborting connection.");
         }
 
@@ -1183,7 +1179,7 @@ mod peer_loop_tests {
     use tracing_test::traced_test;
 
     use crate::{
-        config_models::{cli_args, network::Network},
+        config_models::network::Network,
         models::{peer::TransactionNotification, state::wallet::WalletSecret},
         tests::shared::{
             add_block, get_dummy_peer_connection_data_genesis, get_dummy_socket_address,
@@ -1852,15 +1848,21 @@ mod peer_loop_tests {
         // In this scenario the peer sends more blocks than the client allows to store in the
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
         // process as the alternative is that the program will crash because it runs out of RAM.
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 1).await?;
-        let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let (
+            _peer_broadcast_tx,
+            from_main_rx_clone,
+            to_main_tx,
+            mut to_main_rx1,
+            mut state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Alpha, 1).await?;
 
         // Restrict max number of blocks held in memory to 2.
-        global_state_mut.cli = cli_args::Args {
-            max_number_of_blocks_before_syncing: 2,
-            ..Default::default()
-        };
+        let mut cli = state_lock.cli().clone();
+        cli.max_number_of_blocks_before_syncing = 2;
+        state_lock.set_cli(cli).await;
+
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
         let genesis_block: Block = global_state_mut
