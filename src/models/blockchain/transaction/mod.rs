@@ -1,12 +1,14 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
+pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
 use crate::models::consensus::Witness;
 use anyhow::Result;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
@@ -24,8 +26,8 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
+use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
-use self::utxo::{LockScript, Utxo};
 use self::validity::TransactionValidationLogic;
 use super::block::Block;
 use super::shared::Hash;
@@ -36,9 +38,11 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-pub type TransactionWitness = Witness<TransactionPrimitiveWitness, TransactionValidationLogic>;
+pub type TransactionWitness = Witness<PrimitiveWitness, TransactionValidationLogic>;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, Arbitrary,
+)]
 pub struct PublicAnnouncement {
     pub message: Vec<BFieldElement>,
 }
@@ -47,20 +51,6 @@ impl PublicAnnouncement {
     pub fn new(message: Vec<BFieldElement>) -> Self {
         Self { message }
     }
-}
-
-/// The raw witness is the most primitive type of transaction witness.
-/// It exposes secret data and is therefore not for broadcasting.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct TransactionPrimitiveWitness {
-    pub input_utxos: Vec<Utxo>,
-    pub input_lock_scripts: Vec<LockScript>,
-    pub type_scripts: Vec<TypeScript>,
-    pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
-    pub input_membership_proofs: Vec<MsMembershipProof>,
-    pub output_utxos: Vec<Utxo>,
-    pub mutator_set_accumulator: MutatorSetAccumulator,
-    pub kernel: TransactionKernel,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -244,7 +234,7 @@ impl Transaction {
                 if self_witness.kernel.mutator_set_hash != other_witness.kernel.mutator_set_hash {
                     error!("Cannot merge two transactions with distinct mutator set hashes.");
                 }
-                Witness::Primitive(TransactionPrimitiveWitness {
+                Witness::Primitive(PrimitiveWitness {
                     input_utxos: [
                         self_witness.input_utxos.clone(),
                         other_witness.input_utxos.clone(),
@@ -326,7 +316,7 @@ impl Transaction {
 
     /// Verify the transaction directly from the primitive witness, without proofs or
     /// decomposing into subclaims.
-    fn validate_primitive_witness(&self, primitive_witness: &TransactionPrimitiveWitness) -> bool {
+    fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
             .input_lock_scripts
@@ -520,7 +510,7 @@ mod witness_tests {
             timestamp: BFieldElement::new(0),
             mutator_set_hash: Digest::default(),
         };
-        let primitive_witness = TransactionPrimitiveWitness {
+        let primitive_witness = PrimitiveWitness {
             input_utxos: vec![],
             type_scripts: vec![],
             input_lock_scripts: vec![],
@@ -532,7 +522,7 @@ mod witness_tests {
         };
 
         let encoded = primitive_witness.encode();
-        let decoded = *TransactionPrimitiveWitness::decode(&encoded).unwrap();
+        let decoded = *PrimitiveWitness::decode(&encoded).unwrap();
         assert_eq!(primitive_witness, decoded);
     }
 }
@@ -542,6 +532,7 @@ mod transaction_tests {
     use rand::random;
     use std::time::Duration;
     use tracing_test::traced_test;
+    use transaction_tests::utxo::{LockScript, Utxo};
 
     use super::*;
     use crate::{

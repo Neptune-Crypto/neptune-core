@@ -10,7 +10,7 @@ use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::{
-    blockchain::transaction::{utxo::Utxo, TransactionPrimitiveWitness},
+    blockchain::transaction::{utxo::Utxo, PrimitiveWitness},
     consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic},
 };
 
@@ -46,9 +46,9 @@ impl TypeScriptsHalt {
 }
 
 impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
-    type PrimitiveWitness = TransactionPrimitiveWitness;
+    type PrimitiveWitness = PrimitiveWitness;
 
-    fn new_from_primitive_witness(primitive_witness: &TransactionPrimitiveWitness) -> Self {
+    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
         let claim = Claim {
             input: primitive_witness.kernel.mast_hash().values().to_vec(),
             output: vec![],

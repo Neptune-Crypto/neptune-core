@@ -26,11 +26,12 @@ use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
+use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
 use super::blockchain::transaction::validity::TransactionValidationLogic;
+use super::blockchain::transaction::PublicAnnouncement;
 use super::blockchain::transaction::Transaction;
-use super::blockchain::transaction::{PublicAnnouncement, TransactionPrimitiveWitness};
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::blockchain::type_scripts::TypeScript;
 use super::consensus::ValidationLogic;
@@ -550,7 +551,7 @@ impl GlobalState {
         // is here the spending key reversed.
         let mut secret_input = spending_key.unlock_key.encode();
         secret_input.reverse();
-        let mut primitive_witness = TransactionPrimitiveWitness {
+        let mut primitive_witness = PrimitiveWitness {
             input_utxos,
             input_lock_scripts,
             type_scripts,

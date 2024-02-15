@@ -21,7 +21,7 @@ use self::{
     kernel_to_lock_scripts::KernelToLockScripts, kernel_to_type_scripts::KernelToTypeScripts,
     typescripts_halt::TypeScriptsHalt,
 };
-use super::TransactionPrimitiveWitness;
+use super::PrimitiveWitness;
 
 /// The validity of a transaction, in the base case, decomposes into
 /// these subclaims.
@@ -44,7 +44,7 @@ pub struct TransactionValidationLogic {
 }
 
 impl TransactionValidationLogic {
-    pub fn new_from_primitive_witness(primitive_witness: &TransactionPrimitiveWitness) -> Self {
+    pub fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
         let lock_scripts_halt = LockScriptsHalt::new_from_primitive_witness(primitive_witness);
         let kernel_to_lock_scripts =
             KernelToLockScripts::new_from_primitive_witness(primitive_witness);

@@ -2,6 +2,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::prelude::{triton_vm, twenty_first};
 
 use anyhow::bail;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
@@ -15,7 +16,7 @@ use super::chunk::Chunk;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
 pub struct ChunkDictionary {
     // {chunk index => (MMR membership proof for the whole chunk to which index belongs, chunk value)}
     pub dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>,

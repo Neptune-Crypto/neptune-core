@@ -42,6 +42,8 @@ use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
+use self::primitive_witness::PrimitiveWitness;
+
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
 /// Prepare a Block for mining
@@ -214,7 +216,7 @@ fn make_coinbase_transaction(
         mutator_set_hash: mutator_set_accumulator.hash(),
     };
 
-    let primitive_witness = TransactionPrimitiveWitness {
+    let primitive_witness = PrimitiveWitness {
         input_utxos: vec![],
         type_scripts: vec![TypeScript::native_coin()],
         input_lock_scripts: vec![],

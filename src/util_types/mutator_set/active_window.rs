@@ -1,5 +1,6 @@
 use crate::prelude::twenty_first;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use super::chunk::Chunk;
 use super::shared::{CHUNK_SIZE, WINDOW_SIZE};
 
-#[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize, GetSize, BFieldCodec, Arbitrary)]
 pub struct ActiveWindow {
     // It's OK to store this in memory, since it's on the size of kilobytes, not gigabytes.
     pub sbf: Vec<u32>,

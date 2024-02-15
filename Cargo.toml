@@ -10,9 +10,9 @@ publish = false
 aead = "0"
 aes-gcm = "0"
 anyhow = "1"
+arbitrary = { version = "1", features = ["derive"] }
 bech32 = "0"
 bincode = "1"
-tiny-bip39 = "1.0.0"
 bytes = "1"
 bytesize = "1"
 chrono = "^0.4.31"
@@ -40,6 +40,7 @@ serde_json = "1"
 strum = { version = "0.25", features = ["derive"] }
 tarpc = { version = "^0.34", features = ["tokio1", "serde-transport", "serde-transport-json", "tcp"] }
 tasm-lib = "0.2.1"
+tiny-bip39 = "1.0.0"
 tokio = { version = "1", features = ["full", "tracing"] }
 tokio-serde = { version = "0", features = ["bincode", "json"] }
 tokio-util = { version = "0", features = ["codec"] }
@@ -57,6 +58,8 @@ zeroize = "1.7.0"
 [dev-dependencies]
 pin-project-lite = "0.2.13"
 tokio-test = "0"
+proptest = "1.4"
+proptest-arbitrary-interop = "0.1"
 
 [dev-dependencies.cargo-husky]
 default-features = false

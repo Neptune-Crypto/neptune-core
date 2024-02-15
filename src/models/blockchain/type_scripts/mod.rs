@@ -13,17 +13,17 @@ use tasm_lib::{
 
 use native_currency::native_currency_program;
 
-use super::transaction::TransactionPrimitiveWitness;
+use super::transaction::primitive_witness::PrimitiveWitness;
 
 pub mod native_currency;
 pub mod neptune_coins;
 pub mod time_lock;
 
 trait TypeScriptValidationLogic<ExternalWitness>:
-    ValidationLogic<(TransactionPrimitiveWitness, ExternalWitness)>
+    ValidationLogic<(PrimitiveWitness, ExternalWitness)>
 where
     ExternalWitness: BFieldCodec,
-    (TransactionPrimitiveWitness, ExternalWitness): SecretWitness,
+    (PrimitiveWitness, ExternalWitness): SecretWitness,
 {
 }
 

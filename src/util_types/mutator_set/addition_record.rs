@@ -1,5 +1,6 @@
 use crate::prelude::twenty_first;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -7,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize, BFieldCodec, Arbitrary,
+)]
 pub struct AdditionRecord {
     pub canonical_commitment: Digest,
 }

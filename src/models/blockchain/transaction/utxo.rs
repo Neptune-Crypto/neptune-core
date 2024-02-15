@@ -3,6 +3,7 @@ use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::type_scripts::native_currency;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_traits::Zero;
 use rand::rngs::StdRng;
@@ -19,14 +20,14 @@ use crate::models::blockchain::type_scripts::native_currency::NATIVE_CURRENCY_TY
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
 
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,

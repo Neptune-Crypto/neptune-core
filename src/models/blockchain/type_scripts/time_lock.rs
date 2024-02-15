@@ -1,12 +1,17 @@
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
+use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::SecretWitness;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::Hash;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::{
@@ -387,21 +392,68 @@ impl ConsensusProgram for TimeLock {
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLockWitness {
-    time_lock: TimeLock,
-    release_date: u64,
-    mast_path: Vec<Digest>,
+    /// One timestamp for every input UTXO. Inputs that do not have a time lock are
+    /// assigned timestamp 0, which is automatically satisfied.
+    release_dates: Vec<u64>,
     input_utxos: Vec<Utxo>,
-    input_mps: Vec<MsMembershipProof>,
+    input_membership_proofs: Vec<MsMembershipProof>,
     transaction_kernel: TransactionKernel,
+}
+
+impl TimeLockWitness {
+    pub fn from_primitive_witness(transaction_primitive_witness: &PrimitiveWitness) -> Self {
+        let release_dates = transaction_primitive_witness
+            .input_utxos
+            .iter()
+            .map(|utxo| {
+                utxo.coins
+                    .iter()
+                    .find(|coin| coin.type_script_hash == TimeLock::hash())
+                    .cloned()
+                    .map(|coin| {
+                        coin.state
+                            .first()
+                            .copied()
+                            .unwrap_or_else(|| BFieldElement::new(0))
+                    })
+                    .unwrap_or_else(|| BFieldElement::new(0))
+            })
+            .map(|b| b.value())
+            .collect_vec();
+        let transaction_kernel =
+            TransactionKernel::from_primitive_witness(transaction_primitive_witness);
+        let input_utxos = transaction_primitive_witness.input_utxos.clone();
+        let input_mps = transaction_primitive_witness
+            .input_membership_proofs
+            .clone();
+        Self {
+            release_dates,
+            input_utxos,
+            input_membership_proofs: input_mps,
+            transaction_kernel,
+        }
+    }
 }
 
 impl SecretWitness for TimeLockWitness {
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
-        NonDeterminism::new(vec![BFieldElement::new(self.release_date)])
-            .with_digests(self.mast_path.clone())
+        NonDeterminism::new(self.release_dates.encode()).with_digests(
+            self.transaction_kernel
+                .mast_path(TransactionKernelField::Timestamp)
+                .clone(),
+        )
     }
 
     fn subprogram(&self) -> Program {
         Program::new(&TimeLock::code())
+    }
+}
+
+impl<'a> Arbitrary<'a> for TimeLockWitness {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let transaction_primitive_witness: PrimitiveWitness = u.arbitrary()?;
+        Ok(TimeLockWitness::from_primitive_witness(
+            &transaction_primitive_witness,
+        ))
     }
 }

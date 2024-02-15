@@ -10,7 +10,7 @@ use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::{
-    blockchain::transaction::{utxo::LockScript, TransactionPrimitiveWitness},
+    blockchain::transaction::{utxo::LockScript, PrimitiveWitness},
     consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic},
 };
 
@@ -36,11 +36,9 @@ pub struct LockScriptsHalt {
 }
 
 impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
-    type PrimitiveWitness = TransactionPrimitiveWitness;
+    type PrimitiveWitness = PrimitiveWitness;
 
-    fn new_from_primitive_witness(
-        primitive_witness: &TransactionPrimitiveWitness,
-    ) -> LockScriptsHalt {
+    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> LockScriptsHalt {
         let program_and_program_digests_and_spending_keys = primitive_witness
             .input_lock_scripts
             .iter()

@@ -51,6 +51,7 @@ use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
+use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_option;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_public_announcement;
 use crate::models::blockchain::transaction::transaction_kernel::pseudorandom_transaction_kernel;
@@ -58,7 +59,6 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
 use crate::models::blockchain::transaction::TransactionWitness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::blockchain::type_scripts::TypeScript;
@@ -799,7 +799,7 @@ pub fn make_mock_transaction_with_generation_key(
         .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
         .collect_vec();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
-    let primitive_witness = TransactionPrimitiveWitness {
+    let primitive_witness = PrimitiveWitness {
         input_utxos,
         type_scripts,
         input_lock_scripts,
@@ -925,7 +925,7 @@ pub fn make_mock_block(
         mutator_set_hash: previous_mutator_set.hash(),
     };
 
-    let primitive_witness = TransactionPrimitiveWitness {
+    let primitive_witness = PrimitiveWitness {
         input_utxos: vec![],
         type_scripts: vec![TypeScript::native_coin()],
         lock_script_witnesses: vec![],

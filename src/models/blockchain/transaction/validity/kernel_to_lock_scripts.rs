@@ -1,7 +1,7 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
-use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
+use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::{
     transaction_kernel::TransactionKernelField, utxo::Utxo,
 };
@@ -47,9 +47,9 @@ impl KernelToLockScripts {
 }
 
 impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
-    type PrimitiveWitness = TransactionPrimitiveWitness;
+    type PrimitiveWitness = PrimitiveWitness;
 
-    fn new_from_primitive_witness(primitive_witness: &TransactionPrimitiveWitness) -> Self {
+    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
         let claim = Claim {
             input: primitive_witness.kernel.mast_hash().into(),
             output: primitive_witness

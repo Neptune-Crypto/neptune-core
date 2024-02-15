@@ -1,6 +1,7 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
@@ -47,7 +48,9 @@ pub enum MembershipProofError {
 }
 
 // In order to store this structure in the database, it needs to be serializable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec, TasmObject, Arbitrary,
+)]
 pub struct MsMembershipProof {
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,

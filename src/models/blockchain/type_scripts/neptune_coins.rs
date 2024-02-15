@@ -1,6 +1,7 @@
 use crate::{models::blockchain::transaction::utxo::Coin, prelude::twenty_first};
 
 use anyhow::bail;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -72,6 +73,24 @@ impl NeptuneCoins {
             state: self.encode(),
         }];
         dictionary
+    }
+
+    /// Convert the amount to Neptune atomic units (nau) as a 64-bit floating point.
+    /// Note that this function loses precision!
+    pub fn to_nau_f64(&self) -> f64 {
+        if self.is_zero() {
+            return 0.0;
+        }
+        let nau = self.to_nau();
+        let bit_size = nau.bits();
+        let shift = if bit_size > 52 { bit_size - 52 } else { 0 };
+        let (_sign, digits) = (nau >> shift).to_u64_digits();
+        let top_digit = digits[0];
+        let mut float = top_digit as f64;
+        for _ in 0..shift {
+            float *= 2.0;
+        }
+        float
     }
 
     /// Convert the amount to Neptune atomic units (nau)
@@ -296,6 +315,16 @@ pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let number: [u32; 4] = rng.gen();
     NeptuneCoins(U32s::new(number))
+}
+
+impl<'a> Arbitrary<'a> for NeptuneCoins {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut nau: U32s<NUM_LIMBS> = U32s::new(u.arbitrary()?);
+        while nau > NeptuneCoins::conversion_factor() * 42000000.into() {
+            nau = U32s::new(u.arbitrary()?);
+        }
+        Ok(NeptuneCoins(nau))
+    }
 }
 
 #[cfg(test)]
