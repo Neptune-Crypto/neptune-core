@@ -676,7 +676,7 @@ mod block_tests {
         let future_time1 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
-            + Duration::from_secs(60 * 60 * 1);
+            + Duration::from_secs(60 * 60);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time1.as_millis().try_into().unwrap());
         assert!(block_1.is_valid(&genesis_block));
