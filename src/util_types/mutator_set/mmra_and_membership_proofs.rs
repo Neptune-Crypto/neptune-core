@@ -1,13 +1,11 @@
 use itertools::Itertools;
 use proptest::{
-    arbitrary::{arbitrary_with, Arbitrary},
+    arbitrary::Arbitrary,
     collection::vec,
     strategy::{BoxedStrategy, Just, Strategy},
 };
 use proptest_arbitrary_interop::arb;
-use tasm_lib::twenty_first::util_types::mmr::{
-    mmr_trait::Mmr, shared_basic::leaf_index_to_mt_index_and_peak_index,
-};
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::{
     twenty_first::util_types::mmr::{
         mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
@@ -21,8 +19,8 @@ use super::root_and_paths::RootAndPaths;
 
 #[derive(Debug, Clone)]
 pub struct MmraAndMembershipProofs {
-    mmra: MmrAccumulator<Hash>,
-    membership_proofs: Vec<MmrMembershipProof<Hash>>,
+    pub mmra: MmrAccumulator<Hash>,
+    pub membership_proofs: Vec<MmrMembershipProof<Hash>>,
 }
 
 impl Arbitrary for MmraAndMembershipProofs {
@@ -58,13 +56,14 @@ impl Arbitrary for MmraAndMembershipProofs {
                 let leafs_and_indices = leafs.iter().copied().zip(leaf_indices).collect_vec();
 
                 // iterate over all trees
-                let mut peaks: Vec<BoxedStrategy<Digest>> = vec![];
+                let mut peaks_strategy: Vec<BoxedStrategy<Digest>> = vec![];
                 let dummy_mp = MmrMembershipProof::new(0u64, vec![]);
-                let mut mps: Vec<MmrMembershipProof<Hash>> =
-                    (0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec();
+                let mut mps_strategy =
+                    Just((0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec()).boxed();
                 for tree in 0..num_peaks {
                     // select all leafs and merkle tree indices for this tree
                     let leafs_and_mt_indices = leafs_and_indices
+                        .clone()
                         .iter()
                         .copied()
                         .filter(
@@ -79,7 +78,7 @@ impl Arbitrary for MmraAndMembershipProofs {
                         )
                         .collect_vec();
                     if leafs_and_mt_indices.is_empty() {
-                        peaks.push(Just(digests.pop().unwrap()).boxed());
+                        peaks_strategy.push(Just(digests.pop().unwrap()).boxed());
                         continue;
                     }
 
@@ -95,16 +94,17 @@ impl Arbitrary for MmraAndMembershipProofs {
                             .map(|&(l, i, _o)| (i, l))
                             .collect_vec(),
                     ));
-                    let root_strategy = root_and_paths_strategy.prop_map(|rp| rp.root);
+                    let root_strategy = root_and_paths_strategy.clone().prop_map(|rp| rp.root);
                     let paths_strategy = root_and_paths_strategy.prop_map(|rp| rp.paths);
 
                     // update peaks list
-                    peaks.push(root_strategy.boxed());
+                    peaks_strategy.push(root_strategy.boxed());
 
                     // generate membership proof objects
+                    let other_leafs_and_indices = leafs_and_indices.clone();
                     let membership_proofs_strategy = paths_strategy
-                        .prop_map(|authentication_paths| {
-                            leafs_and_indices
+                        .prop_map(move |authentication_paths| {
+                            other_leafs_and_indices
                                 .iter()
                                 .copied()
                                 .filter(
@@ -133,23 +133,27 @@ impl Arbitrary for MmraAndMembershipProofs {
                         .boxed();
 
                     // collect membership proofs in vector, with indices matching those of the supplied leafs
-                    for ((_leaf, _mt_index, original_index), mp) in
-                        leafs_and_mt_indices.iter().zip(membership_proofs.iter())
-                    {
-                        mps[*original_index] = mp.clone();
+                    mps_strategy = (mps_strategy.clone(), membership_proofs_strategy)
+                        .prop_map(move |(mps, membership_proofs)| {
+                            let mut new_mps = mps.clone();
+                            for ((_leaf, _mt_index, original_index), membership_proof) in
+                                leafs_and_mt_indices.iter().zip(membership_proofs.iter())
+                            {
+                                new_mps[*original_index] = membership_proof.clone();
+                            }
+                            new_mps
+                        })
+                        .boxed();
+                }
+
+                let mmra_strategy = peaks_strategy
+                    .prop_map(move |peaks| MmrAccumulator::<Hash>::init(peaks, total_leaf_count));
+
+                (mps_strategy, mmra_strategy).prop_map(|(membership_proofs, mmra)| {
+                    MmraAndMembershipProofs {
+                        membership_proofs,
+                        mmra,
                     }
-                }
-
-                let mmra = MmrAccumulator::<Hash>::init(peaks, total_leaf_count);
-
-                // sanity check
-                for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-                    assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
-                }
-
-                Just(MmraAndMembershipProofs {
-                    membership_proofs: mps,
-                    mmra,
                 })
             })
             .boxed()
