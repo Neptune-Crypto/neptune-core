@@ -103,7 +103,7 @@ mod test {
     use super::*;
 
     #[proptest(cases = 20)]
-    fn integrity(
+    fn correct(
         // max tree height is 32 as per twenty-first (to be changed)
         #[strategy(1usize..32)] tree_height: usize,
         #[strategy(vec((0..(1u64 << #tree_height), arb()), 0..100))]
@@ -124,5 +124,18 @@ mod test {
             };
             prop_assert!(inclusion_proof.verify(root_and_paths.root));
         }
+    }
+
+    #[proptest(cases = 20)]
+    fn no_fail(
+        // try max tree height 64 here
+        #[strategy(1usize..64)] _tree_height: usize,
+        #[strategy(vec((0..(1u64 << #_tree_height), arb()), 0..100))]
+        #[filter(#_indexed_leafs.iter().map(|(idx, _)| idx).all_unique())]
+        _indexed_leafs: Vec<(u64, Digest)>,
+        #[strategy(RootAndPaths::arbitrary_with((#_tree_height, #_indexed_leafs)))]
+        _root_and_paths: RootAndPaths,
+    ) {
+        prop_assert!(true);
     }
 }
