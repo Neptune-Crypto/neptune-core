@@ -9,6 +9,7 @@ use num_traits::{abs, Zero};
 
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
+use std::time::{Duration, SystemTime};
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -295,6 +296,7 @@ impl Block {
         //   b) Block header points to previous block
         //   d) Block timestamp is greater than previous block timestamp
         //   e) Target difficulty, and other control parameters, were adjusted correctly
+        //   f) Block timestamp is less than host-time (utc) + 2 hours.
         // 1. The transaction is valid.
         // 1'. All transactions are valid.
         //   a) verify that MS membership proof is valid, done against previous `mutator_set_accumulator`,
@@ -339,6 +341,16 @@ impl Block {
             != Self::difficulty_control(previous_block, block_copy.kernel.header.timestamp.value())
         {
             warn!("Value for new difficulty is incorrect.");
+            return false;
+        }
+
+        // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
+        let future_limit = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            + Duration::from_secs(60 * 60 * 2);
+        if (block_copy.kernel.header.timestamp.value() as u128) >= future_limit.as_millis() {
+            warn!("block time is too far in the future");
             return false;
         }
 
@@ -647,6 +659,48 @@ mod block_tests {
 
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
 
+        assert!(!block_1.is_valid(&genesis_block));
+    }
+
+    #[traced_test]
+    #[test]
+    fn block_with_far_future_timestamp_is_invalid() {
+        let genesis_block = Block::genesis_block();
+
+        let a_wallet_secret = WalletSecret::new_random();
+        let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
+        let (mut block_1, _, _) =
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+
+        // Set block timestamp 1 hour in the future.  (is valid)
+        let future_time1 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            + Duration::from_secs(60 * 60 * 1);
+        block_1.kernel.header.timestamp =
+            BFieldElement::new(future_time1.as_millis().try_into().unwrap());
+        assert!(block_1.is_valid(&genesis_block));
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+
+        // Set block timestamp 2 hours - 1 sec in the future.  (is valid)
+        let future_time2 = now + Duration::from_secs(60 * 60 * 2 - 1);
+        block_1.kernel.header.timestamp =
+            BFieldElement::new(future_time2.as_millis().try_into().unwrap());
+        assert!(block_1.is_valid(&genesis_block));
+
+        // Set block timestamp 2 hours in the future. (not valid)
+        let future_time3 = now + Duration::from_secs(60 * 60 * 2);
+        block_1.kernel.header.timestamp =
+            BFieldElement::new(future_time3.as_millis().try_into().unwrap());
+        assert!(!block_1.is_valid(&genesis_block));
+
+        // Set block timestamp 2 days in the future. (not valid)
+        let future_time4 = now + Duration::from_secs(86400 * 2);
+        block_1.kernel.header.timestamp =
+            BFieldElement::new(future_time4.as_millis().try_into().unwrap());
         assert!(!block_1.is_valid(&genesis_block));
     }
 
