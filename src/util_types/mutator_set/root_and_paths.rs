@@ -39,7 +39,7 @@ impl Arbitrary for RootAndPaths {
 
                 // populate nodes dictionary with leafs
                 for &(index, leaf) in &indices_and_leafs {
-                    let node_index = index + (1 << tree_height);
+                    let node_index = (index as u128) + (1u128 << tree_height);
                     nodes.insert(node_index, leaf);
                 }
 
@@ -48,8 +48,8 @@ impl Arbitrary for RootAndPaths {
                 // note: depth 1 is the layer containing only the root
                 let by_layer = |index, layer| {
                     let sub_tree_height = tree_height - layer;
-                    let layer_start = 1u64 << sub_tree_height;
-                    let layer_stop = 1u64 << (sub_tree_height + 1);
+                    let layer_start = 1u128 << sub_tree_height;
+                    let layer_stop = 1u128 << (sub_tree_height + 1);
                     index >= layer_start && index < layer_stop
                 };
                 for layer in 0..tree_height {
@@ -80,7 +80,7 @@ impl Arbitrary for RootAndPaths {
                 // read out paths
                 let paths = indices_and_leafs
                     .iter()
-                    .map(|(leaf_idx, _)| leaf_idx + (1 << tree_height))
+                    .map(|(leaf_idx, _)| (*leaf_idx as u128) + (1u128 << tree_height))
                     .map(|node_idx| {
                         (0..tree_height)
                             .map(|layer_idx| nodes[&((node_idx >> layer_idx) ^ 1)])
