@@ -4,6 +4,7 @@ pub mod archival_mutator_set;
 pub mod boxed_big_array;
 pub mod chunk;
 pub mod chunk_dictionary;
+pub mod mmra_and_membership_proofs;
 pub mod ms_membership_proof;
 pub mod mutator_set_accumulator;
 pub mod mutator_set_kernel;
