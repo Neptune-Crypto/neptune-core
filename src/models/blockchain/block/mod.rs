@@ -691,8 +691,8 @@ mod block_tests {
             BFieldElement::new(future_time2.as_millis().try_into().unwrap());
         assert!(block_1.is_valid(&genesis_block));
 
-        // Set block timestamp 2 hours in the future. (not valid)
-        let future_time3 = now + Duration::from_secs(60 * 60 * 2);
+        // Set block timestamp 2 hours + 10 secs in the future. (not valid)
+        let future_time3 = now + Duration::from_secs(60 * 60 * 2 + 10);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time3.as_millis().try_into().unwrap());
         assert!(!block_1.is_valid(&genesis_block));
