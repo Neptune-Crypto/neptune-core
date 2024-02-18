@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
 
             // Get wallet object, create various wallet secret files
             let wallet_dir = data_dir.wallet_directory_path();
-            DataDirectory::create_dir_if_not_exists(&wallet_dir)?;
+            DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
             let (wallet_secret, secret_file_paths) =
                 WalletSecret::read_from_file_or_create(&wallet_dir).unwrap();
@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
 
             // wallet file does not exist yet, so create it and save
             println!("Saving wallet to disk at {} ...", wallet_file.display());
-            DataDirectory::create_dir_if_not_exists(&wallet_dir)?;
+            DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
             match wallet_secret.save_to_disk(&wallet_file) {
                 Err(e) => {
                     println!("Could not save imported wallet to disk.");

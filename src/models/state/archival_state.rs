@@ -3,11 +3,12 @@ use crate::prelude::twenty_first;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
-use std::fs;
-use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
+use tokio::io::AsyncSeekExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::SeekFrom;
 use tracing::{debug, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
@@ -36,7 +37,7 @@ pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 ///  * block-index database stored in levelDB
 ///  * mutator set stored in LevelDB,
 ///
-/// TODO: make all file operations async.
+/// all file operations are async, or async-friendly.
 ///       see <https://github.com/Neptune-Crypto/neptune-core/issues/75>
 pub struct ArchivalState {
     data_dir: DataDirectory,
@@ -80,7 +81,7 @@ impl ArchivalState {
         data_dir: &DataDirectory,
     ) -> Result<NeptuneLevelDb<BlockIndexKey, BlockIndexValue>> {
         let block_index_db_dir_path = data_dir.block_index_database_dir_path();
-        DataDirectory::create_dir_if_not_exists(&block_index_db_dir_path)?;
+        DataDirectory::create_dir_if_not_exists(&block_index_db_dir_path).await?;
 
         let block_index = NeptuneLevelDb::<BlockIndexKey, BlockIndexValue>::new(
             &block_index_db_dir_path,
@@ -96,7 +97,7 @@ impl ArchivalState {
         data_dir: &DataDirectory,
     ) -> Result<RustyArchivalMutatorSet> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
-        DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
+        DataDirectory::create_dir_if_not_exists(&ms_db_dir_path).await?;
 
         let path = ms_db_dir_path.clone();
         let result =
@@ -238,17 +239,17 @@ impl ArchivalState {
         let serialized_block: Vec<u8> = bincode::serialize(new_block)?;
         let serialized_block_size: u64 = serialized_block.len() as u64;
 
-        // todo: make following file operations async friendly.
+        // file operations are async.
 
-        let mut block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path)?;
+        let mut block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
 
         // Check if we should use the last file, or we need a new one.
-        if new_block_file_is_needed(&block_file, serialized_block_size) {
+        if new_block_file_is_needed(&block_file, serialized_block_size).await {
             last_rec = LastFileRecord {
                 last_file: last_rec.last_file + 1,
             };
             block_file_path = self.data_dir.block_file_path(last_rec.last_file);
-            block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path)?;
+            block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path).await?;
         }
 
         debug!("Writing block to: {}", block_file_path.display());
@@ -263,27 +264,28 @@ impl ArchivalState {
             Some(record) => record.add(serialized_block_size, &new_block.kernel.header),
             None => {
                 assert!(
-                    block_file.metadata().unwrap().len().is_zero(),
+                    block_file.metadata().await.unwrap().len().is_zero(),
                     "If no file record exists, block file must be empty"
                 );
                 FileRecord::new(serialized_block_size, &new_block.kernel.header)
             }
         };
 
-        // todo: make file ops async
         // Make room in file for mmapping and record where block starts
-        let pos = block_file.seek(SeekFrom::End(0)).unwrap();
+        let pos = block_file.seek(SeekFrom::End(0)).await.unwrap();
         debug!("Size of file prior to block writing: {}", pos);
         block_file
             .seek(SeekFrom::Current(serialized_block_size as i64 - 1))
+            .await
             .unwrap();
-        block_file.write_all(&[0]).unwrap();
+        block_file.write_all(&[0]).await.unwrap();
         let file_offset: u64 = block_file
             .seek(SeekFrom::Current(-(serialized_block_size as i64)))
+            .await
             .unwrap();
         debug!(
             "New file size: {} bytes",
-            block_file.metadata().unwrap().len()
+            block_file.metadata().await.unwrap().len()
         );
 
         let height_record_key = BlockIndexKey::Height(new_block.kernel.header.height);
@@ -294,14 +296,19 @@ impl ArchivalState {
             };
 
         // Write to file with mmap, only map relevant part of file into memory
-        let mmap = unsafe {
-            MmapOptions::new()
-                .offset(pos)
-                .len(serialized_block_size as usize)
-                .map(&block_file)?
-        };
-        let mut mmap: memmap2::MmapMut = mmap.make_mut().unwrap();
-        mmap.deref_mut()[..].copy_from_slice(&serialized_block);
+        // we use spawn_blocking to make the blocking mmap async-friendly.
+        tokio::task::spawn_blocking(move || {
+            let mmap = unsafe {
+                MmapOptions::new()
+                    .offset(pos)
+                    .len(serialized_block_size as usize)
+                    .map(&block_file)
+                    .unwrap()
+            };
+            let mut mmap: memmap2::MmapMut = mmap.make_mut().unwrap();
+            mmap.deref_mut()[..].copy_from_slice(&serialized_block);
+        })
+        .await?;
 
         // Update block index database with newly stored block
         let mut block_index_entries: Vec<(BlockIndexKey, BlockIndexValue)> = vec![];
@@ -340,29 +347,33 @@ impl ArchivalState {
         Ok(())
     }
 
-    fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
+    async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
         // Get path of file for block
         let block_file_path: PathBuf = self
             .data_dir
             .block_file_path(block_record.file_location.file_index);
 
         // Open file as read-only
-        let block_file: fs::File = fs::OpenOptions::new()
+        let block_file: tokio::fs::File = tokio::fs::OpenOptions::new()
             .read(true)
             .open(block_file_path)
+            .await
             .unwrap();
 
         // Read the file into memory, set the offset and length indicated in the block record
         // to avoid using more memory than needed
-        let mmap = unsafe {
-            MmapOptions::new()
-                .offset(block_record.file_location.offset)
-                .len(block_record.file_location.block_length)
-                .map(&block_file)?
-        };
-        let block: Block = bincode::deserialize(&mmap).unwrap();
-
-        Ok(block)
+        // we use spawn_blocking to make the blocking mmap async-friendly.
+        tokio::task::spawn_blocking(move || {
+            let mmap = unsafe {
+                MmapOptions::new()
+                    .offset(block_record.file_location.offset)
+                    .len(block_record.file_location.block_length)
+                    .map(&block_file)?
+            };
+            let block: Block = bincode::deserialize(&mmap).unwrap();
+            Ok(block)
+        })
+        .await?
     }
 
     /// return the latest block
@@ -380,7 +391,7 @@ impl ArchivalState {
             .unwrap()
             .as_block_record();
 
-        let block: Block = self.get_block_from_block_record(tip_block_record)?;
+        let block: Block = self.get_block_from_block_record(tip_block_record).await?;
 
         Ok(Some(block))
     }
@@ -433,7 +444,7 @@ impl ArchivalState {
         };
 
         // Fetch block from disk
-        let block = self.get_block_from_block_record(record)?;
+        let block = self.get_block_from_block_record(record).await?;
 
         Ok(Some(block))
     }
@@ -2761,6 +2772,7 @@ mod archival_state_tests {
         // Test `get_block_from_block_record`
         let block_from_block_record = archival_state
             .get_block_from_block_record(actual_block_record_2)
+            .await
             .unwrap();
         assert_eq!(mock_block_2, block_from_block_record);
         assert_eq!(mock_block_2.hash(), block_from_block_record.hash());

@@ -74,12 +74,12 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Get data directory (wallet, block database), create one if none exists
     let data_dir = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network)?;
-    DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path())?;
+    DataDirectory::create_dir_if_not_exists(&data_dir.root_dir_path()).await?;
     info!("Data directory is {}", data_dir);
 
     // Get wallet object, create various wallet secret files
     let wallet_dir = data_dir.wallet_directory_path();
-    DataDirectory::create_dir_if_not_exists(&wallet_dir)?;
+    DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
     let (wallet_secret, _) =
         WalletSecret::read_from_file_or_create(&data_dir.wallet_directory_path())?;
     info!("Now getting wallet state. This may take a while if the database needs pruning.");

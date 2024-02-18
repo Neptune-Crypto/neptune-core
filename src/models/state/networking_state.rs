@@ -44,7 +44,7 @@ impl NetworkingState {
     /// Create databases for peer standings
     pub async fn initialize_peer_databases(data_dir: &DataDirectory) -> Result<PeerDatabases> {
         let database_dir_path = data_dir.database_dir_path();
-        DataDirectory::create_dir_if_not_exists(&database_dir_path)?;
+        DataDirectory::create_dir_if_not_exists(&database_dir_path).await?;
 
         let peer_standings = NeptuneLevelDb::<IpAddr, PeerStanding>::new(
             &data_dir.banned_ips_database_dir_path(),

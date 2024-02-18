@@ -152,7 +152,9 @@ impl WalletState {
     ) -> Self {
         // Create or connect to wallet block DB
 
-        DataDirectory::create_dir_if_not_exists(&data_dir.wallet_database_dir_path()).unwrap();
+        DataDirectory::create_dir_if_not_exists(&data_dir.wallet_database_dir_path())
+            .await
+            .unwrap();
         let wallet_db = DB::open(
             &data_dir.wallet_database_dir_path(),
             &crate::database::create_db_if_missing(),

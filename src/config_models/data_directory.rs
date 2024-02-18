@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config_models::network::Network;
@@ -42,23 +41,25 @@ impl DataDirectory {
     }
 
     /// Create directory if it does not exist
-    pub fn create_dir_if_not_exists(dir: &Path) -> Result<()> {
-        std::fs::create_dir_all(dir)
+    pub async fn create_dir_if_not_exists(dir: &Path) -> Result<()> {
+        tokio::fs::create_dir_all(dir)
+            .await
             .with_context(|| format!("Failed to create data directory {}", dir.to_string_lossy()))
     }
 
     /// Open file, create parent directory if it does not exist
-    pub fn open_ensure_parent_dir_exists(file_path: &Path) -> Result<fs::File> {
+    pub async fn open_ensure_parent_dir_exists(file_path: &Path) -> Result<tokio::fs::File> {
         let parent_dir = file_path
             .parent()
             .with_context(|| format!("The parent directory of {:?}", file_path))?;
-        Self::create_dir_if_not_exists(parent_dir)?;
+        Self::create_dir_if_not_exists(parent_dir).await?;
 
-        fs::OpenOptions::new()
+        tokio::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .open(file_path)
+            .await
             .context("open_ensure_parent_dir_exists")
     }
 
