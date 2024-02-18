@@ -7,10 +7,10 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
-use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, LineWriter, Write};
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::fs::OpenOptions;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
@@ -94,20 +94,23 @@ impl WalletState {
 
     /// Store information needed to recover mutator set membership proof of a UTXO, in case
     /// the wallet database is deleted.
-    fn store_utxo_ms_recovery_data(
+    ///
+    /// Uses non-blocking I/O via tokio.
+    async fn store_utxo_ms_recovery_data(
         &self,
         utxo_ms_recovery_data: IncomingUtxoRecoveryData,
     ) -> Result<()> {
         // Open file
         #[cfg(test)]
         {
-            std::fs::create_dir_all(self.wallet_directory_path.clone())?;
+            tokio::fs::create_dir_all(self.wallet_directory_path.clone()).await?;
         }
         let incoming_secrets_file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(self.incoming_secrets_path())?;
-        let mut incoming_secrets_file = LineWriter::new(incoming_secrets_file);
+            .open(self.incoming_secrets_path())
+            .await?;
+        let mut incoming_secrets_file = BufWriter::new(incoming_secrets_file);
 
         // Create JSON string ending with a newline as this flushes the write
         #[cfg(windows)]
@@ -117,26 +120,31 @@ impl WalletState {
 
         let mut json_string = serde_json::to_string(&utxo_ms_recovery_data)?;
         json_string.push_str(LINE_ENDING);
-        incoming_secrets_file.write_all(json_string.as_bytes())?;
+        incoming_secrets_file
+            .write_all(json_string.as_bytes())
+            .await?;
 
         // Flush just in case, since this is cryptographic data, you can't be too sure
-        incoming_secrets_file.flush()?;
+        incoming_secrets_file.flush().await?;
 
         Ok(())
     }
 
     /// Read recovery-information for mutator set membership proof of a UTXO. Returns all lines in the files,
     /// where each line represents an incoming UTXO.
-    pub(crate) fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
+    ///
+    /// Uses non-blocking I/O via tokio.
+    pub(crate) async fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
         let incoming_secrets_file = OpenOptions::new()
             .read(true)
             .write(false)
-            .open(self.incoming_secrets_path())?;
+            .open(self.incoming_secrets_path())
+            .await?;
 
         let file_reader = BufReader::new(incoming_secrets_file);
         let mut ret = vec![];
-        for line in file_reader.lines() {
-            let line = line?;
+        let mut lines = file_reader.lines();
+        while let Some(line) = lines.next_line().await? {
             let utxo_ms_recovery_data: IncomingUtxoRecoveryData =
                 serde_json::from_str(&line).expect("Could not parse JSON string");
             ret.push(utxo_ms_recovery_data);
@@ -570,7 +578,7 @@ impl WalletState {
 
         // write these to disk.
         for item in incoming_utxo_recovery_data_list.into_iter() {
-            self.store_utxo_ms_recovery_data(item)?;
+            self.store_utxo_ms_recovery_data(item).await?;
         }
 
         self.wallet_db.set_sync_label(new_block.hash());

@@ -613,7 +613,7 @@ impl GlobalState {
         );
 
         // Fetch all incoming UTXOs from recovery data
-        let incoming_utxos = self.wallet_state.read_utxo_ms_recovery_data()?;
+        let incoming_utxos = self.wallet_state.read_utxo_ms_recovery_data().await?;
         let incoming_utxo_count = incoming_utxos.len();
         info!("Checking {} incoming UTXOs", incoming_utxo_count);
 
