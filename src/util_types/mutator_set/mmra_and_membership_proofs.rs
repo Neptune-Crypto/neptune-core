@@ -1,11 +1,14 @@
+use std::marker::PhantomData;
+
 use itertools::Itertools;
 use proptest::{
     arbitrary::Arbitrary,
     collection::vec,
     strategy::{BoxedStrategy, Just, Strategy},
 };
-use proptest_arbitrary_interop::arb;
-use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
+use tasm_lib::twenty_first::util_types::{
+    merkle_tree::MerkleTreeInclusionProof, mmr::shared_basic::leaf_index_to_mt_index_and_peak_index,
+};
 use tasm_lib::{
     twenty_first::util_types::mmr::{
         mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
@@ -27,137 +30,225 @@ impl Arbitrary for MmraAndMembershipProofs {
     type Parameters = Vec<Digest>;
 
     fn arbitrary_with(leafs_proper: Self::Parameters) -> Self::Strategy {
-        let total_leaf_count_strategy = (leafs_proper.len() as u64)..u64::MAX;
-        let index_strategy =
-            (arb::<u64>(), total_leaf_count_strategy.clone()).prop_map(|(i, m)| i % m);
-        let indices_strategy = vec(index_strategy, leafs_proper.len());
-        let leafs_strategy = Just(leafs_proper);
-        let digest_strategy = vec(arb::<Digest>(), 3 * 64);
-        (
-            total_leaf_count_strategy,
-            leafs_strategy,
-            indices_strategy,
-            digest_strategy,
-        )
-            .prop_flat_map(|(total_leaf_count, leafs, mut indices, mut digests)| {
-                let num_peaks = total_leaf_count.count_ones();
+        let num_paths = leafs_proper.len() as u64;
+        // let total_leaf_count_strategy = num_paths..u64::MAX;
+        let total_leaf_count_strategy = num_paths..num_paths + 100;
 
-                // sample mmr leaf indices and calculate matching derived indices
-                let leaf_indices = leafs
-                    .iter()
-                    .enumerate()
-                    .map(|(original_index, _leaf)| (original_index, indices.pop().unwrap()))
-                    .map(|(original_index, mmr_index)| {
-                        let (mt_index, peak_index) =
-                            leaf_index_to_mt_index_and_peak_index(mmr_index, total_leaf_count);
-                        (original_index, mmr_index, mt_index, peak_index)
+        // unwrap total leaf count
+        total_leaf_count_strategy
+            .prop_flat_map(move |total_leaf_count| {
+                let indices_strategy = vec(0u64..total_leaf_count, num_paths as usize)
+                    .prop_filter("indices must be unique", |indices| {
+                        indices.iter().all_unique()
                     })
-                    .collect_vec();
-                let leafs_and_indices = leafs.iter().copied().zip(leaf_indices).collect_vec();
+                    .boxed();
 
-                // iterate over all trees
-                let mut peaks_strategy: Vec<BoxedStrategy<Digest>> = vec![];
-                let dummy_mp = MmrMembershipProof::new(0u64, vec![]);
-                let mut mps_strategy =
-                    Just((0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec()).boxed();
-                for tree in 0..num_peaks {
-                    // select all leafs and merkle tree indices for this tree
-                    let leafs_and_mt_indices = leafs_and_indices
-                        .clone()
-                        .iter()
-                        .copied()
-                        .filter(
-                            |(_leaf, (_original_index, _mmr_index, _mt_index, peak_index))| {
-                                *peak_index == tree
-                            },
-                        )
-                        .map(
-                            |(leaf, (original_index, _mmr_index, mt_index, _peak_index))| {
-                                (leaf, mt_index, original_index)
-                            },
-                        )
-                        .collect_vec();
-                    if leafs_and_mt_indices.is_empty() {
-                        peaks_strategy.push(Just(digests.pop().unwrap()).boxed());
-                        continue;
-                    }
+                // unwrap leafs, indices, digests
+                (Just(leafs_proper.clone()), indices_strategy)
+                    .prop_flat_map(move |(leafs, mut indices)| {
+                        let num_peaks = total_leaf_count.count_ones();
+                        let mut tree_heights = vec![];
+                        for shift in (0..63).rev() {
+                            if total_leaf_count & (1u64 << shift) != 0 {
+                                tree_heights.push(shift);
+                            }
+                        }
 
-                    // generate root and authentication paths
-                    let tree_height = (*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap()
-                        as u128)
-                        .ilog2() as usize;
-
-                    let root_and_paths_strategy = RootAndPaths::arbitrary_with((
-                        tree_height,
-                        leafs_and_mt_indices
+                        // sample mmr leaf indices and calculate matching derived indices
+                        let index_sets = leafs
                             .iter()
-                            .map(|&(l, i, _o)| (i, l))
-                            .collect_vec(),
-                    ));
-                    let root_strategy = root_and_paths_strategy.clone().prop_map(|rp| rp.root);
-                    let paths_strategy = root_and_paths_strategy.prop_map(|rp| rp.paths);
+                            .enumerate()
+                            .map(|(enumeration_index, _leaf)| {
+                                (enumeration_index, indices.pop().unwrap())
+                            })
+                            .map(|(enumeration_index, mmr_leaf_index)| {
+                                let (mt_node_index, peak_index) =
+                                    leaf_index_to_mt_index_and_peak_index(
+                                        mmr_leaf_index,
+                                        total_leaf_count,
+                                    );
+                                (enumeration_index, mt_node_index, mmr_leaf_index, peak_index)
+                            })
+                            .collect_vec();
+                        let leafs_and_indices = leafs
+                            .iter()
+                            .copied()
+                            .zip(index_sets.iter().cloned())
+                            .collect_vec();
 
-                    // update peaks list
-                    peaks_strategy.push(root_strategy.boxed());
-
-                    // generate membership proof objects
-                    let other_leafs_and_indices = leafs_and_indices.clone();
-                    let membership_proofs_strategy = paths_strategy
-                        .prop_map(move |authentication_paths| {
-                            other_leafs_and_indices
+                        // segregate by tree
+                        let mut indices_and_leafs_by_tree = vec![];
+                        for tree in 0..num_peaks {
+                            let local_indices_and_leafs = leafs_and_indices
                                 .iter()
-                                .copied()
                                 .filter(
                                     |(
                                         _leaf,
-                                        (_original_index, _mmr_index, _mt_index, peak_index),
+                                        (
+                                            _enumeration_index,
+                                            _mt_node_index,
+                                            _mmr_leaf_index,
+                                            peak_index,
+                                        ),
                                     )| { *peak_index == tree },
                                 )
-                                .zip(authentication_paths.into_iter())
+                                .cloned()
                                 .map(
                                     |(
+                                        leaf,
                                         (
-                                            _leaf,
-                                            (_original_index, mmr_index, _mt_index, _peak_index),
+                                            enumeration_index,
+                                            mt_node_index,
+                                            mmr_leaf_index,
+                                            _peak_index,
                                         ),
-                                        authentication_path,
                                     )| {
-                                        MmrMembershipProof::<Hash>::new(
-                                            mmr_index,
-                                            authentication_path,
-                                        )
+                                        (enumeration_index, mt_node_index, mmr_leaf_index, leaf)
                                     },
                                 )
-                                .collect_vec()
-                        })
-                        .boxed();
+                                .collect_vec();
 
-                    // collect membership proofs in vector, with indices matching those of the supplied leafs
-                    mps_strategy = (mps_strategy.clone(), membership_proofs_strategy)
-                        .prop_map(move |(mps, membership_proofs)| {
-                            let mut new_mps = mps.clone();
-                            for ((_leaf, _mt_index, original_index), membership_proof) in
-                                leafs_and_mt_indices.iter().zip(membership_proofs.iter())
-                            {
-                                new_mps[*original_index] = membership_proof.clone();
-                            }
-                            new_mps
-                        })
-                        .boxed();
-                }
+                            indices_and_leafs_by_tree.push(local_indices_and_leafs);
+                        }
 
-                let mmra_strategy = peaks_strategy
-                    .prop_map(move |peaks| MmrAccumulator::<Hash>::init(peaks, total_leaf_count));
+                        // for each tree generate root and paths
+                        let mut root_and_paths_strategies = vec![];
+                        for (tree, local_indices_and_leafs) in
+                            indices_and_leafs_by_tree.iter().enumerate()
+                        {
+                            let tree_height = tree_heights[tree];
+                            let root_and_paths_strategy = RootAndPaths::arbitrary_with((
+                                tree_height,
+                                local_indices_and_leafs
+                                    .iter()
+                                    .copied()
+                                    .map(|(_ei, mtni, _mmri, leaf)| {
+                                        (mtni ^ (1 << tree_height), leaf)
+                                    })
+                                    .collect_vec(),
+                            ));
+                            root_and_paths_strategies.push(root_and_paths_strategy);
+                        }
 
-                (mps_strategy, mmra_strategy).prop_map(|(membership_proofs, mmra)| {
-                    MmraAndMembershipProofs {
-                        membership_proofs,
-                        mmra,
-                    }
-                })
+                        // unwrap vector of roots and pathses
+                        (root_and_paths_strategies, Just(indices_and_leafs_by_tree)).prop_map(
+                            move |(roots_and_pathses, indices_and_leafs_by_tree_)| {
+                                // sanity check for roots and pathses
+                                for (root_and_paths, indices_and_leafs) in roots_and_pathses
+                                    .iter()
+                                    .zip(indices_and_leafs_by_tree_.iter())
+                                {
+                                    let root = root_and_paths.root;
+                                    for (
+                                        path,
+                                        (
+                                            _enumeration_index,
+                                            merkle_tree_node_index,
+                                            _mmr_index,
+                                            leaf,
+                                        ),
+                                    ) in
+                                        root_and_paths.paths.iter().zip(indices_and_leafs.iter())
+                                    {
+                                        let mip = MerkleTreeInclusionProof {
+                                            tree_height: path.len(),
+                                            indexed_leaves: vec![(
+                                                *merkle_tree_node_index as usize
+                                                    ^ (1 << path.len()),
+                                                *leaf,
+                                            )],
+                                            authentication_structure: path.clone(),
+                                            _hasher: PhantomData::<Hash>,
+                                        };
+                                        assert!(mip.verify(root));
+                                    }
+                                }
+
+                                // extract peaks
+                                let peaks = roots_and_pathses
+                                    .iter()
+                                    .map(|root_and_paths| root_and_paths.root)
+                                    .collect_vec();
+
+                                // prepare to extract membership proofs
+                                let mut membership_proofs = vec![
+                                    MmrMembershipProof {
+                                        leaf_index: 0,
+                                        authentication_path: vec![],
+                                        _hasher: std::marker::PhantomData::<Hash>
+                                    };
+                                    num_paths as usize
+                                ];
+
+                                // loop over all leaf indices and look up membership proof
+                                for (root_and_paths, indices_and_leafs) in roots_and_pathses
+                                    .into_iter()
+                                    .zip(indices_and_leafs_by_tree_.iter())
+                                {
+                                    let paths = root_and_paths.paths;
+                                    for (
+                                        path,
+                                        &(enumeration_index, _merkle_tree_index, mmr_index, _leaf),
+                                    ) in paths.into_iter().zip(indices_and_leafs.iter())
+                                    {
+                                        membership_proofs[enumeration_index].authentication_path =
+                                            path;
+                                        membership_proofs[enumeration_index].leaf_index = mmr_index;
+                                    }
+                                }
+
+                                // sanity check
+                                for (mmr_mp, leaf) in membership_proofs.iter().zip(leafs.iter()) {
+                                    let (_mti, _pi) = leaf_index_to_mt_index_and_peak_index(
+                                        mmr_mp.leaf_index,
+                                        total_leaf_count,
+                                    );
+                                    assert!(mmr_mp.verify(&peaks, *leaf, total_leaf_count).0);
+                                }
+
+                                MmraAndMembershipProofs {
+                                    mmra: MmrAccumulator::init(peaks, total_leaf_count),
+                                    membership_proofs,
+                                }
+                            },
+                        )
+                    })
+                    .boxed()
             })
             .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use crate::twenty_first::shared_math::tip5::Digest;
+    use proptest::prelude::*;
+    use proptest_arbitrary_interop::arb;
+    use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+    use test_strategy::proptest;
+
+    #[proptest(cases = 20)]
+    fn integrity(
+        #[strategy(vec(arb(), 0..10))] leafs: Vec<Digest>,
+        #[strategy(MmraAndMembershipProofs::arbitrary_with(#leafs))]
+        mmra_and_membership_proofs: MmraAndMembershipProofs,
+    ) {
+        for (leaf, mp) in leafs
+            .into_iter()
+            .zip(mmra_and_membership_proofs.membership_proofs)
+        {
+            prop_assert!(
+                mp.verify(
+                    &mmra_and_membership_proofs.mmra.get_peaks(),
+                    leaf,
+                    mmra_and_membership_proofs.mmra.count_leaves(),
+                )
+                .0
+            );
+        }
+    }
 }
