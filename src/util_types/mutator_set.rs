@@ -6,7 +6,7 @@ pub mod chunk;
 pub mod chunk_dictionary;
 pub mod mmra_and_membership_proofs;
 pub mod ms_membership_proof;
-// pub mod msa_and_records;
+pub mod msa_and_records;
 pub mod mutator_set_accumulator;
 pub mod mutator_set_kernel;
 pub mod mutator_set_trait;

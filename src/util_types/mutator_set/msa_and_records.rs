@@ -9,7 +9,10 @@ use proptest_arbitrary_interop::arb;
 use tasm_lib::{
     twenty_first::util_types::{
         algebraic_hasher::AlgebraicHasher,
-        mmr::{mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr},
+        mmr::{
+            mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
+            mmr_trait::Mmr,
+        },
     },
     Digest,
 };
@@ -39,25 +42,81 @@ pub struct MsaAndRecords {
     pub membership_proofs: Vec<MsMembershipProof>,
 }
 
+fn can_remove_verbose(
+    mutator_set_kernel: &MutatorSetKernel<MmrAccumulator<Hash>>,
+    removal_record: &RemovalRecord,
+) -> bool {
+    let mut have_absent_index = false;
+    if !removal_record.validate(mutator_set_kernel) {
+        panic!("unsynchronized");
+        return false;
+    }
+
+    for inserted_index in removal_record.absolute_indices.to_vec().into_iter() {
+        // determine if inserted index lives in active window
+        let active_window_start = (mutator_set_kernel.aocl.count_leaves() / BATCH_SIZE as u64)
+            as u128
+            * CHUNK_SIZE as u128;
+        if inserted_index < active_window_start {
+            let inserted_index_chunkidx = (inserted_index / CHUNK_SIZE as u128) as u64;
+            if let Some((_mmr_mp, chunk)) = removal_record
+                .target_chunks
+                .dictionary
+                .get(&inserted_index_chunkidx)
+            {
+                let relative_index = (inserted_index % CHUNK_SIZE as u128) as u32;
+                if !chunk.contains(relative_index) {
+                    have_absent_index = true;
+                    break;
+                }
+            }
+        } else {
+            let relative_index = (inserted_index - active_window_start) as u32;
+            if !mutator_set_kernel.swbf_active.contains(relative_index) {
+                have_absent_index = true;
+                break;
+            }
+        }
+    }
+
+    assert!(have_absent_index, "no indices absent!");
+
+    have_absent_index
+}
+
 impl MsaAndRecords {
     pub fn verify(&self, items: &[Digest]) -> bool {
-        self.removal_records
+        let all_removal_records_can_remove = self
+            .removal_records
             .iter()
-            .all(|rr| self.mutator_set_accumulator.kernel.can_remove(rr))
-            && self
-                .membership_proofs
-                .iter()
-                .zip_eq(items.iter())
-                .all(|(mp, item)| self.mutator_set_accumulator.verify(*item, mp))
+            .all(|rr| can_remove_verbose(&self.mutator_set_accumulator.kernel, rr));
+        assert!(
+            all_removal_records_can_remove,
+            "Some removal records cannot be removed!"
+        );
+        let all_membership_proofs_are_valid = self
+            .membership_proofs
+            .iter()
+            .zip_eq(items.iter())
+            .all(|(mp, item)| self.mutator_set_accumulator.verify(*item, mp));
+        assert!(
+            all_membership_proofs_are_valid,
+            "some membership proofs are not valid!"
+        );
+        all_removal_records_can_remove && all_membership_proofs_are_valid
     }
 }
 
 impl Arbitrary for MsaAndRecords {
-    type Parameters = (Vec<(Digest, Digest, Digest)>, Vec<(Digest, Digest, Digest)>);
+    type Parameters = (
+        Vec<(Digest, Digest, Digest)>,
+        Vec<(Digest, Digest, Digest)>,
+        u64,
+    );
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
-        let (removables, addeds) = parameters;
+        let (removables, addeds, aocl_size) = parameters;
 
         let removable_commitments = removables
             .iter()
@@ -67,8 +126,11 @@ impl Arbitrary for MsaAndRecords {
             .collect_vec();
 
         // unwrap aocl indices
-        let aocl_size = (1u64 << 33);
-        vec(0u64..aocl_size, addeds.len()).prop_flat_map(|aocl_indices| {
+        vec(0u64..aocl_size, addeds.len()).prop_flat_map(move |aocl_indices| {
+
+        // prepare unwrap
+        let removables = removables.clone();
+        let addeds = addeds.clone();
 
         // unwrap random aocl mmr with membership proofs
         MmraAndMembershipProofs::arbitrary_with((
@@ -117,9 +179,11 @@ impl Arbitrary for MsaAndRecords {
             let addeds = addeds.clone();
 
             // unwrap random mmr_chunks
-            mmr_chunk_indices.into_iter()
-                .map(|index| (Just(index), arb::<Chunk>()))
-                .collect_vec()
+            let mmr_indices_and_chunks_strategy = mmr_chunk_indices.iter()
+                .map(|index| (Just(*index), arb::<Chunk>()))
+                .collect_vec();
+            let mmr_chunk_indices = mmr_chunk_indices.clone();
+            mmr_indices_and_chunks_strategy
                 .prop_flat_map(move |mmr_indices_and_chunks| {
                     // prepare to unwrap
                     let aocl_mmra = aocl_mmra.clone();
@@ -148,9 +212,8 @@ impl Arbitrary for MsaAndRecords {
                                         swbf_membership_proofs
                                             .into_iter()
                                             .zip(mmr_indices_and_chunks.iter().cloned()),
-                                    )
+                                    ).map(|(mmr_chunk_index, (swbf_membership_proof, (_mmr_index, chunk)))|(mmr_chunk_index, (swbf_membership_proof, chunk)))
                                     .collect();
-                                println!("made chunk dictionary with indices: {} where aocl mmra leaf count is {}", chunk_dictionary.keys().join(", "), aocl_mmra.count_leaves());
                             let personalized_chunk_dictionaries = all_index_sets
                                 .iter()
                                 .map(|index_set| {
@@ -167,25 +230,17 @@ impl Arbitrary for MsaAndRecords {
                                     ChunkDictionary::new(
                                         chunk_indices
                                         .iter()
+                                        .filter(|chunk_index| {chunk_dictionary.contains_key(*chunk_index,)})
                                         .map(|chunk_index| {
                                             (
-                                                *chunk_index,
+                                                chunk_index,
                                                 chunk_dictionary
                                                     .get(
                                                         chunk_index,
-                                                    )
-                                            ).filter(|r|r.is_some()).cloned()
-                                        })
-                                        .collect::<HashMap<
-                                            u64,
-                                            (
-                                                MmrMembershipProof<
-                                                    Hash,
-                                                >,
-                                                Chunk,
-                                            ),
-                                        >>(
-                                        ),
+                                                    ).unwrap()
+                                            )
+                                        }).map(|(chunk_index, (membership_proof, chunk))| (*chunk_index, (membership_proof.clone(), chunk.clone())))
+                                        .collect::<HashMap<u64,(MmrMembershipProof<Hash>,Chunk)>>(),
                                     )
                                 })
                                 .collect_vec();
@@ -208,6 +263,7 @@ impl Arbitrary for MsaAndRecords {
                                     },
                                 )
                                 .collect_vec();
+
                             let removal_records = all_index_sets
                                 .iter()
                                 .zip(personalized_chunk_dictionaries.iter())
@@ -241,6 +297,7 @@ impl Arbitrary for MsaAndRecords {
                                             swbf_active: active_window,
                                         },
                                     };
+
                                     MsaAndRecords {
                                         mutator_set_accumulator,
                                         addition_records: addition_records.clone(),
@@ -274,11 +331,12 @@ mod test {
     fn msa_and_records_is_valid(
         #[strategy(0usize..10)] _num_removals: usize,
         #[strategy(0usize..10)] _num_additions: usize,
+        #[strategy(0u64..=u64::MAX)] _aocl_size: u64,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_removals))]
         removables: Vec<(Digest, Digest, Digest)>,
         #[strategy(vec((arb::<Digest>(), arb::<Digest>(), arb::<Digest>()), #_num_additions))]
         _addeds: Vec<(Digest, Digest, Digest)>,
-        #[strategy(MsaAndRecords::arbitrary_with((#removables, #_addeds)))]
+        #[strategy(MsaAndRecords::arbitrary_with((#removables, #_addeds, #_aocl_size)))]
         msa_and_records: MsaAndRecords,
     ) {
         prop_assert!(msa_and_records.verify(

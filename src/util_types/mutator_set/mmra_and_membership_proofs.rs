@@ -1,13 +1,9 @@
-use std::marker::PhantomData;
-
 use itertools::Itertools;
 use proptest::{
     arbitrary::Arbitrary,
     strategy::{BoxedStrategy, Just, Strategy},
 };
-use tasm_lib::twenty_first::util_types::{
-    merkle_tree::MerkleTreeInclusionProof, mmr::shared_basic::leaf_index_to_mt_index_and_peak_index,
-};
+use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::{
     twenty_first::util_types::mmr::{
         mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
@@ -30,14 +26,13 @@ impl Arbitrary for MmraAndMembershipProofs {
 
     fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
         let (indices_and_leafs, total_leaf_count) = parameters;
-        let indices = indices_and_leafs.iter().map(|(i, d)| *i).collect_vec();
-        let max_index = indices.iter().max().copied().unwrap_or(0u64);
-        let leafs = indices_and_leafs.iter().map(|(i, d)| *d).collect_vec();
+        let indices = indices_and_leafs.iter().map(|(i, _d)| *i).collect_vec();
+        let leafs = indices_and_leafs.iter().map(|(_i, d)| *d).collect_vec();
         let num_paths = leafs.len() as u64;
 
         let num_peaks = total_leaf_count.count_ones();
         let mut tree_heights = vec![];
-        for shift in (0..63).rev() {
+        for shift in (0..64).rev() {
             if total_leaf_count & (1u64 << shift) != 0 {
                 tree_heights.push(shift);
             }
@@ -99,28 +94,6 @@ impl Arbitrary for MmraAndMembershipProofs {
         // unwrap vector of roots and pathses
         (root_and_paths_strategies, Just(indices_and_leafs_by_tree))
             .prop_map(move |(roots_and_pathses, indices_and_leafs_by_tree_)| {
-                // sanity check for roots and pathses
-                for (root_and_paths, indices_and_leafs__) in roots_and_pathses
-                    .iter()
-                    .zip(indices_and_leafs_by_tree_.iter())
-                {
-                    let root = root_and_paths.root;
-                    for (path, (_enumeration_index, merkle_tree_node_index, _mmr_index, leaf)) in
-                        root_and_paths.paths.iter().zip(indices_and_leafs__.iter())
-                    {
-                        let mip = MerkleTreeInclusionProof {
-                            tree_height: path.len(),
-                            indexed_leaves: vec![(
-                                *merkle_tree_node_index as usize ^ (1 << path.len()),
-                                *leaf,
-                            )],
-                            authentication_structure: path.clone(),
-                            _hasher: PhantomData::<Hash>,
-                        };
-                        assert!(mip.verify(root));
-                    }
-                }
-
                 // extract peaks
                 let peaks = roots_and_pathses
                     .iter()
@@ -180,10 +153,10 @@ mod test {
     use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
     use test_strategy::proptest;
 
-    fn indices_and_leafs_strategy(num: usize) -> BoxedStrategy<Vec<(u64, Digest)>> {
-        vec(arb::<(u64, Digest)>(), num)
+    fn indices_and_leafs_strategy(max: u64, num: usize) -> BoxedStrategy<Vec<(u64, Digest)>> {
+        vec((0u64..max, arb::<Digest>()), num)
             .prop_filter("indices must all be unique", |indices_and_leafs| {
-                indices_and_leafs.iter().map(|(i, l)| *i).all_unique()
+                indices_and_leafs.iter().map(|(i, _l)| *i).all_unique()
             })
             .boxed()
     }
@@ -191,14 +164,13 @@ mod test {
     #[proptest(cases = 20)]
     fn integrity(
         #[strategy(1usize..10)] _num_paths: usize,
-        #[strategy(indices_and_leafs_strategy(#_num_paths))] indices_and_leafs: Vec<(u64, Digest)>,
-        #[filter(#indices_and_leafs.iter().map(|(i,_l)|*i).max().unwrap() < #_total_leaf_count)]
-        #[strategy(0..u64::MAX)]
-        _total_leaf_count: u64,
+        #[strategy(0..u64::MAX)] _total_leaf_count: u64,
+        #[strategy(indices_and_leafs_strategy(#_total_leaf_count, #_num_paths))]
+        indices_and_leafs: Vec<(u64, Digest)>,
         #[strategy(MmraAndMembershipProofs::arbitrary_with((#indices_and_leafs, #_total_leaf_count)))]
         mmra_and_membership_proofs: MmraAndMembershipProofs,
     ) {
-        for ((index, leaf), mp) in indices_and_leafs
+        for ((_index, leaf), mp) in indices_and_leafs
             .into_iter()
             .zip(mmra_and_membership_proofs.membership_proofs)
         {
