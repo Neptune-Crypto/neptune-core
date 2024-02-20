@@ -47,7 +47,7 @@ impl Arbitrary for MmraAndMembershipProofs {
         let index_sets = leafs
             .iter()
             .enumerate()
-            .map(|(enumeration_index, _leaf)| (enumeration_index, indices.pop().unwrap()))
+            .map(|(enumeration_index, _leaf)| (enumeration_index, indices[enumeration_index]))
             .map(|(enumeration_index, mmr_leaf_index)| {
                 let (mt_node_index, peak_index) =
                     leaf_index_to_mt_index_and_peak_index(mmr_leaf_index, total_leaf_count);
@@ -100,13 +100,13 @@ impl Arbitrary for MmraAndMembershipProofs {
         (root_and_paths_strategies, Just(indices_and_leafs_by_tree))
             .prop_map(move |(roots_and_pathses, indices_and_leafs_by_tree_)| {
                 // sanity check for roots and pathses
-                for (root_and_paths, indices_and_leafs) in roots_and_pathses
+                for (root_and_paths, indices_and_leafs__) in roots_and_pathses
                     .iter()
                     .zip(indices_and_leafs_by_tree_.iter())
                 {
                     let root = root_and_paths.root;
                     for (path, (_enumeration_index, merkle_tree_node_index, _mmr_index, leaf)) in
-                        root_and_paths.paths.iter().zip(indices_and_leafs.iter())
+                        root_and_paths.paths.iter().zip(indices_and_leafs__.iter())
                     {
                         let mip = MerkleTreeInclusionProof {
                             tree_height: path.len(),
@@ -138,13 +138,13 @@ impl Arbitrary for MmraAndMembershipProofs {
                 ];
 
                 // loop over all leaf indices and look up membership proof
-                for (root_and_paths, indices_and_leafs) in roots_and_pathses
+                for (root_and_paths, indices_and_leafs_) in roots_and_pathses
                     .into_iter()
                     .zip(indices_and_leafs_by_tree_.iter())
                 {
                     let paths = root_and_paths.paths;
                     for (path, &(enumeration_index, _merkle_tree_index, mmr_index, _leaf)) in
-                        paths.into_iter().zip(indices_and_leafs.iter())
+                        paths.into_iter().zip(indices_and_leafs_.iter())
                     {
                         membership_proofs[enumeration_index].authentication_path = path;
                         membership_proofs[enumeration_index].leaf_index = mmr_index;

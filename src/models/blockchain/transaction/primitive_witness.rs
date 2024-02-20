@@ -387,8 +387,10 @@ pub(crate) fn arbitrary_primitive_witness_with(
                 // unwrap random sender randomness and receiver preimages
                 let sender_randomnesses_strategy = vec(arb::<Digest>(), num_inputs);
                 let receiver_preimages_strategy = vec(arb::<Digest>(), num_inputs);
-                (sender_randomnesses_strategy, receiver_preimages_strategy)
-                    .prop_flat_map(move |(mut sender_randomnesses, mut receiver_preimages)| {
+                let aocl_size = 1u64<<33;
+                let aocl_indices_strategy = vec(0u64..aocl_size, num_inputs);
+                (sender_randomnesses_strategy, receiver_preimages_strategy, aocl_indices_strategy)
+                    .prop_flat_map(move |(mut sender_randomnesses, mut receiver_preimages, aocl_indices)| {
                         let input_triples = input_utxos
                             .iter()
                             .map(|utxo| {
@@ -419,7 +421,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let public_announcements = public_announcements.clone();
 
                         // unwrap random aocl mmr with membership proofs
-                        MmraAndMembershipProofs::arbitrary_with(input_commitments)
+                        MmraAndMembershipProofs::arbitrary_with((aocl_indices.into_iter().zip(input_commitments).collect_vec(), aocl_size))
                             .prop_flat_map(move |aocl_mmra_and_membership_proofs| {
                                 let aocl_mmra = aocl_mmra_and_membership_proofs.mmra;
                                 let aocl_membership_proofs =
@@ -489,9 +491,10 @@ pub(crate) fn arbitrary_primitive_witness_with(
                                         let public_announcements = public_announcements.clone();
 
                                         // unwrap random swbf mmra and membership proofs
-                                        let swbf_strategy = MmraAndMembershipProofs::arbitrary_with(
-                                            mmr_chunks.iter().map(Hash::hash).collect_vec(),
-                                        );
+                                        let swbf_size = aocl_size / (BATCH_SIZE as u64);
+                                        let swbf_strategy = MmraAndMembershipProofs::arbitrary_with((
+                                            mmr_chunk_indices.iter().zip(mmr_chunks.iter()).map(|(i,c)|(*i,Hash::hash(c))).collect_vec(),swbf_size
+                                        ));
                                         let mmr_chunks = mmr_chunks.clone();
                                         swbf_strategy
                                         .prop_flat_map(move |swbf_mmr_and_paths| {
