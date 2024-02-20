@@ -1,8 +1,10 @@
+use crate::models::blockchain::transaction::primitive_witness::arbitrary_primitive_witness_with;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::SecretWitness;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -11,9 +13,12 @@ use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
+use num_traits::Zero;
 use proptest::arbitrary::Arbitrary;
+use proptest::collection::vec;
 use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
+use proptest_arbitrary_interop::arb;
 use serde::{Deserialize, Serialize};
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::{
@@ -28,6 +33,8 @@ use tasm_lib::{
 
 use crate::models::consensus::tasm::builtins as tasm;
 use crate::models::consensus::tasm::program::ConsensusProgram;
+
+use super::neptune_coins::NeptuneCoins;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock {}
@@ -452,17 +459,42 @@ impl SecretWitness for TimeLockWitness {
 }
 
 impl Arbitrary for TimeLockWitness {
-    type Parameters = (Vec<Option<u64>>, usize, usize);
+    type Parameters = (Vec<u64>, usize, usize);
 
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
         let (release_dates, num_outputs, num_public_announcements) = parameters;
         let num_inputs = release_dates.len();
-        PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, num_public_announcements))
-            .prop_map(|transaction_primitive_witness| {
-                TimeLockWitness::from_primitive_witness(&transaction_primitive_witness)
-            })
+        (
+            vec(arb::<Utxo>(), num_inputs),
+            vec(arb::<Utxo>(), num_outputs),
+            vec(arb::<PublicAnnouncement>(), num_public_announcements),
+        )
+            .prop_flat_map(
+                move |(mut input_utxos, output_utxos, public_announcements)| {
+                    // add time locks to input utxos
+                    for (utxo, release_date) in input_utxos.iter_mut().zip(release_dates.iter()) {
+                        if *release_date != 0 {
+                            let time_lock_coin = TimeLock::until(*release_date);
+                            utxo.coins.push(time_lock_coin);
+                        }
+                    }
+
+                    // generate primitive transaction witness and time lock witness from there
+                    arbitrary_primitive_witness_with(
+                        &input_utxos,
+                        &output_utxos,
+                        &public_announcements,
+                        NeptuneCoins::zero(),
+                        None,
+                    )
+                    .prop_map(move |transaction_primitive_witness| {
+                        TimeLockWitness::from_primitive_witness(&transaction_primitive_witness)
+                    })
+                    .boxed()
+                },
+            )
             .boxed()
     }
 }
