@@ -3,9 +3,15 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
+use num_traits::Zero;
+use proptest::{
+    arbitrary::Arbitrary,
+    collection::vec,
+    strategy::{BoxedStrategy, Strategy},
+};
+use proptest_arbitrary_interop::arb;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
@@ -23,12 +29,14 @@ use tasm_lib::{
 };
 
 use crate::{
-    models::blockchain::type_scripts::native_currency::{
+    models::blockchain::{type_scripts::native_currency::{
         native_currency_program, NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
-    },
+    }},
     util_types::mutator_set::{
+        active_window::ActiveWindow,
         chunk::Chunk,
         chunk_dictionary::ChunkDictionary,
+        mmra_and_membership_proofs::MmraAndMembershipProofs,
         mutator_set_kernel::{get_swbf_indices, MutatorSetKernel},
         mutator_set_trait::{commit, MutatorSet},
         removal_record::{AbsoluteIndexSet, RemovalRecord},
@@ -49,7 +57,8 @@ use crate::{
 
 use super::{
     transaction_kernel::TransactionKernel,
-    utxo::{Coin, LockScript, Utxo},
+    utxo::{ LockScript, Utxo},
+    PublicAnnouncement,
 };
 
 /// The raw witness is the most primitive type of transaction witness.
@@ -249,279 +258,421 @@ impl PrimitiveWitness {
 
         (root, paths)
     }
-
-    fn pseudorandom_mmra_of_given_size_with_mps_at_indices(
-        seed: [u8; 32],
-        size: u64,
-        leafs: &[Digest],
-        indices: &[u64],
-    ) -> (MmrAccumulator<Hash>, Vec<MmrMembershipProof<Hash>>) {
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let mut tree_heights = vec![];
-        for h in (0..64).rev() {
-            if size & (1 << h) != 0 {
-                tree_heights.push(h);
-            }
-        }
-
-        let mut peaks = vec![];
-        let mut membership_proofs = vec![];
-        let leaf_and_various_indices = leafs
-            .iter()
-            .zip(indices.iter())
-            .map(|(&l, &idx)| (l, idx, leaf_index_to_mt_index_and_peak_index(idx, size)));
-        for (i, tree_height) in tree_heights.into_iter().enumerate() {
-            let leafs_and_indices = leaf_and_various_indices
-                .clone()
-                .filter(|(_l, _idx, (_mti, pki))| *pki == i as u32)
-                .map(|(l, _idx, (mti, _pki))| (l, mti))
-                .collect_vec();
-            let (root, paths) = Self::pseudorandom_merkle_root_with_authentication_paths(
-                rng.gen(),
-                tree_height,
-                &leafs_and_indices,
-            );
-            peaks.push(root);
-            membership_proofs.append(
-                &mut leafs_and_indices
-                    .into_iter()
-                    .zip(paths.into_iter())
-                    .map(|((_l, idx), path)| MmrMembershipProof::new(idx, path))
-                    .collect_vec(),
-            );
-        }
-        (MmrAccumulator::init(peaks, size), membership_proofs)
-    }
 }
 
-impl<'a> Arbitrary<'a> for PrimitiveWitness {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let num_inputs = u.int_in_range(0..=4)?;
-        let num_outputs = u.int_in_range(0..=4)?;
-        let num_public_announcements = u.int_in_range(0..=2)?;
-        let sender_spending_keys = (0..num_inputs)
-            .map(|_| {
-                generation_address::SpendingKey::derive_from_seed(u.arbitrary::<Digest>().unwrap())
-            })
-            .collect_vec();
-        let sender_receiving_addresses = sender_spending_keys
-            .iter()
-            .map(|ssk| ssk.to_address())
-            .collect_vec();
-        let input_lock_scripts = sender_receiving_addresses
-            .iter()
-            .map(|sra| sra.lock_script())
-            .collect_vec();
-        let lock_script_witnesses = sender_spending_keys
-            .iter()
-            .map(|ssk| ssk.unlock_key.values().to_vec())
-            .collect_vec();
-        let input_amounts = (0..num_inputs)
-            .map(|_| u.arbitrary::<NeptuneCoins>().unwrap())
-            .collect_vec();
-        let total_inputs = input_amounts.iter().cloned().sum::<NeptuneCoins>();
-        let mut output_fractions = (0..=num_outputs)
-            .map(|_| u.int_in_range(0..=99).unwrap() as f64)
-            .collect_vec();
-        let output_sum = output_fractions.iter().cloned().sum::<f64>();
-        output_fractions.iter_mut().for_each(|f| *f /= output_sum);
-        let input_utxos = input_lock_scripts
-            .iter()
-            .map(|ils| {
-                Utxo::new(
-                    ils.clone(),
-                    vec![Coin {
-                        type_script_hash: NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
-                        state: u.arbitrary::<NeptuneCoins>().unwrap().encode(),
-                    }],
-                )
-            })
-            .collect_vec();
-        let input_triples = input_utxos
-            .iter()
-            .map(|utxo| {
-                (
-                    Hash::hash(utxo),
-                    u.arbitrary::<Digest>().unwrap(),
-                    u.arbitrary::<Digest>().unwrap(),
-                )
-            })
-            .collect_vec();
-        let input_commitments = input_triples
-            .iter()
-            .map(|(item, sender_randomness, receiver_preimage)| {
-                commit(*item, *sender_randomness, Hash::hash(receiver_preimage))
-            })
-            .map(|ar| ar.canonical_commitment)
-            .collect_vec();
-        let (aocl_mmr, aocl_authentication_paths) =
-            Self::pseudorandom_mmra_with_mps(u.arbitrary().unwrap(), &input_commitments);
-        let all_index_sets = input_triples
-            .iter()
-            .zip(aocl_authentication_paths.iter())
-            .map(
-                |((item, sender_randomness, receiver_preimage), authentication_path)| {
-                    get_swbf_indices(
-                        *item,
-                        *sender_randomness,
-                        *receiver_preimage,
-                        authentication_path.leaf_index,
+impl Arbitrary for PrimitiveWitness {
+    type Parameters = (usize, usize, usize);
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
+        let (num_inputs, num_outputs, num_public_announcements) = parameters;
+        (
+            vec(arb::<Utxo>(), num_inputs),
+            vec(arb::<Utxo>(), num_outputs),
+            vec(arb::<PublicAnnouncement>(), num_public_announcements),
+            arb::<NeptuneCoins>(),
+            arb::<Option<NeptuneCoins>>(),
+        )
+            .prop_flat_map(
+                |(input_utxos, mut output_utxos, public_announcements, mut fee, maybe_coinbase)| {
+                    let total_inputs = input_utxos.iter().flat_map(|utxo| utxo.coins.clone()).filter(|coin|coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST).map(|coin|coin.state).map(|state| NeptuneCoins::decode(&state)).filter(|r|r.is_ok()).map(|r|*r.unwrap()).sum::<NeptuneCoins>();
+                    let mut total_outputs = output_utxos.iter().flat_map(|utxo| utxo.coins.clone()).filter(|coin|coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST).map(|coin|coin.state).map(|state| NeptuneCoins::decode(&state)).filter(|r|r.is_ok()).map(|r|*r.unwrap()).sum::<NeptuneCoins>();
+                    let mut some_coinbase = match maybe_coinbase {
+                        Some(coinbase) => coinbase,
+                        None => NeptuneCoins::zero(),
+                    };
+                    while total_inputs < total_outputs + fee + some_coinbase {
+                        for output_utxo in output_utxos.iter_mut() {
+                            for coin in output_utxo.coins.iter_mut() {
+                                if coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST {
+                                    let mut amount = *NeptuneCoins::decode(&coin.state).unwrap();
+                                    amount.div_two();
+                                    coin.state = amount.encode();
+                                }
+                            }
+                        }
+                        if let Some(mut coinbase) = maybe_coinbase {
+                            coinbase.div_two();
+                            some_coinbase.div_two();
+                        }
+                        fee.div_two();
+                        total_outputs = output_utxos.iter().flat_map(|utxo| utxo.coins.clone()).filter(|coin|coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST).map(|coin|coin.state).map(|state| NeptuneCoins::decode(&state)).filter(|r|r.is_ok()).map(|r|*r.unwrap()).sum::<NeptuneCoins>();
+                    }
+                    arbitrary_primitive_witness_with(
+                        &input_utxos,
+                        &output_utxos,
+                        &public_announcements,
+                        fee,
+                        maybe_coinbase,
                     )
                 },
             )
-            .collect_vec();
-        let mut all_indices = all_index_sets.iter().flatten().cloned().collect_vec();
-        all_indices.sort();
-        let mut all_chunk_indices = all_indices
-            .iter()
-            .map(|index| index / (CHUNK_SIZE as u128))
-            .map(|index| index as u64)
-            .collect_vec();
-        all_chunk_indices.dedup();
-        let mmr_chunk_indices = all_chunk_indices
-            .iter()
-            .cloned()
-            .filter(|ci| *ci < aocl_mmr.count_leaves() / (BATCH_SIZE as u64))
-            .collect_vec();
-        let mmr_chunks = (0..mmr_chunk_indices.len())
-            .map(|_| u.arbitrary::<Chunk>().unwrap())
-            .collect_vec();
-        let (swbf_mmr, swbf_authentication_paths) =
-            Self::pseudorandom_mmra_of_given_size_with_mps_at_indices(
-                u.arbitrary().unwrap(),
-                aocl_mmr.count_leaves() / (BATCH_SIZE as u64),
-                &mmr_chunks.iter().map(Hash::hash).collect_vec(),
-                &mmr_chunk_indices,
-            );
-        let chunk_dictionary: HashMap<u64, (MmrMembershipProof<Hash>, Chunk)> = mmr_chunk_indices
-            .iter()
-            .cloned()
-            .zip(swbf_authentication_paths.into_iter().zip(mmr_chunks))
-            .collect();
-        let personalized_chunk_dictionaries = all_index_sets
-            .iter()
-            .map(|index_set| {
-                let mut is = index_set
-                    .iter()
-                    .map(|index| index / (BATCH_SIZE as u128))
-                    .map(|index| index as u64)
-                    .collect_vec();
-                is.sort();
-                is.dedup();
-                is
-            })
-            .map(|chunk_indices| {
-                ChunkDictionary::new(
-                    chunk_indices
-                        .iter()
-                        .map(|chunk_index| {
-                            (
-                                *chunk_index,
-                                chunk_dictionary.get(chunk_index).cloned().unwrap(),
-                            )
-                        })
-                        .collect::<HashMap<u64, (MmrMembershipProof<Hash>, Chunk)>>(),
-                )
-            })
-            .collect_vec();
-        let input_membership_proofs = input_triples
-            .iter()
-            .zip(aocl_authentication_paths.iter())
-            .zip(personalized_chunk_dictionaries.iter())
-            .map(
-                |(((_item, sender_randomness, receiver_preimage), auth_path), target_chunks)| {
-                    MsMembershipProof {
-                        sender_randomness: *sender_randomness,
-                        receiver_preimage: *receiver_preimage,
-                        auth_path_aocl: auth_path.clone(),
-                        target_chunks: target_chunks.clone(),
-                    }
-                },
-            )
-            .collect_vec();
-        let input_removal_records = all_index_sets
-            .iter()
-            .zip(personalized_chunk_dictionaries.iter())
-            .map(|(index_set, target_chunks)| RemovalRecord {
-                absolute_indices: AbsoluteIndexSet::new(index_set),
-                target_chunks: target_chunks.clone(),
-            })
-            .collect_vec();
-        let type_scripts = vec![TypeScript::new(native_currency_program())];
-        let output_utxos = output_fractions
-            .iter()
-            .take(num_outputs)
-            .map(|f| Utxo {
-                lock_script_hash: u.arbitrary().unwrap(),
-                coins: vec![Coin {
-                    type_script_hash: NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
-                    state: NeptuneCoins::new((f * total_inputs.to_nau_f64()) as u32).encode(),
-                }],
-            })
-            .collect_vec();
-        let output_commitments = output_utxos
-            .iter()
-            .map(|utxo| {
-                commit(
-                    Hash::hash(utxo),
-                    u.arbitrary().unwrap(),
-                    u.arbitrary().unwrap(),
-                )
-            })
-            .collect_vec();
-        let mutator_set_accumulator = MutatorSetAccumulator {
-            kernel: MutatorSetKernel {
-                aocl: aocl_mmr,
-                swbf_inactive: swbf_mmr,
-                swbf_active: u.arbitrary()?,
-            },
-        };
-        let has_coinbase: bool = u.arbitrary()?;
-        let coinbase = if !has_coinbase {
-            None
-        } else {
-            let fraction_to_coinbase: f64 = u.int_in_range(0..=99)? as f64 / 100.0;
-            let coinbase_amount =
-                total_inputs.to_nau_f64() * output_fractions.last().unwrap() * fraction_to_coinbase;
-            Some(NeptuneCoins::new(coinbase_amount as u32))
-        };
-        let fee = match coinbase {
-            Some(cb) => {
-                NeptuneCoins::new(
-                    (total_inputs.to_nau_f64() * output_fractions.last().unwrap()) as u32,
-                ) - cb
-            }
-            None => NeptuneCoins::new(
-                (total_inputs.to_nau_f64() * output_fractions.last().unwrap()) as u32,
-            ),
-        };
-        let public_announcements = (0..num_public_announcements)
-            .map(|_| u.arbitrary().unwrap())
-            .collect_vec();
-        let kernel = TransactionKernel {
-            inputs: input_removal_records,
-            outputs: output_commitments,
-            public_announcements,
-            fee,
-            coinbase,
-            timestamp: BFieldElement::new(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
-            ),
-            mutator_set_hash: mutator_set_accumulator.hash(),
-        };
-        let primitive_witness = PrimitiveWitness {
-            input_lock_scripts,
-            input_utxos,
-            input_membership_proofs,
-            type_scripts,
-            lock_script_witnesses,
-            output_utxos,
-            mutator_set_accumulator,
-            kernel,
-        };
-        Ok(primitive_witness)
+            .boxed()
     }
+}
+
+pub(crate) fn arbitrary_primitive_witness_with(
+    input_utxos: &[Utxo],
+    output_utxos: &[Utxo],
+    public_announcements: &[PublicAnnouncement],
+    fee: NeptuneCoins,
+    coinbase: Option<NeptuneCoins>,
+) -> BoxedStrategy<PrimitiveWitness> {
+    let num_inputs = input_utxos.len();
+    let num_outputs = output_utxos.len();
+    let input_utxos = input_utxos.to_vec();
+    let output_utxos = output_utxos.to_vec();
+    let public_announcements = public_announcements.to_vec();
+
+    // unwrap spending key seeds
+    vec(arb::<Digest>(), num_inputs)
+            .prop_flat_map(move |mut spending_key_seeds| {
+                let sender_spending_keys = (0..num_inputs)
+                    .map(|_| {
+                        generation_address::SpendingKey::derive_from_seed(
+                            spending_key_seeds.pop().unwrap(),
+                        )
+                    })
+                    .collect_vec();
+                let sender_receiving_addresses = sender_spending_keys
+                    .iter()
+                    .map(|ssk| ssk.to_address())
+                    .collect_vec();
+                let input_lock_scripts = sender_receiving_addresses
+                    .iter()
+                    .map(|sra| sra.lock_script())
+                    .collect_vec();
+                let lock_script_witnesses = sender_spending_keys
+                    .iter()
+                    .map(|ssk| ssk.unlock_key.values().to_vec())
+                    .collect_vec();
+
+                // prepare to unwrap
+                let lock_script_witnesses = lock_script_witnesses.clone();
+                let input_lock_scripts = input_lock_scripts.clone();
+
+                        // prepare to unwrap
+                        let lock_script_witnesses = lock_script_witnesses.clone();
+                        let input_lock_scripts = input_lock_scripts.clone();
+                        let input_utxos = input_utxos.clone();
+                        let output_utxos = output_utxos.clone();
+                        let public_announcements = public_announcements.clone();
+
+                        // unwrap random sender randomness and receiver preimages
+                        let sender_randomnesses_strategy = vec(arb::<Digest>(), num_inputs);
+                        let receiver_preimages_strategy = vec(arb::<Digest>(), num_inputs);
+                        (sender_randomnesses_strategy, receiver_preimages_strategy)
+                            .prop_flat_map(move |(mut sender_randomnesses, mut receiver_preimages)| {
+                                let input_triples = input_utxos
+                                    .iter()
+                                    .map(|utxo| {
+                                        (
+                                            Hash::hash(utxo),
+                                            sender_randomnesses.pop().unwrap(),
+                                            receiver_preimages.pop().unwrap(),
+                                        )
+                                    })
+                                    .collect_vec();
+                                let input_commitments = input_triples
+                                    .iter()
+                                    .map(|(item, sender_randomness, receiver_preimage)| {
+                                        commit(
+                                            *item,
+                                            *sender_randomness,
+                                            Hash::hash(receiver_preimage),
+                                        )
+                                    })
+                                    .map(|ar| ar.canonical_commitment)
+                                    .collect_vec();
+
+                                // prepare to unwrap
+                                let input_lock_scripts = input_lock_scripts.clone();
+                                let lock_script_witnesses = lock_script_witnesses.clone();
+                                let input_utxos = input_utxos.clone();
+                                let output_utxos = output_utxos.clone();
+                                let public_announcements = public_announcements.clone();
+
+                                // unwrap random aocl mmr with membership proofs
+                                MmraAndMembershipProofs::arbitrary_with(input_commitments)
+                                    .prop_flat_map(move |aocl_mmra_and_membership_proofs| {
+                                        let aocl_mmra = aocl_mmra_and_membership_proofs.mmra;
+                                        let aocl_membership_proofs =
+                                            aocl_mmra_and_membership_proofs.membership_proofs;
+                                        let all_index_sets = input_triples
+                                            .iter()
+                                            .zip(aocl_membership_proofs.iter())
+                                            .map(
+                                                |(
+                                                    (item, sender_randomness, receiver_preimage),
+                                                    authentication_path,
+                                                )| {
+                                                    get_swbf_indices(
+                                                        *item,
+                                                        *sender_randomness,
+                                                        *receiver_preimage,
+                                                        authentication_path.leaf_index,
+                                                    )
+                                                },
+                                            )
+                                            .collect_vec();
+                                        let mut all_indices =
+                                            all_index_sets.iter().flatten().cloned().collect_vec();
+                                        all_indices.sort();
+                                        let mut all_chunk_indices = all_indices
+                                            .iter()
+                                            .map(|index| index / (CHUNK_SIZE as u128))
+                                            .map(|index| index as u64)
+                                            .collect_vec();
+                                        all_chunk_indices.dedup();
+                                        let mmr_chunk_indices = all_chunk_indices
+                                            .iter()
+                                            .cloned()
+                                            .filter(|ci| {
+                                                *ci < aocl_mmra.count_leaves() / (BATCH_SIZE as u64)
+                                            })
+                                            .collect_vec();
+
+                                        // prepare to unwrap
+                                        let input_lock_scripts = input_lock_scripts.clone();
+                                        let lock_script_witnesses = lock_script_witnesses.clone();
+                                        let aocl_mmra = aocl_mmra.clone();
+                                        let mmr_chunk_indices = mmr_chunk_indices.clone();
+                                        let all_index_sets = all_index_sets.clone();
+                                        let input_triples = input_triples.clone();
+                                        let aocl_membership_proofs = aocl_membership_proofs.clone();
+                                        let input_utxos = input_utxos.clone();
+                                        let output_utxos = output_utxos.clone();
+                                        let public_announcements = public_announcements.clone();
+
+                                        // unwrap random mmr_chunks
+                                        (0..mmr_chunk_indices.len())
+                                            .map(|_| arb::<Chunk>())
+                                            .collect_vec()
+                                            .prop_flat_map( move |mmr_chunks| {
+
+                                                // prepare to unwrap
+                                                let input_lock_scripts = input_lock_scripts.clone();
+                                                let lock_script_witnesses = lock_script_witnesses.clone();
+                                                let aocl_mmra = aocl_mmra.clone();
+                                                let mmr_chunk_indices = mmr_chunk_indices.clone();
+                                                let all_index_sets = all_index_sets.clone();
+                                                let input_triples = input_triples.clone();
+                                                let aocl_membership_proofs = aocl_membership_proofs.clone();
+                                                let input_utxos = input_utxos.clone();
+                                                let output_utxos = output_utxos.clone();
+                                                let public_announcements = public_announcements.clone();
+
+                                                // unwrap random swbf mmra and membership proofs
+                                                let swbf_strategy = MmraAndMembershipProofs::arbitrary_with(
+                                                    mmr_chunks.iter().map(Hash::hash).collect_vec(),
+                                                );
+                                                let mmr_chunks = mmr_chunks.clone();
+                                                swbf_strategy
+                                                .prop_flat_map(move |swbf_mmr_and_paths| {
+                                                    let swbf_mmra = swbf_mmr_and_paths.mmra;
+                                                    let swbf_membership_proofs =
+                                                        swbf_mmr_and_paths.membership_proofs;
+
+                                                    let chunk_dictionary: HashMap<
+                                                        u64,
+                                                        (MmrMembershipProof<Hash>, Chunk),
+                                                    > = mmr_chunk_indices
+                                                        .iter()
+                                                        .cloned()
+                                                        .zip(
+                                                            swbf_membership_proofs
+                                                                .into_iter()
+                                                                .zip(mmr_chunks.iter().cloned()),
+                                                        )
+                                                        .collect();
+                                                    let personalized_chunk_dictionaries =
+                                                        all_index_sets
+                                                            .iter()
+                                                            .map(|index_set| {
+                                                                let mut is = index_set
+                                                                    .iter()
+                                                                    .map(|index| {
+                                                                        index / (BATCH_SIZE as u128)
+                                                                    })
+                                                                    .map(|index| index as u64)
+                                                                    .collect_vec();
+                                                                is.sort();
+                                                                is.dedup();
+                                                                is
+                                                            })
+                                                            .map(|chunk_indices| {
+                                                                ChunkDictionary::new(
+                                                                    chunk_indices
+                                                                        .iter()
+                                                                        .map(|chunk_index| {
+                                                                            (
+                                                                                *chunk_index,
+                                                                                chunk_dictionary
+                                                                                    .get(
+                                                                                        chunk_index,
+                                                                                    )
+                                                                                    .cloned()
+                                                                                    .unwrap(),
+                                                                            )
+                                                                        })
+                                                                        .collect::<HashMap<
+                                                                            u64,
+                                                                            (
+                                                                                MmrMembershipProof<
+                                                                                    Hash,
+                                                                                >,
+                                                                                Chunk,
+                                                                            ),
+                                                                        >>(
+                                                                        ),
+                                                                )
+                                                            })
+                                                            .collect_vec();
+                                                    let input_membership_proofs = input_triples
+                                                        .iter()
+                                                        .zip(aocl_membership_proofs.iter())
+                                                        .zip(personalized_chunk_dictionaries.iter())
+                                                        .map(
+                                                            |(
+                                                                (
+                                                                    (_item, sender_randomness, receiver_preimage),
+                                                                    auth_path,
+                                                                ),
+                                                                target_chunks,
+                                                            )| {
+                                                                MsMembershipProof {
+                                                                    sender_randomness: *sender_randomness,
+                                                                    receiver_preimage: *receiver_preimage,
+                                                                    auth_path_aocl: auth_path.clone(),
+                                                                    target_chunks: target_chunks.clone(),
+                                                                }
+                                                            },
+                                                        )
+                                                        .collect_vec();
+                                                    let input_removal_records =
+                                                        all_index_sets
+                                                            .iter()
+                                                            .zip(
+                                                                personalized_chunk_dictionaries
+                                                                    .iter(),
+                                                            )
+                                                            .map(|(index_set, target_chunks)| {
+                                                                RemovalRecord {
+                                                                    absolute_indices:
+                                                                        AbsoluteIndexSet::new(
+                                                                            index_set,
+                                                                        ),
+                                                                    target_chunks: target_chunks
+                                                                        .clone(),
+                                                                }
+                                                            })
+                                                            .collect_vec();
+                                                    let type_scripts = vec![TypeScript::new(
+                                                        native_currency_program(),
+                                                    )];
+
+
+                                                    // prepare to unwrap
+                                                    let input_lock_scripts = input_lock_scripts.clone();
+                                                    let input_utxos = input_utxos.clone();
+                                                    let input_removal_records = input_removal_records.clone();
+                                                    let input_membership_proofs = input_membership_proofs.clone();
+                                                    let type_scripts = type_scripts.clone();
+                                                    let lock_script_witnesses = lock_script_witnesses.clone();
+                                                    let aocl_mmra = aocl_mmra.clone();
+                                                    let swbf_mmra = swbf_mmra.clone();
+                                                    let output_utxos = output_utxos.clone();
+                                                    let public_announcements = public_announcements.clone();
+
+                                                    // unwrap sender randomnesses and receiver digests
+                                                    let output_sender_randomnesses_strategy =
+                                                        vec(arb::<Digest>(), num_outputs);
+                                                    let receiver_digest_strategy =
+                                                        vec(arb::<Digest>(), num_outputs);
+                                                    (output_sender_randomnesses_strategy, receiver_digest_strategy)
+                                                        .prop_flat_map(
+                                                            move |(mut output_sender_randomnesses, mut receiver_digests)| {
+                                                                let output_commitments = output_utxos
+                                                                    .iter()
+                                                                    .map(|utxo| {
+                                                                        commit(
+                                                                            Hash::hash(utxo),
+                                                                            output_sender_randomnesses
+                                                                                .pop()
+                                                                                .unwrap(),
+                                                                            receiver_digests.pop().unwrap(),
+                                                                        )
+                                                                    })
+                                                                    .collect_vec();
+
+                                                                // prepare to unwrap
+                                                                let input_lock_scripts = input_lock_scripts.clone();
+                                                                let input_utxos = input_utxos.clone();
+                                                                let input_removal_records = input_removal_records.clone();
+                                                                let input_membership_proofs = input_membership_proofs.clone();
+                                                                let type_scripts = type_scripts.clone();
+                                                                let lock_script_witnesses = lock_script_witnesses.clone();
+                                                                let aocl_mmra = aocl_mmra.clone();
+                                                                let swbf_mmra = swbf_mmra.clone();
+                                                                let output_utxos = output_utxos.clone();
+                                                                let public_announcements = public_announcements.clone();
+
+                                                                // unwrap random active window
+                                                                arb::<ActiveWindow>()
+                                                                    .prop_map(move |active_window| {
+                                                                        let mutator_set_accumulator =
+                                                                            MutatorSetAccumulator {
+                                                                                kernel: MutatorSetKernel {
+                                                                                    aocl: aocl_mmra.clone(),
+                                                                                    swbf_inactive:
+                                                                                        swbf_mmra.clone(),
+                                                                                    swbf_active:
+                                                                                        active_window,
+                                                                                },
+                                                                            };
+
+                                                                let kernel = TransactionKernel {
+                                                                    inputs: input_removal_records.clone(),
+                                                                    outputs: output_commitments.clone(),
+                                                                    public_announcements: public_announcements.to_vec(),
+                                                                    fee,
+                                                                    coinbase,
+                                                                    timestamp: BFieldElement::new(
+                                                                        SystemTime::now()
+                                                                            .duration_since(UNIX_EPOCH)
+                                                                            .unwrap()
+                                                                            .as_millis()
+                                                                            as u64,
+                                                                    ),
+                                                                    mutator_set_hash:
+                                                                        mutator_set_accumulator.hash(),
+                                                                };
+
+                                                                PrimitiveWitness {
+                                                                        input_lock_scripts: input_lock_scripts.clone(),
+                                                                        input_utxos: input_utxos.clone(),
+                                                                        input_membership_proofs: input_membership_proofs.clone(),
+                                                                        type_scripts: type_scripts.clone(),
+                                                                        lock_script_witnesses: lock_script_witnesses.clone(),
+                                                                        output_utxos: output_utxos.clone(),
+                                                                        mutator_set_accumulator: mutator_set_accumulator.clone(),
+                                                                        kernel,
+                                                                    }
+                                                    
+                                                        })
+                                                        .boxed()
+                                                    },
+                                                )
+                                                .boxed()
+                                            })
+                                            .boxed()
+                                        })
+                                        .boxed()
+                                    })
+                                    .boxed()
+                        })
+                        .boxed()
+
+            })
+            .boxed()
 }

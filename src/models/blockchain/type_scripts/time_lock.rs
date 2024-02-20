@@ -9,9 +9,11 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::Hash;
-use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
+use proptest::arbitrary::Arbitrary;
+use proptest::strategy::BoxedStrategy;
+use proptest::strategy::Strategy;
 use serde::{Deserialize, Serialize};
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 use tasm_lib::{
@@ -449,11 +451,18 @@ impl SecretWitness for TimeLockWitness {
     }
 }
 
-impl<'a> Arbitrary<'a> for TimeLockWitness {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let transaction_primitive_witness: PrimitiveWitness = u.arbitrary()?;
-        Ok(TimeLockWitness::from_primitive_witness(
-            &transaction_primitive_witness,
-        ))
+impl Arbitrary for TimeLockWitness {
+    type Parameters = (Vec<Option<u64>>, usize, usize);
+
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(parameters: Self::Parameters) -> Self::Strategy {
+        let (release_dates, num_outputs, num_public_announcements) = parameters;
+        let num_inputs = release_dates.len();
+        PrimitiveWitness::arbitrary_with((num_inputs, num_outputs, num_public_announcements))
+            .prop_map(|transaction_primitive_witness| {
+                TimeLockWitness::from_primitive_witness(&transaction_primitive_witness)
+            })
+            .boxed()
     }
 }
