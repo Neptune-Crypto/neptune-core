@@ -76,10 +76,18 @@ impl TransactionValidationLogic {
 
     pub fn verify(&self) -> bool {
         info!("validity logic for 'kernel_to_lock_scripts', 'kernel_to_type_scripts', 'type_scripts_halt' not implemented yet.");
-        self.lock_scripts_halt.verify()
-            // && self.kernel_to_lock_scripts.verify()
-            && self.removal_records_integrity.verify()
+        let lock_scripts_halt = self.lock_scripts_halt.verify();
+        let removal_records_integral = self.removal_records_integrity.verify();
+        if !lock_scripts_halt {
+            eprintln!("Lock scripts don't halt.");
+        }
+        if !removal_records_integral {
+            eprintln!("Removal records are not integral.");
+        }
+        // && self.kernel_to_lock_scripts.verify()
+
         // && self.kernel_to_typescripts.verify()
         // && self.type_scripts_halt.verify()
+        lock_scripts_halt && removal_records_integral
     }
 }

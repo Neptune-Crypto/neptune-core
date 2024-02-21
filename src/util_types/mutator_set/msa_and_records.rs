@@ -219,7 +219,6 @@ impl Arbitrary for MsaAndRecords {
                                     .map(|(((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)| {
                                         let leaf = commit(*item, *sender_randomness, receiver_preimage.hash::<Hash>()).canonical_commitment;
                                         assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks(), leaf, aocl_mmra.count_leaves()).0);
-                                        println!("verified AOCL membership of leaf {leaf} at index {}", aocl_auth_path.leaf_index);
                                         (((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)
                                     })
                                     .map(
