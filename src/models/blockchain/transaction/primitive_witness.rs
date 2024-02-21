@@ -271,7 +271,7 @@ impl Arbitrary for PrimitiveWitness {
         )
             .prop_flat_map(
                 |(
-                    input_lock_script_preimages,
+                    address_seeds,
                     input_amounts,
                     output_lock_script_preimages,
                     mut output_amounts,
@@ -279,18 +279,25 @@ impl Arbitrary for PrimitiveWitness {
                     mut fee,
                     maybe_coinbase,
                 )| {
-                    let input_utxos = input_lock_script_preimages
-                        .into_iter()
+                    let input_spending_keys = address_seeds
+                        .iter()
+                        .map(|address_seed| {
+                            generation_address::SpendingKey::derive_from_seed(*address_seed)
+                        })
+                        .collect_vec();
+                    let input_lock_scripts = input_spending_keys
+                        .iter()
+                        .map(|spending_key| spending_key.to_address().lock_script())
+                        .collect_vec();
+                    let input_lock_script_witnesses = input_spending_keys
+                        .iter()
+                        .map(|spending_key| spending_key.unlock_key.values().to_vec())
+                        .collect_vec();
+                    let input_utxos = input_lock_scripts
+                        .iter()
                         .zip(input_amounts)
-                        .map(|(lock_script_preimage, amount)| {
-                            Utxo::new(
-                                generation_address::SpendingKey::derive_from_seed(
-                                    lock_script_preimage,
-                                )
-                                .to_address()
-                                .lock_script(),
-                                amount.to_native_coins(),
-                            )
+                        .map(|(lock_script, amount)| {
+                            Utxo::new(lock_script.clone(), amount.to_native_coins())
                         })
                         .collect_vec();
                     let total_inputs = input_utxos
@@ -334,6 +341,8 @@ impl Arbitrary for PrimitiveWitness {
                         .collect_vec();
                     arbitrary_primitive_witness_with(
                         &input_utxos,
+                        &input_lock_scripts,
+                        &input_lock_script_witnesses,
                         &output_utxos,
                         &public_announcements,
                         fee,
@@ -347,6 +356,8 @@ impl Arbitrary for PrimitiveWitness {
 
 pub(crate) fn arbitrary_primitive_witness_with(
     input_utxos: &[Utxo],
+    input_lock_scripts: &[LockScript],
+    input_lock_script_witnesses: &[Vec<BFieldElement>],
     output_utxos: &[Utxo],
     public_announcements: &[PublicAnnouncement],
     fee: NeptuneCoins,
@@ -357,9 +368,10 @@ pub(crate) fn arbitrary_primitive_witness_with(
     let input_utxos = input_utxos.to_vec();
     let output_utxos = output_utxos.to_vec();
     let public_announcements = public_announcements.to_vec();
+    let input_lock_scripts = input_lock_scripts.to_vec();
+    let input_lock_script_witnesses = input_lock_script_witnesses.to_vec();
 
     // unwrap:
-    //  - spending key seeds
     //  - sender randomness (input)
     //  - receiver preimage (input)
     //  - sender randomness (output)
@@ -368,47 +380,18 @@ pub(crate) fn arbitrary_primitive_witness_with(
     (
         vec(arb::<Digest>(), num_inputs),
         vec(arb::<Digest>(), num_inputs),
-        vec(arb::<Digest>(), num_inputs),
         vec(arb::<Digest>(), num_outputs),
         vec(arb::<Digest>(), num_outputs),
         0u64..=u64::MAX,
     )
         .prop_flat_map(
             move |(
-                mut spending_key_seeds,
                 mut sender_randomnesses_input,
                 mut receiver_preimages_input,
                 sender_randomnesses_output,
                 receiver_preimages_output,
                 aocl_size,
             )| {
-                let sender_spending_keys = (0..num_inputs)
-                    .map(|_| {
-                        generation_address::SpendingKey::derive_from_seed(
-                            spending_key_seeds.pop().unwrap(),
-                        )
-                    })
-                    .collect_vec();
-                let sender_receiving_addresses = sender_spending_keys
-                    .iter()
-                    .map(|ssk| ssk.to_address())
-                    .collect_vec();
-                let input_lock_scripts = sender_receiving_addresses
-                    .iter()
-                    .map(|sra| sra.lock_script())
-                    .collect_vec();
-                let lock_script_witnesses = sender_spending_keys
-                    .iter()
-                    .map(|ssk| ssk.unlock_key.values().to_vec())
-                    .collect_vec();
-
-                // prepare to unwrap
-                let lock_script_witnesses = lock_script_witnesses.clone();
-                let input_lock_scripts = input_lock_scripts.clone();
-                let input_utxos = input_utxos.clone();
-                let output_utxos = output_utxos.clone();
-                let public_announcements = public_announcements.clone();
-
                 let input_triples = input_utxos
                     .iter()
                     .map(|utxo| {
@@ -421,9 +404,9 @@ pub(crate) fn arbitrary_primitive_witness_with(
                     .collect_vec();
 
                 // prepare to unwrap
-                let input_lock_scripts = input_lock_scripts.clone();
-                let lock_script_witnesses = lock_script_witnesses.clone();
                 let input_triples = input_triples.clone();
+                let input_lock_scripts = input_lock_scripts.to_vec();
+                let input_lock_script_witnesses = input_lock_script_witnesses.to_vec();
                 let input_utxos = input_utxos.clone();
                 let output_utxos = output_utxos.clone();
                 let public_announcements = public_announcements.clone();
@@ -438,12 +421,10 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let type_scripts = vec![TypeScript::new(native_currency_program())];
 
                         // prepare to unwrap
-                        let input_lock_scripts = input_lock_scripts.clone();
                         let input_utxos = input_utxos.clone();
                         let input_removal_records = input_removal_records.clone();
                         let input_membership_proofs = input_membership_proofs.clone();
                         let type_scripts = type_scripts.clone();
-                        let lock_script_witnesses = lock_script_witnesses.clone();
                         let output_utxos = output_utxos.clone();
                         let public_announcements = public_announcements.clone();
                         let mut sender_randomnesses_output = sender_randomnesses_output.clone();
@@ -461,12 +442,10 @@ pub(crate) fn arbitrary_primitive_witness_with(
                             .collect_vec();
 
                         // prepare to unwrap
-                        let input_lock_scripts = input_lock_scripts.clone();
                         let input_utxos = input_utxos.clone();
                         let input_removal_records = input_removal_records.clone();
                         let input_membership_proofs = input_membership_proofs.clone();
                         let type_scripts = type_scripts.clone();
-                        let lock_script_witnesses = lock_script_witnesses.clone();
                         let output_utxos = output_utxos.clone();
                         let public_announcements = public_announcements.clone();
 
@@ -490,7 +469,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
                             input_utxos: input_utxos.clone(),
                             input_membership_proofs: input_membership_proofs.clone(),
                             type_scripts: type_scripts.clone(),
-                            lock_script_witnesses: lock_script_witnesses.clone(),
+                            lock_script_witnesses: input_lock_script_witnesses.clone(),
                             output_utxos: output_utxos.clone(),
                             mutator_set_accumulator: mutator_set_accumulator.clone(),
                             kernel,

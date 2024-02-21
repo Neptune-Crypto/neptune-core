@@ -484,6 +484,8 @@ impl Arbitrary for TimeLockWitness {
                     // generate primitive transaction witness and time lock witness from there
                     arbitrary_primitive_witness_with(
                         &input_utxos,
+                        &[],
+                        &[],
                         &output_utxos,
                         &public_announcements,
                         NeptuneCoins::zero(),

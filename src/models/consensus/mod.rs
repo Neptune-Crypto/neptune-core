@@ -196,15 +196,19 @@ pub trait ValidationLogic<T: SecretWitness> {
             }
             ClaimSupport::MultipleSupports(secret_witnesses) => {
                 let claim = self.claim();
+                #[allow(clippy::never_loop)]
                 for witness in secret_witnesses.iter() {
                     let vm_result = witness.subprogram().run(
                         PublicInput::new(claim.input.to_vec()),
                         witness.nondeterminism(),
                     );
                     match vm_result {
-                        Ok(_) => (),
+                        Ok(_) => {
+                            panic!("success!");
+                        }
                         Err(err) => {
                             warn!("Multiple-support witness failed to validate: {err}");
+                            panic!("failed: {err}");
                             return false;
                         }
                     }
