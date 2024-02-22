@@ -60,7 +60,7 @@ impl TransactionKernel {
 pub enum TransactionKernelField {
     InputUtxos,
     OutputUtxos,
-    Pubscript,
+    PublicAnnouncements,
     Fee,
     Coinbase,
     Timestamp,

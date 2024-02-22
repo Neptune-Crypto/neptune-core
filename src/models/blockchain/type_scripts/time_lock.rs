@@ -446,7 +446,12 @@ impl TimeLockWitness {
 
 impl SecretWitness for TimeLockWitness {
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
-        NonDeterminism::new(self.release_dates.encode()).with_digests(
+        let individual_tokens = [
+            vec![self.transaction_kernel.timestamp],
+            self.release_dates.encode(),
+        ]
+        .concat();
+        NonDeterminism::new(individual_tokens).with_digests(
             self.transaction_kernel
                 .mast_path(TransactionKernelField::Timestamp)
                 .clone(),
@@ -459,6 +464,11 @@ impl SecretWitness for TimeLockWitness {
 }
 
 impl Arbitrary for TimeLockWitness {
+    /// Parameters are:
+    ///  - release_dates : Vec<u64> One release date per input UTXO. 0 if the time lock
+    ///    coin is absent.
+    ///  - num_outputs : usize Number of outputs.
+    ///  - num_public_announcements : usize Number of public announcements.
     type Parameters = (Vec<u64>, usize, usize);
 
     type Strategy = BoxedStrategy<Self>;
@@ -533,5 +543,34 @@ impl Arbitrary for TimeLockWitness {
                 },
             )
             .boxed()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use proptest::{collection::vec, strategy::Just};
+    use test_strategy::proptest;
+
+    use crate::models::{
+        blockchain::type_scripts::time_lock::TimeLock,
+        consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram, SecretWitness},
+    };
+
+    use super::TimeLockWitness;
+
+    #[proptest]
+    fn test_unlocked(
+        #[strategy(1usize..=3)] _num_inputs: usize,
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(vec(Just(0u64), #_num_inputs))] _release_dates: Vec<u64>,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        time_lock_witness: TimeLockWitness,
+    ) {
+        let transaction_kernel = &time_lock_witness.transaction_kernel;
+        TimeLock::run(
+            transaction_kernel.mast_hash().reversed().values().as_ref(),
+            time_lock_witness.nondeterminism(),
+        );
     }
 }
