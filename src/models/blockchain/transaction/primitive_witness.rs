@@ -20,9 +20,7 @@ use tasm_lib::{
 
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::{
-    models::blockchain::type_scripts::native_currency::{
-        native_currency_program, NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
-    },
+    models::blockchain::type_scripts::native_currency::native_currency_program,
     util_types::mutator_set::{
         msa_and_records::MsaAndRecords,
         mutator_set_trait::{commit, MutatorSet},
@@ -56,6 +54,70 @@ pub struct PrimitiveWitness {
     pub kernel: TransactionKernel,
 }
 
+impl PrimitiveWitness {
+    pub fn transaction_inputs_from_address_seeds_and_amounts(
+        address_seeds: &[Digest],
+        input_amounts: &[NeptuneCoins],
+    ) -> (Vec<Utxo>, Vec<LockScript>, Vec<Vec<BFieldElement>>) {
+        let input_spending_keys = address_seeds
+            .iter()
+            .map(|address_seed| generation_address::SpendingKey::derive_from_seed(*address_seed))
+            .collect_vec();
+        let input_lock_scripts = input_spending_keys
+            .iter()
+            .map(|spending_key| spending_key.to_address().lock_script())
+            .collect_vec();
+        let input_lock_script_witnesses = input_spending_keys
+            .iter()
+            .map(|spending_key| spending_key.unlock_key.values().to_vec())
+            .collect_vec();
+
+        let input_utxos = input_lock_scripts
+            .iter()
+            .zip(input_amounts)
+            .map(|(lock_script, amount)| Utxo::new(lock_script.clone(), amount.to_native_coins()))
+            .collect_vec();
+        (input_utxos, input_lock_scripts, input_lock_script_witnesses)
+    }
+
+    pub fn valid_transaction_outputs_from_amounts_and_address_seeds(
+        total_inputs: NeptuneCoins,
+        maybe_coinbase: Option<NeptuneCoins>,
+        fee: &mut NeptuneCoins,
+        output_amounts: &mut [NeptuneCoins],
+        address_seeds: &[Digest],
+    ) -> Vec<Utxo> {
+        let mut total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+        let mut some_coinbase = match maybe_coinbase {
+            Some(coinbase) => coinbase,
+            None => NeptuneCoins::zero(),
+        };
+        while total_inputs < total_outputs + *fee + some_coinbase {
+            for amount in output_amounts.iter_mut() {
+                amount.div_two();
+            }
+            if let Some(mut coinbase) = maybe_coinbase {
+                coinbase.div_two();
+                some_coinbase.div_two();
+            }
+            fee.div_two();
+            total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+        }
+        address_seeds
+            .iter()
+            .zip(output_amounts)
+            .map(|(seed, amount)| {
+                Utxo::new(
+                    generation_address::SpendingKey::derive_from_seed(*seed)
+                        .to_address()
+                        .lock_script(),
+                    amount.to_native_coins(),
+                )
+            })
+            .collect_vec()
+    }
+}
+
 impl Arbitrary for PrimitiveWitness {
     type Parameters = (usize, usize, usize);
     type Strategy = BoxedStrategy<Self>;
@@ -82,75 +144,28 @@ impl Arbitrary for PrimitiveWitness {
         )
             .prop_flat_map(
                 |(
-                    address_seeds,
+                    input_address_seeds,
                     input_amounts,
-                    output_lock_script_preimages,
+                    output_address_seeds,
                     mut output_amounts,
                     public_announcements,
                     mut fee,
                     maybe_coinbase,
                 )| {
-                    let input_spending_keys = address_seeds
-                        .iter()
-                        .map(|address_seed| {
-                            generation_address::SpendingKey::derive_from_seed(*address_seed)
-                        })
-                        .collect_vec();
-                    let input_lock_scripts = input_spending_keys
-                        .iter()
-                        .map(|spending_key| spending_key.to_address().lock_script())
-                        .collect_vec();
-                    let input_lock_script_witnesses = input_spending_keys
-                        .iter()
-                        .map(|spending_key| spending_key.unlock_key.values().to_vec())
-                        .collect_vec();
-
-                    let input_utxos = input_lock_scripts
-                        .iter()
-                        .zip(input_amounts)
-                        .map(|(lock_script, amount)| {
-                            Utxo::new(lock_script.clone(), amount.to_native_coins())
-                        })
-                        .collect_vec();
-                    let total_inputs = input_utxos
-                        .iter()
-                        .flat_map(|utxo| utxo.coins.clone())
-                        .filter(|coin| coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST)
-                        .map(|coin| coin.state)
-                        .map(|state| NeptuneCoins::decode(&state))
-                        .filter(|r| r.is_ok())
-                        .map(|r| *r.unwrap())
-                        .sum::<NeptuneCoins>();
-                    let mut total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
-                    let mut some_coinbase = match maybe_coinbase {
-                        Some(coinbase) => coinbase,
-                        None => NeptuneCoins::zero(),
-                    };
-                    while total_inputs < total_outputs + fee + some_coinbase {
-                        for amount in output_amounts.iter_mut() {
-                            amount.div_two();
-                        }
-                        if let Some(mut coinbase) = maybe_coinbase {
-                            coinbase.div_two();
-                            some_coinbase.div_two();
-                        }
-                        fee.div_two();
-                        total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
-                    }
-                    let output_utxos = output_lock_script_preimages
-                        .into_iter()
-                        .zip(output_amounts)
-                        .map(|(lock_script_preimage, amount)| {
-                            Utxo::new(
-                                generation_address::SpendingKey::derive_from_seed(
-                                    lock_script_preimage,
-                                )
-                                .to_address()
-                                .lock_script(),
-                                amount.to_native_coins(),
-                            )
-                        })
-                        .collect_vec();
+                    let (input_utxos, input_lock_scripts, input_lock_script_witnesses) =
+                        Self::transaction_inputs_from_address_seeds_and_amounts(
+                            &input_address_seeds,
+                            &input_amounts,
+                        );
+                    let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
+                    let output_utxos =
+                        Self::valid_transaction_outputs_from_amounts_and_address_seeds(
+                            total_inputs,
+                            maybe_coinbase,
+                            &mut fee,
+                            &mut output_amounts,
+                            &output_address_seeds,
+                        );
                     arbitrary_primitive_witness_with(
                         &input_utxos,
                         &input_lock_scripts,
