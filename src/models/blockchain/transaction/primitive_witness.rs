@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use get_size::GetSize;
 use itertools::Itertools;
@@ -12,22 +9,16 @@ use proptest::{
     strategy::{BoxedStrategy, Strategy},
 };
 use proptest_arbitrary_interop::arb;
-use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
     twenty_first::{
         shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-        util_types::{
-            algebraic_hasher::AlgebraicHasher,
-            mmr::{
-                mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
-                mmr_trait::Mmr,
-            },
-        },
+        util_types::algebraic_hasher::AlgebraicHasher,
     },
     Digest,
 };
 
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::{
     models::blockchain::type_scripts::native_currency::{
         native_currency_program, NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
@@ -37,10 +28,6 @@ use crate::{
         mutator_set_trait::{commit, MutatorSet},
     },
     Hash,
-};
-use crate::{
-    models::blockchain::type_scripts::neptune_coins::NeptuneCoins,
-    twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index,
 };
 use crate::{
     models::{blockchain::type_scripts::TypeScript, state::wallet::address::generation_address},
@@ -67,182 +54,6 @@ pub struct PrimitiveWitness {
     pub output_utxos: Vec<Utxo>,
     pub mutator_set_accumulator: MutatorSetAccumulator,
     pub kernel: TransactionKernel,
-}
-
-impl PrimitiveWitness {
-    pub fn pseudorandom_mmra_with_mps(
-        seed: [u8; 32],
-        leafs: &[Digest],
-    ) -> (MmrAccumulator<Hash>, Vec<MmrMembershipProof<Hash>>) {
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-
-        // sample size of MMR
-        let mut leaf_count = rng.next_u64();
-        while leaf_count < leafs.len() as u64 {
-            leaf_count = rng.next_u64();
-        }
-        let num_peaks = leaf_count.count_ones();
-
-        // sample mmr leaf indices and calculate matching derived indices
-        let leaf_indices = leafs
-            .iter()
-            .enumerate()
-            .map(|(original_index, _leaf)| (original_index, rng.next_u64() % leaf_count))
-            .map(|(original_index, mmr_index)| {
-                let (mt_index, peak_index) =
-                    leaf_index_to_mt_index_and_peak_index(mmr_index, leaf_count);
-                (original_index, mmr_index, mt_index, peak_index)
-            })
-            .collect_vec();
-        let leafs_and_indices = leafs.iter().copied().zip(leaf_indices).collect_vec();
-
-        // iterate over all trees
-        let mut peaks = vec![];
-        let dummy_mp = MmrMembershipProof::new(0u64, vec![]);
-        let mut mps: Vec<MmrMembershipProof<Hash>> =
-            (0..leafs.len()).map(|_| dummy_mp.clone()).collect_vec();
-        for tree in 0..num_peaks {
-            // select all leafs and merkle tree indices for this tree
-            let leafs_and_mt_indices = leafs_and_indices
-                .iter()
-                .copied()
-                .filter(
-                    |(_leaf, (_original_index, _mmr_index, _mt_index, peak_index))| {
-                        *peak_index == tree
-                    },
-                )
-                .map(
-                    |(leaf, (original_index, _mmr_index, mt_index, _peak_index))| {
-                        (leaf, mt_index, original_index)
-                    },
-                )
-                .collect_vec();
-            if leafs_and_mt_indices.is_empty() {
-                peaks.push(rng.gen());
-                continue;
-            }
-
-            // generate root and authentication paths
-            let tree_height = (*leafs_and_mt_indices.first().map(|(_l, i, _o)| i).unwrap() as u128)
-                .ilog2() as usize;
-            let (root, authentication_paths) =
-                Self::pseudorandom_merkle_root_with_authentication_paths(
-                    rng.gen(),
-                    tree_height,
-                    &leafs_and_mt_indices
-                        .iter()
-                        .map(|(l, i, _o)| (*l, *i))
-                        .collect_vec(),
-                );
-
-            // update peaks list
-            peaks.push(root);
-
-            // generate membership proof objects
-            let membership_proofs = leafs_and_indices
-                .iter()
-                .copied()
-                .filter(
-                    |(_leaf, (_original_index, _mmr_index, _mt_index, peak_index))| {
-                        *peak_index == tree
-                    },
-                )
-                .zip(authentication_paths.into_iter())
-                .map(
-                    |(
-                        (_leaf, (_original_index, mmr_index, _mt_index, _peak_index)),
-                        authentication_path,
-                    )| {
-                        MmrMembershipProof::<Hash>::new(mmr_index, authentication_path)
-                    },
-                )
-                .collect_vec();
-
-            // sanity check: test if membership proofs agree with peaks list (up until now)
-            let dummy_remainder: Vec<Digest> = (peaks.len()..num_peaks as usize)
-                .map(|_| rng.gen())
-                .collect_vec();
-            let dummy_peaks = [peaks.clone(), dummy_remainder].concat();
-            for (&(leaf, _mt_index, _original_index), mp) in
-                leafs_and_mt_indices.iter().zip(membership_proofs.iter())
-            {
-                assert!(mp.verify(&dummy_peaks, leaf, leaf_count).0);
-            }
-
-            // collect membership proofs in vector, with indices matching those of the supplied leafs
-            for ((_leaf, _mt_index, original_index), mp) in
-                leafs_and_mt_indices.iter().zip(membership_proofs.iter())
-            {
-                mps[*original_index] = mp.clone();
-            }
-        }
-
-        let mmra = MmrAccumulator::<Hash>::init(peaks, leaf_count);
-
-        // sanity check
-        for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-            assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
-        }
-
-        (mmra, mps)
-    }
-
-    pub fn pseudorandom_merkle_root_with_authentication_paths(
-        seed: [u8; 32],
-        tree_height: usize,
-        leafs_and_indices: &[(Digest, u64)],
-    ) -> (Digest, Vec<Vec<Digest>>) {
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let mut nodes: HashMap<u64, Digest> = HashMap::new();
-
-        // populate nodes dictionary with leafs
-        for (leaf, index) in leafs_and_indices.iter() {
-            nodes.insert(*index, *leaf);
-        }
-
-        // walk up tree layer by layer
-        // when we need nodes not already present, sample at random
-        let mut depth = tree_height + 1;
-        while depth > 0 {
-            let mut working_indices = nodes
-                .keys()
-                .copied()
-                .filter(|i| {
-                    (*i as u128) < (1u128 << (depth)) && (*i as u128) >= (1u128 << (depth - 1))
-                })
-                .collect_vec();
-            working_indices.sort();
-            working_indices.dedup();
-            for wi in working_indices {
-                let wi_odd = wi | 1;
-                if nodes.get(&wi_odd).is_none() {
-                    nodes.insert(wi_odd, rng.gen::<Digest>());
-                }
-                let wi_even = wi_odd ^ 1;
-                if nodes.get(&wi_even).is_none() {
-                    nodes.insert(wi_even, rng.gen::<Digest>());
-                }
-                let hash = Hash::hash_pair(nodes[&wi_even], nodes[&wi_odd]);
-                nodes.insert(wi >> 1, hash);
-            }
-            depth -= 1;
-        }
-
-        // read out root
-        let root = *nodes.get(&1).unwrap_or(&rng.gen());
-
-        // read out paths
-        let paths = leafs_and_indices
-            .iter()
-            .map(|(_d, i)| {
-                (0..tree_height)
-                    .map(|j| *nodes.get(&((*i >> j) ^ 1)).unwrap())
-                    .collect_vec()
-            })
-            .collect_vec();
-
-        (root, paths)
-    }
 }
 
 impl Arbitrary for PrimitiveWitness {
