@@ -293,6 +293,7 @@ impl Arbitrary for PrimitiveWitness {
                         .iter()
                         .map(|spending_key| spending_key.unlock_key.values().to_vec())
                         .collect_vec();
+
                     let input_utxos = input_lock_scripts
                         .iter()
                         .zip(input_amounts)

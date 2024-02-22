@@ -308,6 +308,15 @@ impl ReceivingAddress {
         Self::from_spending_key(&spending_key)
     }
 
+    /// Determine whether the given witness unlocks the lock defined by this receiving
+    /// address.
+    pub fn can_unlock_with(&self, witness: &[BFieldElement]) -> bool {
+        match witness.try_into() {
+            Ok(witness_array) => Digest::new(witness_array).hash::<Hash>() == self.spending_lock,
+            Err(_) => false,
+        }
+    }
+
     pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
         // derive shared key
         let mut randomness = [0u8; 32];

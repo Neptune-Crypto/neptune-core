@@ -2,7 +2,9 @@ use anyhow::Result;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::maybe_write_debuggable_program_to_disk;
 use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::shared_math::bfield_codec::BFieldCodec;
 use tracing::{debug, warn};
@@ -198,17 +200,22 @@ pub trait ValidationLogic<T: SecretWitness> {
                 let claim = self.claim();
                 #[allow(clippy::never_loop)]
                 for witness in secret_witnesses.iter() {
-                    let vm_result = witness.subprogram().run(
-                        PublicInput::new(claim.input.to_vec()),
-                        witness.nondeterminism(),
-                    );
+                    let public_input = PublicInput::new(claim.input.to_vec());
+                    let vm_result = witness
+                        .subprogram()
+                        .run(public_input.clone(), witness.nondeterminism());
                     match vm_result {
-                        Ok(_) => {
-                            panic!("success!");
-                        }
+                        Ok(_) => {}
                         Err(err) => {
                             warn!("Multiple-support witness failed to validate: {err}");
-                            panic!("failed: {err}");
+                            maybe_write_debuggable_program_to_disk(
+                                &witness.subprogram(),
+                                &VMState::new(
+                                    &witness.subprogram(),
+                                    public_input,
+                                    witness.nondeterminism(),
+                                ),
+                            );
                             return false;
                         }
                     }

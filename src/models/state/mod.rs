@@ -546,11 +546,7 @@ impl GlobalState {
             .mutator_set_accumulator
             .clone();
 
-        // When reading a digest from secret and standard-in, the digest's
-        // zeroth element must be on top of the stack. So the secret-in
-        // is here the spending key reversed.
-        let mut secret_input = spending_key.unlock_key.encode();
-        secret_input.reverse();
+        let secret_input = spending_key.unlock_key.encode();
         let mut primitive_witness = PrimitiveWitness {
             input_utxos,
             input_lock_scripts,

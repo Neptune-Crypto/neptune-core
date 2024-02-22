@@ -17,12 +17,17 @@ use crate::models::{
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScriptHaltsWitness {
     lock_script: LockScript,
-    preimage: Vec<BFieldElement>,
+    nondeterministic_tokens: Vec<BFieldElement>,
 }
 
 impl SecretWitness for LockScriptHaltsWitness {
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
-        NonDeterminism::new(self.preimage.clone().into_iter().collect_vec())
+        NonDeterminism::new(
+            self.nondeterministic_tokens
+                .clone()
+                .into_iter()
+                .collect_vec(),
+        )
     }
 
     fn subprogram(&self) -> Program {
@@ -50,16 +55,20 @@ impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
         Self {
             supported_claims: program_and_program_digests_and_spending_keys
                 .into_iter()
-                .map(|(lockscript, lockscript_digest, spendkey)| SupportedClaim {
-                    claim: triton_vm::prelude::Claim {
-                        program_digest: lockscript_digest,
-                        input: tx_kernel_mast_hash.values().to_vec(),
-                        output: empty_string.clone(),
-                    },
-                    support: ClaimSupport::SecretWitness(LockScriptHaltsWitness {
-                        lock_script: lockscript.to_owned(),
-                        preimage: spendkey.to_owned(),
-                    }),
+                .map(|(lockscript, lockscript_digest, spendkey)| {
+                    let mut nondeterministic_tokens = spendkey.to_owned();
+                    nondeterministic_tokens.reverse();
+                    SupportedClaim {
+                        claim: triton_vm::prelude::Claim {
+                            program_digest: lockscript_digest,
+                            input: tx_kernel_mast_hash.values().to_vec(),
+                            output: empty_string.clone(),
+                        },
+                        support: ClaimSupport::SecretWitness(LockScriptHaltsWitness {
+                            lock_script: lockscript.to_owned(),
+                            nondeterministic_tokens,
+                        }),
+                    }
                 })
                 .collect(),
         }
