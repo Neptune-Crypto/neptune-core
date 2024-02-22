@@ -467,13 +467,33 @@ impl Arbitrary for TimeLockWitness {
         let (release_dates, num_outputs, num_public_announcements) = parameters;
         let num_inputs = release_dates.len();
         (
-            vec(arb::<Utxo>(), num_inputs),
-            vec(arb::<Utxo>(), num_outputs),
+            vec(arb::<Digest>(), num_inputs),
+            vec(arb::<NeptuneCoins>(), num_inputs),
+            vec(arb::<Digest>(), num_outputs),
+            vec(arb::<NeptuneCoins>(), num_outputs),
             vec(arb::<PublicAnnouncement>(), num_public_announcements),
+            arb::<Option<NeptuneCoins>>(),
+            arb::<NeptuneCoins>(),
         )
             .prop_flat_map(
-                move |(mut input_utxos, output_utxos, public_announcements)| {
-                    // add time locks to input utxos
+                move |(
+                    input_address_seeds,
+                    input_amounts,
+                    output_address_seeds,
+                    mut output_amounts,
+                    public_announcements,
+                    maybe_coinbase,
+                    mut fee,
+                )| {
+                    // generate inputs
+                    let (mut input_utxos, input_lock_scripts, input_lock_script_witnesses) =
+                        PrimitiveWitness::transaction_inputs_from_address_seeds_and_amounts(
+                            &input_address_seeds,
+                            &input_amounts,
+                        );
+                    let total_inputs = input_amounts.into_iter().sum::<NeptuneCoins>();
+
+                    // add time locks to input UTXOs
                     for (utxo, release_date) in input_utxos.iter_mut().zip(release_dates.iter()) {
                         if *release_date != 0 {
                             let time_lock_coin = TimeLock::until(*release_date);
@@ -481,15 +501,30 @@ impl Arbitrary for TimeLockWitness {
                         }
                     }
 
+                    // generate valid output amounts
+                    PrimitiveWitness::find_valid_output_amounts_and_fee(
+                        total_inputs,
+                        maybe_coinbase,
+                        &mut output_amounts,
+                        &mut fee,
+                    );
+
+                    // generate output UTXOs
+                    let output_utxos =
+                        PrimitiveWitness::valid_transaction_outputs_from_amounts_and_address_seeds(
+                            &output_amounts,
+                            &output_address_seeds,
+                        );
+
                     // generate primitive transaction witness and time lock witness from there
                     arbitrary_primitive_witness_with(
                         &input_utxos,
-                        &[],
-                        &[],
+                        &input_lock_scripts,
+                        &input_lock_script_witnesses,
                         &output_utxos,
                         &public_announcements,
                         NeptuneCoins::zero(),
-                        None,
+                        maybe_coinbase,
                     )
                     .prop_map(move |transaction_primitive_witness| {
                         TimeLockWitness::from_primitive_witness(&transaction_primitive_witness)

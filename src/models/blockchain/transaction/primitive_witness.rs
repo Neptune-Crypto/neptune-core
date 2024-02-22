@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use get_size::GetSize;
 use itertools::Itertools;
-use num_traits::Zero;
+use num_traits::{CheckedSub, Zero};
 use proptest::{
     arbitrary::Arbitrary,
     collection::vec,
@@ -80,29 +80,56 @@ impl PrimitiveWitness {
         (input_utxos, input_lock_scripts, input_lock_script_witnesses)
     }
 
-    pub fn valid_transaction_outputs_from_amounts_and_address_seeds(
-        total_inputs: NeptuneCoins,
+    /// Obtain a *valid* set of outputs (and fee) given a fixed total input amount
+    /// and (optional) coinbase. This function takes a suggestion for the output
+    /// amounts and fee and mutates these values until they satisfy the no-inflation
+    /// requirement.
+    pub fn find_valid_output_amounts_and_fee(
+        total_input_amount: NeptuneCoins,
         maybe_coinbase: Option<NeptuneCoins>,
-        fee: &mut NeptuneCoins,
-        output_amounts: &mut [NeptuneCoins],
-        address_seeds: &[Digest],
-    ) -> Vec<Utxo> {
-        let mut total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+        output_amounts_suggestion: &mut [NeptuneCoins],
+        fee_suggestion: &mut NeptuneCoins,
+    ) {
+        let mut total_output_amount = output_amounts_suggestion
+            .iter()
+            .cloned()
+            .sum::<NeptuneCoins>();
         let mut some_coinbase = match maybe_coinbase {
             Some(coinbase) => coinbase,
             None => NeptuneCoins::zero(),
         };
-        while total_inputs < total_outputs + *fee + some_coinbase {
-            for amount in output_amounts.iter_mut() {
+        let mut inflationary = false;
+        while total_input_amount + some_coinbase != total_output_amount + *fee_suggestion
+            || inflationary
+        {
+            for amount in output_amounts_suggestion.iter_mut() {
                 amount.div_two();
             }
             if let Some(mut coinbase) = maybe_coinbase {
                 coinbase.div_two();
                 some_coinbase.div_two();
             }
-            fee.div_two();
-            total_outputs = output_amounts.iter().cloned().sum::<NeptuneCoins>();
+            total_output_amount = output_amounts_suggestion
+                .iter()
+                .cloned()
+                .sum::<NeptuneCoins>();
+            match (total_input_amount + some_coinbase).checked_sub(&total_output_amount) {
+                Some(number) => {
+                    *fee_suggestion = number;
+                    inflationary = false;
+                }
+                None => {
+                    inflationary = true;
+                }
+            }
         }
+    }
+
+    /// Generate valid output UTXOs from the amounts and seeds for the addresses
+    pub fn valid_transaction_outputs_from_amounts_and_address_seeds(
+        output_amounts: &[NeptuneCoins],
+        address_seeds: &[Digest],
+    ) -> Vec<Utxo> {
         address_seeds
             .iter()
             .zip(output_amounts)
@@ -158,12 +185,15 @@ impl Arbitrary for PrimitiveWitness {
                             &input_amounts,
                         );
                     let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
+                    Self::find_valid_output_amounts_and_fee(
+                        total_inputs,
+                        maybe_coinbase,
+                        &mut output_amounts,
+                        &mut fee,
+                    );
                     let output_utxos =
                         Self::valid_transaction_outputs_from_amounts_and_address_seeds(
-                            total_inputs,
-                            maybe_coinbase,
-                            &mut fee,
-                            &mut output_amounts,
+                            &output_amounts,
                             &output_address_seeds,
                         );
                     arbitrary_primitive_witness_with(
