@@ -28,7 +28,6 @@ impl SecretWitness for MmrMembershipWitness {
     fn standard_input(&self) -> PublicInput {
         todo!()
     }
-
 }
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]

@@ -27,7 +27,6 @@ impl SecretWitness for PredecessorIsValidWitness {
     fn standard_input(&self) -> PublicInput {
         todo!()
     }
-
 }
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]

@@ -75,5 +75,4 @@ impl SecretWitness for PrincipalBlockValidationWitness {
     fn standard_input(&self) -> PublicInput {
         todo!()
     }
-
 }

@@ -3,7 +3,8 @@ use std::panic::catch_unwind;
 use itertools::Itertools;
 use tasm_lib::{
     triton_vm::{
-        instruction::LabelledInstruction, program::{NonDeterminism, Program}
+        instruction::LabelledInstruction,
+        program::{NonDeterminism, Program},
     },
     twenty_first::shared_math::b_field_element::BFieldElement,
     Digest,
@@ -14,7 +15,7 @@ use crate::models::blockchain::shared::Hash;
 use super::environment;
 
 pub enum ConsensusError {
-    RustShadowPanic(String)
+    RustShadowPanic(String),
 }
 
 pub trait ConsensusProgram {
@@ -39,17 +40,18 @@ pub trait ConsensusProgram {
         input: &[BFieldElement],
         nondeterminism: NonDeterminism<BFieldElement>,
     ) -> Result<Vec<BFieldElement>, ConsensusError> {
-        println!("Running consensus program with input: {}", input.iter().map(|b|b.value()).join(","));
-        match catch_unwind(||
-            {
-                environment::init(input, nondeterminism);
-                Self::source();
-                environment::PUB_OUTPUT.take()
-            }) {
-                Ok(result) => Result::Ok(result),
-                Err(e) => {
-                    Result::Err(ConsensusError::RustShadowPanic(format!("{:?}", e)))
-                },
-            }
+        println!(
+            "Running consensus program with input: {}",
+            input.iter().map(|b| b.value()).join(",")
+        );
+        let emulation_result = catch_unwind(|| {
+            environment::init(Self::hash(), input, nondeterminism);
+            Self::source();
+            environment::PUB_OUTPUT.take()
+        });
+        match emulation_result {
+            Ok(result) => Result::Ok(result),
+            Err(e) => Result::Err(ConsensusError::RustShadowPanic(format!("{:?}", e))),
+        }
     }
 }

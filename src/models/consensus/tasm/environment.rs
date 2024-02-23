@@ -24,7 +24,11 @@ thread_local! {
     pub(super) static PROGRAM_DIGEST: RefCell<Digest> = RefCell::new(Digest::default());
 }
 
-pub(crate) fn init(input: &[BFieldElement], nondeterminism: NonDeterminism<BFieldElement>) {
+pub(crate) fn init(
+    program_digest: Digest,
+    input: &[BFieldElement],
+    nondeterminism: NonDeterminism<BFieldElement>,
+) {
     let mut pub_input_reversed = input.to_vec();
     pub_input_reversed.reverse();
     let mut inidividual_tokens_reversed = nondeterminism.individual_tokens;
@@ -47,5 +51,8 @@ pub(crate) fn init(input: &[BFieldElement], nondeterminism: NonDeterminism<BFiel
     });
     PUB_OUTPUT.with(|v| {
         *v.borrow_mut() = vec![];
+    });
+    PROGRAM_DIGEST.with(|v| {
+        *v.borrow_mut() = program_digest;
     });
 }

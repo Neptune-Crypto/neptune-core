@@ -451,7 +451,9 @@ impl SecretWitness for TimeLockWitness {
             .transaction_kernel
             .mast_path(TransactionKernelField::Timestamp)
             .clone();
-        NonDeterminism::new(individual_tokens).with_digests(mast_path)
+        NonDeterminism::new(individual_tokens)
+            .with_digests(mast_path)
+            .with_ram(memory)
     }
 
     fn subprogram(&self) -> Program {
@@ -562,6 +564,8 @@ impl Arbitrary for TimeLockWitness {
 
 #[cfg(test)]
 mod test {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use proptest::{collection::vec, strategy::Just};
     use test_strategy::proptest;
 
@@ -572,7 +576,7 @@ mod test {
 
     use super::TimeLockWitness;
 
-    #[proptest(cases = 1)]
+    #[proptest(cases = 5)]
     fn test_unlocked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -585,8 +589,37 @@ mod test {
             TimeLock::run(
                 &time_lock_witness.standard_input().individual_tokens,
                 time_lock_witness.nondeterminism(),
-            ).is_ok(),
+            )
+            .is_ok(),
             "time lock program did not halt gracefully"
+        );
+    }
+
+    fn now() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    #[proptest(cases = 5)]
+    fn test_locked(
+        #[strategy(1usize..=3)] _num_inputs: usize,
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(vec(now()+1000*60*60*24..now()+1000*60*60*24*7, #_num_inputs))]
+        _release_dates: Vec<u64>,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        time_lock_witness: TimeLockWitness,
+    ) {
+        println!("now: {}", now());
+        assert!(
+            TimeLock::run(
+                &time_lock_witness.standard_input().individual_tokens,
+                time_lock_witness.nondeterminism(),
+            )
+            .is_err(),
+            "time lock program failed to panic"
         );
     }
 }

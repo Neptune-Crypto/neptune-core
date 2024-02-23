@@ -314,14 +314,18 @@ impl Display for NeptuneCoins {
 pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let number: [u32; 4] = rng.gen();
-    NeptuneCoins(U32s::new(number))
+    let mut nau = U32s::new(number);
+    for _ in 0..10 {
+        nau.div_two();
+    }
+    NeptuneCoins(nau)
 }
 
 impl<'a> Arbitrary<'a> for NeptuneCoins {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut nau: U32s<NUM_LIMBS> = U32s::new(u.arbitrary()?);
-        while nau > NeptuneCoins::conversion_factor() * 42000000.into() {
-            nau = U32s::new(u.arbitrary()?);
+        for _ in 0..10 {
+            nau.div_two();
         }
         Ok(NeptuneCoins(nau))
     }
