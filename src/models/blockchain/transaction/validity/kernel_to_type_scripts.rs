@@ -28,6 +28,10 @@ impl SecretWitness for KernelToTypeScriptsWitness {
     fn subprogram(&self) -> Program {
         todo!()
     }
+
+    fn standard_input(&self) -> PublicInput {
+        todo!()
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToTypeScripts {

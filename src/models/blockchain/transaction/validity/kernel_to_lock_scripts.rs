@@ -30,6 +30,10 @@ impl SecretWitness for KernelToLockScriptsWitness {
     fn subprogram(&self) -> Program {
         todo!()
     }
+
+    fn standard_input(&self) -> PublicInput {
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]

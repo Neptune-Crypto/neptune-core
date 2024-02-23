@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
+use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
@@ -89,6 +90,10 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
 
     fn subprogram(&self) -> Program {
         RemovalRecordsIntegrity::program()
+    }
+
+    fn standard_input(&self) -> PublicInput {
+        PublicInput::new(self.kernel.mast_hash().reversed().values().to_vec())
     }
 }
 

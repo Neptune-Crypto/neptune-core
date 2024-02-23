@@ -12,6 +12,7 @@ use proptest_arbitrary_interop::arb;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
+    structure::tasm_object::TasmObject,
     twenty_first::{
         shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
         util_types::algebraic_hasher::AlgebraicHasher,
@@ -45,7 +46,7 @@ use super::{
 /// is desirable to associate a random but consistent salt for the entire list of UTXOs.
 /// This situation arises when two distinct consensus programs prove different features
 /// about the same list of UTXOs.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, GetSize, BFieldCodec)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, GetSize, BFieldCodec, TasmObject)]
 pub struct SaltedUtxos {
     pub utxos: Vec<Utxo>,
     pub salt: [BFieldElement; 3],

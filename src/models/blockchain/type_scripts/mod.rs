@@ -1,19 +1,27 @@
 use crate::{
-    models::consensus::{SecretWitness, ValidationLogic},
+    models::consensus::{mast_hash::MastHash, SecretWitness, ValidationLogic},
     Hash,
 };
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use tasm_lib::{
-    triton_vm::{instruction::LabelledInstruction, program::Program},
-    twenty_first::shared_math::bfield_codec::BFieldCodec,
+    triton_vm::{
+        instruction::LabelledInstruction,
+        program::{Program, PublicInput},
+    },
+    twenty_first::{
+        shared_math::bfield_codec::BFieldCodec, util_types::algebraic_hasher::AlgebraicHasher,
+    },
     Digest,
 };
 
 use native_currency::native_currency_program;
 
-use super::transaction::primitive_witness::PrimitiveWitness;
+use super::transaction::{
+    primitive_witness::{PrimitiveWitness, SaltedUtxos},
+    transaction_kernel::TransactionKernel,
+};
 
 pub mod native_currency;
 pub mod neptune_coins;
@@ -68,5 +76,23 @@ impl TypeScript {
         Self {
             program: native_currency_program(),
         }
+    }
+}
+
+pub trait TypeScriptWitness {
+    fn transaction_kernel(&self) -> TransactionKernel;
+    fn salted_input_utxos(&self) -> SaltedUtxos;
+    fn salted_output_utxos(&self) -> SaltedUtxos;
+
+    fn type_script_standard_input(&self) -> PublicInput {
+        PublicInput::new(
+            [
+                self.transaction_kernel().mast_hash().reversed().values(),
+                Hash::hash(&self.salted_input_utxos()).reversed().values(),
+                Hash::hash(&self.salted_output_utxos()).reversed().values(),
+            ]
+            .concat()
+            .to_vec(),
+        )
     }
 }

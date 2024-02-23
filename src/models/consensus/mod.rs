@@ -63,6 +63,9 @@ impl GetSize for SingleProof {
 pub trait SecretWitness:
     Clone + Serialize + PartialEq + Eq + GetSize + BFieldCodec + Sized
 {
+    /// The program's (public/standard) input
+    fn standard_input(&self) -> PublicInput;
+
     /// The non-determinism for the VM that this witness corresponds to
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement>;
 

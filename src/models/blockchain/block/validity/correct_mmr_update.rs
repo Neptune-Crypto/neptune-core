@@ -2,7 +2,7 @@ use crate::Hash;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
-    triton_vm::program::{NonDeterminism, Program},
+    triton_vm::program::{NonDeterminism, Program, PublicInput},
     twenty_first::{
         shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
         util_types::mmr::mmr_accumulator::MmrAccumulator,
@@ -24,6 +24,11 @@ impl SecretWitness for CorrectMmrUpdateWitness {
     fn subprogram(&self) -> Program {
         todo!()
     }
+
+    fn standard_input(&self) -> PublicInput {
+        todo!()
+    }
+
 }
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,7 +1,9 @@
+use std::panic::catch_unwind;
+
+use itertools::Itertools;
 use tasm_lib::{
     triton_vm::{
-        instruction::LabelledInstruction,
-        program::{NonDeterminism, Program},
+        instruction::LabelledInstruction, program::{NonDeterminism, Program}
     },
     twenty_first::shared_math::b_field_element::BFieldElement,
     Digest,
@@ -10,6 +12,10 @@ use tasm_lib::{
 use crate::models::blockchain::shared::Hash;
 
 use super::environment;
+
+pub enum ConsensusError {
+    RustShadowPanic(String)
+}
 
 pub trait ConsensusProgram {
     /// The canonical reference source code for the consensus program, written in the
@@ -32,9 +38,18 @@ pub trait ConsensusProgram {
     fn run(
         input: &[BFieldElement],
         nondeterminism: NonDeterminism<BFieldElement>,
-    ) -> Vec<BFieldElement> {
-        environment::init(input, nondeterminism);
-        Self::source();
-        environment::PUB_OUTPUT.take()
+    ) -> Result<Vec<BFieldElement>, ConsensusError> {
+        println!("Running consensus program with input: {}", input.iter().map(|b|b.value()).join(","));
+        match catch_unwind(||
+            {
+                environment::init(input, nondeterminism);
+                Self::source();
+                environment::PUB_OUTPUT.take()
+            }) {
+                Ok(result) => Result::Ok(result),
+                Err(e) => {
+                    Result::Err(ConsensusError::RustShadowPanic(format!("{:?}", e)))
+                },
+            }
     }
 }

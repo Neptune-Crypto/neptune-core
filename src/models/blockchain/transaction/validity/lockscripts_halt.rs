@@ -6,6 +6,7 @@ use crate::{
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use tasm_lib::{triton_vm::program::PublicInput, Digest};
 use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -18,6 +19,7 @@ use crate::models::{
 pub struct LockScriptHaltsWitness {
     lock_script: LockScript,
     nondeterministic_tokens: Vec<BFieldElement>,
+    transaction_kernel_mast_hash: Digest,
 }
 
 impl SecretWitness for LockScriptHaltsWitness {
@@ -32,6 +34,15 @@ impl SecretWitness for LockScriptHaltsWitness {
 
     fn subprogram(&self) -> Program {
         self.lock_script.program.clone()
+    }
+
+    fn standard_input(&self) -> PublicInput {
+        PublicInput::new(
+            self.transaction_kernel_mast_hash
+                .reversed()
+                .values()
+                .to_vec(),
+        )
     }
 }
 
@@ -67,6 +78,7 @@ impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
                         support: ClaimSupport::SecretWitness(LockScriptHaltsWitness {
                             lock_script: lockscript.to_owned(),
                             nondeterministic_tokens,
+                            transaction_kernel_mast_hash: tx_kernel_mast_hash,
                         }),
                     }
                 })

@@ -1,16 +1,15 @@
+use std::collections::HashMap;
+
 use crate::models::blockchain::transaction::primitive_witness::arbitrary_primitive_witness_with;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
-use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::SecretWitness;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
-use crate::util_types::mutator_set::shared::NUM_TRIALS;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -21,7 +20,11 @@ use proptest::strategy::BoxedStrategy;
 use proptest::strategy::Strategy;
 use proptest_arbitrary_interop::arb;
 use serde::{Deserialize, Serialize};
+use tasm_lib::memory::encode_to_memory;
+use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+use tasm_lib::twenty_first::shared_math::tip5::Tip5;
 use tasm_lib::{
     triton_vm::{
         instruction::LabelledInstruction,
@@ -36,6 +39,7 @@ use crate::models::consensus::tasm::builtins as tasm;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 
 use super::neptune_coins::NeptuneCoins;
+use super::TypeScriptWitness;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct TimeLock {}
@@ -58,8 +62,14 @@ impl ConsensusProgram for TimeLock {
         // get in the current program's hash digest
         let self_digest: Digest = tasm::own_program_digest();
 
-        // read standard input: the transaction kernel mast hash
+        // read standard input:
+        //  - transaction kernel mast hash
+        //  - input salted utxos digest
+        //  - output salted utxos digest
+        // (All type scripts take this triple as input.)
         let tx_kernel_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let input_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let _output_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
 
         // divine the timestamp and authenticate it against the kernel mast hash
         let leaf_index: u32 = 5;
@@ -69,50 +79,22 @@ impl ConsensusProgram for TimeLock {
         tasm::tasm_hashing_merkle_verify(tx_kernel_digest, leaf_index, leaf, tree_height);
 
         // get pointers to objects living in nondeterministic memory:
-        //  - list of input UTXOs
-        //  - list of input UTXOs' membership proofs in the mutator set
-        //  - transaction kernel
+        //  - input Salted UTXOs
         let input_utxos_pointer: u64 = tasm::tasm_io_read_secin___bfe().value();
-        let input_utxos: Vec<Utxo> =
+
+        // it's important to read the outputs digest too, but we actually don't care about
+        // the output UTXOs (in this type script)
+        let _output_utxos_pointer: u64 = tasm::tasm_io_read_secin___bfe().value();
+
+        // authenticate salted input UTXOs against the digest that was read from stdin
+        let input_salted_utxos: SaltedUtxos =
             tasm::decode_from_memory(BFieldElement::new(input_utxos_pointer));
-        let input_mps_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
-        let input_mps: Vec<MsMembershipProof> = tasm::decode_from_memory(input_mps_pointer);
-        let transaction_kernel_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
-        let transaction_kernel: TransactionKernel =
-            tasm::decode_from_memory(transaction_kernel_pointer);
-
-        // authenticate kernel
-        let transaction_kernel_hash = Hash::hash(&transaction_kernel);
-        assert_eq!(transaction_kernel_hash, tx_kernel_digest);
-
-        // compute the inputs (removal records' absolute index sets)
-        let mut inputs_derived: Vec<Digest> = Vec::with_capacity(input_utxos.len());
-        let mut i: usize = 0;
-        while i < input_utxos.len() {
-            let aocl_leaf_index: u64 = input_mps[i].auth_path_aocl.leaf_index;
-            let receiver_preimage: Digest = input_mps[i].receiver_preimage;
-            let sender_randomness: Digest = input_mps[i].sender_randomness;
-            let item: Digest = Hash::hash(&input_utxos[i]);
-            let index_set: [u128; NUM_TRIALS as usize] =
-                get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_leaf_index);
-            inputs_derived.push(Hash::hash(&index_set));
-            i += 1;
-        }
-
-        // read inputs (absolute index sets) from kernel
-        let mut inputs_kernel: Vec<Digest> = Vec::with_capacity(transaction_kernel.inputs.len());
-        i = 0;
-        while i < transaction_kernel.inputs.len() {
-            let index_set = transaction_kernel.inputs[i].absolute_indices.to_vec();
-            inputs_kernel.push(Hash::hash(&index_set));
-            i += 1;
-        }
-
-        // authenticate inputs
-        tasm::tasm_list_unsafeimplu32_multiset_equality(inputs_derived, inputs_kernel);
+        let input_salted_utxos_digest: Digest = Tip5::hash(&input_salted_utxos);
+        assert_eq!(input_salted_utxos_digest, input_utxos_digest);
 
         // iterate over inputs
-        i = 0;
+        let input_utxos = input_salted_utxos.utxos;
+        let mut i = 0;
         while i < input_utxos.len() {
             // get coins
             let coins: &Vec<Coin> = &input_utxos[i].coins;
@@ -448,20 +430,50 @@ impl TimeLockWitness {
 
 impl SecretWitness for TimeLockWitness {
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
-        let individual_tokens = [
-            vec![self.transaction_kernel.timestamp],
-            self.release_dates.encode(),
-        ]
-        .concat();
-        NonDeterminism::new(individual_tokens).with_digests(
-            self.transaction_kernel
-                .mast_path(TransactionKernelField::Timestamp)
-                .clone(),
-        )
+        let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+        let input_salted_utxos_address = FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
+        let output_salted_utxos_address = encode_to_memory(
+            &mut memory,
+            input_salted_utxos_address,
+            self.input_utxos.clone(),
+        );
+        encode_to_memory(
+            &mut memory,
+            output_salted_utxos_address,
+            SaltedUtxos::empty(),
+        );
+        let individual_tokens = vec![
+            self.transaction_kernel.timestamp,
+            input_salted_utxos_address,
+            output_salted_utxos_address,
+        ];
+        let mast_path = self
+            .transaction_kernel
+            .mast_path(TransactionKernelField::Timestamp)
+            .clone();
+        NonDeterminism::new(individual_tokens).with_digests(mast_path)
     }
 
     fn subprogram(&self) -> Program {
         Program::new(&TimeLock::code())
+    }
+
+    fn standard_input(&self) -> PublicInput {
+        self.type_script_standard_input()
+    }
+}
+
+impl TypeScriptWitness for TimeLockWitness {
+    fn transaction_kernel(&self) -> TransactionKernel {
+        self.transaction_kernel.clone()
+    }
+
+    fn salted_input_utxos(&self) -> SaltedUtxos {
+        self.input_utxos.clone()
+    }
+
+    fn salted_output_utxos(&self) -> SaltedUtxos {
+        SaltedUtxos::empty()
     }
 }
 
@@ -555,12 +567,12 @@ mod test {
 
     use crate::models::{
         blockchain::type_scripts::time_lock::TimeLock,
-        consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram, SecretWitness},
+        consensus::{tasm::program::ConsensusProgram, SecretWitness},
     };
 
     use super::TimeLockWitness;
 
-    #[proptest]
+    #[proptest(cases = 1)]
     fn test_unlocked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -569,10 +581,12 @@ mod test {
         #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
         time_lock_witness: TimeLockWitness,
     ) {
-        let transaction_kernel = &time_lock_witness.transaction_kernel;
-        TimeLock::run(
-            transaction_kernel.mast_hash().reversed().values().as_ref(),
-            time_lock_witness.nondeterminism(),
+        assert!(
+            TimeLock::run(
+                &time_lock_witness.standard_input().individual_tokens,
+                time_lock_witness.nondeterminism(),
+            ).is_ok(),
+            "time lock program did not halt gracefully"
         );
     }
 }

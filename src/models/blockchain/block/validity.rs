@@ -1,7 +1,7 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
-    triton_vm::program::{NonDeterminism, Program},
+    triton_vm::program::{NonDeterminism, Program, PublicInput},
     twenty_first::{self, shared_math::b_field_element::BFieldElement},
 };
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -71,4 +71,9 @@ impl SecretWitness for PrincipalBlockValidationWitness {
     fn subprogram(&self) -> Program {
         todo!()
     }
+
+    fn standard_input(&self) -> PublicInput {
+        todo!()
+    }
+
 }
