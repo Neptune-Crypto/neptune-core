@@ -26,7 +26,7 @@ use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
-use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use super::blockchain::transaction::primitive_witness::{PrimitiveWitness, SaltedUtxos};
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::utxo::{LockScript, Utxo};
 use super::blockchain::transaction::validity::TransactionValidationLogic;
@@ -548,12 +548,12 @@ impl GlobalState {
 
         let secret_input = spending_key.unlock_key.encode();
         let mut primitive_witness = PrimitiveWitness {
-            input_utxos,
+            input_utxos: SaltedUtxos::new(input_utxos.clone()),
             input_lock_scripts,
             type_scripts,
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
-            output_utxos: output_utxos.clone(),
+            output_utxos: SaltedUtxos::new(output_utxos.clone()),
             mutator_set_accumulator,
             kernel: kernel.clone(),
         };

@@ -43,6 +43,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use self::primitive_witness::PrimitiveWitness;
+use self::primitive_witness::SaltedUtxos;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
@@ -217,12 +218,12 @@ fn make_coinbase_transaction(
     };
 
     let primitive_witness = PrimitiveWitness {
-        input_utxos: vec![],
+        input_utxos: SaltedUtxos::empty(),
         type_scripts: vec![TypeScript::native_coin()],
         input_lock_scripts: vec![],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
-        output_utxos: vec![coinbase_utxo.clone()],
+        output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
         mutator_set_accumulator,
         kernel,
     };

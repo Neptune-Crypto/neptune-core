@@ -110,7 +110,12 @@ impl Transaction {
             if let Witness::Primitive(witness) = &mut self.witness {
                 let membership_proofs =
                     &mut witness.input_membership_proofs.iter_mut().collect_vec();
-                let own_items = witness.input_utxos.iter().map(Hash::hash).collect_vec();
+                let own_items = witness
+                    .input_utxos
+                    .utxos
+                    .iter()
+                    .map(Hash::hash)
+                    .collect_vec();
                 MsMembershipProof::batch_update_from_addition(
                     membership_proofs,
                     &own_items,
@@ -235,11 +240,9 @@ impl Transaction {
                     error!("Cannot merge two transactions with distinct mutator set hashes.");
                 }
                 Witness::Primitive(PrimitiveWitness {
-                    input_utxos: [
-                        self_witness.input_utxos.clone(),
-                        other_witness.input_utxos.clone(),
-                    ]
-                    .concat(),
+                    input_utxos: self_witness
+                        .input_utxos
+                        .cat(other_witness.input_utxos.clone()),
                     input_lock_scripts: [
                         self_witness.input_lock_scripts.clone(),
                         other_witness.input_lock_scripts.clone(),
@@ -262,11 +265,9 @@ impl Transaction {
                         other_witness.input_membership_proofs.clone(),
                     ]
                     .concat(),
-                    output_utxos: [
-                        self_witness.output_utxos.clone(),
-                        other_witness.output_utxos.clone(),
-                    ]
-                    .concat(),
+                    output_utxos: self_witness
+                        .output_utxos
+                        .cat(other_witness.output_utxos.clone()),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
                     kernel: merged_kernel.clone(),
                 })
@@ -347,6 +348,7 @@ impl Transaction {
         let mut witnessed_removal_records = vec![];
         for (input_utxo, msmp) in primitive_witness
             .input_utxos
+            .utxos
             .iter()
             .zip(primitive_witness.input_membership_proofs.iter())
         {
@@ -373,6 +375,7 @@ impl Transaction {
         // collect type script hashes
         let type_script_hashes = primitive_witness
             .output_utxos
+            .utxos
             .iter()
             .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
             .sorted_by_key(|d| d.values().map(|b| b.value()))
@@ -494,6 +497,7 @@ impl Transaction {
 #[cfg(test)]
 mod witness_tests {
     use tasm_lib::Digest;
+    use witness_tests::primitive_witness::SaltedUtxos;
 
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
@@ -511,12 +515,12 @@ mod witness_tests {
             mutator_set_hash: Digest::default(),
         };
         let primitive_witness = PrimitiveWitness {
-            input_utxos: vec![],
+            input_utxos: SaltedUtxos::empty(),
             type_scripts: vec![],
             input_lock_scripts: vec![],
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
-            output_utxos: vec![],
+            output_utxos: SaltedUtxos::empty(),
             mutator_set_accumulator: MutatorSetAccumulator::new(),
             kernel: empty_kernel,
         };

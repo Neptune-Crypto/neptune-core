@@ -1,3 +1,4 @@
+use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::prelude::twenty_first;
@@ -800,12 +801,12 @@ pub fn make_mock_transaction_with_generation_key(
         .collect_vec();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
     let primitive_witness = PrimitiveWitness {
-        input_utxos,
+        input_utxos: SaltedUtxos::new(input_utxos),
         type_scripts,
         input_lock_scripts,
         lock_script_witnesses: spending_key_unlock_keys,
         input_membership_proofs,
-        output_utxos,
+        output_utxos: SaltedUtxos::new(output_utxos),
         mutator_set_accumulator: tip_msa,
         kernel: kernel.clone(),
     };
@@ -926,11 +927,11 @@ pub fn make_mock_block(
     };
 
     let primitive_witness = PrimitiveWitness {
-        input_utxos: vec![],
+        input_utxos: SaltedUtxos::empty(),
         type_scripts: vec![TypeScript::native_coin()],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
-        output_utxos: vec![coinbase_utxo.clone()],
+        output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
         mutator_set_accumulator: previous_mutator_set.clone(),
         input_lock_scripts: vec![],
         kernel: tx_kernel.clone(),

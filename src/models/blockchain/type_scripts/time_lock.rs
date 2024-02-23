@@ -1,5 +1,6 @@
 use crate::models::blockchain::transaction::primitive_witness::arbitrary_primitive_witness_with;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
@@ -404,7 +405,7 @@ pub struct TimeLockWitness {
     /// One timestamp for every input UTXO. Inputs that do not have a time lock are
     /// assigned timestamp 0, which is automatically satisfied.
     release_dates: Vec<u64>,
-    input_utxos: Vec<Utxo>,
+    input_utxos: SaltedUtxos,
     input_membership_proofs: Vec<MsMembershipProof>,
     transaction_kernel: TransactionKernel,
 }
@@ -413,6 +414,7 @@ impl TimeLockWitness {
     pub fn from_primitive_witness(transaction_primitive_witness: &PrimitiveWitness) -> Self {
         let release_dates = transaction_primitive_witness
             .input_utxos
+            .utxos
             .iter()
             .map(|utxo| {
                 utxo.coins

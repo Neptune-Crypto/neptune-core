@@ -56,8 +56,8 @@ impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
         };
         let witness = TypeScriptHaltsWitness {
             type_script: TypeScript::native_coin(),
-            input_utxos: primitive_witness.input_utxos.clone(),
-            output_utxos: primitive_witness.output_utxos.clone(),
+            input_utxos: primitive_witness.input_utxos.utxos.clone(),
+            output_utxos: primitive_witness.output_utxos.utxos.clone(),
         };
         let amount_logic: SupportedClaim<TypeScriptHaltsWitness> = SupportedClaim {
             claim,

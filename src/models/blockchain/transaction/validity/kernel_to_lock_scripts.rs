@@ -61,7 +61,7 @@ impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
             program_digest: Digest::default(),
         };
         let _kernel_to_lock_scripts_witness = KernelToLockScriptsWitness {
-            input_utxos: primitive_witness.input_utxos.clone(),
+            input_utxos: primitive_witness.input_utxos.utxos.clone(),
             mast_path: primitive_witness
                 .kernel
                 .mast_path(TransactionKernelField::InputUtxos),

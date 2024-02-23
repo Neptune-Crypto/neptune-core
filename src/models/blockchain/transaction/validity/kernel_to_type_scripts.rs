@@ -49,8 +49,9 @@ impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
     fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
         let mut type_script_digests = primitive_witness
             .input_utxos
+            .utxos
             .iter()
-            .chain(primitive_witness.output_utxos.iter())
+            .chain(primitive_witness.output_utxos.utxos.iter())
             .flat_map(|utxo| {
                 utxo.coins
                     .iter()

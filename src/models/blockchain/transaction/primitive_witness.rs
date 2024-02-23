@@ -9,6 +9,7 @@ use proptest::{
     strategy::{BoxedStrategy, Strategy},
 };
 use proptest_arbitrary_interop::arb;
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
     twenty_first::{
@@ -40,16 +41,57 @@ use super::{
     PublicAnnouncement,
 };
 
+/// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
+/// is desirable to associate a random but consistent salt for the entire list of UTXOs.
+/// This situation arises when two distinct consensus programs prove different features
+/// about the same list of UTXOs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, GetSize, BFieldCodec)]
+pub struct SaltedUtxos {
+    pub utxos: Vec<Utxo>,
+    pub salt: [BFieldElement; 3],
+}
+
+impl SaltedUtxos {
+    /// Takes a Vec of UTXOs and returns a `SaltedUtxos` object. The salt comes from
+    /// `thread_rng`.
+    pub fn new(utxos: Vec<Utxo>) -> Self {
+        Self {
+            utxos,
+            salt: thread_rng().gen(),
+        }
+    }
+
+    /// Generate a `SaltedUtxos` object that contains no UTXOs. There is a random salt
+    /// though, which comes from `thread_rng`.
+    pub fn empty() -> Self {
+        Self {
+            utxos: vec![],
+            salt: thread_rng().gen(),
+        }
+    }
+
+    /// Concatenate two `SaltedUtxos` objects. Derives the salt from hashing the
+    /// concatenation of that of the operands.
+    pub fn cat(&self, other: SaltedUtxos) -> Self {
+        Self {
+            utxos: [self.utxos.clone(), other.utxos].concat(),
+            salt: Hash::hash_varlen(&[self.salt, other.salt].concat().to_vec()).values()[0..3]
+                .try_into()
+                .unwrap(),
+        }
+    }
+}
+
 /// The raw witness is the most primitive type of transaction witness.
 /// It exposes secret data and is therefore not for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct PrimitiveWitness {
-    pub input_utxos: Vec<Utxo>,
+    pub input_utxos: SaltedUtxos,
     pub input_lock_scripts: Vec<LockScript>,
     pub type_scripts: Vec<TypeScript>,
     pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
     pub input_membership_proofs: Vec<MsMembershipProof>,
-    pub output_utxos: Vec<Utxo>,
+    pub output_utxos: SaltedUtxos,
     pub mutator_set_accumulator: MutatorSetAccumulator,
     pub kernel: TransactionKernel,
 }
@@ -231,22 +273,28 @@ pub(crate) fn arbitrary_primitive_witness_with(
     // unwrap:
     //  - sender randomness (input)
     //  - receiver preimage (input)
+    //  - salt (input)
     //  - sender randomness (output)
     //  - receiver preimage (output)
+    //  - salt (output)
     //  - aocl size
     (
         vec(arb::<Digest>(), num_inputs),
         vec(arb::<Digest>(), num_inputs),
+        vec(arb::<BFieldElement>(), 3),
         vec(arb::<Digest>(), num_outputs),
         vec(arb::<Digest>(), num_outputs),
+        vec(arb::<BFieldElement>(), 3),
         0u64..=u64::MAX,
     )
         .prop_flat_map(
             move |(
                 mut sender_randomnesses_input,
                 mut receiver_preimages_input,
+                inputs_salt,
                 sender_randomnesses_output,
                 receiver_preimages_output,
+                outputs_salt,
                 aocl_size,
             )| {
                 let input_triples = input_utxos
@@ -323,11 +371,17 @@ pub(crate) fn arbitrary_primitive_witness_with(
 
                         PrimitiveWitness {
                             input_lock_scripts: input_lock_scripts.clone(),
-                            input_utxos: input_utxos.clone(),
+                            input_utxos: SaltedUtxos {
+                                utxos: input_utxos.clone(),
+                                salt: inputs_salt.clone().try_into().unwrap(),
+                            },
                             input_membership_proofs: input_membership_proofs.clone(),
                             type_scripts: type_scripts.clone(),
                             lock_script_witnesses: input_lock_script_witnesses.clone(),
-                            output_utxos: output_utxos.clone(),
+                            output_utxos: SaltedUtxos {
+                                utxos: output_utxos.clone(),
+                                salt: outputs_salt.clone().try_into().unwrap(),
+                            },
                             mutator_set_accumulator: mutator_set_accumulator.clone(),
                             kernel,
                         }

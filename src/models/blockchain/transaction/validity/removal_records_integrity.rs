@@ -58,7 +58,7 @@ pub struct RemovalRecordsIntegrityWitness {
 impl RemovalRecordsIntegrityWitness {
     pub fn new(primitive_witness: &PrimitiveWitness) -> Self {
         Self {
-            input_utxos: primitive_witness.input_utxos.clone(),
+            input_utxos: primitive_witness.input_utxos.utxos.clone(),
             membership_proofs: primitive_witness.input_membership_proofs.clone(),
             kernel: primitive_witness.kernel.clone(),
             aocl: primitive_witness
