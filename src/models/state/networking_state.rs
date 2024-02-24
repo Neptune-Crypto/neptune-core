@@ -1,5 +1,5 @@
 use crate::config_models::data_directory::DataDirectory;
-use crate::database::{create_db_if_missing, NeptuneLevelDb};
+use crate::database::{create_db_if_missing, NeptuneLevelDb, WriteBatchAsync};
 use crate::models::database::PeerDatabases;
 use crate::models::peer::{self, PeerStanding};
 use anyhow::Result;
@@ -92,10 +92,12 @@ impl NetworkingState {
             .map(|(ip, _old_standing)| (ip, PeerStanding::default()))
             .collect();
 
-        self.peer_databases
-            .peer_standings
-            .batch_write(new_entries)
-            .await
+        let mut batch = WriteBatchAsync::new();
+        for (ip, standing) in new_entries.into_iter() {
+            batch.op_write(ip, standing);
+        }
+
+        self.peer_databases.peer_standings.batch_write(batch).await
     }
 
     // Storing IP addresses is, according to this answer, not a violation of GDPR:

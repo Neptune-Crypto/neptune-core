@@ -120,9 +120,9 @@ mod chunk_dict_tests {
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+    use twenty_first::mock::mmr::get_mock_ammr_from_digests;
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::{Digest, Tip5};
-    use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
     use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
@@ -138,7 +138,7 @@ mod chunk_dict_tests {
         // Insert elements
         let num_leaves = 3;
         let leaf_hashes: Vec<Digest> = random_elements(num_leaves);
-        let archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
+        let archival_mmr = get_mock_ammr_from_digests(leaf_hashes);
 
         let key1: u64 = 898989;
         let mp1: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
@@ -214,7 +214,7 @@ mod chunk_dict_tests {
         // Build a non-empty chunk dict and verify that it still works
         let key: u64 = 898989;
         let leaf_hashes: Vec<Digest> = random_elements(3);
-        let archival_mmr = get_rustyleveldb_ammr_from_digests(leaf_hashes);
+        let archival_mmr = get_mock_ammr_from_digests(leaf_hashes);
         let mp: MmrMembershipProof<H> = archival_mmr.prove_membership(1).0;
         let chunk = Chunk {
             relative_indices: (0..CHUNK_SIZE).collect(),

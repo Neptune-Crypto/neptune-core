@@ -2,16 +2,14 @@
 #![warn(rustdoc::unescaped_backticks)]
 #![warn(rustdoc::broken_intra_doc_links)]
 
-//! Thread-safe collection types backed by levelDB.
+//! Thread-safe collection types backed by levelNeptuneLevelDb.
 //!
 //! In particular:
-//!  - [`OrdinaryVec`](storage_vec::OrdinaryVec) provides a database-backed Vec with
-//!    read/write cache and atomic writes.
-//!  - [`SimpleRustyStorage`](storage_schema::SimpleRustyStorage) provides atomic DB writes across
+//!  - [`OrdinaryVec`](storage_vec::OrdinaryVec) provides a standard (in-memory) Vec
+//!    that implements the StorageVec trait.  It is mainly useful for tests and doctests.
+//!  - [`SimpleRustyStorage`](storage_schema::SimpleRustyStorage) provides atomic NeptuneLevelDb writes across
 //!    any number of [`DbtVec`](storage_schema::DbtVec) or [`DbtSingleton`](storage_schema::DbtSingleton) "tables".
-//!  - [`DatabaseArray`](database_array::DatabaseArray) and [`DatabaseVector`](database_vector::DatabaseVector) provide uncached
-//!    and non-atomic writes.
-//!  - [`DB`](level_db::DB) provides a convenient wrapper for the LevelDB API.
+//!  - [`NeptuneLevelDb`](level_db::NeptuneLevelDb) provides a convenient wrapper for the LevelNeptuneLevelDb API.
 
 // For anyone reading this code and trying to understand the StorageVec trait and the DbSchema
 // in particular, especially with regards to locks, mutability, and concurrency, the following
@@ -20,8 +18,8 @@
 //  0. DbtSchema::tables holds an Arc::clone() reference to each instance of a `DbTable`
 //     implementor such as DbtVec.  This is done so that DbtSchema can iterate over these
 //     tables, collect pending Write operations into a database WriteBatch, then send
-//     all writes to DB at once, atomically.
-//  1. To have a reference in DbtSchema::tables, a `DBTable` implementor such as DbtVec
+//     all writes to NeptuneLevelDb at once, atomically.
+//  1. To have a reference in DbtSchema::tables, a `NeptuneLevelDbTable` implementor such as DbtVec
 //     must include Arc, to impl cheap reference clone.
 //  2. For mutability of its contents, Arc must include either RwLock or Mutex.
 //  3. Without Arc<Mutex<..>> wrapper around DbtVecPrivate, DbtVec cannot modify
@@ -56,10 +54,5 @@
 //     per operation.  The disadvantage is that caller must keep track of the created tables
 //     and pass them to StorageWriter::persist() as Vec<&type as &dyn DbTable>, which is ugly.
 
-pub mod database_array;
-pub mod database_vector;
-pub mod level_db;
 pub mod storage_schema;
 pub mod storage_vec;
-
-mod utils;

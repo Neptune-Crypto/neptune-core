@@ -346,13 +346,13 @@ impl WalletSecret {
 mod wallet_tests {
     use std::time::Duration;
 
+    use crate::database::storage::storage_vec::traits::*;
     use itertools::Itertools;
     use num_traits::CheckedSub;
     use rand::random;
     use tracing_test::traced_test;
     use twenty_first::shared_math::tip5::DIGEST_LENGTH;
     use twenty_first::shared_math::x_field_element::EXTENSION_DEGREE;
-    use twenty_first::storage::storage_vec::traits::*;
 
     use super::monitored_utxo::MonitoredUtxo;
     use super::wallet_state::WalletState;
@@ -374,7 +374,7 @@ mod wallet_tests {
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...
-        wallet_state.wallet_db.monitored_utxos().get_all()
+        wallet_state.wallet_db.monitored_utxos().get_all().await
     }
 
     #[tokio::test]
@@ -771,8 +771,11 @@ mod wallet_tests {
             receiver_data,
             NeptuneCoins::zero(),
             msa_tip_previous.clone(),
-        );
-        next_block.accumulate_transaction(tx, &msa_tip_previous);
+        )
+        .await;
+        next_block
+            .accumulate_transaction(tx, &msa_tip_previous)
+            .await;
 
         own_wallet_state
             .update_wallet_state_with_new_block(&msa_tip_previous.clone(), &next_block)
@@ -873,7 +876,9 @@ mod wallet_tests {
             .await
             .unwrap();
 
-        block_1.accumulate_transaction(valid_tx, &previous_msa);
+        block_1
+            .accumulate_transaction(valid_tx, &previous_msa)
+            .await;
 
         // Verify the validity of the merged transaction and block
         assert!(block_1.is_valid(&genesis_block, now + seven_months));
@@ -1002,7 +1007,9 @@ mod wallet_tests {
         );
 
         // Check that `WalletStatus` is returned correctly
-        let wallet_status = { own_wallet_state.get_wallet_status_from_lock(block_18.hash()) };
+        let wallet_status = own_wallet_state
+            .get_wallet_status_from_lock(block_18.hash())
+            .await;
         assert_eq!(
             19,
             wallet_status.synced_unspent.len(),
@@ -1134,10 +1141,12 @@ mod wallet_tests {
             .create_transaction(vec![receiver_data_six.clone()], NeptuneCoins::new(4), now)
             .await
             .unwrap();
-        block_3_b.accumulate_transaction(
-            tx_from_preminer,
-            &block_2_b.kernel.body.mutator_set_accumulator,
-        );
+        block_3_b
+            .accumulate_transaction(
+                tx_from_preminer,
+                &block_2_b.kernel.body.mutator_set_accumulator,
+            )
+            .await;
         assert!(
             block_3_b.is_valid(&block_2_b, now),
             "Block must be valid after accumulating txs"

@@ -1,7 +1,9 @@
 use std::{fmt::Debug, sync::Arc};
 
-use super::{dbtsingleton_private::DbtSingletonPrivate, traits::*, RustyValue, WriteOperation};
-use crate::sync::{AtomicRw, LockCallbackFn};
+use super::{
+    dbtsingleton_private::DbtSingletonPrivate, traits::*, PendingWrites, SimpleRustyReader,
+};
+use crate::locks::tokio::AtomicRw;
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Singleton type created by [`super::DbtSchema`]
@@ -20,81 +22,61 @@ use serde::{de::DeserializeOwned, Serialize};
 #[derive(Debug)]
 pub struct DbtSingleton<V> {
     // note: Arc is not needed, because we never hand out inner to anyone.
-    inner: AtomicRw<DbtSingletonPrivate<V>>,
+    inner: DbtSingletonPrivate<V>,
 }
 
 // We manually impl Clone so that callers can make reference clones.
-impl<V> Clone for DbtSingleton<V> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
+// impl<V> Clone for DbtSingleton<V> {
+//     fn clone(&self) -> Self {
+//         Self {
+//             inner: self.inner.clone(),
+//         }
+//     }
+// }
 
 impl<V> DbtSingleton<V>
 where
-    V: Default + Clone,
+    V: Default + Clone + Serialize,
 {
-    // DbtSingleton can not be instantiated directly outside of this crate.
+    // DbtSingleton can not be instantiated directly outside of storage_schema module
+    // use [Schema::new_singleton()]
     #[inline]
-    pub(crate) fn new(
+    pub(super) fn new(
         key: u8,
-        lock_name: String,
-        reader: Arc<dyn StorageReader + Sync + Send>,
-        lock_callback_fn: Option<LockCallbackFn>,
+        write_ops: AtomicRw<PendingWrites>,
+        reader: Arc<SimpleRustyReader>,
         name: String,
     ) -> Self {
-        let singleton = DbtSingletonPrivate::<V>::new(key, reader, name);
-        Self {
-            inner: AtomicRw::from((singleton, Some(lock_name), lock_callback_fn)),
-        }
+        let singleton = DbtSingletonPrivate::<V>::new(key, write_ops, reader, name);
+        Self { inner: singleton }
+    }
+
+    /// returns singleton value
+    #[inline]
+    pub async fn get(&self) -> V {
+        self.inner.get()
+    }
+
+    /// set singleton value
+    #[inline]
+    pub async fn set(&mut self, t: V) {
+        self.inner.set(t).await;
     }
 }
 
-impl<V> StorageSingleton<V> for DbtSingleton<V>
-where
-    V: Clone + From<V> + Default,
-    V: DeserializeOwned,
-{
-    #[inline]
-    fn get(&self) -> V {
-        self.inner.lock(|inner| inner.get())
-    }
-
-    #[inline]
-    fn set(&mut self, t: V) {
-        self.inner.lock_mut(|inner| inner.set(t));
-    }
-}
-
+#[async_trait::async_trait]
 impl<V> DbTable for DbtSingleton<V>
 where
-    V: Eq + Clone + Default + Debug,
-    V: Serialize + DeserializeOwned,
+    V: Clone + Default,
+    V: Serialize + DeserializeOwned + Send + Sync,
 {
     #[inline]
-    fn pull_queue(&mut self) -> Vec<WriteOperation> {
-        self.inner.lock_mut(|inner| {
-            if inner.current_value == inner.old_value {
-                vec![]
-            } else {
-                inner.old_value = inner.current_value.clone();
-                vec![WriteOperation::Write(
-                    inner.key.into(),
-                    RustyValue::from_any(&inner.current_value),
-                )]
-            }
-        })
-    }
+    async fn restore_or_new(&mut self) {
+        // let mut inner = self.inner.lock_guard_mut().await;
 
-    #[inline]
-    fn restore_or_new(&mut self) {
-        self.inner.lock_mut(|inner| {
-            inner.current_value = match inner.reader.get(inner.key.into()) {
-                Some(value) => value.into_any(),
-                None => V::default(),
-            }
-        });
+        self.inner.current_value = match self.inner.reader.get(self.inner.key.into()).await {
+            Some(value) => value.into_any(),
+            None => V::default(),
+        };
     }
 }

@@ -1,6 +1,6 @@
-use super::super::level_db::DB;
+use super::super::super::neptune_leveldb::NeptuneLevelDb;
 use super::super::utils;
-use super::{traits::*, Index};
+use super::{Index};
 use itertools::Itertools;
 use leveldb::batch::WriteBatch;
 use serde::{de::DeserializeOwned, Serialize};
@@ -19,18 +19,19 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Debug, Clone)]
 pub struct RustyLevelDbVecPrivate<T: Serialize + DeserializeOwned> {
     key_prefix: u8,
-    pub(super) db: DB,
+    pub(super) db: NeptuneLevelDb<Index, T>,
     write_queue: VecDeque<WriteElement<T>>,
     length: Index,
     pub(super) cache: HashMap<Index, T>,
     pub(super) name: String,
 }
 
-impl<T: Serialize + DeserializeOwned + Clone> StorageVecLockedData<T>
-    for RustyLevelDbVecPrivate<T>
+// impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVecLockedData<T>
+//     for RustyLevelDbVecPrivate<T>
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> RustyLevelDbVecPrivate<T>
 {
     #[inline]
-    fn get(&self, index: Index) -> T {
+    pub(super) async fn get(&self, index: Index) -> T {
         // Disallow getting values out-of-bounds
         assert!(
             index < self.len(),
@@ -46,11 +47,11 @@ impl<T: Serialize + DeserializeOwned + Clone> StorageVecLockedData<T>
 
         // then try persistent storage
         let db_key = self.get_index_key(index);
-        self.get_u8(&db_key)
+        self.get_u8(&db_key).await
     }
 
     #[inline]
-    fn set(&mut self, index: Index, value: T) {
+    pub(super) async fn set(&mut self, index: Index, value: T) {
         // Disallow setting values out-of-bounds
         assert!(
             index < self.len(),
@@ -82,7 +83,7 @@ impl<T: Serialize + DeserializeOwned + Clone> StorageVecLockedData<T>
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> RustyLevelDbVecPrivate<T> {
     #[inline]
     pub(super) fn is_empty(&self) -> bool {
         self.length == 0
@@ -93,7 +94,7 @@ impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
         self.length
     }
 
-    pub(super) fn get_many(&self, indices: &[Index]) -> Vec<T> {
+    pub(super) async fn get_many(&self, indices: &[Index]) -> Vec<T> {
         fn sort_to_match_requested_index_order<T>(indexed_elements: HashMap<usize, T>) -> Vec<T> {
             let mut elements = indexed_elements.into_iter().collect_vec();
             elements.sort_unstable_by_key(|&(index_position, _)| index_position);
@@ -132,10 +133,11 @@ impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
 
         // let db_reader = self.db;
 
-        let elements_fetched_from_db = indices_of_elements_not_in_cache
+        let elements_fetched_from_db = futures::future::join_all(
+        indices_of_elements_not_in_cache
             .iter()
             .map(|&(_, index)| self.get_index_key(index))
-            .map(|key| self.get_u8(&key));
+            .map(|key| async move {self.get_u8(&key).await})).await;
 
         let indexed_fetched_elements_from_db = indices_of_elements_not_in_cache
             .iter()
@@ -148,7 +150,7 @@ impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
 
     /// Return all stored elements in a vector, whose index matches the StorageVec's.
     /// It's the caller's responsibility that there is enough memory to store all elements.
-    pub(super) fn get_all(&self) -> Vec<T> {
+    pub(super) async fn get_all(&self) -> Vec<T> {
         let length = self.len();
 
         let (indices_of_elements_in_cache, indices_of_elements_not_in_cache): (Vec<_>, Vec<_>) =
@@ -171,7 +173,7 @@ impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
         // let db_reader = self.db;
         for index in indices_of_elements_not_in_cache {
             let key = self.get_index_key(index);
-            let element = self.get_u8(&key);
+            let element = self.get_u8(&key).await;
             fetched_elements[index as usize] = Some(element);
         }
 
@@ -189,14 +191,14 @@ impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
     /// unique.  If not, the last value with the same index will win.
     /// For unordered collections such as HashMap, the behavior is undefined.
     #[inline]
-    pub(super) fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, T)>) {
+    pub(super) async fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, T)> + Send) {
         for (index, value) in key_vals.into_iter() {
-            self.set(index, value);
+            self.set(index, value).await;
         }
     }
 
     #[inline]
-    pub(super) fn pop(&mut self) -> Option<T> {
+    pub(super) async fn pop(&mut self) -> Option<T> {
         // add to write queue
         self.write_queue.push_back(WriteElement::Pop);
 
@@ -214,12 +216,12 @@ impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
         } else {
             // then try persistent storage
             let db_key = self.get_index_key(self.length);
-            Some(self.get_u8(&db_key))
+            Some(self.get_u8(&db_key).await)
         }
     }
 
     #[inline]
-    pub(super) fn push(&mut self, value: T) {
+    pub(super) async fn push(&mut self, value: T) {
         // add to write queue
         self.write_queue
             .push_back(WriteElement::Push(value.clone()));
@@ -236,15 +238,15 @@ impl<T: Serialize + DeserializeOwned + Clone> RustyLevelDbVecPrivate<T> {
     }
 
     #[inline]
-    pub(super) fn clear(&mut self) {
+    pub(super) async fn clear(&mut self) {
         while !self.is_empty() {
-            self.pop();
+            self.pop().await;
         }
     }
 }
 
 // ************ non-trait methods (StorageVec) **************/
-impl<T: Serialize + DeserializeOwned> RustyLevelDbVecPrivate<T> {
+impl<T: Serialize + DeserializeOwned + Send + Sync + 'static> RustyLevelDbVecPrivate<T> {
     // Return the key used to store the length of the persisted vector
     #[inline]
     pub(crate) fn get_length_key(key_prefix: u8) -> [u8; 2] {
@@ -254,15 +256,15 @@ impl<T: Serialize + DeserializeOwned> RustyLevelDbVecPrivate<T> {
 
     /// Return the length at the last write to disk
     #[inline]
-    pub(crate) fn persisted_length(&self) -> Index {
+    pub(crate) async fn persisted_length(&self) -> Index {
         let key = Self::get_length_key(self.key_prefix);
-        match self.get_u8_option(&key) {
+        match self.get_u8_option(&key).await {
             Some(value) => utils::deserialize(&value),
             None => 0,
         }
     }
 
-    /// Return the level-DB key used to store the element at an index
+    /// Return the level-NeptuneLevelDb key used to store the element at an index
     #[inline]
     pub(crate) fn get_index_key(&self, index: Index) -> [u8; 9] {
         [vec![self.key_prefix], utils::serialize(&index)]
@@ -272,9 +274,9 @@ impl<T: Serialize + DeserializeOwned> RustyLevelDbVecPrivate<T> {
     }
 
     #[inline]
-    pub(crate) fn new(db: DB, key_prefix: u8, name: &str) -> Self {
+    pub(crate) async fn new(db: NeptuneLevelDb<Index, T>, key_prefix: u8, name: &str) -> Self {
         let length_key = Self::get_length_key(key_prefix);
-        let length = match utils::get_u8_option(&db, &length_key, name) {
+        let length = match utils::get_u8_option(&db, &length_key).await {
             Some(length_bytes) => utils::deserialize(&length_bytes),
             None => 0,
         };
@@ -290,46 +292,46 @@ impl<T: Serialize + DeserializeOwned> RustyLevelDbVecPrivate<T> {
     }
 
     /// Collect all added elements that have not yet bit persisted
-    pub(crate) fn pull_queue(&mut self, write_batch: &WriteBatch) {
-        let original_length = self.persisted_length();
+    pub(crate) async fn pull_queue(&mut self, write_ops: &WriteBatch) {
+        let original_length = self.persisted_length().await;
         let mut length = original_length;
         while let Some(write_element) = self.write_queue.pop_front() {
             match write_element {
                 WriteElement::OverWrite((i, t)) => {
                     let key = self.get_index_key(i);
                     let value = utils::serialize(&t);
-                    write_batch.put_u8(&key, &value);
+                    write_ops.put_u8(&key, &value);
                 }
                 WriteElement::Push(t) => {
                     let key = [vec![self.key_prefix], utils::serialize(&length)].concat();
                     length += 1;
                     let value = utils::serialize(&t);
-                    write_batch.put(&key, &value);
+                    write_ops.put(&key, &value);
                 }
                 WriteElement::Pop => {
                     let key = [vec![self.key_prefix], utils::serialize(&(length - 1))].concat();
                     length -= 1;
-                    write_batch.delete(&key);
+                    write_ops.delete(&key);
                 }
             };
         }
 
         if original_length != length {
             let key = Self::get_length_key(self.key_prefix);
-            write_batch.put_u8(&key, &utils::serialize(&self.length));
+            write_ops.put_u8(&key, &utils::serialize(&self.length));
         }
 
         self.cache.clear();
     }
 
     #[inline]
-    fn get_u8_option(&self, index: &[u8]) -> Option<Vec<u8>> {
-        utils::get_u8_option(&self.db, index, &self.name)
+    async fn get_u8_option(&self, index: &[u8]) -> Option<Vec<u8>> {
+        utils::get_u8_option(&self.db, index).await
     }
 
     #[inline]
-    pub(super) fn get_u8(&self, index: &[u8]) -> T {
-        utils::get_u8(&self.db, index, &self.name)
+    pub(super) async fn get_u8(&self, index: &[u8]) -> T {
+        utils::get_u8(&self.db, index, &self.name).await
     }
 }
 

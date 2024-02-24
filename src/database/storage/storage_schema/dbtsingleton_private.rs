@@ -1,14 +1,18 @@
-use super::traits::*;
+// use super::traits::*;
+use super::{PendingWrites, RustyValue, SimpleRustyReader, WriteOperation};
+use crate::locks::tokio::AtomicRw;
+use serde::Serialize;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 // note: no locking is required in `DbtSingletonPrivate` because locking
 // is performed in the `DbtSingleton` public wrapper.
 pub(crate) struct DbtSingletonPrivate<V> {
+    pub(super) pending_writes: AtomicRw<PendingWrites>,
     pub(super) key: u8,
     pub(super) current_value: V,
     pub(super) old_value: V,
-    pub(super) reader: Arc<dyn StorageReader + Sync + Send>,
+    pub(super) reader: Arc<SimpleRustyReader>,
     pub(super) name: String,
 }
 
@@ -27,12 +31,18 @@ where
     }
 }
 
-impl<V: Clone + Default> DbtSingletonPrivate<V> {
-    pub(super) fn new(key: u8, reader: Arc<dyn StorageReader + Sync + Send>, name: String) -> Self {
+impl<V: Clone + Default + Serialize> DbtSingletonPrivate<V> {
+    pub(super) fn new(
+        key: u8,
+        pending_writes: AtomicRw<PendingWrites>,
+        reader: Arc<SimpleRustyReader>,
+        name: String,
+    ) -> Self {
         Self {
             key,
             current_value: Default::default(),
             old_value: Default::default(),
+            pending_writes,
             reader,
             name: name.to_owned(),
         }
@@ -41,7 +51,16 @@ impl<V: Clone + Default> DbtSingletonPrivate<V> {
         self.current_value.clone()
     }
 
-    pub(super) fn set(&mut self, v: V) {
+    pub(super) async fn set(&mut self, v: V) {
+        self.pending_writes
+            .lock_guard_mut()
+            .await
+            .write_ops
+            .push(WriteOperation::Write(
+                self.key.into(),
+                RustyValue::from_any(&v),
+            ));
+
         self.current_value = v;
     }
 }

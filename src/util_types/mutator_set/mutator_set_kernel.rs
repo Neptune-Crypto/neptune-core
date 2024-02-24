@@ -594,8 +594,8 @@ mod accumulation_scheme_tests {
         );
     }
 
-    #[test]
-    fn mutator_set_hash_test() {
+    #[tokio::test]
+    async fn mutator_set_hash_test() {
         let empty_set = MutatorSetAccumulator::default();
         let empty_hash = empty_set.hash();
 
@@ -688,10 +688,10 @@ mod accumulation_scheme_tests {
         }
     }
 
-    #[test]
-    fn init_test() {
+    #[tokio::test]
+    async fn init_test() {
         let accumulator = MutatorSetAccumulator::default();
-        let mut rms = empty_rusty_mutator_set();
+        let mut rms = empty_rusty_mutator_set().await;
         let archival = rms.ams_mut();
 
         // Verify that function to get batch index does not overflow for the empty MS

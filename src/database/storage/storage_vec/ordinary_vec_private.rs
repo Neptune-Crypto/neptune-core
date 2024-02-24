@@ -1,21 +1,38 @@
-use super::{traits::*, Index};
+use serde::{de::DeserializeOwned, Serialize};
+
+use super::Index;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OrdinaryVecPrivate<T>(pub(super) Vec<T>);
 
-impl<T: Clone> StorageVecLockedData<T> for OrdinaryVecPrivate<T> {
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> OrdinaryVecPrivate<T> {
     #[inline]
-    fn get(&self, index: Index) -> T {
-        self.0.get(index as usize).unwrap().clone()
+    pub(super) fn get(&self, index: Index) -> T {
+        self.0
+            .get(index as usize)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Out-of-bounds. Got index {} but length was {}.",
+                    index,
+                    self.0.len(),
+                )
+            })
+            .clone()
+    }
+
+    pub(super) fn get_many(&self, indices: &[Index]) -> Vec<T> {
+        indices.iter().map(|i| self.get(*i)).collect()
+    }
+
+    pub(super) fn get_all(&self) -> Vec<T> {
+        self.0.clone()
     }
 
     #[inline]
-    fn set(&mut self, index: Index, value: T) {
+    pub(super) fn set(&mut self, index: Index, value: T) {
         self.0[index as usize] = value;
     }
-}
 
-impl<T: Clone> OrdinaryVecPrivate<T> {
     #[inline]
     pub(super) fn is_empty(&self) -> bool {
         self.0.is_empty()

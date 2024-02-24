@@ -1,11 +1,12 @@
-use crate::leveldb::database::key::IntoLevelDBKey;
-use crate::leveldb::error::Error;
+use leveldb::database::key::IntoLevelDBKey;
+use leveldb::error::Error;
+use serde::{Deserialize, Serialize};
 
 // Todo: consider making RustyKey a newtype for RustyValue and auto derive all its From impls
 //       using either `derive_more` or `newtype_derive` crate
 
 /// Represents a database key as bytes
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RustyKey(pub Vec<u8>);
 
 impl From<u8> for RustyKey {

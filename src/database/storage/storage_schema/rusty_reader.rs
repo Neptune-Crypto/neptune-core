@@ -1,4 +1,4 @@
-use super::super::level_db::DB;
+use super::super::super::neptune_leveldb::NeptuneLevelDb;
 use super::{traits::StorageReader, RustyKey, RustyValue};
 
 // Note: RustyReader and SimpleRustyReader appear to be exactly
@@ -7,28 +7,18 @@ use super::{traits::StorageReader, RustyKey, RustyValue};
 /// A read-only database interface
 #[derive(Debug, Clone)]
 pub struct RustyReader {
-    /// levelDB Database
-    pub db: DB,
+    /// levelNeptuneLevelDb Database
+    pub db: NeptuneLevelDb<RustyKey, RustyValue>,
 }
 
 impl StorageReader for RustyReader {
     #[inline]
-    fn get(&self, key: RustyKey) -> Option<RustyValue> {
-        self.db
-            .get(&key.0)
-            .expect("there should be some value")
-            .map(RustyValue)
+    async fn get(&self, key: RustyKey) -> Option<RustyValue> {
+        self.db.get(key).await
     }
 
     #[inline]
-    fn get_many(&self, keys: &[RustyKey]) -> Vec<Option<RustyValue>> {
-        keys.iter()
-            .map(|key| {
-                self.db
-                    .get(&key.0)
-                    .expect("there should be some value")
-                    .map(RustyValue)
-            })
-            .collect()
+    async fn get_many(&self, keys: impl IntoIterator<Item = RustyKey>) -> Vec<Option<RustyValue>> {
+        futures::future::join_all(keys.into_iter().map(|key| self.db.get(key))).await
     }
 }

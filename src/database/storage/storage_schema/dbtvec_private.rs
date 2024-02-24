@@ -1,24 +1,26 @@
-use super::super::storage_vec::traits::*;
+// use super::super::storage_vec::traits::*;
 use super::super::storage_vec::Index;
 use super::RustyKey;
-use super::{traits::StorageReader, VecWriteOperation};
+use super::{traits::StorageReader, PendingWrites, RustyValue, SimpleRustyReader, WriteOperation};
+use crate::locks::tokio::AtomicRw;
 use itertools::Itertools;
 use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::fmt::{Debug, Formatter};
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 // note: no locking is required in `DbtVecPrivate` because locking
 // is performed in the `DbtVec` public wrapper.
 pub struct DbtVecPrivate<V> {
-    pub(super) reader: Arc<dyn StorageReader + Send + Sync>,
+    pub(super) pending_writes: AtomicRw<PendingWrites>,
+    pub(super) reader: Arc<SimpleRustyReader>,
     pub(super) current_length: Option<Index>,
     pub(super) key_prefix: u8,
-    pub(super) write_queue: VecDeque<VecWriteOperation<V>>,
+    // pub(super) write_queue: VecDeque<VecWriteOperation<V>>,
     pub(super) cache: HashMap<Index, V>,
+    persist_count: usize,
     pub(super) name: String,
+    phantom: std::marker::PhantomData<V>,
 }
 
 impl<V> Debug for DbtVecPrivate<V>
@@ -27,25 +29,26 @@ where
 {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         f.debug_struct("DbtVecPrivate")
-            .field("reader", &"Arc<dyn StorageReader + Send + Sync>")
+            .field("reader", &"Arc<SimpleRustyReader + Send + Sync>")
             .field("current_length", &self.current_length)
             .field("key_prefix", &self.key_prefix)
-            .field("write_queue", &self.write_queue)
+            // .field("write_queue", &self.write_queue)
             .field("cache", &self.cache)
             .field("name", &self.name)
             .finish()
     }
 }
 
-impl<V: Clone + DeserializeOwned> StorageVecLockedData<V> for DbtVecPrivate<V> {
+// impl<V: Clone + Serialize + DeserializeOwned> StorageVecLockedData<V> for DbtVecPrivate<V> {
+impl<V: Clone + Serialize + DeserializeOwned> DbtVecPrivate<V> {
     #[inline]
-    fn get(&self, index: Index) -> V {
+    pub(super) async fn get(&self, index: Index) -> V {
         // Disallow getting values out-of-bounds
 
         assert!(
-            index < self.len(),
+            index < self.len().await,
             "Out-of-bounds. Got {index} but length was {}. persisted vector name: {}",
-            self.len(),
+            self.len().await,
             self.name
         );
 
@@ -60,7 +63,8 @@ impl<V: Clone + DeserializeOwned> StorageVecLockedData<V> for DbtVecPrivate<V> {
 
         // then try persistent storage
         let key: RustyKey = self.get_index_key(index);
-        let val = self.reader.get(key).unwrap_or_else(|| {
+        println!("get-key: {:?}", key);
+        let val = self.reader.get(key).await.unwrap_or_else(|| {
             panic!(
                 "Element with index {index} does not exist in {}. This should not happen",
                 self.name
@@ -70,23 +74,23 @@ impl<V: Clone + DeserializeOwned> StorageVecLockedData<V> for DbtVecPrivate<V> {
     }
 
     #[inline]
-    fn set(&mut self, index: Index, value: V) {
+    pub(super) async fn set(&mut self, index: Index, value: V) {
         // Disallow setting values out-of-bounds
 
         assert!(
-            index < self.len(),
+            index < self.len().await,
             "Out-of-bounds. Got {index} but length was {}. persisted vector name: {}",
-            self.len(),
+            self.len().await,
             self.name
         );
 
-        self.write_op_overwrite(index, value);
+        self.write_op_overwrite(index, value).await;
     }
 }
 
 impl<V> DbtVecPrivate<V>
 where
-    V: Clone,
+    V: Clone + Serialize,
 {
     // Return the key used to store the length of the vector
     #[inline]
@@ -101,9 +105,10 @@ where
 
     /// Return the length at the last write to disk
     #[inline]
-    pub(super) fn persisted_length(&self) -> Option<Index> {
+    pub(super) async fn persisted_length(&self) -> Option<Index> {
         self.reader
             .get(Self::get_length_key(self.key_prefix))
+            .await
             .map(|v| v.into_any())
     }
 
@@ -119,25 +124,44 @@ where
     }
 
     #[inline]
-    pub(crate) fn new(
-        reader: Arc<dyn StorageReader + Send + Sync>,
+    pub(crate) async fn new(
+        pending_writes: AtomicRw<PendingWrites>,
+        reader: Arc<SimpleRustyReader>,
         key_prefix: u8,
         name: &str,
     ) -> Self {
         let length = None;
         let cache = HashMap::new();
+        let persist_count = pending_writes.lock_guard().await.persist_count;
+
         Self {
+            pending_writes,
             key_prefix,
             reader,
-            write_queue: VecDeque::default(),
+            // write_queue: VecDeque::default(),
             current_length: length,
             cache,
+            persist_count,
             name: name.to_string(),
+            phantom: Default::default(),
         }
     }
 
     #[inline]
-    fn write_op_overwrite(&mut self, index: Index, value: V) {
+    async fn write_op_overwrite(&mut self, index: Index, value: V) {
+        let persist_count = {
+            let mut pending_writes = self.pending_writes.lock_guard_mut().await;
+
+            println!("set-key: {:?}", self.get_index_key(index));
+
+            pending_writes.write_ops.push(WriteOperation::Write(
+                self.get_index_key(index),
+                RustyValue::from_any(&value),
+            ));
+            pending_writes.persist_count
+        };
+        self.process_persist_count(persist_count);
+
         self.cache.insert(index, value.clone());
 
         // note: benchmarks have revealed this code to slow down
@@ -156,29 +180,38 @@ where
         // })
         // }
 
-        self.write_queue
-            .push_back(VecWriteOperation::OverWrite((index, value)));
+        // self.write_queue
+        //     .push_back(VecWriteOperation::OverWrite((index, value)));
+    }
+
+    fn process_persist_count(&mut self, pending_writes_persist_count: usize) {
+        if pending_writes_persist_count > self.persist_count {
+            self.cache.clear();
+        }
+        self.persist_count = pending_writes_persist_count;
     }
 }
 
 impl<V> DbtVecPrivate<V>
 where
-    V: Clone + DeserializeOwned,
+    V: Clone + Serialize + DeserializeOwned,
 {
     #[inline]
-    pub(super) fn is_empty(&self) -> bool {
-        self.len() == 0
+    pub(super) async fn is_empty(&self) -> bool {
+        self.len().await == 0
     }
 
     #[inline]
-    pub(super) fn len(&self) -> Index {
-        self.current_length
-            .unwrap_or_else(|| self.persisted_length().unwrap_or(0))
+    pub(super) async fn len(&self) -> Index {
+        match self.current_length {
+            Some(l) => l,
+            None => self.persisted_length().await.unwrap_or(0),
+        }
     }
 
     /// Fetch multiple elements from a `DbtVec` and return the elements matching the order
     /// of the input indices.
-    pub(super) fn get_many(&self, indices: &[Index]) -> Vec<V> {
+    pub(super) async fn get_many(&self, indices: &[Index]) -> Vec<V> {
         fn sort_to_match_requested_index_order<V>(indexed_elements: HashMap<usize, V>) -> Vec<V> {
             let mut elements = indexed_elements.into_iter().collect_vec();
             elements.sort_unstable_by_key(|&(index_position, _)| index_position);
@@ -191,11 +224,13 @@ where
         };
 
         assert!(
-            *max_index < self.len(),
+            *max_index < self.len().await,
             "Out-of-bounds. Got index {max_index} but length was {}. persisted vector name: {}",
-            self.len(),
+            self.len().await,
             self.name
         );
+
+        // let fake_cache: HashMap<Index, V> = HashMap::new();
 
         let (indices_of_elements_in_cache, indices_of_elements_not_in_cache): (Vec<_>, Vec<_>) =
             indices
@@ -225,7 +260,8 @@ where
             .collect_vec();
         let elements_fetched_from_db = self
             .reader
-            .get_many(&keys_for_indices_not_in_cache)
+            .get_many(keys_for_indices_not_in_cache)
+            .await
             .into_iter()
             .map(|x| x.expect("there should be some value").into_any());
 
@@ -240,11 +276,13 @@ where
 
     /// Return all stored elements in a vector, whose index matches the StorageVec's.
     /// It's the caller's responsibility that there is enough memory to store all elements.
-    pub(super) fn get_all(&self) -> Vec<V> {
-        let (indices_of_elements_in_cache, indices_of_elements_not_in_cache): (Vec<_>, Vec<_>) =
-            (0..self.len()).partition(|index| self.cache.contains_key(index));
+    pub(super) async fn get_all(&self) -> Vec<V> {
+        // let fake_cache: HashMap<Index, V> = HashMap::new();
 
-        let mut fetched_elements: Vec<Option<V>> = vec![None; self.len() as usize];
+        let (indices_of_elements_in_cache, indices_of_elements_not_in_cache): (Vec<_>, Vec<_>) =
+            (0..self.len().await).partition(|index| self.cache.contains_key(index));
+
+        let mut fetched_elements: Vec<Option<V>> = vec![None; self.len().await as usize];
         for index in indices_of_elements_in_cache {
             let element = self.cache[&index].clone();
             fetched_elements[index as usize] = Some(element);
@@ -264,7 +302,8 @@ where
             .collect_vec();
         let elements_fetched_from_db = self
             .reader
-            .get_many(&keys)
+            .get_many(keys)
+            .await
             .into_iter()
             .map(|x| x.expect("there should be some value").into_any());
         let indexed_fetched_elements_from_db = indices_of_elements_not_in_cache
@@ -287,8 +326,8 @@ where
     /// It is the caller's responsibility to ensure that index values are
     /// unique.  If not, the last value with the same index will win.
     /// For unordered collections such as HashMap, the behavior is undefined.
-    pub(super) fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, V)>) {
-        let self_len = self.len();
+    pub(super) async fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, V)> + Send) {
+        let self_len = self.len().await;
 
         for (index, value) in key_vals.into_iter() {
             assert!(
@@ -298,59 +337,100 @@ where
                 self.name
             );
 
-            self.write_op_overwrite(index, value);
+            self.write_op_overwrite(index, value).await;
         }
     }
 
     #[inline]
-    pub(super) fn pop(&mut self) -> Option<V> {
+    pub(super) async fn pop(&mut self) -> Option<V> {
         // If vector is empty, return None
-        if self.is_empty() {
+        if self.is_empty().await {
+            println!("pop: is_empty --> None");
             return None;
         }
 
         // add to write queue
-        self.write_queue.push_back(VecWriteOperation::Pop);
+        // self.write_queue.push_back(VecWriteOperation::Pop);
 
         // Update length
-        *self
+        let current_length = self
             .current_length
             .as_mut()
-            .expect("there should be some value") -= 1;
+            .expect("there should be some value");
+
+        *current_length -= 1;
+
+        let new_length = *current_length;
+
+        let persist_count = {
+            let mut pending_writes = self.pending_writes.lock_guard_mut().await;
+
+            pending_writes
+                .write_ops
+                .push(WriteOperation::Delete(self.get_index_key(new_length)));
+            pending_writes.write_ops.push(WriteOperation::Write(
+                Self::get_length_key(self.key_prefix),
+                RustyValue::from_any(&new_length),
+            ));
+            pending_writes.persist_count
+        };
+
+        self.process_persist_count(persist_count);
 
         // try cache first
-        let current_length = self.len();
+        let current_length = self.len().await;
         if self.cache.contains_key(&current_length) {
+            println!("pop: found {} in cache", current_length);
             self.cache.remove(&current_length)
         } else {
             // then try persistent storage
+            println!("pop: {} not in cache. fetching from DB", new_length);
             let key = self.get_index_key(current_length);
-            self.reader.get(key).map(|value| value.into_any())
+            self.reader.get(key).await.map(|value| value.into_any())
         }
     }
 
     #[inline]
-    pub(super) fn push(&mut self, value: V) {
+    pub(super) async fn push(&mut self, value: V) {
         // add to write queue
-        self.write_queue
-            .push_back(VecWriteOperation::Push(value.clone()));
+        // self.write_queue
+        //     .push_back(VecWriteOperation::Push(value.clone()));
 
         // record in cache
-        let current_length = self.len();
-        let _old_val = self.cache.insert(current_length, value);
+        let current_length = self.len().await;
+        let new_length = current_length + 1;
+
+        let persist_count = {
+            let mut pending_writes = self.pending_writes.lock_guard_mut().await;
+
+            // println!("push-key: {:?}", self.get_index_key(index));
+
+            pending_writes.write_ops.push(WriteOperation::Write(
+                self.get_index_key(current_length),
+                RustyValue::from_any(&value),
+            ));
+            pending_writes.write_ops.push(WriteOperation::Write(
+                Self::get_length_key(self.key_prefix),
+                RustyValue::from_any(&new_length),
+            ));
+            pending_writes.persist_count
+        };
+        self.process_persist_count(persist_count);
+
+        let _old_val = self.cache.insert(current_length, value.clone());
 
         // note: we cannot naively remove any previous `Push` ops with
         // this value from the write_queue (to reduce disk i/o) because
         // there might be corresponding `Pop` op(s).
 
         // update length
-        self.current_length = Some(current_length + 1);
+        self.current_length = Some(new_length);
     }
 
     #[inline]
-    pub(super) fn clear(&mut self) {
-        while !self.is_empty() {
-            self.pop();
+    pub(super) async fn clear(&mut self) {
+        while !self.is_empty().await {
+            self.pop().await;
         }
     }
 }

@@ -288,7 +288,7 @@ impl Mempool {
     /// Remove from the mempool all transactions that become invalid because
     /// of this newly mined block. Also update all mutator set data for monitored
     /// transactions that were not removed in the previous step.
-    pub fn update_with_block(
+    pub async fn update_with_block(
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
@@ -673,11 +673,14 @@ mod tests {
         let (mut block_2, _, _) =
             make_mock_block(&block_1, None, premine_receiver_address, rng.gen());
         block_2
-            .accumulate_transaction(tx_by_preminer, &block_1.kernel.body.mutator_set_accumulator);
+            .accumulate_transaction(tx_by_preminer, &block_1.kernel.body.mutator_set_accumulator)
+            .await;
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool.update_with_block(block_1.kernel.body.mutator_set_accumulator, &block_2);
+        mempool
+            .update_with_block(block_1.kernel.body.mutator_set_accumulator, &block_2)
+            .await;
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction contains
@@ -720,7 +723,7 @@ mod tests {
         block_3_with_updated_tx.accumulate_transaction(
             tx_by_other_updated.clone(),
             &block_2.kernel.body.mutator_set_accumulator,
-        );
+        ).await;
         now = Duration::from_millis(block_2.kernel.header.timestamp.value());
         assert!(
             block_3_with_updated_tx.is_valid(&block_2, now + seven_months),
@@ -737,7 +740,7 @@ mod tests {
             mempool.update_with_block(
                 previous_block.kernel.body.mutator_set_accumulator,
                 &next_block,
-            );
+            ).await;
             previous_block = next_block;
         }
 
@@ -748,17 +751,19 @@ mod tests {
         block_14.accumulate_transaction(
             tx_by_other_updated,
             &previous_block.kernel.body.mutator_set_accumulator,
-        );
+        ).await;
         now = Duration::from_millis(previous_block.kernel.header.timestamp.value());
         assert!(
             block_14.is_valid(&previous_block, now+seven_months),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        mempool.update_with_block(
-            previous_block.kernel.body.mutator_set_accumulator,
-            &block_14,
-        );
+        mempool
+            .update_with_block(
+                previous_block.kernel.body.mutator_set_accumulator,
+                &block_14,
+            )
+            .await;
 
         assert!(
             mempool.is_empty(),
