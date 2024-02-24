@@ -10,7 +10,8 @@ Neptune-core is the reference implementation for the [Neptune](https://neptune.c
  - Install curl: `sudo apt install curl`
  - Install the rust compiler and accessories: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
  - Source the rust environment: `source "$HOME/.cargo/env"`
- - Install LebelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
+ - Install build tools: `sudo apt install build-essential`
+ - Install LevelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
  - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
  - Enter the repository: `cd neptune-core`
  - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development* branch, skip this step.)
