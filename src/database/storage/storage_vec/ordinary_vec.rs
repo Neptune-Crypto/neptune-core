@@ -1,125 +1,124 @@
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
 use super::ordinary_vec_private::OrdinaryVecPrivate;
 use super::{traits::*, Index};
-use crate::sync::{AtomicRw, AtomicRwReadGuard, AtomicRwWriteGuard};
 
-/// A wrapper that adds [`RwLock`](std::sync::RwLock) and atomic snapshot
-/// guarantees around all accesses to an ordinary [`Vec`]
+/// Implements [`StorageVec`]` trait for an ordinary (in memory) `Vec`
 #[derive(Debug, Clone, Default)]
-pub struct OrdinaryVec<T>(AtomicRw<OrdinaryVecPrivate<T>>);
+pub struct OrdinaryVec<T>(OrdinaryVecPrivate<T>);
 
 impl<T> From<Vec<T>> for OrdinaryVec<T> {
     fn from(v: Vec<T>) -> Self {
-        Self(AtomicRw::from(OrdinaryVecPrivate(v)))
+        Self(OrdinaryVecPrivate(v))
     }
 }
 
-impl<T> OrdinaryVec<T> {
+#[async_trait::async_trait]
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVecBase<T>
+    for OrdinaryVec<T>
+{
     #[inline]
-    pub(crate) fn write_lock(&mut self) -> AtomicRwWriteGuard<'_, OrdinaryVecPrivate<T>> {
-        self.0.lock_guard_mut()
-    }
-
-    #[inline]
-    pub(crate) fn read_lock(&self) -> AtomicRwReadGuard<'_, OrdinaryVecPrivate<T>> {
-        self.0.lock_guard()
-    }
-}
-
-impl<T> StorageVecRwLock<T> for OrdinaryVec<T> {
-    type LockedData = OrdinaryVecPrivate<T>;
-
-    #[inline]
-    fn try_write_lock(&mut self) -> Option<AtomicRwWriteGuard<'_, Self::LockedData>> {
-        Some(self.write_lock())
+    async fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     #[inline]
-    fn try_read_lock(&self) -> Option<AtomicRwReadGuard<'_, Self::LockedData>> {
-        Some(self.read_lock())
-    }
-}
-
-impl<T: Clone> StorageVec<T> for OrdinaryVec<T> {
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.read_lock().is_empty()
+    async fn len(&self) -> Index {
+        self.0.len()
     }
 
     #[inline]
-    fn len(&self) -> Index {
-        self.read_lock().len()
+    async fn get(&self, index: Index) -> T {
+        self.0.get(index)
     }
 
     #[inline]
-    fn get(&self, index: Index) -> T {
-        self.read_lock().get(index)
+    async fn get_many(&self, indices: &[Index]) -> Vec<T> {
+        self.0.get_many(indices)
     }
 
-    fn many_iter<'a>(
-        &'a self,
-        indices: impl IntoIterator<Item = Index> + 'a,
-    ) -> Box<dyn Iterator<Item = (Index, T)> + '_> {
-        // note: this lock is moved into the iterator closure and is not
-        //       released until caller drops the returned iterator
-        let inner = self.read_lock();
-
-        Box::new(indices.into_iter().map(move |i| {
-            assert!(
-                i < inner.len(),
-                "Out-of-bounds. Got index {} but length was {}.",
-                i,
-                inner.len(),
-            );
-            (i, inner.get(i))
-        }))
+    /// Return all stored elements in a vector, whose index matches the StorageVec's.
+    /// It's the caller's responsibility that there is enough memory to store all elements.
+    #[inline]
+    async fn get_all(&self) -> Vec<T> {
+        self.0.get_all()
     }
 
-    fn many_iter_values<'a>(
-        &'a self,
-        indices: impl IntoIterator<Item = Index> + 'a,
-    ) -> Box<dyn Iterator<Item = T> + '_> {
-        // note: this lock is moved into the iterator closure and is not
-        //       released until caller drops the returned iterator
-        let inner = self.read_lock();
+    // async fn many_iter<'a>(
+    //     &'a self,
+    //     indices: impl IntoIterator<Item = Index> + 'a,
+    // ) -> Box<dyn Iterator<Item = (Index, T)> + '_> {
+    //     // note: this lock is moved into the iterator closure and is not
+    //     //       released until caller drops the returned iterator
+    //     let inner = self.read_lock();
 
-        Box::new(indices.into_iter().map(move |i| {
-            assert!(
-                i < inner.len(),
-                "Out-of-bounds. Got index {} but length was {}.",
-                i,
-                inner.len(),
-            );
-            inner.get(i)
-        }))
-    }
+    //     Box::new(indices.into_iter().map(move |i| {
+    //         assert!(
+    //             i < inner.len(),
+    //             "Out-of-bounds. Got index {} but length was {}.",
+    //             i,
+    //             inner.len(),
+    //         );
+    //         (i, inner.get(i))
+    //     }))
+    // }
+
+    // async fn many_iter_values<'a>(
+    //     &'a self,
+    //     indices: impl IntoIterator<Item = Index> + 'a,
+    // ) -> Box<dyn Iterator<Item = T> + '_> {
+    //     // note: this lock is moved into the iterator closure and is not
+    //     //       released until caller drops the returned iterator
+    //     let inner = self.read_lock();
+
+    //     Box::new(indices.into_iter().map(move |i| {
+    //         assert!(
+    //             i < inner.len(),
+    //             "Out-of-bounds. Got index {} but length was {}.",
+    //             i,
+    //             inner.len(),
+    //         );
+    //         inner.get(i)
+    //     }))
+    // }
 
     #[inline]
-    fn set(&mut self, index: Index, value: T) {
+    async fn set(&mut self, index: Index, value: T) {
         // note: on 32 bit systems, this could panic.
-        self.write_lock().set(index, value);
+        self.0.set(index, value);
     }
 
     #[inline]
-    fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, T)>) {
-        self.write_lock().set_many(key_vals);
+    async fn set_many(&mut self, key_vals: impl IntoIterator<Item = (Index, T)> + Send) {
+        self.0.set_many(key_vals)
     }
 
     #[inline]
-    fn pop(&mut self) -> Option<T> {
-        self.write_lock().pop()
+    async fn pop(&mut self) -> Option<T> {
+        self.0.pop()
     }
 
     #[inline]
-    fn push(&mut self, value: T) {
-        self.write_lock().push(value);
+    async fn push(&mut self, value: T) {
+        self.0.push(value);
     }
 
     #[inline]
-    fn clear(&mut self) {
-        self.write_lock().clear();
+    async fn clear(&mut self) {
+        self.0.clear();
     }
 }
 
+// Async Streams (ie async iterators)
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVecStream<T>
+    for OrdinaryVec<T>
+{
+}
+
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec<T> for OrdinaryVec<T> {}
+
+/*
 #[cfg(test)]
 mod tests {
     use super::super::traits::tests as traits_tests;
@@ -169,3 +168,4 @@ mod tests {
         }
     }
 }
+*/

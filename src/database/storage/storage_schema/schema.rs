@@ -1,6 +1,6 @@
 // use super::super::storage_vec::Index;
-use super::{traits::*, DbtSingleton, DbtVec};
-use crate::sync::{AtomicMutex, AtomicRw, LockCallbackFn};
+use super::{traits::*, DbtSingleton, DbtVec, PendingWrites, SimpleRustyReader};
+use crate::locks::tokio::{AtomicMutex, AtomicRw, LockCallbackFn};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{fmt::Display, sync::Arc};
 
@@ -14,8 +14,8 @@ use std::{fmt::Display, sync::Arc};
 /// to any subset of the `table`s and then persist (write) the data
 /// atomically to the database.
 ///
-/// Thus we get something like relational DB transactions using
-/// `LevelDB` key/val store.
+/// Thus we get something like relational NeptuneLevelDb transactions using
+/// `LevelNeptuneLevelDb` key/val store.
 ///
 /// ### Atomicity -- Single Table:
 ///
@@ -34,8 +34,8 @@ use std::{fmt::Display, sync::Arc};
 /// # Example:
 ///
 /// ```
-/// # use twenty_first::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = level_db::DB::open_new_test_database(true, None, None, None).unwrap();
+/// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+/// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
 /// use std::sync::{Arc, RwLock};
 /// let mut storage = SimpleRustyStorage::new(db);
 ///
@@ -69,8 +69,8 @@ use std::{fmt::Display, sync::Arc};
 /// # Example:
 ///
 /// ```rust
-/// # use twenty_first::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-/// # let db = level_db::DB::open_new_test_database(true, None, None, None).unwrap();
+/// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+/// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
 /// let mut storage = SimpleRustyStorage::new(db);
 ///
 /// let mut atomic_tables = storage.schema.create_tables_rw(|s| {
@@ -90,41 +90,45 @@ use std::{fmt::Display, sync::Arc};
 ///     tables.2.set(true);
 /// });
 /// ```
-pub struct DbtSchema<Reader: StorageReader + Send + Sync> {
+pub struct DbtSchema {
     /// These are the tables known by this `DbtSchema` instance.
     ///
     /// Implementor(s) of [`StorageWriter`] will iterate over these
     /// tables, collect the pending operations, and write them
-    /// atomically to the DB.
-    pub tables: AtomicRw<Vec<Box<dyn DbTable + Send + Sync>>>,
+    /// atomically to the NeptuneLevelDb.
+    pub pending_writes: AtomicRw<PendingWrites>,
 
     /// Database Reader
-    pub reader: Arc<Reader>,
+    pub reader: Arc<SimpleRustyReader>,
 
     /// If present, the provided callback function will be called
     /// whenever a lock is acquired by a `DbTable` instantiated
     /// by this `DbtSchema`.  See [AtomicRw](crate::sync::AtomicRw)
     pub lock_callback_fn: Option<LockCallbackFn>,
+
+    /// indicates count of tables in this schema
+    pub table_count: u8,
 }
 
-impl<Reader: StorageReader + Send + Sync> DbtSchema<Reader> {
+impl DbtSchema {
     /// Instantiate a `DbtSchema` from an `Arc<Reader` and
     /// optional `name` and lock acquisition callback.
     /// See See [AtomicRw](crate::sync::AtomicRw)
     pub fn new(
-        reader: Arc<Reader>,
+        reader: SimpleRustyReader,
         name: Option<&str>,
         lock_callback_fn: Option<LockCallbackFn>,
     ) -> Self {
         Self {
-            tables: AtomicRw::from((vec![], name, lock_callback_fn)),
-            reader,
+            pending_writes: AtomicRw::from((PendingWrites::default(), name, lock_callback_fn)),
+            reader: Arc::new(reader),
             lock_callback_fn,
+            table_count: 0,
         }
     }
 }
 
-impl<Reader: StorageReader + 'static + Sync + Send> DbtSchema<Reader> {
+impl DbtSchema {
     /// Create a new DbtVec
     ///
     /// The `DbtSchema` will keep a reference to the `DbtVec`. In this way,
@@ -133,28 +137,19 @@ impl<Reader: StorageReader + 'static + Sync + Send> DbtSchema<Reader> {
     ///
     /// Atomicity: see [`DbtSchema`]
     #[inline]
-    pub fn new_vec<V>(&mut self, name: &str) -> DbtVec<V>
+    pub async fn new_vec<V>(&mut self, name: &str) -> DbtVec<V>
     where
         V: Clone + 'static,
-        V: Serialize + DeserializeOwned,
-        DbtVec<V>: DbTable + Send + Sync,
+        V: Serialize + DeserializeOwned + Send + Sync,
     {
-        let lock_name = format!(
-            "{}-DbtVec - {}",
-            self.tables.name().unwrap_or("DbtSchema"),
-            name
-        );
-
-        let mut tables = self.tables.lock_guard_mut();
-        assert!(tables.len() < 255);
+        let pending_writes = self.pending_writes.clone();
         let reader = self.reader.clone();
-        let key_prefix = tables.len() as u8;
-        let vector = DbtVec::<V>::new(reader, key_prefix, name, lock_name, self.lock_callback_fn);
+        let key_prefix = self.table_count;
+        self.table_count += 1;
 
-        // note: this clone only bumps internal ref-count.
-        let elem = Box::new(vector.clone());
+        let mut vector = DbtVec::<V>::new(pending_writes, reader, key_prefix, name).await;
+        vector.restore_or_new().await;
 
-        tables.push(elem);
         vector
     }
 
@@ -169,30 +164,23 @@ impl<Reader: StorageReader + 'static + Sync + Send> DbtSchema<Reader> {
     ///
     /// Atomicity: see [`DbtSchema`]
     #[inline]
-    pub fn new_singleton<V>(&mut self, name: impl Into<String> + Display) -> DbtSingleton<V>
+    pub async fn new_singleton<V>(&mut self, name: impl Into<String> + Display) -> DbtSingleton<V>
     where
         V: Default + Clone + 'static,
-        V: Serialize + DeserializeOwned,
-        DbtSingleton<V>: DbTable + Send + Sync,
+        V: Serialize + DeserializeOwned + Send + Sync,
+        // DbtSingleton<V>: DbTable + Send + Sync,
     {
-        let lock_name = format!(
-            "{}-DbtSingleton - {}",
-            self.tables.name().unwrap_or("DbtSchema"),
-            name
+        let key = self.table_count;
+        self.table_count += 1;
+
+        let mut singleton = DbtSingleton::<V>::new(
+            key,
+            self.pending_writes.clone(),
+            self.reader.clone(),
+            name.into(),
         );
-        self.tables.lock_mut(|t| {
-            assert!(t.len() < u8::MAX as usize);
-            let key = t.len() as u8;
-            let singleton = DbtSingleton::<V>::new(
-                key,
-                lock_name,
-                self.reader.clone(),
-                self.lock_callback_fn,
-                name.into(),
-            );
-            t.push(Box::new(singleton.clone()));
-            singleton
-        })
+        singleton.restore_or_new().await;
+        singleton
     }
 
     /// create tables and wrap in an [`AtomicRw<T>`]
@@ -205,8 +193,8 @@ impl<Reader: StorageReader + 'static + Sync + Send> DbtSchema<Reader> {
     /// # Example:
     ///
     /// ```rust
-    /// # use twenty_first::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-    /// # let db = level_db::DB::open_new_test_database(true, None, None, None).unwrap();
+    /// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+    /// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
     /// let mut storage = SimpleRustyStorage::new(db);
     ///
     /// let mut atomic_tables = storage.schema.create_tables_rw(|s| {
@@ -244,8 +232,8 @@ impl<Reader: StorageReader + 'static + Sync + Send> DbtSchema<Reader> {
     /// # Example:
     ///
     /// ```rust
-    /// # use twenty_first::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
-    /// # let db = level_db::DB::open_new_test_database(true, None, None, None).unwrap();
+    /// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{SimpleRustyStorage, traits::*}};
+    /// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
     /// let mut storage = SimpleRustyStorage::new(db);
     ///
     /// let mut atomic_tables = storage.schema.create_tables_mutex(|s| {
@@ -280,8 +268,8 @@ impl<Reader: StorageReader + 'static + Sync + Send> DbtSchema<Reader> {
     /// # Example:
     ///
     /// ```
-    /// # use twenty_first::storage::{level_db, storage_vec::traits::*, storage_schema::{DbtSchema, SimpleRustyStorage, traits::*}};
-    /// # let db = level_db::DB::open_new_test_database(true, None, None, None).unwrap();
+    /// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{DbtSchema, SimpleRustyStorage, traits::*}};
+    /// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
     /// let mut storage = SimpleRustyStorage::new(db);
     ///
     /// let ages = storage.schema.new_vec::<u16>("ages");
@@ -311,8 +299,8 @@ impl<Reader: StorageReader + 'static + Sync + Send> DbtSchema<Reader> {
     /// # Example:
     ///
     /// ```
-    /// # use twenty_first::storage::{level_db, storage_vec::traits::*, storage_schema::{DbtSchema, SimpleRustyStorage, traits::*}};
-    /// # let db = level_db::DB::open_new_test_database(true, None, None, None).unwrap();
+    /// # use crate::database::storage::{level_db, storage_vec::traits::*, storage_schema::{DbtSchema, SimpleRustyStorage, traits::*}};
+    /// # let db = level_db::NeptuneLevelDb::open_new_test_database(true, None, None, None).await.unwrap();
     /// let mut storage = SimpleRustyStorage::new(db);
     ///
     /// let ages = storage.schema.new_vec::<u16>("ages");

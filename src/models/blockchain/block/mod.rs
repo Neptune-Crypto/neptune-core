@@ -240,7 +240,7 @@ impl Block {
 
     /// Merge a transaction into this block's transaction.
     /// The mutator set data must be valid in all inputs.
-    pub fn accumulate_transaction(
+    pub async fn accumulate_transaction(
         &mut self,
         transaction: Transaction,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
@@ -557,20 +557,16 @@ mod block_tests {
 
     use crate::{
         config_models::network::Network,
+        database::storage::storage_schema::SimpleRustyStorage,
+        database::NeptuneLevelDb,
         models::{
             blockchain::transaction::PublicAnnouncement, state::wallet::WalletSecret,
             state::UtxoReceiverData,
         },
         tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
+        util_types::mutator_set::archival_mmr::ArchivalMmr,
     };
-    use tasm_lib::twenty_first::{
-        storage::level_db::DB,
-        util_types::{
-            emojihash_trait::Emojihash,
-            mmr::archival_mmr::ArchivalMmr,
-            storage_schema::{SimpleRustyStorage, StorageWriter},
-        },
-    };
+    use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 
     use super::*;
 
@@ -627,7 +623,9 @@ mod block_tests {
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");
 
-        block_1.accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator);
+        block_1
+            .accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator)
+            .await;
         assert!(
             block_1.is_valid(&genesis_block, now + seven_months),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
@@ -741,17 +739,19 @@ mod block_tests {
         assert!(!block_1.is_valid(&genesis_block, now));
     }
 
-    #[test]
-    fn can_prove_block_ancestry() {
+    #[tokio::test]
+    async fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
         let genesis_block = Block::genesis_block();
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
-        let db = DB::open_new_test_database(true, None, None, None).unwrap();
+        let db = NeptuneLevelDb::open_new_test_database(true, None, None, None)
+            .await
+            .unwrap();
         let mut storage = SimpleRustyStorage::new(db);
-        storage.restore_or_new();
-        let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0");
-        let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage);
+        // storage.restore_or_new();
+        let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
+        let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage).await;
         ammr.append(genesis_block.hash());
         let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
 
@@ -773,7 +773,7 @@ mod block_tests {
 
         let index = thread_rng().gen_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
-        let (membership_proof, _) = ammr.prove_membership(index as u64);
+        let (membership_proof, _) = ammr.prove_membership_async(index as u64).await;
         let (v, _) = membership_proof.verify(
             &last_block_mmra.get_peaks(),
             block_digest,

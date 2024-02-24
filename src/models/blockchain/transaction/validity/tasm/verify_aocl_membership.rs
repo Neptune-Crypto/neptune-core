@@ -21,7 +21,8 @@ use triton_vm::{
     triton_asm,
 };
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
-use twenty_first::test_shared::mmr::get_rustyleveldb_ammr_from_digests;
+// use twenty_first::mock::mmr::get_mock_ammr_from_digests;
+use twenty_first::mock::mmr::get_mock_ammr_from_digests;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 /// Given a membership proof and a canonical commitment, verify membership in the AOCL.
@@ -192,7 +193,7 @@ impl Function for VerifyAoclMembership {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let num_leafs = rng.gen_range(1..100);
         let leafs = (0..num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();
-        let mmr = get_rustyleveldb_ammr_from_digests::<Hash>(leafs);
+        let mmr = get_mock_ammr_from_digests::<Hash>(leafs);
 
         let leaf_index = rng.next_u64() % num_leafs;
         let leaf = mmr.get_leaf(leaf_index);

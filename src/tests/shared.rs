@@ -141,7 +141,7 @@ pub fn get_dummy_version() -> String {
     "0.1.0".to_string()
 }
 
-pub fn get_dummy_latest_block(
+pub async fn get_dummy_latest_block(
     input_block: Option<Block>,
 ) -> (Block, LatestBlockInfo, Arc<std::sync::Mutex<BlockHeader>>) {
     let block = match input_block {
@@ -159,10 +159,15 @@ pub fn get_dummy_latest_block(
 }
 
 /// Return a handshake object with a randomly set instance ID
-pub fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
+pub async fn get_dummy_handshake_data_for_genesis(network: Network) -> HandshakeData {
     HandshakeData {
         instance_id: rand::random(),
-        tip_header: get_dummy_latest_block(None).2.lock().unwrap().to_owned(),
+        tip_header: get_dummy_latest_block(None)
+            .await
+            .2
+            .lock()
+            .unwrap()
+            .to_owned(),
         listen_port: Some(8080),
         network,
         version: get_dummy_version(),
@@ -178,11 +183,11 @@ pub fn to_bytes(message: &PeerMessage) -> Result<Bytes> {
     Ok(buf.freeze())
 }
 
-pub fn get_dummy_peer_connection_data_genesis(
+pub async fn get_dummy_peer_connection_data_genesis(
     network: Network,
     id: u8,
 ) -> (HandshakeData, SocketAddr) {
-    let handshake = get_dummy_handshake_data_for_genesis(network);
+    let handshake = get_dummy_handshake_data_for_genesis(network).await;
     let socket_address = get_dummy_socket_address(id);
 
     (handshake, socket_address)
@@ -206,7 +211,7 @@ pub async fn get_mock_global_state(
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
-    let (block, _, _) = get_dummy_latest_block(None);
+    let (block, _, _) = get_dummy_latest_block(None).await;
     let light_state: LightState = LightState::from(block.clone());
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
@@ -259,7 +264,7 @@ pub async fn get_test_genesis_setup(
         to_main_tx,
         _to_main_rx1,
         state,
-        get_dummy_handshake_data_for_genesis(network),
+        get_dummy_handshake_data_for_genesis(network).await,
     ))
 }
 
@@ -739,7 +744,7 @@ pub fn random_option<T>(thing: T) -> Option<T> {
 
 // TODO: Consider moving this to to the appropriate place in global state,
 // keep fn interface. Can be helper function to `create_transaction`.
-pub fn make_mock_transaction_with_generation_key(
+pub async fn make_mock_transaction_with_generation_key(
     input_utxos_mps_keys: Vec<(Utxo, MsMembershipProof, generation_address::SpendingKey)>,
     receiver_data: Vec<UtxoReceiverData>,
     fee: NeptuneCoins,

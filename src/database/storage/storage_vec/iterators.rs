@@ -1,5 +1,5 @@
 use super::{traits::*, Index};
-use crate::sync::AtomicRwWriteGuard;
+use crate::locks::tokio::AtomicRwWriteGuard;
 use lending_iterator::prelude::*;
 use lending_iterator::{gat, LendingIterator};
 use std::iter::Iterator;

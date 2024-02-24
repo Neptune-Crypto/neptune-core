@@ -52,3 +52,42 @@ pub trait MutatorSet {
     /// Return single hash digest that commits to the entire mutator set
     fn hash(&self) -> Digest;
 }
+
+
+// #[allow(async_fn_in_trait)]
+#[async_trait::async_trait]
+pub trait MutatorSetAsync {
+    /// Generates a membership proof that will be valid when the item
+    /// is added to the mutator set.
+    fn prove(
+        &mut self,
+        item: Digest,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
+    ) -> MsMembershipProof;
+
+    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool;
+
+    /// Generates a removal record with which to update the set commitment.
+    fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord;
+
+    /// Updates the set-commitment with an addition record.
+    async fn add(&mut self, addition_record: &AdditionRecord);
+
+    /// Updates the mutator set so as to remove the item determined by
+    /// its removal record.
+    async fn remove(&mut self, removal_record: &RemovalRecord);
+
+    /// batch_remove
+    /// Apply multiple removal records, and update a list of membership proofs to
+    /// be valid after the application of these removal records.
+    async fn batch_remove(
+        &mut self,
+        removal_records: Vec<RemovalRecord>,
+        preserved_membership_proofs: &mut [&mut MsMembershipProof],
+    );
+
+    /// hash
+    /// Return single hash digest that commits to the entire mutator set
+    async fn hash(&self) -> Digest;
+}

@@ -12,11 +12,11 @@ pub enum WriteOperation {
 
 /// Vector write operations
 #[derive(Debug, Clone)]
-pub enum VecWriteOperation<V> {
+pub enum VecWriteOperation<T> {
     /// overwrite, aka set operation
-    OverWrite((Index, V)),
+    OverWrite((Index, T)),
     /// push to end operation
-    Push(V),
+    Push(T),
     /// pop from end operation
     Pop,
 }

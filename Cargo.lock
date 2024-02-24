@@ -827,7 +827,6 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=928b1fa7522aacdb055c4c04d144b44af241f2e6#928b1fa7522aacdb055c4c04d144b44af241f2e6"
 dependencies = [
  "quote",
  "syn 2.0.48",
@@ -876,9 +875,9 @@ dependencies = [
 
 [[package]]
 name = "divan"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c2c28ae7ffaca46791b755c7ef2be7b6feb8daa7800f9ec2c73bcc7488320d1"
+checksum = "a0d567df2c9c2870a43f3f2bd65aaeb18dbce1c18f217c3e564b4fbaeb3ee56c"
 dependencies = [
  "cfg-if",
  "clap",
@@ -890,9 +889,9 @@ dependencies = [
 
 [[package]]
 name = "divan-macros"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffa2173b504e1dd6860b8f28ce2b7e0f6f7dd5a0df224779d5874b856f922d2b"
+checksum = "27540baf49be0d484d8f0130d7d8da3011c32a44d4fc873368154f1510e574a2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1710,6 +1709,8 @@ dependencies = [
  "aes-gcm",
  "anyhow",
  "arbitrary",
+ "async-stream",
+ "async-trait",
  "bech32",
  "bincode",
  "bytes",
@@ -1725,6 +1726,8 @@ dependencies = [
  "futures",
  "get-size",
  "itertools 0.11.0",
+ "lending-iterator",
+ "leveldb-sys",
  "memmap2",
  "num-bigint",
  "num-rational",
@@ -1736,6 +1739,7 @@ dependencies = [
  "rand",
  "ratatui",
  "regex",
+ "rs-leveldb",
  "semver",
  "serde",
  "serde_derive",
@@ -1746,6 +1750,7 @@ dependencies = [
  "test-strategy",
  "tiny-bip39",
  "tokio",
+ "tokio-scoped",
  "tokio-serde 0.9.0",
  "tokio-test",
  "tokio-util",
@@ -2388,9 +2393,9 @@ checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
 
 [[package]]
 name = "rayon"
-version = "1.8.1"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa7237101a77a10773db45d62004a272517633fbcc3df19d96455ede1122e051"
+checksum = "e4963ed1bc86e4f3ee217022bd855b297cef07fb9eac5dfa1f788b220b49b3bd"
 dependencies = [
  "either",
  "rayon-core",
@@ -2840,12 +2845,12 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=928b1fa7522aacdb055c4c04d144b44af241f2e6#928b1fa7522aacdb055c4c04d144b44af241f2e6"
 dependencies = [
  "anyhow",
+ "arbitrary",
  "derive_tasm_object",
  "hex",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "num",
  "num-traits",
  "rand",
@@ -3033,6 +3038,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.48",
+]
+
+[[package]]
+name = "tokio-scoped"
+version = "0.2.0"
+source = "git+https://github.com/dan-da/tokio-scoped-redux.git?rev=90ad5f09ca68552bd9430605bd7d7101e44a83dd#90ad5f09ca68552bd9430605bd7d7101e44a83dd"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
@@ -3266,8 +3279,6 @@ dependencies = [
 [[package]]
 name = "triton-vm"
 version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b175b3fec57c819f8242fe9a2b9f706bc75c0390ccdf3f88c9f30f6c49bb0ff"
 dependencies = [
  "arbitrary",
  "bincode",
@@ -3300,9 +3311,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74c2f4a50a2fc1a25d26aed9079e6295093ca8fe649f0f00391a9c2cbb03540d"
+version = "0.38.0"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",

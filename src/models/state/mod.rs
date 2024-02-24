@@ -12,10 +12,15 @@ use tracing::{debug, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
-use twenty_first::storage::storage_schema::traits::*;
-use twenty_first::storage::storage_vec::traits::*;
+// use crate::database::storage::storage_schema::traits::{StorageWriter as SW};
+use crate::database::storage::storage_schema::traits::StorageWriter as SW;
+// use crate::database::storage::storage_vec::traits::{StorageVec as SV};
+// use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::storage::storage_vec::Index;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+// use twenty_first::util_types::emojihash_trait::Emojihash;
+// use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
@@ -38,17 +43,20 @@ use super::blockchain::type_scripts::time_lock::TimeLock;
 use super::blockchain::type_scripts::TypeScript;
 use super::consensus::tasm::program::ConsensusProgram;
 use crate::config_models::cli_args;
+use crate::locks::tokio as sync_tokio;
+// use crate::models::consensus::Witness;
 use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::utxo_notification_pool::ExpectedUtxo;
 use crate::time_fn_call_async;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
-use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
+use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
-use crate::util_types::sync::tokio as sync_tokio;
 
 use crate::{Hash, VERSION};
+
+use futures::{pin_mut, StreamExt};
 
 pub mod archival_state;
 pub mod blockchain_state;
@@ -58,7 +66,7 @@ pub mod networking_state;
 pub mod shared;
 pub mod wallet;
 
-/// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::util_types::sync::tokio::AtomicRw)
+/// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
 /// ([`RwLock`](std::sync::RwLock)) over [`GlobalState`].
 ///
 /// Conceptually** all reads and writes of application state
@@ -80,7 +88,7 @@ pub mod wallet;
 /// Readers do not block eachother.  Only a writer blocks readers.
 /// See [`RwLock`](std::sync::RwLock) docs for details.
 ///
-/// ** At the present time, storage types in twenty_first::storage
+/// ** At the present time, storage types in crate::database::storage
 /// implement their own locking, which means they can be mutated
 /// without acquiring the `GlobalStateLock`.  This may change in
 /// the future.
@@ -271,7 +279,9 @@ impl GlobalState {
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         let tip_digest = self.chain.light_state().hash();
-        self.wallet_state.get_wallet_status_from_lock(tip_digest)
+        self.wallet_state
+            .get_wallet_status_from_lock(tip_digest)
+            .await
     }
 
     pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
@@ -301,7 +311,7 @@ impl GlobalState {
         let current_tip_digest = self.chain.light_state().hash();
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
 
-        if monitored_utxos.is_empty() {
+        if monitored_utxos.is_empty().await {
             return None;
         }
 
@@ -315,7 +325,11 @@ impl GlobalState {
         //
         // We then continue working backward through all entries to
         // determine max(spent_in_block)
-        for (_i, mutxo) in monitored_utxos.many_iter((0..monitored_utxos.len()).rev()) {
+
+        // note: we use get_all() here because we don't (yet?) have a way
+        // to reverse an async stream.
+
+        for mutxo in monitored_utxos.get_all().await.iter().rev() {
             if max_confirmed_in_block.is_none() {
                 if let Some((.., confirmed_in_block)) = mutxo.confirmed_in_block {
                     if mutxo
@@ -350,7 +364,11 @@ impl GlobalState {
 
         // let num_monitored_utxos = monitored_utxos.len();
         let mut history = vec![];
-        for (_idx, monitored_utxo) in monitored_utxos.iter() {
+
+        let stream = monitored_utxos.stream_values().await;
+        pin_mut!(stream); // needed for iteration
+        while let Some(monitored_utxo) = stream.next().await {
+            // for (_idx, monitored_utxo) in monitored_utxos.iter() {
             if monitored_utxo
                 .get_membership_proof_for_block(current_tip_digest)
                 .is_none()
@@ -698,7 +716,7 @@ impl GlobalState {
 
         assert_eq!(
             tip_hash,
-            ams_ref.get_sync_label(),
+            ams_ref.get_sync_label().await,
             "Archival mutator set must be synced to tip for successful MUTXO recovery"
         );
 
@@ -711,26 +729,41 @@ impl GlobalState {
         // monitored UTXO in the database. All monitored UTXOs are fetched outside
         // of the loop to avoid DB access/IO inside the loop.
         let mut recovery_data_for_missing_mutxos = vec![];
-        let mutxos = self.wallet_state.wallet_db.monitored_utxos().get_all();
-        '_outer: for incoming_utxo in incoming_utxos.into_iter() {
-            'inner: for monitored_utxo in mutxos.iter() {
-                if monitored_utxo.utxo == incoming_utxo.utxo {
-                    let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
-                    let msmp = match msmp_res {
-                        Some((_blockh_hash, msmp_val)) => msmp_val,
-                        None => continue 'inner,
-                    };
 
-                    // If UTXO matches, then check if the AOCL index is also a match.
-                    // If it is, then the UTXO is already in the wallet database.
-                    if msmp.auth_path_aocl.leaf_index == incoming_utxo.aocl_index {
-                        continue '_outer;
+        {
+
+            // todo: use stream() instead of get_all()
+            let stream = self.wallet_state.wallet_db.monitored_utxos().stream_values().await;
+            pin_mut!(stream); // needed for iteration
+
+            // let mutxos = self
+            //     .wallet_state
+            //     .wallet_db
+            //     .monitored_utxos()
+            //     .get_all()
+            //     .await;
+
+            '_outer: for incoming_utxo in incoming_utxos.into_iter() {
+                // 'inner: for monitored_utxo in mutxos.iter() {
+                'inner: while let Some(monitored_utxo) = stream.next().await {
+                    if monitored_utxo.utxo == incoming_utxo.utxo {
+                        let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
+                        let msmp = match msmp_res {
+                            Some((_blockh_hash, msmp_val)) => msmp_val,
+                            None => continue 'inner,
+                        };
+
+                        // If UTXO matches, then check if the AOCL index is also a match.
+                        // If it is, then the UTXO is already in the wallet database.
+                        if msmp.auth_path_aocl.leaf_index == incoming_utxo.aocl_index {
+                            continue '_outer;
+                        }
                     }
                 }
-            }
 
-            // If no match is found, add the UTXO to the list of missing UTXOs
-            recovery_data_for_missing_mutxos.push(incoming_utxo);
+                // If no match is found, add the UTXO to the list of missing UTXOs
+                recovery_data_for_missing_mutxos.push(incoming_utxo);
+            }
         }
 
         if recovery_data_for_missing_mutxos.is_empty() {
@@ -747,7 +780,7 @@ impl GlobalState {
             "Attempting to restore {} missing monitored UTXOs to wallet database",
             recovery_data_for_missing_mutxos.len()
         );
-        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves();
+        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves_async().await;
         let mut restored_mutxos = 0;
         for incoming_utxo in recovery_data_for_missing_mutxos {
             // If the referenced UTXO is in the future from our tip, do not attempt to recover it. Instead: warn the user of this.
@@ -756,12 +789,15 @@ impl GlobalState {
                 continue;
             }
             let ms_item = Hash::hash(&incoming_utxo.utxo);
-            let restored_msmp_res = ams_ref.ams().restore_membership_proof(
-                ms_item,
-                incoming_utxo.sender_randomness,
-                incoming_utxo.receiver_preimage,
-                incoming_utxo.aocl_index,
-            );
+            let restored_msmp_res = ams_ref
+                .ams()
+                .restore_membership_proof(
+                    ms_item,
+                    incoming_utxo.sender_randomness,
+                    incoming_utxo.receiver_preimage,
+                    incoming_utxo.aocl_index,
+                )
+                .await;
             let restored_msmp = match restored_msmp_res {
                 Ok(msmp) => {
                     // Verify that the restored MSMP is valid
@@ -782,11 +818,12 @@ impl GlobalState {
             self.wallet_state
                 .wallet_db
                 .monitored_utxos_mut()
-                .push(restored_mutxo);
+                .push(restored_mutxo)
+                .await;
             restored_mutxos += 1;
         }
 
-        self.wallet_state.wallet_db.persist();
+        self.wallet_state.wallet_db.persist().await;
         info!("Successfully restored {restored_mutxos} monitored UTXOs to wallet database");
 
         Ok(())
@@ -803,170 +840,186 @@ impl GlobalState {
 
         // note: iter_mut_lock holds a write-lock, so it should be dropped
         // immediately after use.
-        let mut iter_mut_lock = monitored_utxos.iter_mut();
-        'outer: while let Some(mut setter) = iter_mut_lock.next() {
-            let monitored_utxo = setter.value();
 
-            // Ignore those MUTXOs that were marked as abandoned
-            if monitored_utxo.abandoned_at.is_some() {
-                continue;
-            }
+        // let mut iter_mut_lock = monitored_utxos.iter_mut();
+        // 'outer: while let Some(mut setter) = iter_mut_lock.next() {
+        //     let monitored_utxo = setter.value();
 
-            // ignore synced ones
-            if monitored_utxo.is_synced_to(tip_hash) {
-                continue;
-            }
+        let mut mutxos_changed = std::collections::BTreeMap::new();
+        // let mut iter_mut_lock = monitored_utxos.iter_mut();
 
-            debug!(
-                "Resyncing monitored UTXO number {}, with hash {}",
-                setter.index(),
-                Hash::hash(&monitored_utxo.utxo)
-            );
+        {
+            let stream = monitored_utxos.stream_values().await;
+            pin_mut!(stream); // needed for iteration
+            let mut i: Index = 0;
 
-            // If the UTXO was not confirmed yet, there is no
-            // point in synchronizing its membership proof.
-            let (confirming_block_digest, confirming_block_height) =
-                match monitored_utxo.confirmed_in_block {
-                    Some((confirmed_block_hash, _timestamp, block_height)) => {
-                        (confirmed_block_hash, block_height)
-                    }
-                    None => {
-                        continue;
-                    }
-                };
-
-            // try latest (block hash, membership proof) entry
-            let (block_hash, mut membership_proof) = monitored_utxo
-                .get_latest_membership_proof_entry()
-                .expect("Database not in consistent state. Monitored UTXO must have at least one membership proof.");
-
-            // request path-to-tip
-            let (backwards, _luca, forwards) = self
-                .chain
-                .archival_state()
-                .find_path(block_hash, tip_hash)
-                .await;
-
-            // after this point, we may be modifying it.
-            let mut monitored_utxo = monitored_utxo.clone();
-
-            // walk backwards, reverting
-            for revert_block_hash in backwards.into_iter() {
-                // Was the UTXO confirmed in this block? If so, there
-                // is nothing we can do except orphan the UTXO: that
-                // is, leave it without a synced membership proof.
-                // Whenever current owned UTXOs are queried, one
-                // should take care to filter for UTXOs that have a
-                // membership proof synced to the current block tip.
-                if confirming_block_digest == revert_block_hash {
-                    warn!(
-                        "Could not recover MSMP as transaction appears to be on an abandoned chain"
-                    );
-                    break 'outer;
-                }
-
-                let revert_block = self
-                    .chain
-                    .archival_state()
-                    .get_block(revert_block_hash)
-                    .await?
-                    .unwrap();
-                let maybe_revert_block_predecessor = self
-                    .chain
-                    .archival_state()
-                    .get_block(revert_block.kernel.header.prev_block_digest)
-                    .await?;
-                let previous_mutator_set = match maybe_revert_block_predecessor {
-                    Some(block) => block.kernel.body.mutator_set_accumulator,
-                    None => MutatorSetAccumulator::default(),
-                };
-
-                debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
-
-                // revert removals
-                let removal_records = revert_block.kernel.body.transaction.kernel.inputs.clone();
-                for removal_record in removal_records.iter().rev() {
-                    // membership_proof.revert_update_from_removal(&removal);
-                    membership_proof
-                        .revert_update_from_remove(removal_record)
-                        .expect("Could not revert membership proof from removal record.");
-                }
-
-                // revert additions
-                membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
-
-                // unset spent_in_block field if the UTXO was spent in this block
-                if let Some((spent_block_hash, _, _)) = monitored_utxo.spent_in_block {
-                    if spent_block_hash == revert_block_hash {
-                        monitored_utxo.spent_in_block = None;
-                    }
-                }
-
-                // assert valid (if unspent)
-                assert!(monitored_utxo.spent_in_block.is_some() || previous_mutator_set
-                    .verify(Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
-            }
-
-            // walk forwards, applying
-            for apply_block_hash in forwards.into_iter() {
-                // Was the UTXO confirmed in this block?
-                // This can occur in some edge cases of forward-only
-                // resynchronization. In this case, assume the
-                // membership proof is already synced to this block.
-                if confirming_block_digest == apply_block_hash {
+            // 'outer: for (i, monitored_utxo) in monitored_utxos.get_all().await.iter().enumerate() {
+            'outer: while let Some(monitored_utxo) = stream.next().await {
+                // Ignore those MUTXOs that were marked as abandoned
+                if monitored_utxo.abandoned_at.is_some() {
                     continue;
                 }
 
-                let apply_block = self
-                    .chain
-                    .archival_state()
-                    .get_block(apply_block_hash)
-                    .await?
-                    .unwrap();
-                let maybe_apply_block_predecessor = self
-                    .chain
-                    .archival_state()
-                    .get_block(apply_block.kernel.header.prev_block_digest)
-                    .await?;
-                let mut block_msa = match maybe_apply_block_predecessor {
-                    Some(block) => block.kernel.body.mutator_set_accumulator,
-                    None => MutatorSetAccumulator::default(),
-                };
-                let addition_records = apply_block.kernel.body.transaction.kernel.outputs;
-                let removal_records = apply_block.kernel.body.transaction.kernel.inputs;
-
-                // apply additions
-                for addition_record in addition_records.iter() {
-                    membership_proof
-                        .update_from_addition(
-                            Hash::hash(&monitored_utxo.utxo),
-                            &block_msa,
-                            addition_record,
-                        )
-                        .expect("Could not update membership proof with addition record.");
-                    block_msa.add(addition_record);
+                // ignore synced ones
+                if monitored_utxo.is_synced_to(tip_hash) {
+                    continue;
                 }
 
-                // apply removals
-                for removal_record in removal_records.iter() {
-                    membership_proof
-                        .update_from_remove(removal_record)
-                        .expect("Could not update membership proof from removal record.");
-                    block_msa.remove(removal_record);
+                debug!(
+                    "Resyncing monitored UTXO number {}, with hash {}",
+                    i,
+                    // setter.index(),
+                    Hash::hash(&monitored_utxo.utxo)
+                );
+
+                // If the UTXO was not confirmed yet, there is no
+                // point in synchronizing its membership proof.
+                let (confirming_block_digest, confirming_block_height) =
+                    match monitored_utxo.confirmed_in_block {
+                        Some((confirmed_block_hash, _timestamp, block_height)) => {
+                            (confirmed_block_hash, block_height)
+                        }
+                        None => {
+                            continue;
+                        }
+                    };
+
+                // try latest (block hash, membership proof) entry
+                let (block_hash, mut membership_proof) = monitored_utxo
+                    .get_latest_membership_proof_entry()
+                    .expect("Database not in consistent state. Monitored UTXO must have at least one membership proof.");
+
+                // request path-to-tip
+                let (backwards, _luca, forwards) = self
+                    .chain
+                    .archival_state()
+                    .find_path(block_hash, tip_hash)
+                    .await;
+
+                // after this point, we may be modifying it.
+                let mut monitored_utxo = monitored_utxo.clone();
+
+                // walk backwards, reverting
+                for revert_block_hash in backwards.into_iter() {
+                    // Was the UTXO confirmed in this block? If so, there
+                    // is nothing we can do except orphan the UTXO: that
+                    // is, leave it without a synced membership proof.
+                    // Whenever current owned UTXOs are queried, one
+                    // should take care to filter for UTXOs that have a
+                    // membership proof synced to the current block tip.
+                    if confirming_block_digest == revert_block_hash {
+                        warn!(
+                            "Could not recover MSMP as transaction appears to be on an abandoned chain"
+                        );
+                        break 'outer;
+                    }
+
+                    let revert_block = self
+                        .chain
+                        .archival_state()
+                        .get_block(revert_block_hash)
+                        .await?
+                        .unwrap();
+                    let maybe_revert_block_predecessor = self
+                        .chain
+                        .archival_state()
+                        .get_block(revert_block.kernel.header.prev_block_digest)
+                        .await?;
+                    let previous_mutator_set = match maybe_revert_block_predecessor {
+                        Some(block) => block.kernel.body.mutator_set_accumulator,
+                        None => MutatorSetAccumulator::default(),
+                    };
+
+                    debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
+
+                    // revert removals
+                    let removal_records = revert_block.kernel.body.transaction.kernel.inputs.clone();
+                    for removal_record in removal_records.iter().rev() {
+                        // membership_proof.revert_update_from_removal(&removal);
+                        membership_proof
+                            .revert_update_from_remove(removal_record)
+                            .expect("Could not revert membership proof from removal record.");
+                    }
+
+                    // revert additions
+                    membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
+
+                    // unset spent_in_block field if the UTXO was spent in this block
+                    if let Some((spent_block_hash, _, _)) = monitored_utxo.spent_in_block {
+                        if spent_block_hash == revert_block_hash {
+                            monitored_utxo.spent_in_block = None;
+                        }
+                    }
+
+                    // assert valid (if unspent)
+                    assert!(monitored_utxo.spent_in_block.is_some() || previous_mutator_set
+                        .verify(Hash::hash(&monitored_utxo.utxo), &membership_proof), "Failed to verify monitored UTXO {monitored_utxo:?}\n against previous MSA in block {revert_block:?}");
                 }
 
-                assert_eq!(block_msa, apply_block.kernel.body.mutator_set_accumulator);
+                // walk forwards, applying
+                for apply_block_hash in forwards.into_iter() {
+                    // Was the UTXO confirmed in this block?
+                    // This can occur in some edge cases of forward-only
+                    // resynchronization. In this case, assume the
+                    // membership proof is already synced to this block.
+                    if confirming_block_digest == apply_block_hash {
+                        continue;
+                    }
+
+                    let apply_block = self
+                        .chain
+                        .archival_state()
+                        .get_block(apply_block_hash)
+                        .await?
+                        .unwrap();
+                    let maybe_apply_block_predecessor = self
+                        .chain
+                        .archival_state()
+                        .get_block(apply_block.kernel.header.prev_block_digest)
+                        .await?;
+                    let mut block_msa = match maybe_apply_block_predecessor {
+                        Some(block) => block.kernel.body.mutator_set_accumulator,
+                        None => MutatorSetAccumulator::default(),
+                    };
+                    let addition_records = apply_block.kernel.body.transaction.kernel.outputs;
+                    let removal_records = apply_block.kernel.body.transaction.kernel.inputs;
+
+                    // apply additions
+                    for addition_record in addition_records.iter() {
+                        membership_proof
+                            .update_from_addition(
+                                Hash::hash(&monitored_utxo.utxo),
+                                &block_msa,
+                                addition_record,
+                            )
+                            .expect("Could not update membership proof with addition record.");
+                        block_msa.add(addition_record);
+                    }
+
+                    // apply removals
+                    for removal_record in removal_records.iter() {
+                        membership_proof
+                            .update_from_remove(removal_record)
+                            .expect("Could not update membership proof from removal record.");
+                        block_msa.remove(removal_record);
+                    }
+
+                    assert_eq!(block_msa, apply_block.kernel.body.mutator_set_accumulator);
+                }
+
+                // store updated membership proof
+                monitored_utxo.add_membership_proof_for_tip(tip_hash, membership_proof);
+                mutxos_changed.insert(i as Index, monitored_utxo);
+                i += 1;
             }
-
-            // store updated membership proof
-            monitored_utxo.add_membership_proof_for_tip(tip_hash, membership_proof);
-            setter.set(monitored_utxo);
         }
-        drop(iter_mut_lock); // <---- releases write lock.
+
+        // drop(iter_mut_lock); // <---- releases write lock.
+        monitored_utxos.set_many(mutxos_changed).await;
 
         // Update sync label and persist
-        self.wallet_state.wallet_db.set_sync_label(tip_hash);
-        self.wallet_state.wallet_db.persist();
+        self.wallet_state.wallet_db.set_sync_label(tip_hash).await;
+        self.wallet_state.wallet_db.persist().await;
 
         Ok(())
     }
@@ -1002,41 +1055,55 @@ impl GlobalState {
 
         let mut updates = std::collections::BTreeMap::new();
 
-        // Find monitored_utxo for updating
-        for (i, mut mutxo) in self
-            .wallet_state
-            .wallet_db
-            .monitored_utxos()
-            .get_all()
-            .into_iter()
-            .enumerate()
         {
-            // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
-            //    once the spending block is buried sufficiently deep
-            // 2. If synced to current tip, there is nothing more to do with this MUTXO
-            // 3. If already marked as abandoned, we don't do that again
-            if mutxo.spent_in_block.is_some()
-                || mutxo.is_synced_to(current_tip_info.0)
-                || mutxo.abandoned_at.is_some()
+            let stream = self
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .stream_values()
+                .await;
+            pin_mut!(stream); // needed for iteration
+
+            // Find monitored_utxo for updating
+            // for (i, mut mutxo) in self
+            //     .wallet_state
+            //     .wallet_db
+            //     .monitored_utxos()
+            //     .get_all()
+            //     .await
+            //     .into_iter()
+            //     .enumerate()
+            let mut i: Index = 0;
+            while let Some(mut mutxo) = stream.next().await
             {
-                continue;
-            }
-
-            // MUTXO is neither spent nor synced. Mark as abandoned
-            // if it was confirmed in block that is now abandoned,
-            // and if that block is older than threshold.
-            if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
-                let depth = current_tip_header.height - block_height_confirmed + 1;
-
-                let abandoned = depth >= block_depth_threshhold as i128
-                    && mutxo
-                        .was_abandoned(current_tip_digest, self.chain.archival_state())
-                        .await;
-
-                if abandoned {
-                    mutxo.abandoned_at = Some(current_tip_info);
-                    updates.insert(i as u64, mutxo);
+                // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
+                //    once the spending block is buried sufficiently deep
+                // 2. If synced to current tip, there is nothing more to do with this MUTXO
+                // 3. If already marked as abandoned, we don't do that again
+                if mutxo.spent_in_block.is_some()
+                    || mutxo.is_synced_to(current_tip_info.0)
+                    || mutxo.abandoned_at.is_some()
+                {
+                    continue;
                 }
+
+                // MUTXO is neither spent nor synced. Mark as abandoned
+                // if it was confirmed in block that is now abandoned,
+                // and if that block is older than threshold.
+                if let Some((_, _, block_height_confirmed)) = mutxo.confirmed_in_block {
+                    let depth = current_tip_header.height - block_height_confirmed + 1;
+
+                    let abandoned = depth >= block_depth_threshhold as i128
+                        && mutxo
+                            .was_abandoned(current_tip_digest, self.chain.archival_state())
+                            .await;
+
+                    if abandoned {
+                        mutxo.abandoned_at = Some(current_tip_info);
+                        updates.insert(i, mutxo);
+                    }
+                }
+                i += 1;
             }
         }
 
@@ -1046,14 +1113,15 @@ impl GlobalState {
         self.wallet_state
             .wallet_db
             .monitored_utxos_mut()
-            .set_many(updates);
+            .set_many(updates)
+            .await;
 
         Ok(removed_count)
     }
 
     pub async fn flush_databases(&mut self) -> Result<()> {
         // flush wallet databases
-        self.wallet_state.wallet_db.persist();
+        self.wallet_state.wallet_db.persist().await;
 
         // flush block_index database
         self.chain.archival_state_mut().block_index_db.flush().await;
@@ -1063,12 +1131,14 @@ impl GlobalState {
         self.chain
             .archival_state_mut()
             .archival_mutator_set
-            .set_sync_label(hash);
+            .set_sync_label(hash)
+            .await;
 
         self.chain
             .archival_state_mut()
             .archival_mutator_set
-            .persist();
+            .persist()
+            .await;
 
         // flush peer_standings
         self.net.peer_databases.peer_standings.flush().await;
@@ -1142,7 +1212,8 @@ impl GlobalState {
         // Update mempool with UTXOs from this block. This is done by removing all transaction
         // that became invalid/was mined by this block.
         self.mempool
-            .update_with_block(previous_mutator_set_accumulator, &new_block);
+            .update_with_block(previous_mutator_set_accumulator, &new_block)
+            .await;
 
         self.chain.light_state_mut().set_block(new_block);
 
@@ -1208,7 +1279,8 @@ mod global_state_tests {
         tip_block: &Block,
     ) -> bool {
         let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-        for (_idx, monitored_utxo) in monitored_utxos.iter() {
+        for (_idx, monitored_utxo) in monitored_utxos.get_all().await.iter().enumerate() {
+            // for (_idx, monitored_utxo) in monitored_utxos.iter() {
             let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
             match current_mp {
@@ -1317,7 +1389,7 @@ mod global_state_tests {
             .wallet_state
             .wallet_db
             .monitored_utxos()
-            .get_all();
+            .get_all().await;
         assert_ne!(monitored_utxos.len(), 0);
 
         // one month before release date, we should not be able to create the transaction
@@ -1437,13 +1509,13 @@ mod global_state_tests {
         {
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos_mut();
             assert!(
-                monitored_utxos.len().is_one(),
+                monitored_utxos.len().await.is_one(),
                 "MUTXO must have genesis element before emptying it"
             );
-            monitored_utxos.pop();
+            monitored_utxos.pop().await;
 
             assert!(
-                monitored_utxos.is_empty(),
+                monitored_utxos.is_empty().await,
                 "MUTXO must be empty after emptying it"
             );
         }
@@ -1456,12 +1528,12 @@ mod global_state_tests {
         {
             let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
             assert!(
-                monitored_utxos.len().is_one(),
+                monitored_utxos.len().await.is_one(),
                 "MUTXO must have genesis element after recovering it"
             );
 
             // Verify that the restored MUTXO has a valid MSMP
-            let own_premine_mutxo = monitored_utxos.get(0);
+            let own_premine_mutxo = monitored_utxos.get(0).await;
             let ms_item = Hash::hash(&own_premine_mutxo.utxo);
             global_state
                 .chain
@@ -1609,7 +1681,8 @@ mod global_state_tests {
         // Verify that wallet has monitored UTXOs, from genesis and from block_1a
         let wallet_status = global_state
             .wallet_state
-            .get_wallet_status_from_lock(mock_block_1a.hash());
+            .get_wallet_status_from_lock(mock_block_1a.hash())
+            .await;
         assert_eq!(2, wallet_status.synced_unspent.len());
 
         // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
@@ -1649,7 +1722,8 @@ mod global_state_tests {
         // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
         let wallet_status_after_forking = global_state
             .wallet_state
-            .get_wallet_status_from_lock(parent_block.hash());
+            .get_wallet_status_from_lock(parent_block.hash())
+            .await;
         assert_eq!(1, wallet_status_after_forking.synced_unspent.len());
         assert_eq!(1, wallet_status_after_forking.unsynced_unspent.len());
 
@@ -1659,6 +1733,7 @@ mod global_state_tests {
         assert!(
             !monitored_utxos
                 .get(0)
+                .await
                 .was_abandoned(
                     parent_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
@@ -1668,6 +1743,7 @@ mod global_state_tests {
         assert!(
             monitored_utxos
                 .get(1)
+                .await
                 .was_abandoned(
                     parent_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
@@ -1730,7 +1806,8 @@ mod global_state_tests {
             // Verify that UTXO was recorded
             let wallet_status_after_1a = global_state
                 .wallet_state
-                .get_wallet_status_from_lock(mock_block_1a.hash());
+                .get_wallet_status_from_lock(mock_block_1a.hash())
+                .await;
             assert_eq!(2, wallet_status_after_1a.synced_unspent.len());
         }
 
@@ -1761,7 +1838,8 @@ mod global_state_tests {
         // Verify that all both MUTXOs have synced MPs
         let wallet_status_on_a_fork = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_a_block.hash());
+            .get_wallet_status_from_lock(fork_a_block.hash())
+            .await;
 
         assert_eq!(2, wallet_status_on_a_fork.synced_unspent.len());
 
@@ -1792,7 +1870,8 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let wallet_status_on_b_fork_before_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash());
+            .get_wallet_status_from_lock(fork_b_block.hash())
+            .await;
         assert_eq!(
             0,
             wallet_status_on_b_fork_before_resync.synced_unspent.len()
@@ -1809,7 +1888,8 @@ mod global_state_tests {
             .unwrap();
         let wallet_status_on_b_fork_after_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash());
+            .get_wallet_status_from_lock(fork_b_block.hash())
+            .await;
         assert_eq!(2, wallet_status_on_b_fork_after_resync.synced_unspent.len());
         assert_eq!(
             0,
@@ -1845,7 +1925,8 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let wallet_status_on_c_fork_before_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash());
+            .get_wallet_status_from_lock(fork_c_block.hash())
+            .await;
         assert_eq!(
             0,
             wallet_status_on_c_fork_before_resync.synced_unspent.len()
@@ -1863,7 +1944,8 @@ mod global_state_tests {
             .unwrap();
         let wallet_status_on_c_fork_after_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash());
+            .get_wallet_status_from_lock(fork_c_block.hash())
+            .await;
         assert_eq!(1, wallet_status_on_c_fork_after_resync.synced_unspent.len());
         assert_eq!(
             1,
@@ -1875,6 +1957,7 @@ mod global_state_tests {
         assert!(
             !monitored_utxos
                 .get(0)
+                .await
                 .was_abandoned(
                     fork_c_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
@@ -1884,6 +1967,7 @@ mod global_state_tests {
         assert!(
             monitored_utxos
                 .get(1)
+                .await
                 .was_abandoned(
                     fork_c_block.kernel.mast_hash(),
                     global_state.chain.archival_state()
@@ -2001,7 +2085,7 @@ mod global_state_tests {
             block_1.accumulate_transaction(
                 tx_to_alice_and_bob,
                 &genesis_block.kernel.body.mutator_set_accumulator,
-            );
+            ).await;
             let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
             assert!(block_1.is_valid(&genesis_block, now + Duration::from_millis(seven_months)));
         }
@@ -2052,7 +2136,7 @@ mod global_state_tests {
                     .wallet_state
                     .wallet_db
                     .monitored_utxos()
-                    .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+                    .len().await, "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
             );
         }
 
@@ -2199,11 +2283,11 @@ mod global_state_tests {
                 genesis_spending_key.to_address(),
                 rng.gen(),
             );
-        block_2.accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator);
+        block_2.accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator).await;
         assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
         assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
 
-        block_2.accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator);
+        block_2.accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator).await;
     }
 
     #[traced_test]

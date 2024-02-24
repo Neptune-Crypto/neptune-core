@@ -107,12 +107,12 @@ mod ms_accumulator_tests {
     use itertools::{izip, Itertools};
     use rand::{thread_rng, Rng};
 
-    use crate::util_types::mutator_set::mutator_set_trait::commit;
+    use crate::util_types::mutator_set::mutator_set_trait::*;
 
     use super::*;
 
-    #[test]
-    fn mutator_set_batch_remove_accumulator_test() {
+    #[tokio::test]
+    async fn mutator_set_batch_remove_accumulator_test() {
         // Test the batch-remove function for mutator set accumulator
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let mut membership_proofs: Vec<MsMembershipProof> = vec![];
@@ -157,10 +157,11 @@ mod ms_accumulator_tests {
         }
 
         // Remove the entries with batch_remove
-        accumulator.batch_remove(
-            removal_records,
-            &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
-        );
+        accumulator
+            .batch_remove(
+                removal_records,
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+            );
 
         // Verify that the expected membership proofs fail/pass
         for (mp, &item, skipped) in izip!(
@@ -173,8 +174,8 @@ mod ms_accumulator_tests {
         }
     }
 
-    #[test]
-    fn mutator_set_accumulator_pbt() {
+    #[tokio::test]
+    async fn mutator_set_accumulator_pbt() {
         // This tests verifies that items can be added and removed from the mutator set
         // without assuming anything about the order of the adding and removal. It also
         // verifies that the membership proofs handled through an mutator set accumulator
@@ -185,9 +186,9 @@ mod ms_accumulator_tests {
         // lot of code duplication that is avoided by doing that.
 
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
-        let mut rms_after = empty_rusty_mutator_set();
+        let mut rms_after = empty_rusty_mutator_set().await;
         let archival_after_remove = rms_after.ams_mut();
-        let mut rms_before = empty_rusty_mutator_set();
+        let mut rms_before = empty_rusty_mutator_set().await;
         let archival_before_remove = rms_before.ams_mut();
         let number_of_interactions = 100;
         let mut rng = rand::thread_rng();
@@ -207,7 +208,7 @@ mod ms_accumulator_tests {
                 let new_commitment = accumulator.hash();
                 assert_eq!(
                     new_commitment,
-                    archival_after_remove.hash(),
+                    archival_after_remove.hash().await,
                     "Commitment to archival/accumulator MS must agree"
                 );
                 match last_ms_commitment {
@@ -248,8 +249,8 @@ mod ms_accumulator_tests {
                     }
 
                     accumulator.add(&addition_record);
-                    archival_after_remove.add(&addition_record);
-                    archival_before_remove.add(&addition_record);
+                    archival_after_remove.add(&addition_record).await;
+                    archival_before_remove.add(&addition_record).await;
 
                     let updated_mp_indices = update_result.unwrap();
                     println!("{}: Inserted", i);
@@ -322,14 +323,18 @@ mod ms_accumulator_tests {
                     assert!(accumulator.verify(removal_item, &removal_mp));
                     let removal_record_copy = removal_record.clone();
                     accumulator.remove(&removal_record);
-                    archival_after_remove.remove(&removal_record);
+                    archival_after_remove.remove(&removal_record).await;
 
                     // Verify that removal record's indices are all set
                     for removed_index in removal_record.absolute_indices.to_vec() {
-                        assert!(archival_after_remove.bloom_filter_contains(removed_index));
+                        assert!(
+                            archival_after_remove
+                                .bloom_filter_contains(removed_index)
+                                .await
+                        );
                     }
 
-                    archival_before_remove.remove(&removal_record_copy);
+                    archival_before_remove.remove(&removal_record_copy).await;
                     assert!(!accumulator.verify(removal_item, &removal_mp));
 
                     // Verify that the sequential `update_from_remove` return value is correct
@@ -395,6 +400,7 @@ mod ms_accumulator_tests {
                             receiver_preimage,
                             mp_batch.auth_path_aocl.leaf_index,
                         )
+                        .await
                         .unwrap();
                     assert_eq!(arch_mp, mp_batch.to_owned());
 
