@@ -791,8 +791,9 @@ mod archival_state_tests {
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::utxo::LockScript;
+    use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
-    use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, utxo::Utxo};
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::consensus::mast_hash::MastHash;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;

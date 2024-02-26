@@ -1,22 +1,24 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
-pub mod native_coin;
-pub mod neptune_coins;
+pub mod primitive_witness;
 pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
 use crate::models::consensus::Witness;
 use anyhow::Result;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
+use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
 use std::time::SystemTime;
+use tasm_lib::Digest;
 use tracing::{debug, error, warn};
 use triton_vm::prelude::NonDeterminism;
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -24,22 +26,23 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
-use self::native_coin::native_coin_program;
-use self::neptune_coins::NeptuneCoins;
+use self::primitive_witness::PrimitiveWitness;
 use self::transaction_kernel::TransactionKernel;
-use self::utxo::{LockScript, TypeScript, Utxo};
 use self::validity::TransactionValidationLogic;
 use super::block::Block;
 use super::shared::Hash;
+use super::type_scripts::TypeScript;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-pub type TransactionWitness = Witness<TransactionPrimitiveWitness, TransactionValidationLogic>;
+pub type TransactionWitness = Witness<PrimitiveWitness, TransactionValidationLogic>;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Default, Arbitrary,
+)]
 pub struct PublicAnnouncement {
     pub message: Vec<BFieldElement>,
 }
@@ -48,20 +51,6 @@ impl PublicAnnouncement {
     pub fn new(message: Vec<BFieldElement>) -> Self {
         Self { message }
     }
-}
-
-/// The raw witness is the most primitive type of transaction witness.
-/// It exposes secret data and is therefore not for broadcasting.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct TransactionPrimitiveWitness {
-    pub input_utxos: Vec<Utxo>,
-    pub input_lock_scripts: Vec<LockScript>,
-    pub type_scripts: Vec<TypeScript>,
-    pub lock_script_witnesses: Vec<Vec<BFieldElement>>,
-    pub input_membership_proofs: Vec<MsMembershipProof>,
-    pub output_utxos: Vec<Utxo>,
-    pub public_announcements: Vec<PublicAnnouncement>,
-    pub mutator_set_accumulator: MutatorSetAccumulator,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -121,7 +110,12 @@ impl Transaction {
             if let Witness::Primitive(witness) = &mut self.witness {
                 let membership_proofs =
                     &mut witness.input_membership_proofs.iter_mut().collect_vec();
-                let own_items = witness.input_utxos.iter().map(Hash::hash).collect_vec();
+                let own_items = witness
+                    .input_utxos
+                    .utxos
+                    .iter()
+                    .map(Hash::hash)
+                    .collect_vec();
                 MsMembershipProof::batch_update_from_addition(
                     membership_proofs,
                     &own_items,
@@ -242,12 +236,13 @@ impl Transaction {
 
         let merged_witness = match (&self.witness, &other.witness) {
             (Witness::Primitive(self_witness), Witness::Primitive(other_witness)) => {
-                Witness::Primitive(TransactionPrimitiveWitness {
-                    input_utxos: [
-                        self_witness.input_utxos.clone(),
-                        other_witness.input_utxos.clone(),
-                    ]
-                    .concat(),
+                if self_witness.kernel.mutator_set_hash != other_witness.kernel.mutator_set_hash {
+                    error!("Cannot merge two transactions with distinct mutator set hashes.");
+                }
+                Witness::Primitive(PrimitiveWitness {
+                    input_utxos: self_witness
+                        .input_utxos
+                        .cat(other_witness.input_utxos.clone()),
                     input_lock_scripts: [
                         self_witness.input_lock_scripts.clone(),
                         other_witness.input_lock_scripts.clone(),
@@ -270,17 +265,11 @@ impl Transaction {
                         other_witness.input_membership_proofs.clone(),
                     ]
                     .concat(),
-                    output_utxos: [
-                        self_witness.output_utxos.clone(),
-                        other_witness.output_utxos.clone(),
-                    ]
-                    .concat(),
-                    public_announcements: [
-                        self_witness.public_announcements.clone(),
-                        other_witness.public_announcements.clone(),
-                    ]
-                    .concat(),
+                    output_utxos: self_witness
+                        .output_utxos
+                        .cat(other_witness.output_utxos.clone()),
                     mutator_set_accumulator: self_witness.mutator_set_accumulator.clone(),
+                    kernel: merged_kernel.clone(),
                 })
             }
 
@@ -326,7 +315,9 @@ impl Transaction {
             .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
     }
 
-    fn validate_primitive_witness(&self, primitive_witness: &TransactionPrimitiveWitness) -> bool {
+    /// Verify the transaction directly from the primitive witness, without proofs or
+    /// decomposing into subclaims.
+    fn validate_primitive_witness(&self, primitive_witness: &PrimitiveWitness) -> bool {
         // verify lock scripts
         for (lock_script, secret_input) in primitive_witness
             .input_lock_scripts
@@ -357,6 +348,7 @@ impl Transaction {
         let mut witnessed_removal_records = vec![];
         for (input_utxo, msmp) in primitive_witness
             .input_utxos
+            .utxos
             .iter()
             .zip(primitive_witness.input_membership_proofs.iter())
         {
@@ -380,22 +372,35 @@ impl Transaction {
             witnessed_removal_records.push(removal_record);
         }
 
-        // collect type scripts
-        let type_scripts = primitive_witness
+        // collect type script hashes
+        let type_script_hashes = primitive_witness
             .output_utxos
+            .utxos
             .iter()
             .flat_map(|utxo| utxo.coins.iter().map(|coin| coin.type_script_hash))
             .sorted_by_key(|d| d.values().map(|b| b.value()))
             .dedup()
             .collect_vec();
 
+        // verify that all type script hashes are represented by the witness's type script list
+        let mut type_script_dictionary = HashMap::<Digest, TypeScript>::new();
+        for ts in primitive_witness.type_scripts.iter() {
+            type_script_dictionary.insert(ts.hash(), ts.clone());
+        }
+        if !type_script_hashes
+            .clone()
+            .into_iter()
+            .all(|tsh| type_script_dictionary.contains_key(&tsh))
+        {
+            warn!("Transaction contains input(s) or output(s) with unknown typescript.");
+            return false;
+        }
+
         // verify type scripts
-        for type_script_hash in type_scripts {
-            let type_script = if type_script_hash != native_coin_program().hash::<Hash>() {
-                warn!("Observed non-native type script: {} Non-native type scripts are not supported yet.", type_script_hash.emojihash());
-                continue;
-            } else {
-                native_coin_program()
+        for type_script_hash in type_script_hashes {
+            let Some(type_script) = type_script_dictionary.get(&type_script_hash) else {
+                warn!("Type script hash not found; should not get here.");
+                return false;
             };
 
             let public_input = self.kernel.mast_hash().encode();
@@ -408,7 +413,9 @@ impl Transaction {
 
             // The type script is satisfied if it halts gracefully, i.e.,
             // without panicking. So we don't care about the output
-            if let Err(e) = type_script.run(public_input.into(), NonDeterminism::new(secret_input))
+            if let Err(e) = type_script
+                .program
+                .run(public_input.into(), NonDeterminism::new(secret_input))
             {
                 warn!(
                     "Type script {} not satisfied for transaction: {}",
@@ -489,23 +496,37 @@ impl Transaction {
 
 #[cfg(test)]
 mod witness_tests {
+    use tasm_lib::Digest;
+    use witness_tests::primitive_witness::SaltedUtxos;
+
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+
     use super::*;
 
     #[test]
     fn decode_encode_test_empty() {
-        let primitive_witness = TransactionPrimitiveWitness {
-            input_utxos: vec![],
+        let empty_kernel = TransactionKernel {
+            inputs: vec![],
+            outputs: vec![],
+            public_announcements: vec![],
+            fee: NeptuneCoins::new(0),
+            coinbase: None,
+            timestamp: BFieldElement::new(0),
+            mutator_set_hash: Digest::default(),
+        };
+        let primitive_witness = PrimitiveWitness {
+            input_utxos: SaltedUtxos::empty(),
             type_scripts: vec![],
             input_lock_scripts: vec![],
             lock_script_witnesses: vec![],
             input_membership_proofs: vec![],
-            output_utxos: vec![],
-            public_announcements: vec![],
+            output_utxos: SaltedUtxos::empty(),
             mutator_set_accumulator: MutatorSetAccumulator::new(),
+            kernel: empty_kernel,
         };
 
         let encoded = primitive_witness.encode();
-        let decoded = *TransactionPrimitiveWitness::decode(&encoded).unwrap();
+        let decoded = *PrimitiveWitness::decode(&encoded).unwrap();
         assert_eq!(primitive_witness, decoded);
     }
 }
@@ -515,9 +536,11 @@ mod transaction_tests {
     use rand::random;
     use std::time::Duration;
     use tracing_test::traced_test;
+    use transaction_tests::utxo::{LockScript, Utxo};
 
     use super::*;
     use crate::{
+        models::blockchain::type_scripts::neptune_coins::NeptuneCoins,
         tests::shared::make_mock_transaction, util_types::mutator_set::mutator_set_trait::commit,
     };
 

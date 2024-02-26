@@ -26,11 +26,14 @@ use self::wallet::wallet_state::WalletState;
 use self::wallet::wallet_status::WalletStatus;
 use super::blockchain::block::block_height::BlockHeight;
 use super::blockchain::block::Block;
+use super::blockchain::transaction::primitive_witness::{PrimitiveWitness, SaltedUtxos};
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
-use super::blockchain::transaction::utxo::{LockScript, TypeScript, Utxo};
+use super::blockchain::transaction::utxo::{LockScript, Utxo};
 use super::blockchain::transaction::validity::TransactionValidationLogic;
-use super::blockchain::transaction::{neptune_coins::NeptuneCoins, Transaction};
-use super::blockchain::transaction::{PublicAnnouncement, TransactionPrimitiveWitness};
+use super::blockchain::transaction::PublicAnnouncement;
+use super::blockchain::transaction::Transaction;
+use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use super::blockchain::type_scripts::TypeScript;
 use super::consensus::ValidationLogic;
 use crate::config_models::cli_args;
 use crate::models::consensus::Witness;
@@ -543,26 +546,22 @@ impl GlobalState {
             .mutator_set_accumulator
             .clone();
 
-        // When reading a digest from secret and standard-in, the digest's
-        // zeroth element must be on top of the stack. So the secret-in
-        // is here the spending key reversed.
-        let mut secret_input = spending_key.unlock_key.encode();
-        secret_input.reverse();
-        let mut primitive_witness = TransactionPrimitiveWitness {
-            input_utxos,
+        let secret_input = spending_key.unlock_key.encode();
+        let mut primitive_witness = PrimitiveWitness {
+            input_utxos: SaltedUtxos::new(input_utxos.clone()),
             input_lock_scripts,
             type_scripts,
             lock_script_witnesses: vec![secret_input; spendable_utxos_and_mps.len()],
             input_membership_proofs,
-            output_utxos: output_utxos.clone(),
-            public_announcements,
+            output_utxos: SaltedUtxos::new(output_utxos.clone()),
             mutator_set_accumulator,
+            kernel: kernel.clone(),
         };
 
         // Convert the secret-supported claim to a proof, several proofs, or
         // at the very least hide sensitive data.
         let mut transaction_validity_logic =
-            TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
+            TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
 
         if self.cli().privacy {
             transaction_validity_logic

@@ -7,6 +7,7 @@ use crate::models::consensus::SecretWitness;
 use crate::models::consensus::SupportedClaim;
 use crate::triton_vm::program::Program;
 use tasm_lib::triton_vm::program::NonDeterminism;
+use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
@@ -21,6 +22,10 @@ impl SecretWitness for MmrMembershipWitness {
     }
 
     fn subprogram(&self) -> Program {
+        todo!()
+    }
+
+    fn standard_input(&self) -> PublicInput {
         todo!()
     }
 }

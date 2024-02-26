@@ -2,7 +2,9 @@ use anyhow::Result;
 use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::maybe_write_debuggable_program_to_disk;
 use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::shared_math::bfield_codec::BFieldCodec;
 use tracing::{debug, warn};
@@ -14,6 +16,7 @@ use triton_vm::prelude::PublicInput;
 use triton_vm::prelude::StarkParameters;
 
 pub mod mast_hash;
+pub mod tasm;
 
 /// This file contains abstractions for verifying consensus logic using TritonVM STARK
 /// proofs. The concrete logic is specified in the directories `transaction` and `block`.
@@ -60,10 +63,13 @@ impl GetSize for SingleProof {
 pub trait SecretWitness:
     Clone + Serialize + PartialEq + Eq + GetSize + BFieldCodec + Sized
 {
+    /// The program's (public/standard) input
+    fn standard_input(&self) -> PublicInput;
+
     /// The non-determinism for the VM that this witness corresponds to
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement>;
 
-    /// Returns the subprogram
+    /// Returns the subprogram that this secret witness relates to
     fn subprogram(&self) -> Program;
 }
 
@@ -75,7 +81,7 @@ pub struct SupportedClaim<SubprogramWitness: SecretWitness> {
     pub support: ClaimSupport<SubprogramWitness>,
 }
 
-/// When a claimto validity decomposes into multiple subclaims via variant
+/// When a claim to validity decomposes into multiple subclaims via variant
 /// `ValidationLogic` of `Witness`, those subclaims pertain to the graceful halting of
 /// programs ("subprograms"), which is itself supported by either a proof or some witness
 /// that can help the prover produce one.
@@ -110,9 +116,8 @@ impl<SubprogramWitness: SecretWitness> SupportedClaim<SubprogramWitness> {
 /// sometimes with and sometimes without witness data.
 pub trait ValidationLogic<T: SecretWitness> {
     type PrimitiveWitness;
-    type Kernel;
 
-    fn subprogram(&self) -> Program;
+    fn validation_program(&self) -> Program;
     fn support(&self) -> ClaimSupport<T>;
     fn claim(&self) -> Claim;
 
@@ -121,10 +126,7 @@ pub trait ValidationLogic<T: SecretWitness> {
         todo!()
     }
 
-    fn new_from_primitive_witness(
-        primitive_witness: &Self::PrimitiveWitness,
-        tx_kernel: &Self::Kernel,
-    ) -> Self;
+    fn new_from_primitive_witness(primitive_witness: &Self::PrimitiveWitness) -> Self;
 
     /// Prove the claim.
     fn prove(&mut self) -> Result<()> {
@@ -135,7 +137,7 @@ pub trait ValidationLogic<T: SecretWitness> {
             }
             ClaimSupport::SecretWitness(witness) => {
                 // Run program before proving
-                self.subprogram()
+                self.validation_program()
                     .run(
                         self.claim().public_input().into(),
                         witness.nondeterminism().clone(),
@@ -145,7 +147,7 @@ pub trait ValidationLogic<T: SecretWitness> {
                 let proof = triton_vm::prove(
                     StarkParameters::default(),
                     &self.claim(),
-                    &self.subprogram(),
+                    &self.validation_program(),
                     witness.nondeterminism().clone(),
                 )
                 .expect("Proving integrity of removal records must succeed.");
@@ -199,15 +201,24 @@ pub trait ValidationLogic<T: SecretWitness> {
             }
             ClaimSupport::MultipleSupports(secret_witnesses) => {
                 let claim = self.claim();
+                #[allow(clippy::never_loop)]
                 for witness in secret_witnesses.iter() {
-                    let vm_result = witness.subprogram().run(
-                        PublicInput::new(claim.input.to_vec()),
-                        witness.nondeterminism(),
-                    );
+                    let public_input = PublicInput::new(claim.input.to_vec());
+                    let vm_result = witness
+                        .subprogram()
+                        .run(public_input.clone(), witness.nondeterminism());
                     match vm_result {
-                        Ok(_) => (),
+                        Ok(_) => {}
                         Err(err) => {
                             warn!("Multiple-support witness failed to validate: {err}");
+                            maybe_write_debuggable_program_to_disk(
+                                &witness.subprogram(),
+                                &VMState::new(
+                                    &witness.subprogram(),
+                                    public_input,
+                                    witness.nondeterminism(),
+                                ),
+                            );
                             return false;
                         }
                     }

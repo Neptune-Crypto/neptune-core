@@ -1,6 +1,9 @@
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::type_scripts::native_currency;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_traits::Zero;
 use rand::rngs::StdRng;
@@ -13,19 +16,18 @@ use triton_vm::triton_asm;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-use super::native_coin::{native_coin_program, NATIVE_COIN_TYPESCRIPT_DIGEST};
-use super::{native_coin, NeptuneCoins};
+use crate::models::blockchain::type_scripts::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
 
 pub struct Coin {
     pub type_script_hash: Digest,
     pub state: Vec<BFieldElement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
@@ -64,7 +66,7 @@ impl Utxo {
         Self::new(
             lock_script,
             vec![Coin {
-                type_script_hash: native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST,
+                type_script_hash: native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
                 state: amount.encode(),
             }],
         )
@@ -73,7 +75,7 @@ impl Utxo {
     pub fn get_native_coin_amount(&self) -> NeptuneCoins {
         self.coins
             .iter()
-            .filter(|coin| coin.type_script_hash == NATIVE_COIN_TYPESCRIPT_DIGEST)
+            .filter(|coin| coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST)
             .map(|coin| match NeptuneCoins::decode(&coin.state) {
                 Ok(boxed_amount) => *boxed_amount,
                 Err(_) => NeptuneCoins::zero(),
@@ -142,52 +144,10 @@ impl LockScript {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct TypeScript {
-    pub program: Program,
-}
-
-// Standard hash needed for filtering out duplicates.
-impl std::hash::Hash for TypeScript {
-    fn hash<H: StdHasher>(&self, state: &mut H) {
-        self.program.instructions.hash(state);
-    }
-}
-
-impl From<Vec<LabelledInstruction>> for TypeScript {
-    fn from(instrs: Vec<LabelledInstruction>) -> Self {
-        Self {
-            program: Program::new(&instrs),
-        }
-    }
-}
-
-impl From<&[LabelledInstruction]> for TypeScript {
-    fn from(instrs: &[LabelledInstruction]) -> Self {
-        Self {
-            program: Program::new(instrs),
-        }
-    }
-}
-
-impl TypeScript {
-    pub fn new(program: Program) -> Self {
-        Self { program }
-    }
-
-    pub fn hash(&self) -> Digest {
-        self.program.hash::<Hash>()
-    }
-
-    pub fn native_coin() -> Self {
-        Self {
-            program: native_coin_program(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod utxo_tests {
+    use crate::models::blockchain::type_scripts::TypeScript;
+
     use super::*;
     use rand::{thread_rng, Rng};
     use tracing_test::traced_test;

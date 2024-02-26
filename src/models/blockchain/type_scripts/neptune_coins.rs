@@ -1,6 +1,7 @@
-use crate::prelude::twenty_first;
+use crate::{models::blockchain::transaction::utxo::Coin, prelude::twenty_first};
 
 use anyhow::bail;
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -16,7 +17,7 @@ use std::{
 };
 use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
 
-use super::{native_coin::NATIVE_COIN_TYPESCRIPT_DIGEST, utxo::Coin};
+use super::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 
 const NUM_LIMBS: usize = 4;
 
@@ -68,10 +69,28 @@ impl NeptuneCoins {
     /// Create a `coins` object for use in a UTXO
     pub fn to_native_coins(&self) -> Vec<Coin> {
         let dictionary = vec![Coin {
-            type_script_hash: NATIVE_COIN_TYPESCRIPT_DIGEST,
+            type_script_hash: NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
             state: self.encode(),
         }];
         dictionary
+    }
+
+    /// Convert the amount to Neptune atomic units (nau) as a 64-bit floating point.
+    /// Note that this function loses precision!
+    pub fn to_nau_f64(&self) -> f64 {
+        if self.is_zero() {
+            return 0.0;
+        }
+        let nau = self.to_nau();
+        let bit_size = nau.bits();
+        let shift = if bit_size > 52 { bit_size - 52 } else { 0 };
+        let (_sign, digits) = (nau >> shift).to_u64_digits();
+        let top_digit = digits[0];
+        let mut float = top_digit as f64;
+        for _ in 0..shift {
+            float *= 2.0;
+        }
+        float
     }
 
     /// Convert the amount to Neptune atomic units (nau)
@@ -295,7 +314,21 @@ impl Display for NeptuneCoins {
 pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let number: [u32; 4] = rng.gen();
-    NeptuneCoins(U32s::new(number))
+    let mut nau = U32s::new(number);
+    for _ in 0..10 {
+        nau.div_two();
+    }
+    NeptuneCoins(nau)
+}
+
+impl<'a> Arbitrary<'a> for NeptuneCoins {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut nau: U32s<NUM_LIMBS> = U32s::new(u.arbitrary()?);
+        for _ in 0..10 {
+            nau.div_two();
+        }
+        Ok(NeptuneCoins(nau))
+    }
 }
 
 #[cfg(test)]
@@ -306,8 +339,6 @@ mod amount_tests {
     use num_traits::FromPrimitive;
     use rand::{thread_rng, Rng, RngCore};
     use std::{ops::ShlAssign, str::FromStr};
-
-    use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 
     use super::*;
 

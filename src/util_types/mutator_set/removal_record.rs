@@ -1,6 +1,7 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::rngs::StdRng;
@@ -27,7 +28,7 @@ use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-#[derive(Debug, Clone, PartialEq, Eq, BFieldCodec)]
+#[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
 
 impl GetSize for AbsoluteIndexSet {
@@ -126,7 +127,9 @@ impl<'de> Deserialize<'de> for AbsoluteIndexSet {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary,
+)]
 pub struct RemovalRecord {
     pub absolute_indices: AbsoluteIndexSet,
     pub target_chunks: ChunkDictionary,

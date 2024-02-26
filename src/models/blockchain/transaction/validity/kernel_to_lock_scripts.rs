@@ -1,10 +1,9 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::{triton_vm, twenty_first};
 
-use crate::models::blockchain::transaction::TransactionPrimitiveWitness;
+use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::{
-    transaction_kernel::{TransactionKernel, TransactionKernelField},
-    utxo::Utxo,
+    transaction_kernel::TransactionKernelField, utxo::Utxo,
 };
 
 use crate::models::consensus::{ClaimSupport, SupportedClaim};
@@ -31,6 +30,10 @@ impl SecretWitness for KernelToLockScriptsWitness {
     fn subprogram(&self) -> Program {
         todo!()
     }
+
+    fn standard_input(&self) -> PublicInput {
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -48,16 +51,11 @@ impl KernelToLockScripts {
 }
 
 impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
-    type PrimitiveWitness = TransactionPrimitiveWitness;
+    type PrimitiveWitness = PrimitiveWitness;
 
-    type Kernel = TransactionKernel;
-
-    fn new_from_primitive_witness(
-        primitive_witness: &TransactionPrimitiveWitness,
-        tx_kernel: &TransactionKernel,
-    ) -> Self {
+    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
         let claim = Claim {
-            input: tx_kernel.mast_hash().into(),
+            input: primitive_witness.kernel.mast_hash().into(),
             output: primitive_witness
                 .input_lock_scripts
                 .iter()
@@ -67,8 +65,10 @@ impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
             program_digest: Digest::default(),
         };
         let _kernel_to_lock_scripts_witness = KernelToLockScriptsWitness {
-            input_utxos: primitive_witness.input_utxos.clone(),
-            mast_path: tx_kernel.mast_path(TransactionKernelField::InputUtxos),
+            input_utxos: primitive_witness.input_utxos.utxos.clone(),
+            mast_path: primitive_witness
+                .kernel
+                .mast_path(TransactionKernelField::InputUtxos),
         };
         let supported_claim = SupportedClaim {
             claim,
@@ -78,7 +78,7 @@ impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
         Self { supported_claim }
     }
 
-    fn subprogram(&self) -> Program {
+    fn validation_program(&self) -> Program {
         todo!()
     }
 

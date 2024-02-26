@@ -1,31 +1,35 @@
 use crate::{
-    models::consensus::mast_hash::MastHash,
+    models::{
+        blockchain::{
+            transaction::{primitive_witness::SaltedUtxos, transaction_kernel::TransactionKernel},
+            type_scripts::{TypeScript, TypeScriptWitness},
+        },
+        consensus::mast_hash::MastHash,
+    },
     prelude::{triton_vm, twenty_first},
 };
 
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use tasm_lib::triton_vm::program::PublicInput;
 use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::{
-    blockchain::transaction::{
-        transaction_kernel::TransactionKernel,
-        utxo::{TypeScript, Utxo},
-        TransactionPrimitiveWitness,
-    },
+    blockchain::transaction::PrimitiveWitness,
     consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
-pub struct TypeScriptHaltsWitness {
+pub struct BasicTypeScriptWitness {
     type_script: TypeScript,
-    input_utxos: Vec<Utxo>,
-    output_utxos: Vec<Utxo>,
+    input_utxos: SaltedUtxos,
+    output_utxos: SaltedUtxos,
+    transaction_kernel: TransactionKernel,
 }
 
-impl SecretWitness for TypeScriptHaltsWitness {
+impl SecretWitness for BasicTypeScriptWitness {
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
         NonDeterminism::default()
     }
@@ -33,11 +37,29 @@ impl SecretWitness for TypeScriptHaltsWitness {
     fn subprogram(&self) -> Program {
         self.type_script.program.clone()
     }
+
+    fn standard_input(&self) -> PublicInput {
+        self.type_script_standard_input()
+    }
+}
+
+impl TypeScriptWitness for BasicTypeScriptWitness {
+    fn transaction_kernel(&self) -> TransactionKernel {
+        self.transaction_kernel.clone()
+    }
+
+    fn salted_input_utxos(&self) -> SaltedUtxos {
+        self.input_utxos.clone()
+    }
+
+    fn salted_output_utxos(&self) -> SaltedUtxos {
+        self.output_utxos.clone()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScriptsHalt {
-    pub supported_claims: Vec<SupportedClaim<TypeScriptHaltsWitness>>,
+    pub supported_claims: Vec<SupportedClaim<BasicTypeScriptWitness>>,
 }
 
 impl TypeScriptsHalt {
@@ -49,26 +71,22 @@ impl TypeScriptsHalt {
     }
 }
 
-impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
-    type PrimitiveWitness = TransactionPrimitiveWitness;
+impl ValidationLogic<BasicTypeScriptWitness> for TypeScriptsHalt {
+    type PrimitiveWitness = PrimitiveWitness;
 
-    type Kernel = TransactionKernel;
-
-    fn new_from_primitive_witness(
-        primitive_witness: &TransactionPrimitiveWitness,
-        tx_kernel: &TransactionKernel,
-    ) -> Self {
+    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
         let claim = Claim {
-            input: tx_kernel.mast_hash().values().to_vec(),
+            input: primitive_witness.kernel.mast_hash().values().to_vec(),
             output: vec![],
             program_digest: TypeScript::native_coin().hash(),
         };
-        let witness = TypeScriptHaltsWitness {
+        let witness = BasicTypeScriptWitness {
             type_script: TypeScript::native_coin(),
             input_utxos: primitive_witness.input_utxos.clone(),
             output_utxos: primitive_witness.output_utxos.clone(),
+            transaction_kernel: primitive_witness.kernel.clone(),
         };
-        let amount_logic: SupportedClaim<TypeScriptHaltsWitness> = SupportedClaim {
+        let amount_logic: SupportedClaim<BasicTypeScriptWitness> = SupportedClaim {
             claim,
             support: ClaimSupport::SecretWitness(witness),
         };
@@ -77,11 +95,11 @@ impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
         }
     }
 
-    fn subprogram(&self) -> Program {
+    fn validation_program(&self) -> Program {
         todo!()
     }
 
-    fn support(&self) -> ClaimSupport<TypeScriptHaltsWitness> {
+    fn support(&self) -> ClaimSupport<BasicTypeScriptWitness> {
         ClaimSupport::MultipleSupports(
             self.supported_claims
                 .clone()
@@ -103,7 +121,7 @@ impl ValidationLogic<TypeScriptHaltsWitness> for TypeScriptsHalt {
             .flat_map(|sc| sc.claim.program_digest.values().to_vec())
             .collect_vec();
         let output = vec![];
-        // let program_hash = AllLockScriptsHalt::program().hash();
+        // let program_hash = AllTypeScriptsHalt::program().hash();
         let program_digest = Default::default();
         Claim {
             program_digest,

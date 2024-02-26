@@ -308,6 +308,15 @@ impl ReceivingAddress {
         Self::from_spending_key(&spending_key)
     }
 
+    /// Determine whether the given witness unlocks the lock defined by this receiving
+    /// address.
+    pub fn can_unlock_with(&self, witness: &[BFieldElement]) -> bool {
+        match witness.try_into() {
+            Ok(witness_array) => Digest::new(witness_array).hash::<Hash>() == self.spending_lock,
+            Err(_) => false,
+        }
+    }
+
     pub fn encrypt(&self, utxo: &Utxo, sender_randomness: Digest) -> Result<Vec<BFieldElement>> {
         // derive shared key
         let mut randomness = [0u8; 32];
@@ -443,8 +452,7 @@ mod test_generation_addresses {
     use crate::{
         config_models::network::Network,
         models::blockchain::{
-            shared::Hash,
-            transaction::{neptune_coins::NeptuneCoins, utxo::Utxo},
+            shared::Hash, transaction::utxo::Utxo, type_scripts::neptune_coins::NeptuneCoins,
         },
         tests::shared::make_mock_transaction,
     };
@@ -539,7 +547,7 @@ mod test_generation_addresses {
         let spending_key = SpendingKey::derive_from_seed(seed);
         let receiving_address = ReceivingAddress::from_spending_key(&spending_key);
 
-        let amount: NeptuneCoins = NeptuneCoins::new(rng.gen_range(0..42000000));
+        let amount = NeptuneCoins::new(rng.gen_range(0..42000000));
         let coins = amount.to_native_coins();
         let lock_script = receiving_address.lock_script();
         let utxo = Utxo::new(lock_script, coins);

@@ -1,18 +1,25 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::{
-    models::consensus::mast_hash::{HasDiscriminant, MastHash},
+    models::{
+        blockchain::type_scripts::neptune_coins::{pseudorandom_amount, NeptuneCoins},
+        consensus::mast_hash::{HasDiscriminant, MastHash},
+    },
     prelude::twenty_first,
 };
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
+use strum::EnumCount;
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::shared_math::{
     b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest,
 };
 
-use super::{neptune_coins::pseudorandom_amount, NeptuneCoins, PublicAnnouncement};
+use super::{primitive_witness::PrimitiveWitness, PublicAnnouncement};
 use crate::util_types::mutator_set::{
     addition_record::{pseudorandom_addition_record, AdditionRecord},
     removal_record::{pseudorandom_removal_record, RemovalRecord},
@@ -41,12 +48,19 @@ pub struct TransactionKernel {
 
     pub mutator_set_hash: Digest,
 }
+impl TransactionKernel {
+    pub(crate) fn from_primitive_witness(
+        transaction_primitive_witness: &PrimitiveWitness,
+    ) -> TransactionKernel {
+        transaction_primitive_witness.kernel.clone()
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumCount)]
 pub enum TransactionKernelField {
     InputUtxos,
     OutputUtxos,
-    Pubscript,
+    PublicAnnouncements,
     Fee,
     Coinbase,
     Timestamp,
@@ -112,7 +126,7 @@ pub fn pseudorandom_transaction_kernel(
     let outputs = (0..num_outputs)
         .map(|_| pseudorandom_addition_record(rng.gen::<[u8; 32]>()))
         .collect_vec();
-    let pubscripts = (0..num_public_announcements)
+    let public_announcements = (0..num_public_announcements)
         .map(|_| pseudorandom_public_announcement(rng.gen::<[u8; 32]>()))
         .collect_vec();
     let fee = pseudorandom_amount(rng.gen::<[u8; 32]>());
@@ -123,11 +137,49 @@ pub fn pseudorandom_transaction_kernel(
     TransactionKernel {
         inputs,
         outputs,
-        public_announcements: pubscripts,
+        public_announcements,
         fee,
         coinbase,
         timestamp,
         mutator_set_hash,
+    }
+}
+
+impl<'a> Arbitrary<'a> for TransactionKernel {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let num_inputs = u.int_in_range(0..=4)?;
+        let num_outputs = u.int_in_range(0..=4)?;
+        let num_public_announcements = u.int_in_range(0..=2)?;
+        let inputs: Vec<RemovalRecord> = (0..num_inputs)
+            .map(|_| u.arbitrary().unwrap())
+            .collect_vec();
+        let outputs: Vec<AdditionRecord> = (0..num_outputs)
+            .map(|_| u.arbitrary().unwrap())
+            .collect_vec();
+        let public_announcements: Vec<PublicAnnouncement> = (0..num_public_announcements)
+            .map(|_| u.arbitrary().unwrap())
+            .collect_vec();
+        let fee: NeptuneCoins = u.arbitrary()?;
+        let coinbase: Option<NeptuneCoins> = u.arbitrary()?;
+        let timestamp: BFieldElement = BFieldElement::new(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
+        );
+        let mutator_set_hash: Digest = u.arbitrary()?;
+
+        let transaction_kernel = TransactionKernel {
+            inputs,
+            outputs,
+            public_announcements,
+            fee,
+            coinbase,
+            timestamp,
+            mutator_set_hash,
+        };
+
+        Ok(transaction_kernel)
     }
 }
 

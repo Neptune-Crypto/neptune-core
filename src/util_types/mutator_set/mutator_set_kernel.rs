@@ -567,9 +567,9 @@ mod accumulation_scheme_tests {
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
-    use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::transaction::PublicAnnouncement;
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::UtxoReceiverData;

@@ -8,8 +8,10 @@ use super::{dashboard_app::DashboardEvent, screen::Screen};
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use itertools::Itertools;
 use neptune_core::{
-    models::blockchain::block::block_height::BlockHeight,
-    models::blockchain::transaction::neptune_coins::NeptuneCoins, rpc_server::RPCClient,
+    models::blockchain::{
+        block::block_height::BlockHeight, type_scripts::neptune_coins::NeptuneCoins,
+    },
+    rpc_server::RPCClient,
 };
 use num_traits::{CheckedSub, Zero};
 use ratatui::{

@@ -3,7 +3,8 @@ use std::fmt::Display;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use crate::models::blockchain::transaction::{neptune_coins::NeptuneCoins, utxo::Utxo};
+use crate::models::blockchain::transaction::utxo::Utxo;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

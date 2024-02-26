@@ -1,5 +1,6 @@
 use crate::prelude::twenty_first;
 
+use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
 use serde_derive::{Deserialize, Serialize};
@@ -108,32 +109,22 @@ impl Chunk {
     }
 }
 
-// impl InvertibleBloomFilter for Chunk {
-//     fn increment(&mut self, location: u128) {
-//         self.relative_indices.push(location as u32);
-//         self.relative_indices.sort();
-//     }
-
-//     fn decrement(&mut self, location: u128) {
-//         let mut drop_index = 0;
-//         let mut found = false;
-//         for (i, b) in self.relative_indices.iter().enumerate() {
-//             if *b == location as u32 {
-//                 drop_index = i;
-//                 found = true;
-//             }
-//         }
-//         if found {
-//             self.relative_indices.remove(drop_index);
-//         } else {
-//             panic!("Cannot decrement integer that is already zero.");
-//         }
-//     }
-
-//     fn isset(&self, location: u128) -> bool {
-//         self.relative_indices.contains(&(location as u32))
-//     }
-// }
+impl<'a> Arbitrary<'a> for Chunk {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let relative_indices = (0..10)
+            .map(|_| u.int_in_range(0..=(CHUNK_SIZE - 1)))
+            .collect_vec();
+        if relative_indices.iter().any(|index| index.is_err()) {
+            return arbitrary::Result::<Chunk>::Err(arbitrary::Error::IncorrectFormat);
+        }
+        Ok(Chunk {
+            relative_indices: relative_indices
+                .into_iter()
+                .map(|i| i.unwrap())
+                .collect_vec(),
+        })
+    }
+}
 
 #[cfg(test)]
 mod chunk_tests {

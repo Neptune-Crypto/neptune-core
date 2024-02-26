@@ -4,11 +4,12 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::mutator_set_update::*;
 use crate::models::blockchain::block::*;
 use crate::models::blockchain::shared::*;
-use crate::models::blockchain::transaction::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::utxo::*;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::*;
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::channel::*;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -40,6 +41,9 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
+
+use self::primitive_witness::PrimitiveWitness;
+use self::primitive_witness::SaltedUtxos;
 
 const MOCK_MAX_BLOCK_SIZE: u32 = 1_000_000;
 
@@ -196,41 +200,39 @@ fn make_coinbase_transaction(
         receiver_digest,
     );
 
-    let timestamp: BFieldElement = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad time timestamp in mining process")
-            .as_millis()
-            .try_into()
-            .expect("Must call this function before 584 million years from genesis."),
-    );
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Got bad time timestamp in mining process")
+        .as_millis()
+        .try_into()
+        .expect("Must call this function before 584 million years from genesis.");
 
     let kernel = TransactionKernel {
         inputs: vec![],
         outputs: vec![coinbase_addition_record],
         public_announcements: vec![],
         fee: NeptuneCoins::zero(),
-        timestamp,
+        timestamp: BFieldElement::new(timestamp),
         coinbase: Some(coinbase_amount),
         mutator_set_hash: mutator_set_accumulator.hash(),
     };
 
-    let primitive_witness = TransactionPrimitiveWitness {
-        input_utxos: vec![],
+    let primitive_witness = PrimitiveWitness {
+        input_utxos: SaltedUtxos::empty(),
         type_scripts: vec![TypeScript::native_coin()],
         input_lock_scripts: vec![],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
-        output_utxos: vec![coinbase_utxo.clone()],
-        public_announcements: vec![],
+        output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
         mutator_set_accumulator,
+        kernel,
     };
-    let validity_logic =
-        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness, &kernel);
+    let transaction_validation_logic =
+        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
     (
         Transaction {
-            kernel,
-            witness: TransactionWitness::ValidationLogic(validity_logic),
+            kernel: primitive_witness.kernel,
+            witness: TransactionWitness::ValidationLogic(transaction_validation_logic),
         },
         sender_randomness,
     )
