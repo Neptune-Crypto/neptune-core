@@ -9,7 +9,6 @@ use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::SecretWitness;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -388,7 +387,6 @@ pub struct TimeLockWitness {
     /// assigned timestamp 0, which is automatically satisfied.
     release_dates: Vec<u64>,
     input_utxos: SaltedUtxos,
-    input_membership_proofs: Vec<MsMembershipProof>,
     transaction_kernel: TransactionKernel,
 }
 
@@ -416,13 +414,9 @@ impl TimeLockWitness {
         let transaction_kernel =
             TransactionKernel::from_primitive_witness(transaction_primitive_witness);
         let input_utxos = transaction_primitive_witness.input_utxos.clone();
-        let input_mps = transaction_primitive_witness
-            .input_membership_proofs
-            .clone();
         Self {
             release_dates,
             input_utxos,
-            input_membership_proofs: input_mps,
             transaction_kernel,
         }
     }
