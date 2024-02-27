@@ -2,9 +2,9 @@ use crate::{
     models::{
         blockchain::{
             transaction::{primitive_witness::SaltedUtxos, transaction_kernel::TransactionKernel},
-            type_scripts::{TypeScript, TypeScriptWitness},
+            type_scripts::{native_currency::NativeCurrency, TypeScript, TypeScriptWitness},
         },
-        consensus::mast_hash::MastHash,
+        consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram},
     },
     prelude::{triton_vm, twenty_first},
 };
@@ -54,6 +54,15 @@ impl TypeScriptWitness for BasicTypeScriptWitness {
 
     fn salted_output_utxos(&self) -> SaltedUtxos {
         self.output_utxos.clone()
+    }
+
+    fn from_primitive_witness(primitive_transaction_witness: &PrimitiveWitness) -> Self {
+        Self {
+            type_script: TypeScript::new(NativeCurrency::program()),
+            input_utxos: primitive_transaction_witness.input_utxos.clone(),
+            output_utxos: primitive_transaction_witness.output_utxos.clone(),
+            transaction_kernel: primitive_transaction_witness.kernel.clone(),
+        }
     }
 }
 

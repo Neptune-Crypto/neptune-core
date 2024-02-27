@@ -82,6 +82,7 @@ impl TypeScript {
 }
 
 pub trait TypeScriptWitness {
+    fn from_primitive_witness(primitive_transaction_witness: &PrimitiveWitness) -> Self;
     fn transaction_kernel(&self) -> TransactionKernel;
     fn salted_input_utxos(&self) -> SaltedUtxos;
     fn salted_output_utxos(&self) -> SaltedUtxos;
