@@ -827,7 +827,7 @@ dependencies = [
 [[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=f711ae27d1402d733989624bbadd59b7e82a1972#f711ae27d1402d733989624bbadd59b7e82a1972"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=928b1fa7522aacdb055c4c04d144b44af241f2e6#928b1fa7522aacdb055c4c04d144b44af241f2e6"
 dependencies = [
  "quote",
  "syn 2.0.48",
@@ -1740,7 +1740,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "strum",
+ "strum 0.25.0",
  "tarpc",
  "tasm-lib",
  "test-strategy",
@@ -2375,7 +2375,7 @@ dependencies = [
  "indoc",
  "itertools 0.11.0",
  "paste",
- "strum",
+ "strum 0.25.0",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -2730,7 +2730,16 @@ version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.25.3",
+]
+
+[[package]]
+name = "strum"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723b93e8addf9aa965ebe2d11da6d7540fa2283fcea14b3371ff055f7ba13f5f"
+dependencies = [
+ "strum_macros 0.26.1",
 ]
 
 [[package]]
@@ -2738,6 +2747,19 @@ name = "strum_macros"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23dc1fa9ac9c169a78ba62f0b841814b7abae11bdd047b9c58f893439e309ea0"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.48",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a3417fc93d76740d974a01654a09777cb500428cc874ca9f45edfe0c4d4cd18"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -2818,12 +2840,12 @@ dependencies = [
 [[package]]
 name = "tasm-lib"
 version = "0.2.1"
-source = "git+https://github.com/TritonVM/tasm-lib.git?rev=f711ae27d1402d733989624bbadd59b7e82a1972#f711ae27d1402d733989624bbadd59b7e82a1972"
+source = "git+https://github.com/TritonVM/tasm-lib.git?rev=928b1fa7522aacdb055c4c04d144b44af241f2e6#928b1fa7522aacdb055c4c04d144b44af241f2e6"
 dependencies = [
  "anyhow",
  "derive_tasm_object",
  "hex",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "num",
  "num-traits",
  "rand",
@@ -3243,8 +3265,9 @@ dependencies = [
 
 [[package]]
 name = "triton-vm"
-version = "0.36.1"
-source = "git+https://github.com/TritonVM/triton-vm?rev=75da9a17#75da9a17c4e438c71a8bf761dba90869302e94df"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b175b3fec57c819f8242fe9a2b9f706bc75c0390ccdf3f88c9f30f6c49bb0ff"
 dependencies = [
  "arbitrary",
  "bincode",
@@ -3263,7 +3286,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_derive",
- "strum",
+ "strum 0.26.1",
  "thiserror",
  "twenty-first",
  "unicode-width",
@@ -3277,8 +3300,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twenty-first"
-version = "0.36.0"
-source = "git+https://github.com/Neptune-Crypto/twenty-first?rev=95d52acc#95d52accb8c795fe34136511a4277e44b0bc1795"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74c2f4a50a2fc1a25d26aed9079e6295093ca8fe649f0f00391a9c2cbb03540d"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",

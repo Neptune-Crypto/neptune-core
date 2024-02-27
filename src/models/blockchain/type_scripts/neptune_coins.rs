@@ -9,6 +9,7 @@ use num_traits::{CheckedSub, FromPrimitive, One, Zero};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tasm_lib::structure::tasm_object::TasmObject;
 use std::{
     fmt::Display,
     iter::Sum,
@@ -22,10 +23,11 @@ use super::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 const NUM_LIMBS: usize = 4;
 
 /// An amount of Neptune coins. Amounts of Neptune coins are internally represented in an
-/// atomic unit called Neptune atomic units (nau).
+/// atomic unit called Neptune atomic units (nau), which itself is represented as a 128
+/// bit integer.
 ///
 /// 1 Neptune coin = 10^30 * 2^2 nau.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec, TasmObject)]
 pub struct NeptuneCoins(U32s<NUM_LIMBS>);
 
 impl NeptuneCoins {

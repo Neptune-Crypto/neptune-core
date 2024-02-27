@@ -1,11 +1,15 @@
 use crate::{
-    models::blockchain::type_scripts::TypeScript,
+    models::{blockchain::{transaction::primitive_witness::SaltedUtxos, type_scripts::TypeScript}, consensus::tasm::program::ConsensusProgram},
     prelude::{triton_vm, twenty_first},
 };
 
+use crate::models::consensus::tasm::builtins as tasm;
+
 use anyhow::bail;
+use get_size::GetSize;
 use num_traits::Zero;
-use std::collections::VecDeque;
+use serde::{Deserialize, Serialize};
+
 use triton_vm::{program::Program, triton_asm};
 use twenty_first::{
     shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
@@ -19,6 +23,49 @@ use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
 
 use super::neptune_coins::NeptuneCoins;
 
+#[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
+pub struct NativeCurrency {}
+
+impl ConsensusProgram for NativeCurrency {
+    #[allow(clippy::needless_return)]
+    fn source() {
+        // get in the current program's hash digest
+        let self_digest: Digest = tasm::own_program_digest();
+
+        // read standard input:
+        //  - transaction kernel mast hash
+        //  - input salted utxos digest
+        //  - output salted utxos digest
+        // (All type scripts take this triple as input.)
+        let tx_kernel_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let input_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let output_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        // public input is kernel mast hash
+
+        // get coinbase, fee, inputs, and outputs
+        // these objects live in nondeterministically-initialized memory,
+        // so divine pointers and decode
+        let coinbase_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let coinbase : Option<NeptuneCoins> = tasm::decode_from_memory(coinbase_pointer);
+        let fee_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let fee : NeptuneCoins = tasm::decode_from_memory(fee_pointer);
+        let input_salted_utxos_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let input_salted_utxos: SaltedUtxos =
+            tasm::decode_from_memory(input_salted_utxos_pointer);
+        let output_salted_utxos_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let output_salted_utxos: SaltedUtxos =
+            tasm::decode_from_memory(output_salted_utxos_pointer);
+
+        // todo
+        
+    }
+
+    fn code() -> Vec<triton_vm::prelude::LabelledInstruction> {
+        todo!()
+    }
+}
+
+
 pub const NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST: Digest = Digest::new([
     BFieldElement::new(4843866011885844809),
     BFieldElement::new(16618866032559590857),
@@ -30,111 +77,6 @@ pub const NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST: Digest = Digest::new([
 pub fn native_currency_program() -> Program {
     // todo: insert inflation check logic here
     Program::new(&triton_asm!(halt))
-}
-
-pub fn native_currency_rust_shadow(
-    public_input: &mut VecDeque<BFieldElement>,
-    secret_input: &mut VecDeque<BFieldElement>,
-    _output: &mut VecDeque<BFieldElement>,
-) -> anyhow::Result<()> {
-    // public input is kernel mast hash
-
-    // Kernel mast hash is the Merkle root whose leafs are
-    //  - hash_varlen(input_sequence)
-    //  - hash_varlen(output_sequence)
-    //  - hash_varlen(public_announcements_sequence)
-    //  - hash_varlen(fee_sequence)
-    //  - hash_varlen(coinbase_sequence)
-    //  - hash_varlen(timestamp_sequence)
-    //  - mutator set hash
-    //  - Digest::default().
-    // The sequences are provided through secret_in.
-
-    // read secret input
-    let mut read_secret_input = vec![secret_input.pop_front().unwrap()];
-    let secret_input_length = read_secret_input[0].value() as usize;
-    for _ in 0..secret_input_length {
-        read_secret_input.push(secret_input.pop_front().unwrap());
-    }
-
-    // parse secret input
-    let sequences: Vec<Vec<BFieldElement>> =
-        *Vec::<Vec<BFieldElement>>::decode(&read_secret_input)?;
-    let input_sequence = &sequences[0];
-    let output_sequence = &sequences[1];
-    let public_announcements_sequence = &sequences[2];
-    let fee_sequence = &sequences[3];
-    let coinbase_sequence = &sequences[4];
-    let timestamp_sequence = &sequences[5];
-    let mutator_set_hash = *Digest::decode(&sequences[6]).unwrap_or(Box::<Digest>::default());
-
-    // parse utxos
-    let input_utxos: Vec<Utxo> = *Vec::<Utxo>::decode(input_sequence)?;
-    let output_utxos: Vec<Utxo> = *Vec::<Utxo>::decode(output_sequence)?;
-
-    // parse amounts
-    let fee = *NeptuneCoins::decode(fee_sequence)?;
-    let coinbase = if coinbase_sequence[0].value() == 1 {
-        *NeptuneCoins::decode(coinbase_sequence)?
-    } else {
-        NeptuneCoins::zero()
-    };
-
-    // calculate totals
-    let total_inputs: NeptuneCoins = input_utxos
-        .iter()
-        .flat_map(|utxo| {
-            utxo.coins
-                .iter()
-                .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
-                .map(|coin| {
-                    *NeptuneCoins::decode(&coin.state)
-                        .expect("Native coin reference: failed to parse coin state as amount (1).")
-                })
-        })
-        .sum();
-    let total_outputs: NeptuneCoins = output_utxos
-        .iter()
-        .flat_map(|utxo| {
-            utxo.coins
-                .iter()
-                .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
-                .map(|coin| {
-                    *NeptuneCoins::decode(&coin.state)
-                        .expect("Native coin reference: failed to parse coin state as amount (2).")
-                })
-        })
-        .sum();
-
-    // assert non-inflation
-    if total_inputs + coinbase < total_outputs + fee {
-        bail!("Native coin logic error: transaction inflates money supply.")
-    }
-
-    // verify parsed secret input against digest provided in public input
-    let leafs = [
-        Hash::hash_varlen(input_sequence),
-        Hash::hash_varlen(output_sequence),
-        Hash::hash_varlen(public_announcements_sequence),
-        Hash::hash_varlen(fee_sequence),
-        Hash::hash_varlen(coinbase_sequence),
-        Hash::hash_varlen(timestamp_sequence),
-        mutator_set_hash,
-        Digest::default(),
-    ];
-    let root = <CpuParallel as MerkleTreeMaker<Hash>>::from_digests(&leafs)?.root();
-    let public_input_hash = [
-        public_input.pop_front().unwrap(),
-        public_input.pop_front().unwrap(),
-        public_input.pop_front().unwrap(),
-        public_input.pop_front().unwrap(),
-        public_input.pop_front().unwrap(),
-    ];
-    if root.values() != public_input_hash {
-        bail!("Native coin logic error: supplied secret input does not match with public input.");
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
