@@ -10,10 +10,8 @@ use tasm_lib::library::Library;
 use tasm_lib::memory::push_ram_to_stack::PushRamToStack;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
 
+use tasm_lib::neptune::mutator_set::get_swbf_indices::GetSwbfIndices;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
-use tasm_lib::{
-    neptune::mutator_set::get_swbf_indices::GetSwbfIndices, rust_shadowing_helper_functions,
-};
 use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -83,6 +81,7 @@ impl BasicSnippet for ComputeIndices {
             // read leaf index from memory
             call {read_u64}
             // _ [item] *rp *sr li_hi li_lo
+            hint leaf_index: u64 = stack[0..2]
 
             // re-arrange so that leaf index is deepest in stack
             // _ i4 i3 i2 i1 i0 *rp *sr li_hi li_lo
@@ -97,11 +96,13 @@ impl BasicSnippet for ComputeIndices {
 
             // read receiver_preimage from memory
             call {read_digest} // _ li_hi li_lo i2 i1 i0 i4 i3 *sr [rp]
+            hint rp: Digest = stack[0..5]
 
             // read sender_randomness from memory
             push 1             // _ li_hi li_lo i2 i1 i0 i4 i3 *sr [rp] 1
             swap 6             // _ li_hi li_lo i2 i1 i0 i4 i3 1 [rp] *sr
             call {read_digest} // _ li_hi li_lo i2 i1 i0 i4 i3 1 [rp] [sr]
+            hint sr: Digest = stack[0..5]
 
             // re-arrange stack in anticipation of swbf_get_indices
                     // _ li_hi li_lo i2 i1 i0 i4 i3 1 rp4 rp3 rp2 rp1 rp0 sr4 sr3 sr2 sr1 sr0
@@ -188,25 +189,6 @@ impl Function for ComputeIndices {
             num_trials: NUM_TRIALS as usize,
         };
         get_swbf_indices.rust_shadow(stack, memory);
-
-        // print absolute indices for debugging purposes
-        let absolute_index_list_address: BFieldElement = *stack.last().unwrap();
-        for i in 0..45 {
-            println!(
-                "absolute index {i}: {}",
-                rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
-                    absolute_index_list_address,
-                    i,
-                    memory,
-                    4
-                )
-                .iter()
-                .map(|b| b.value() as u128)
-                .enumerate()
-                .map(|(j, v)| v << (32 * j))
-                .sum::<u128>()
-            );
-        }
     }
 
     fn pseudorandom_initial_state(
@@ -234,10 +216,10 @@ impl Function for ComputeIndices {
         for (i, v) in msmp_encoded.iter().enumerate() {
             memory.insert(BFieldElement::new(2u64 + i as u64), *v);
         }
-        memory.insert(
-            <BFieldElement as num_traits::Zero>::zero(),
-            BFieldElement::new(2u64 + msmp_encoded.len() as u64),
-        );
+        // memory.insert(
+        //     <BFieldElement as num_traits::Zero>::zero(),
+        //     BFieldElement::new(2u64 + msmp_encoded.len() as u64),
+        // );
 
         let mut stack = tasm_lib::empty_stack();
         stack.push(item.values()[4]);
@@ -253,19 +235,21 @@ impl Function for ComputeIndices {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
     use itertools::Itertools;
     use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
     use tasm_lib::{
         empty_stack,
-        list::{
-            higher_order::{inner_function::InnerFunction, map::Map},
-            ListType,
-        },
+        linker::link_for_isolated_run,
+        list::higher_order::{inner_function::InnerFunction, map::Map},
+        maybe_write_debuggable_program_to_disk, rust_shadowing_helper_functions,
         test_helpers::link_and_run_tasm_for_test,
-        traits::function::ShadowedFunction,
-        traits::rust_shadow::RustShadow,
+        traits::{function::ShadowedFunction, rust_shadow::RustShadow},
+        triton_vm::{
+            program::{Program, PublicInput},
+            vm::VMState,
+        },
     };
     use triton_vm::prelude::NonDeterminism;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -347,18 +331,29 @@ mod tests {
         stack.push(main_list_address);
 
         // run map snippet
-        let map_compute_indices = Map {
-            list_type: ListType::Unsafe,
+        let shadowed_snippet = ShadowedFunction::new(Map {
             f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
-        };
+        });
+        let init_stack = stack.clone();
         let vm_output_state = link_and_run_tasm_for_test(
-            &ShadowedFunction::new(map_compute_indices),
+            &shadowed_snippet,
             &mut stack,
             vec![],
-            NonDeterminism::default().with_ram(memory),
+            NonDeterminism::default().with_ram(memory.clone()),
             None,
-            0,
         );
+
+        let program = Program::new(&link_for_isolated_run(Rc::new(RefCell::new(Map {
+            f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
+        }))));
+
+        let mut vm_state = VMState::new(
+            &program,
+            PublicInput::new(vec![]),
+            NonDeterminism::new(vec![]).with_ram(memory),
+        );
+        vm_state.op_stack.stack = init_stack;
+        maybe_write_debuggable_program_to_disk(&program, &vm_state);
 
         // inspect memory
         let final_ram = vm_output_state.final_ram;
@@ -368,7 +363,7 @@ mod tests {
         let mut index_set_pointers = vec![];
         for i in 0..output_list_length {
             index_set_pointers.push(
-                rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
+                rust_shadowing_helper_functions::list::list_get(
                     output_list_address,
                     i,
                     &final_ram,
@@ -381,13 +376,11 @@ mod tests {
             let mut index_set = vec![];
             for i in 0..NUM_TRIALS as usize {
                 index_set.push(
-                    rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
-                        *ptr, i, &final_ram, 4,
-                    )
-                    .iter()
-                    .enumerate()
-                    .map(|(j, v)| (v.value() as u128) << (32 * j))
-                    .sum::<u128>(),
+                    rust_shadowing_helper_functions::list::list_get(*ptr, i, &final_ram, 4)
+                        .iter()
+                        .enumerate()
+                        .map(|(j, v)| (v.value() as u128) << (32 * j))
+                        .sum::<u128>(),
                 );
             }
             tasm_index_sets.push(index_set);

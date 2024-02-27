@@ -6,10 +6,12 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use tasm_lib::{
     data_type::DataType,
     empty_stack,
-    hashing::hash_varlen::HashVarlen,
+    hashing::algebraic_hasher::hash_varlen::HashVarlen,
     snippet_bencher::BenchmarkCase,
-    traits::basic_snippet::BasicSnippet,
-    traits::function::{Function, FunctionInitialState},
+    traits::{
+        basic_snippet::BasicSnippet,
+        function::{Function, FunctionInitialState},
+    },
 };
 use triton_vm::prelude::{triton_asm, BFieldElement};
 use twenty_first::{
@@ -132,7 +134,6 @@ mod tests {
         list::{
             contiguous_list::get_pointer_list::GetPointerList,
             higher_order::{inner_function::InnerFunction, map::Map},
-            ListType,
         },
         rust_shadowing_helper_functions,
         traits::function::ShadowedFunction,
@@ -191,16 +192,13 @@ mod tests {
         // STACK: 0^16 *removal_record_list_encoding_address
 
         // transform contiguous list to list of pointers
-        let get_pointer_list = GetPointerList {
-            output_list_type: ListType::Unsafe,
-        };
+        let get_pointer_list = GetPointerList {};
         let _vm_output = link_and_run_tasm_for_test_deprecated(
             &get_pointer_list,
             &mut stack,
             vec![],
             vec![],
             memory,
-            0,
         );
 
         // STACK: 0^16 *[*removal_record]
@@ -258,7 +256,6 @@ mod tests {
 
         // run map snippet
         let map_hash_removal_record_indices = Map {
-            list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(HashRemovalRecordIndices)),
         };
         let vm_output_state = link_and_run_tasm_for_test(
@@ -267,7 +264,6 @@ mod tests {
             vec![],
             NonDeterminism::default().with_ram(memory_after_1st_run),
             None,
-            0,
         );
         // STACK: 0^16 *[digest]
 
@@ -280,7 +276,7 @@ mod tests {
         let mut tasm_digests = vec![];
         for i in 0..length {
             // let mut values = vec![];
-            let values = rust_shadowing_helper_functions::unsafe_list::unsafe_list_get(
+            let values = rust_shadowing_helper_functions::list::list_get(
                 output_address,
                 i,
                 &final_memory,

@@ -7,10 +7,10 @@ use num_traits::{One, Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{error::Error, fmt};
+use tasm_lib::twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Sponge};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
-use twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, SpongeHasher};
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -75,8 +75,8 @@ pub fn get_swbf_indices(
         "Input to sponge must be a multiple digest length"
     );
 
-    let mut sponge = <Hash as SpongeHasher>::init();
-    Hash::absorb_repeatedly(&mut sponge, input.iter());
+    let mut sponge = Hash::init();
+    Hash::pad_and_absorb_all(&mut sponge, &input);
     Hash::sample_indices(&mut sponge, WINDOW_SIZE, NUM_TRIALS as usize)
         .into_iter()
         .map(|sample_index| sample_index as u128 + batch_offset)

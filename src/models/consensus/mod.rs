@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::maybe_write_debuggable_program_to_disk;
 use tasm_lib::triton_vm;
+use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -13,7 +14,6 @@ use triton_vm::prelude::NonDeterminism;
 use triton_vm::prelude::Program;
 use triton_vm::prelude::Proof;
 use triton_vm::prelude::PublicInput;
-use triton_vm::prelude::StarkParameters;
 
 pub mod mast_hash;
 pub mod tasm;
@@ -145,7 +145,7 @@ pub trait ValidationLogic<T: SecretWitness> {
                     .expect("Program execution prior to proving must succeed");
 
                 let proof = triton_vm::prove(
-                    StarkParameters::default(),
+                    Stark::default(),
                     &self.claim(),
                     &self.validation_program(),
                     witness.nondeterminism().clone(),
@@ -169,9 +169,7 @@ pub trait ValidationLogic<T: SecretWitness> {
     /// Verify the claim.
     fn verify(&self) -> bool {
         match &self.support() {
-            ClaimSupport::Proof(proof) => {
-                triton_vm::verify(StarkParameters::default(), &self.claim(), proof)
-            }
+            ClaimSupport::Proof(proof) => triton_vm::verify(Stark::default(), &self.claim(), proof),
             ClaimSupport::SecretWitness(w) => {
                 let nondeterminism = w.nondeterminism();
                 let input = &self.claim().input;

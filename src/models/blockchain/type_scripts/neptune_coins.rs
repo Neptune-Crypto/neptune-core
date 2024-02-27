@@ -9,13 +9,13 @@ use num_traits::{CheckedSub, FromPrimitive, One, Zero};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tasm_lib::structure::tasm_object::TasmObject;
 use std::{
     fmt::Display,
     iter::Sum,
     ops::{Add, Mul, Neg, Sub},
     str::FromStr,
 };
+use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
 
 use super::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;

@@ -1,25 +1,15 @@
-use crate::{
-    models::{blockchain::{transaction::primitive_witness::SaltedUtxos, type_scripts::TypeScript}, consensus::tasm::program::ConsensusProgram},
-    prelude::{triton_vm, twenty_first},
+use crate::models::{
+    blockchain::transaction::primitive_witness::SaltedUtxos,
+    consensus::tasm::program::ConsensusProgram,
 };
 
+use crate::models::blockchain::type_scripts::BFieldCodec;
 use crate::models::consensus::tasm::builtins as tasm;
-
-use anyhow::bail;
 use get_size::GetSize;
-use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 
+use tasm_lib::{triton_vm, twenty_first::shared_math::b_field_element::BFieldElement, Digest};
 use triton_vm::{program::Program, triton_asm};
-use twenty_first::{
-    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{
-        algebraic_hasher::AlgebraicHasher, merkle_tree::CpuParallel,
-        merkle_tree_maker::MerkleTreeMaker,
-    },
-};
-
-use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
 
 use super::neptune_coins::NeptuneCoins;
 
@@ -30,41 +20,38 @@ impl ConsensusProgram for NativeCurrency {
     #[allow(clippy::needless_return)]
     fn source() {
         // get in the current program's hash digest
-        let self_digest: Digest = tasm::own_program_digest();
+        let _self_digest: Digest = tasm::own_program_digest();
 
         // read standard input:
         //  - transaction kernel mast hash
         //  - input salted utxos digest
         //  - output salted utxos digest
         // (All type scripts take this triple as input.)
-        let tx_kernel_digest: Digest = tasm::tasm_io_read_stdin___digest();
-        let input_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
-        let output_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let _tx_kernel_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let _input_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
+        let _output_utxos_digest: Digest = tasm::tasm_io_read_stdin___digest();
         // public input is kernel mast hash
 
         // get coinbase, fee, inputs, and outputs
         // these objects live in nondeterministically-initialized memory,
         // so divine pointers and decode
-        let coinbase_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
-        let coinbase : Option<NeptuneCoins> = tasm::decode_from_memory(coinbase_pointer);
-        let fee_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
-        let fee : NeptuneCoins = tasm::decode_from_memory(fee_pointer);
-        let input_salted_utxos_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
-        let input_salted_utxos: SaltedUtxos =
-            tasm::decode_from_memory(input_salted_utxos_pointer);
-        let output_salted_utxos_pointer : BFieldElement = tasm::tasm_io_read_secin___bfe();
-        let output_salted_utxos: SaltedUtxos =
+        let coinbase_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let _coinbase: Option<NeptuneCoins> = tasm::decode_from_memory(coinbase_pointer);
+        let fee_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let _fee: NeptuneCoins = tasm::decode_from_memory(fee_pointer);
+        let input_salted_utxos_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let _input_salted_utxos: SaltedUtxos = tasm::decode_from_memory(input_salted_utxos_pointer);
+        let output_salted_utxos_pointer: BFieldElement = tasm::tasm_io_read_secin___bfe();
+        let _output_salted_utxos: SaltedUtxos =
             tasm::decode_from_memory(output_salted_utxos_pointer);
 
         // todo
-        
     }
 
     fn code() -> Vec<triton_vm::prelude::LabelledInstruction> {
         todo!()
     }
 }
-
 
 pub const NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST: Digest = Digest::new([
     BFieldElement::new(4843866011885844809),
@@ -82,6 +69,7 @@ pub fn native_currency_program() -> Program {
 #[cfg(test)]
 mod tests_native_coin {
     use super::*;
+    use crate::Hash;
 
     #[test]
     fn hash_is_really_hash() {

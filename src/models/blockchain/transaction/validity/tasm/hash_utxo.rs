@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use tasm_lib::{
     data_type::DataType,
-    hashing::hash_varlen::HashVarlen,
+    hashing::algebraic_hasher::hash_varlen::HashVarlen,
     snippet_bencher::BenchmarkCase,
     traits::{
         basic_snippet::BasicSnippet,
