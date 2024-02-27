@@ -20,20 +20,22 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::{
-    models::blockchain::type_scripts::native_currency::native_currency_program,
-    util_types::mutator_set::{
-        msa_and_records::MsaAndRecords,
-        mutator_set_trait::{commit, MutatorSet},
-    },
-    Hash,
+use crate::models::{
+    blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
+    consensus::tasm::program::ConsensusProgram,
 };
 use crate::{
     models::{blockchain::type_scripts::TypeScript, state::wallet::address::generation_address},
     util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
     },
+};
+use crate::{
+    util_types::mutator_set::{
+        msa_and_records::MsaAndRecords,
+        mutator_set_trait::{commit, MutatorSet},
+    },
+    Hash,
 };
 
 use super::{
@@ -324,7 +326,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let input_membership_proofs = msa_and_records.membership_proofs;
                         let input_removal_records = msa_and_records.removal_records;
 
-                        let type_scripts = vec![TypeScript::new(native_currency_program())];
+                        let type_scripts = vec![TypeScript::new(NativeCurrency::program())];
 
                         // prepare to unwrap
                         let input_utxos = input_utxos.clone();

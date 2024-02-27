@@ -1,5 +1,9 @@
-use crate::{models::blockchain::transaction::utxo::Coin, prelude::twenty_first};
+use crate::{
+    models::{blockchain::transaction::utxo::Coin, consensus::tasm::program::ConsensusProgram},
+    prelude::twenty_first,
+};
 
+use super::native_currency::NativeCurrency;
 use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
@@ -17,8 +21,6 @@ use std::{
 };
 use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
-
-use super::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 
 const NUM_LIMBS: usize = 4;
 
@@ -71,7 +73,7 @@ impl NeptuneCoins {
     /// Create a `coins` object for use in a UTXO
     pub fn to_native_coins(&self) -> Vec<Coin> {
         let dictionary = vec![Coin {
-            type_script_hash: NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
+            type_script_hash: NativeCurrency::hash(),
             state: self.encode(),
         }];
         dictionary

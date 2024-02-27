@@ -29,9 +29,14 @@ pub trait ConsensusProgram {
     /// produced automatically or hand-optimized.
     fn code() -> Vec<LabelledInstruction>;
 
+    /// Get the program as a `Program` object rather than as a list of `LabelledInstruction`s.
+    fn program() -> Program {
+        Program::new(&Self::code())
+    }
+
     /// Get the program hash digest.
     fn hash() -> Digest {
-        Program::new(&Self::code()).hash::<Hash>()
+        Self::program().hash::<Hash>()
     }
 
     /// Run the source program natively in rust, but with the emulated TritonVM

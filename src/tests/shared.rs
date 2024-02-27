@@ -785,7 +785,7 @@ pub fn make_mock_transaction_with_generation_key(
         .map(|(utxo, _mp, _)| utxo)
         .cloned()
         .collect_vec();
-    let type_scripts = vec![TypeScript::native_coin()];
+    let type_scripts = vec![TypeScript::native_currency()];
     let input_membership_proofs = input_utxos_mps_keys
         .iter()
         .map(|(_utxo, mp, _)| mp)
@@ -928,7 +928,7 @@ pub fn make_mock_block(
 
     let primitive_witness = PrimitiveWitness {
         input_utxos: SaltedUtxos::empty(),
-        type_scripts: vec![TypeScript::native_coin()],
+        type_scripts: vec![TypeScript::native_currency()],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],
         output_utxos: SaltedUtxos::new(vec![coinbase_utxo.clone()]),
