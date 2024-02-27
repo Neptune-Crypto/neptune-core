@@ -3,7 +3,7 @@ use crate::prelude::twenty_first;
 
 use get_size::GetSize;
 use itertools::Itertools;
-use num_traits::{One, Zero};
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{error::Error, fmt};
@@ -61,19 +61,8 @@ pub fn get_swbf_indices(
         sender_randomness.encode(),
         receiver_preimage.encode(),
         leaf_index_bfes,
-        // Pad according to spec
-        vec![
-            BFieldElement::one(),
-            BFieldElement::zero(),
-            BFieldElement::zero(),
-        ],
     ]
     .concat();
-    assert_eq!(
-        input.len() % DIGEST_LENGTH,
-        0,
-        "Input to sponge must be a multiple digest length"
-    );
 
     let mut sponge = Hash::init();
     Hash::pad_and_absorb_all(&mut sponge, &input);

@@ -343,6 +343,7 @@ mod tests {
             None,
         );
 
+        // write debug output (maybe)
         let program = Program::new(&link_for_isolated_run(Rc::new(RefCell::new(Map {
             f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
         }))));
