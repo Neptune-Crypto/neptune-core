@@ -27,6 +27,15 @@ use tasm_lib::{twenty_first::shared_math::b_field_element::BFieldElement, Digest
 use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
 
+/// `NativeCurrency` is the type script that governs Neptune's native currency,
+/// Neptune coins. The arithmetic for amounts are defined by the struct `NeptuneCoins`.
+/// This type script is responsible for checking that transactions that tranfer
+/// Neptune are balanced, *i.e.*,
+///
+///  sum inputs  +  (optional: coinbase)  ==  sum outputs  +  fee .
+///
+/// Transactions that are not balanced in this way are invalid. Furthermore, the
+/// type script checks that no overflow occurs while computing the sums.
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
 pub struct NativeCurrency {}
 

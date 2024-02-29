@@ -22,11 +22,22 @@ use tasm_lib::{
     structure::tasm_object::TasmObject, twenty_first::shared_math::bfield_codec::BFieldCodec,
 };
 
-/// An amount of Neptune coins. Amounts of Neptune coins are internally represented in an
-/// atomic unit called Neptune atomic units (nau), which itself is represented as a 128
+/// `NeptuneCoins` records an amount of Neptune coins. Amounts are internally represented
+/// by an atomic unit called Neptune atomic units (nau), which itself is represented as a 128
 /// bit integer.
 ///
 /// 1 Neptune coin = 10^30 * 2^2 nau.
+///
+/// This conversion factor was chosen such that:
+///  - The largest possible amount, corresponding to 42 000 000 Neptune coins, takes 127 bits.
+///    The top bit is the sign bit and is used for negative amounts (in two's complement).
+///  - When expanding amounts of Neptune coins in decimal form, we can represent them exactly
+///    up to 30 decimal digits.
+///
+/// When using `NeptuneCoins` in a type script or a lock script, or even another consensus
+/// program related to block validity, it is important to use `safe_add` rather than `+` as
+/// the latter operation does not care about overflow. Not testing for overflow can cause
+/// inflation bugs.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec, TasmObject)]
 pub struct NeptuneCoins(u128);
 
