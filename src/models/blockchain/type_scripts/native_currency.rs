@@ -111,10 +111,13 @@ impl ConsensusProgram for NativeCurrency {
                 if input_salted_utxos.utxos[i as usize].coins[j as usize].type_script_hash
                     == self_digest
                 {
+                    // decode state to get amount
                     let amount: NeptuneCoins = *NeptuneCoins::decode(
                         &input_salted_utxos.utxos[i as usize].coins[j as usize].state,
                     )
                     .unwrap();
+
+                    // safely add to total
                     total_input = total_input.safe_add(amount).unwrap();
                     j += 1;
                 }
@@ -133,10 +136,16 @@ impl ConsensusProgram for NativeCurrency {
                 if output_salted_utxos.utxos[i as usize].coins[j as usize].type_script_hash
                     == self_digest
                 {
+                    // decode state to get amount
                     let amount: NeptuneCoins = *NeptuneCoins::decode(
                         &output_salted_utxos.utxos[i as usize].coins[j as usize].state,
                     )
                     .unwrap();
+
+                    // make sure amount is positive (or zero)
+                    assert!(!amount.is_negative());
+
+                    // safely add to total
                     total_output = total_output.safe_add(amount).unwrap();
                     j += 1;
                 }
@@ -146,6 +155,7 @@ impl ConsensusProgram for NativeCurrency {
 
         // test no-inflation equation
         let total_input_plus_coinbase: NeptuneCoins = total_input.safe_add(some_coinbase).unwrap();
+        assert!(!fee.is_negative());
         let total_output_plus_coinbase: NeptuneCoins = total_output.safe_add(fee).unwrap();
         assert_eq!(total_input_plus_coinbase, total_output_plus_coinbase);
     }
