@@ -569,7 +569,7 @@ mod test {
 
     use super::TimeLockWitness;
 
-    #[proptest(cases = 5)]
+    #[proptest]
     fn test_unlocked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -595,7 +595,7 @@ mod test {
             .as_millis() as u64
     }
 
-    #[proptest(cases = 5)]
+    #[proptest]
     fn test_locked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
@@ -613,6 +613,27 @@ mod test {
             )
             .is_err(),
             "time lock program failed to panic"
+        );
+    }
+
+    #[proptest]
+    fn test_released(
+        #[strategy(1usize..=3)] _num_inputs: usize,
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(vec(now()-1000*60*60*24*7..now()-1000*60*60*24, #_num_inputs))]
+        _release_dates: Vec<u64>,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
+        time_lock_witness: TimeLockWitness,
+    ) {
+        println!("now: {}", now());
+        assert!(
+            TimeLock::run(
+                &time_lock_witness.standard_input().individual_tokens,
+                time_lock_witness.nondeterminism(),
+            )
+            .is_ok(),
+            "time lock program did not halt gracefully"
         );
     }
 }
