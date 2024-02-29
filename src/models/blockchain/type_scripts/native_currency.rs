@@ -106,7 +106,7 @@ impl ConsensusProgram for NativeCurrency {
                         &input_salted_utxos.utxos[i as usize].coins[j as usize].state,
                     )
                     .unwrap();
-                    total_input = total_input + amount;
+                    total_input = total_input.safe_add(amount).unwrap();
                     j += 1;
                 }
             }
@@ -128,7 +128,7 @@ impl ConsensusProgram for NativeCurrency {
                         &output_salted_utxos.utxos[i as usize].coins[j as usize].state,
                     )
                     .unwrap();
-                    total_output = total_output + amount;
+                    total_output = total_output.safe_add(amount).unwrap();
                     j += 1;
                 }
             }
@@ -136,7 +136,9 @@ impl ConsensusProgram for NativeCurrency {
         }
 
         // test no-inflation equation
-        assert_eq!(total_input + some_coinbase, total_output + fee);
+        let total_input_plus_coinbase: NeptuneCoins = total_input.safe_add(some_coinbase).unwrap();
+        let total_output_plus_coinbase: NeptuneCoins = total_output.safe_add(fee).unwrap();
+        assert_eq!(total_input_plus_coinbase, total_output_plus_coinbase);
     }
 
     fn code() -> Vec<LabelledInstruction> {
