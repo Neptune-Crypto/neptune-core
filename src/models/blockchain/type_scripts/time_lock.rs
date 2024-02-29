@@ -521,7 +521,7 @@ impl Arbitrary for TimeLockWitness {
                     }
 
                     // generate valid output amounts
-                    PrimitiveWitness::find_valid_output_amounts_and_fee(
+                    PrimitiveWitness::find_balanced_output_amounts_and_fee(
                         total_inputs,
                         maybe_coinbase,
                         &mut output_amounts,

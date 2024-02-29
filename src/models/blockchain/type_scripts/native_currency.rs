@@ -232,3 +232,99 @@ impl SecretWitness for NativeCurrencyWitness {
         NativeCurrency::program()
     }
 }
+
+#[cfg(test)]
+pub mod test {
+    use crate::models::blockchain::transaction::{
+        primitive_witness::arbitrary_primitive_witness_with,
+        utxo::{LockScript, Utxo},
+        PublicAnnouncement,
+    };
+    use proptest::collection::vec;
+    use proptest_arbitrary_interop::arb;
+    use test_strategy::proptest;
+
+    use super::*;
+
+    #[proptest]
+    fn balanced_transaction_is_valid(
+        #[strategy(1usize..=3)] _num_inputs: usize,
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
+        let native_currency_witness =
+            NativeCurrencyWitness::from_primitive_witness(&primitive_witness);
+        assert!(
+            NativeCurrency::run(
+                &native_currency_witness.standard_input().individual_tokens,
+                native_currency_witness.nondeterminism(),
+            )
+            .is_ok(),
+            "native currency program did not halt gracefully"
+        );
+    }
+
+    #[proptest]
+    fn unbalanced_transaction_without_coinbase_is_invalid(
+        #[strategy(1usize..=3)] _num_inputs: usize,
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
+        #[strategy(vec(arb::<LockScript>(), #_num_inputs))] _input_lock_scripts: Vec<LockScript>,
+        #[strategy(vec(vec(arb::<BFieldElement>(), 0..10), #_num_inputs))]
+        _input_lock_script_witnesses: Vec<Vec<BFieldElement>>,
+        #[strategy(vec(arb::<Utxo>(), #_num_outputs))] _output_utxos: Vec<Utxo>,
+        #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
+            PublicAnnouncement,
+        >,
+        #[strategy(arb())] _fee: NeptuneCoins,
+        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, None))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        // with high probability the amounts (which are random) do not add up
+        let native_currency_witness =
+            NativeCurrencyWitness::from_primitive_witness(&primitive_witness);
+        assert!(
+            NativeCurrency::run(
+                &native_currency_witness.standard_input().individual_tokens,
+                native_currency_witness.nondeterminism(),
+            )
+            .is_err(),
+            "native currency program failed to panic"
+        );
+    }
+
+    #[proptest]
+    fn unbalanced_transaction_with_coinbase_is_invalid(
+        #[strategy(1usize..=3)] _num_inputs: usize,
+        #[strategy(1usize..=3)] _num_outputs: usize,
+        #[strategy(1usize..=3)] _num_public_announcements: usize,
+        #[strategy(arb())] _coinbase: NeptuneCoins,
+        #[strategy(vec(arb::<Utxo>(), #_num_inputs))] _input_utxos: Vec<Utxo>,
+        #[strategy(vec(arb::<LockScript>(), #_num_inputs))] _input_lock_scripts: Vec<LockScript>,
+        #[strategy(vec(vec(arb::<BFieldElement>(), 0..10), #_num_inputs))]
+        _input_lock_script_witnesses: Vec<Vec<BFieldElement>>,
+        #[strategy(vec(arb::<Utxo>(), #_num_outputs))] _output_utxos: Vec<Utxo>,
+        #[strategy(vec(arb(), #_num_public_announcements))] _public_announcements: Vec<
+            PublicAnnouncement,
+        >,
+        #[strategy(arb())] _fee: NeptuneCoins,
+        #[strategy(arbitrary_primitive_witness_with(&#_input_utxos, &#_input_lock_scripts, &#_input_lock_script_witnesses, &#_output_utxos, &#_public_announcements, #_fee, Some(#_coinbase)))]
+        primitive_witness: PrimitiveWitness,
+    ) {
+        // with high probability the amounts (which are random) do not add up
+        let native_currency_witness =
+            NativeCurrencyWitness::from_primitive_witness(&primitive_witness);
+        assert!(
+            NativeCurrency::run(
+                &native_currency_witness.standard_input().individual_tokens,
+                native_currency_witness.nondeterminism(),
+            )
+            .is_err(),
+            "native currency program failed to panic"
+        );
+    }
+}

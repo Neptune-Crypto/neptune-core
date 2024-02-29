@@ -27,7 +27,7 @@ pub struct Coin {
     pub state: Vec<BFieldElement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
@@ -104,6 +104,22 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     }
 }
 
+impl<'a> Arbitrary<'a> for Utxo {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let lock_script_hash: Digest = Digest::arbitrary(u)?;
+        let type_script_hash = NativeCurrency::hash();
+        let amount = NeptuneCoins::arbitrary(u)?;
+        let coins = vec![Coin {
+            type_script_hash,
+            state: amount.encode(),
+        }];
+        Ok(Utxo {
+            lock_script_hash,
+            coins,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScript {
     pub program: Program,
@@ -141,6 +157,13 @@ impl LockScript {
 
     pub fn hash(&self) -> Digest {
         self.program.hash::<Hash>()
+    }
+}
+
+impl<'a> Arbitrary<'a> for LockScript {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let program = Program::arbitrary(u)?;
+        Ok(LockScript { program })
     }
 }
 

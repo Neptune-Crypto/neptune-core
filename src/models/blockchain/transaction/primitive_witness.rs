@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use get_size::GetSize;
 use itertools::Itertools;
-use num_traits::{CheckedSub, Zero};
+use num_traits::CheckedSub;
 use proptest::{
     arbitrary::Arbitrary,
     collection::vec,
@@ -125,13 +125,14 @@ impl PrimitiveWitness {
         (input_utxos, input_lock_scripts, input_lock_script_witnesses)
     }
 
-    /// Obtain a *valid* set of outputs (and fee) given a fixed total input amount
+    /// Obtain a *balanced* set of outputs (and fee) given a fixed total input amount
     /// and (optional) coinbase. This function takes a suggestion for the output
     /// amounts and fee and mutates these values until they satisfy the no-inflation
-    /// requirement.
-    pub fn find_valid_output_amounts_and_fee(
+    /// requirement. This method assumes that the total input amount and coinbase (if
+    /// set) can be safely added.
+    pub fn find_balanced_output_amounts_and_fee(
         total_input_amount: NeptuneCoins,
-        maybe_coinbase: Option<NeptuneCoins>,
+        coinbase: Option<NeptuneCoins>,
         output_amounts_suggestion: &mut [NeptuneCoins],
         fee_suggestion: &mut NeptuneCoins,
     ) {
@@ -139,26 +140,19 @@ impl PrimitiveWitness {
             .iter()
             .cloned()
             .sum::<NeptuneCoins>();
-        let mut some_coinbase = match maybe_coinbase {
-            Some(coinbase) => coinbase,
-            None => NeptuneCoins::zero(),
-        };
-        let mut inflationary = false;
-        while total_input_amount + some_coinbase != total_output_amount + *fee_suggestion
-            || inflationary
-        {
+        let total_input_plus_coinbase =
+            total_input_amount + coinbase.unwrap_or_else(|| NeptuneCoins::new(0));
+        let mut inflationary = total_output_amount.safe_add(*fee_suggestion).is_none()
+            || (total_output_amount + *fee_suggestion != total_input_plus_coinbase);
+        while inflationary {
             for amount in output_amounts_suggestion.iter_mut() {
                 amount.div_two();
-            }
-            if let Some(mut coinbase) = maybe_coinbase {
-                coinbase.div_two();
-                some_coinbase.div_two();
             }
             total_output_amount = output_amounts_suggestion
                 .iter()
                 .cloned()
                 .sum::<NeptuneCoins>();
-            match (total_input_amount + some_coinbase).checked_sub(&total_output_amount) {
+            match total_input_plus_coinbase.checked_sub(&total_output_amount) {
                 Some(number) => {
                     *fee_suggestion = number;
                     inflationary = false;
@@ -230,11 +224,15 @@ impl Arbitrary for PrimitiveWitness {
                             &input_amounts,
                         );
                     let total_inputs = input_amounts.iter().copied().sum::<NeptuneCoins>();
-                    Self::find_valid_output_amounts_and_fee(
+                    Self::find_balanced_output_amounts_and_fee(
                         total_inputs,
                         maybe_coinbase,
                         &mut output_amounts,
                         &mut fee,
+                    );
+                    assert_eq!(
+                        total_inputs + maybe_coinbase.unwrap_or(NeptuneCoins::new(0)),
+                        output_amounts.iter().cloned().sum::<NeptuneCoins>() + fee
                     );
                     let output_utxos =
                         Self::valid_transaction_outputs_from_amounts_and_address_seeds(
@@ -397,10 +395,14 @@ pub(crate) fn arbitrary_primitive_witness_with(
 
 #[cfg(test)]
 mod test {
-    use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
-
     use super::PrimitiveWitness;
+    use crate::models::blockchain::{
+        transaction::validity::TransactionValidationLogic,
+        type_scripts::neptune_coins::NeptuneCoins,
+    };
+    use proptest::collection::vec;
     use proptest::prop_assert;
+    use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
     #[proptest(cases = 1)]
@@ -415,5 +417,52 @@ mod test {
             &transaction_primitive_witness
         )
         .verify());
+    }
+
+    #[proptest]
+    fn amounts_balancer_works_with_coinbase(
+        #[strategy(arb::<NeptuneCoins>())] total_input_amount: NeptuneCoins,
+        #[strategy(arb::<NeptuneCoins>())] coinbase: NeptuneCoins,
+        #[strategy(vec(arb::<NeptuneCoins>(), 1..4))] mut output_amounts: Vec<NeptuneCoins>,
+        #[strategy(arb::<NeptuneCoins>())] mut fee: NeptuneCoins,
+    ) {
+        PrimitiveWitness::find_balanced_output_amounts_and_fee(
+            total_input_amount,
+            Some(coinbase),
+            &mut output_amounts,
+            &mut fee,
+        );
+        prop_assert!(
+            total_input_amount.safe_add(coinbase).unwrap()
+                == output_amounts
+                    .iter()
+                    .cloned()
+                    .sum::<NeptuneCoins>()
+                    .safe_add(fee)
+                    .unwrap()
+        );
+    }
+
+    #[proptest]
+    fn amounts_balancer_works_without_coinbase(
+        #[strategy(arb::<NeptuneCoins>())] total_input_amount: NeptuneCoins,
+        #[strategy(vec(arb::<NeptuneCoins>(), 1..4))] mut output_amounts: Vec<NeptuneCoins>,
+        #[strategy(arb::<NeptuneCoins>())] mut fee: NeptuneCoins,
+    ) {
+        PrimitiveWitness::find_balanced_output_amounts_and_fee(
+            total_input_amount,
+            None,
+            &mut output_amounts,
+            &mut fee,
+        );
+        prop_assert!(
+            total_input_amount
+                == output_amounts
+                    .iter()
+                    .cloned()
+                    .sum::<NeptuneCoins>()
+                    .safe_add(fee)
+                    .unwrap()
+        );
     }
 }
