@@ -1,14 +1,17 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
-    triton_vm::program::{NonDeterminism, Program, PublicInput},
+    triton_vm::{
+        instruction::LabelledInstruction,
+        program::{NonDeterminism, PublicInput},
+    },
     twenty_first::{self, shared_math::b_field_element::BFieldElement},
 };
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use crate::models::{
     blockchain::block::Block,
-    consensus::{SecretWitness, SupportedClaim},
+    consensus::{tasm::program::ConsensusProgram, SecretWitness},
 };
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,16 +24,26 @@ impl SecretWitness for CoinbaseIsValidWitness {
         todo!()
     }
 
-    fn subprogram(&self) -> Program {
+    fn standard_input(&self) -> PublicInput {
         todo!()
     }
 
-    fn standard_input(&self) -> PublicInput {
+    fn program(&self) -> tasm_lib::prelude::triton_vm::program::Program {
         todo!()
     }
 }
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoinbaseIsValid {
-    supported_claim: SupportedClaim<CoinbaseIsValidWitness>,
+    witness: CoinbaseIsValidWitness,
+}
+
+impl ConsensusProgram for CoinbaseIsValid {
+    fn source(&self) {
+        todo!()
+    }
+
+    fn code(&self) -> Vec<LabelledInstruction> {
+        todo!()
+    }
 }

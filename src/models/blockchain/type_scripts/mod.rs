@@ -1,7 +1,5 @@
 use crate::{
-    models::consensus::{
-        mast_hash::MastHash, tasm::program::ConsensusProgram, SecretWitness, ValidationLogic,
-    },
+    models::consensus::{mast_hash::MastHash, tasm::program::ConsensusProgram, ValidationLogic},
     Hash,
 };
 use get_size::GetSize;
@@ -20,22 +18,11 @@ use tasm_lib::{
 
 use self::native_currency::NativeCurrency;
 
-use super::transaction::{
-    primitive_witness::{PrimitiveWitness, SaltedUtxos},
-    transaction_kernel::TransactionKernel,
-};
+use super::transaction::{primitive_witness::SaltedUtxos, transaction_kernel::TransactionKernel};
 
 pub mod native_currency;
 pub mod neptune_coins;
 pub mod time_lock;
-
-trait TypeScriptValidationLogic<ExternalWitness>:
-    ValidationLogic<(PrimitiveWitness, ExternalWitness)>
-where
-    ExternalWitness: BFieldCodec,
-    (PrimitiveWitness, ExternalWitness): SecretWitness,
-{
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct TypeScript {
@@ -76,13 +63,12 @@ impl TypeScript {
 
     pub fn native_currency() -> Self {
         Self {
-            program: NativeCurrency::program(),
+            program: NativeCurrency.program(),
         }
     }
 }
 
-pub trait TypeScriptWitness {
-    fn from_primitive_witness(primitive_transaction_witness: &PrimitiveWitness) -> Self;
+pub trait TypeScriptWitness: ValidationLogic {
     fn transaction_kernel(&self) -> TransactionKernel;
     fn salted_input_utxos(&self) -> SaltedUtxos;
     fn salted_output_utxos(&self) -> SaltedUtxos;

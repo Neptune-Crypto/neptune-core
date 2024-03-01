@@ -9,6 +9,8 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use tarpc::context;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{error, info};
@@ -303,6 +305,10 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: NeptuneCoins) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         // test inequality
         let wallet_status = self
             .state
@@ -310,17 +316,21 @@ impl RPC for NeptuneRPCServer {
             .await
             .get_wallet_status_for_tip()
             .await;
-        amount <= wallet_status.synced_unspent_amount
+        amount <= wallet_status.synced_unspent_available_amount(now)
     }
 
     async fn synced_balance(self, _context: tarpc::context::Context) -> NeptuneCoins {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         let wallet_status = self
             .state
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
             .await;
-        wallet_status.synced_unspent_amount
+        wallet_status.synced_unspent_available_amount(now)
     }
 
     async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
@@ -398,6 +408,10 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         let state = self.state.lock_guard().await;
         let tip_header = state.chain.light_state().header().clone();
         let wallet_status = state.get_wallet_status_for_tip().await;
@@ -415,7 +429,7 @@ impl RPC for NeptuneRPCServer {
         DashBoardOverviewDataFromClient {
             tip_header,
             syncing,
-            synced_balance: wallet_status.synced_unspent_amount,
+            synced_balance: wallet_status.synced_unspent_available_amount(now),
             mempool_size,
             mempool_tx_count,
             peer_count,
@@ -483,6 +497,7 @@ impl RPC for NeptuneRPCServer {
 
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
         let state = self.state.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
@@ -528,7 +543,7 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard_mut()
             .await
-            .create_transaction(receiver_data, fee)
+            .create_transaction(receiver_data, fee, now)
             .await;
 
         let transaction = match transaction_result {
@@ -642,8 +657,7 @@ mod rpc_server_tests {
         wallet_secret: WalletSecret,
         peer_count: u8,
     ) -> (NeptuneRPCServer, GlobalStateLock) {
-        let global_state_lock =
-            get_mock_global_state(network, peer_count, Some(wallet_secret)).await;
+        let global_state_lock = get_mock_global_state(network, peer_count, wallet_secret).await;
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         (
             NeptuneRPCServer {

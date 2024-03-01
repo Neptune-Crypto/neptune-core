@@ -1,6 +1,8 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
-use tasm_lib::twenty_first::shared_math::bfield_codec::BFieldCodec;
+use tasm_lib::twenty_first::shared_math::{
+    b_field_element::BFieldElement, bfield_codec::BFieldCodec,
+};
 
 use crate::models::consensus::mast_hash::{HasDiscriminant, MastHash};
 
@@ -28,10 +30,11 @@ impl HasDiscriminant for BlockKernelField {
 impl MastHash for BlockKernel {
     type FieldEnum = BlockKernelField;
 
-    fn mast_sequences(&self) -> Vec<Vec<tasm_lib::prelude::twenty_first::prelude::BFieldElement>> {
-        vec![
+    fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
+        let sequences = vec![
             self.header.mast_hash().encode(),
             self.body.mast_hash().encode(),
-        ]
+        ];
+        sequences
     }
 }

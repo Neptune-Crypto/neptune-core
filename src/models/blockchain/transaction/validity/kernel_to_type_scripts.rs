@@ -1,9 +1,9 @@
 use crate::models::blockchain::type_scripts::TypeScript;
-use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 
-use crate::models::blockchain::transaction::PrimitiveWitness;
-use crate::models::consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
+use crate::models::blockchain::transaction::{self};
+use crate::models::consensus::SecretWitness;
 
 use get_size::GetSize;
 use itertools::Itertools;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use triton_vm::instruction::LabelledInstruction;
-use triton_vm::prelude::{BFieldElement, Claim, Digest, NonDeterminism, Program, PublicInput};
+use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -25,32 +25,33 @@ impl SecretWitness for KernelToTypeScriptsWitness {
         todo!()
     }
 
-    fn subprogram(&self) -> Program {
+    fn standard_input(&self) -> PublicInput {
         todo!()
     }
 
-    fn standard_input(&self) -> PublicInput {
+    fn program(&self) -> triton_vm::prelude::Program {
         todo!()
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToTypeScripts {
-    pub supported_claim: SupportedClaim<KernelToTypeScriptsWitness>,
+    pub witness: KernelToTypeScriptsWitness,
 }
 
-impl KernelToTypeScripts {
-    // TODO: Remove after implementing this struct
-    pub fn dummy() -> Self {
-        Self {
-            supported_claim: SupportedClaim::dummy(),
-        }
+impl KernelToTypeScripts {}
+
+impl ConsensusProgram for KernelToTypeScripts {
+    fn source(&self) {
+        todo!()
+    }
+
+    fn code(&self) -> Vec<LabelledInstruction> {
+        todo!()
     }
 }
 
-impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
-    type PrimitiveWitness = PrimitiveWitness;
-
-    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
+impl From<transaction::PrimitiveWitness> for KernelToTypeScripts {
+    fn from(primitive_witness: transaction::PrimitiveWitness) -> Self {
         let mut type_script_digests = primitive_witness
             .input_utxos
             .utxos
@@ -65,40 +66,12 @@ impl ValidationLogic<KernelToTypeScriptsWitness> for KernelToTypeScripts {
             .collect_vec();
         type_script_digests.sort();
         type_script_digests.dedup();
-        let claim = Claim {
-            input: primitive_witness.kernel.mast_hash().values().to_vec(),
-            output: type_script_digests
-                .into_iter()
-                .flat_map(|d| d.values().to_vec())
-                .collect_vec(),
-            // program_hash: Self::program(),
-            program_digest: Digest::default(),
-        };
-        let supported_claim = SupportedClaim {
-            claim,
-            support: ClaimSupport::DummySupport,
-        };
-        Self { supported_claim }
-    }
-
-    fn prove(&mut self) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    fn verify(&self) -> bool {
-        todo!()
-    }
-
-    fn validation_program(&self) -> Program {
-        todo!()
-    }
-
-    fn support(&self) -> ClaimSupport<KernelToTypeScriptsWitness> {
-        self.supported_claim.support.clone()
-    }
-
-    fn claim(&self) -> Claim {
-        self.supported_claim.claim.clone()
+        Self {
+            witness: KernelToTypeScriptsWitness {
+                type_scripts: vec![],
+                mast_path: vec![],
+            },
+        }
     }
 }
 

@@ -1,12 +1,15 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
-    triton_vm::program::{NonDeterminism, Program, PublicInput},
+    triton_vm::{
+        instruction::LabelledInstruction,
+        program::{NonDeterminism, PublicInput},
+    },
     twenty_first::{self, shared_math::b_field_element::BFieldElement},
 };
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use crate::models::consensus::SecretWitness;
+use crate::models::consensus::{tasm::program::ConsensusProgram, SecretWitness};
 
 use self::{
     coinbase_is_valid::CoinbaseIsValid,
@@ -68,11 +71,21 @@ impl SecretWitness for PrincipalBlockValidationWitness {
         todo!()
     }
 
-    fn subprogram(&self) -> Program {
+    fn standard_input(&self) -> PublicInput {
         todo!()
     }
 
-    fn standard_input(&self) -> PublicInput {
+    fn program(&self) -> tasm_lib::prelude::triton_vm::program::Program {
+        todo!()
+    }
+}
+
+impl ConsensusProgram for PrincipalBlockValidationLogic {
+    fn source(&self) {
+        todo!()
+    }
+
+    fn code(&self) -> Vec<LabelledInstruction> {
         todo!()
     }
 }

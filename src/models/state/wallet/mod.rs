@@ -343,6 +343,8 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
+    use std::time::Duration;
+
     use itertools::Itertools;
     use num_traits::CheckedSub;
     use rand::random;
@@ -376,10 +378,12 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
+        let mut rng = thread_rng();
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
         let network = Network::Testnet;
-        let mut wallet_state_premine_recipient = get_mock_wallet_state(None, network).await;
+        let mut wallet_state_premine_recipient =
+            get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let monitored_utxos_premine_wallet =
             get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
@@ -388,21 +392,14 @@ mod wallet_tests {
             "Monitored UTXO list must contain premined UTXO at init, for premine-wallet"
         );
 
-        let premine_receiver_spending_key = wallet_state_premine_recipient
-            .wallet_secret
-            .nth_generation_spending_key(0);
-        let premine_receiver_address = premine_receiver_spending_key.to_address();
-        let expected_premine_utxo = Utxo {
-            coins: Block::premine_distribution()[0].1.to_native_coins(),
-            lock_script_hash: premine_receiver_address.lock_script().hash(),
-        };
+        let expected_premine_utxo = Block::premine_utxos()[0].clone();
         assert_eq!(
             expected_premine_utxo, monitored_utxos_premine_wallet[0].utxo,
             "Auth wallet's monitored UTXO must match that from genesis block at initialization"
         );
 
         let random_wallet = WalletSecret::new_random();
-        let wallet_state_other = get_mock_wallet_state(Some(random_wallet), network).await;
+        let wallet_state_other = get_mock_wallet_state(random_wallet, network).await;
         let monitored_utxos_other = get_monitored_utxos(&wallet_state_other).await;
         assert!(
             monitored_utxos_other.is_empty(),
@@ -419,7 +416,7 @@ mod wallet_tests {
         for _ in 0..12 {
             let previous_block = next_block;
             let (nb, _coinbase_utxo, _sender_randomness) =
-                make_mock_block(&previous_block, None, other_receiver_address);
+                make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
             next_block = nb;
             let current_mutator_set_accumulator =
                 previous_block.kernel.body.mutator_set_accumulator.clone();
@@ -453,10 +450,10 @@ mod wallet_tests {
 
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
+        let mut rng = thread_rng();
         let network = Network::Testnet;
         let own_wallet_secret = WalletSecret::new_random();
-        let mut own_wallet_state =
-            get_mock_wallet_state(Some(own_wallet_secret.clone()), network).await;
+        let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret.clone(), network).await;
         let other_wallet_secret = WalletSecret::new_random();
         let other_recipient_address = other_wallet_secret
             .nth_generation_spending_key(0)
@@ -472,7 +469,7 @@ mod wallet_tests {
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_recipient_address = own_spending_key.to_address();
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
-            make_mock_block(&genesis_block, None, own_recipient_address);
+            make_mock_block(&genesis_block, None, own_recipient_address, rng.gen());
 
         own_wallet_state
             .expected_utxos
@@ -528,8 +525,8 @@ mod wallet_tests {
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address);
-        let (block_3, _, _) = make_mock_block(&block_2, None, other_recipient_address);
+        let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address, rng.gen());
+        let (block_3, _, _) = make_mock_block(&block_2, None, other_recipient_address, rng.gen());
         monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
@@ -583,16 +580,21 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
+        let mut rng = thread_rng();
         let own_wallet_secret = WalletSecret::new_random();
         let network = Network::Testnet;
-        let mut own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
+        let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
         let genesis_block = Block::genesis_block();
-        let (block_1, cb_utxo, cb_output_randomness) =
-            make_mock_block(&genesis_block, None, own_spending_key.to_address());
-        let mining_reward = cb_utxo.get_native_coin_amount();
+        let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
+            &genesis_block,
+            None,
+            own_spending_key.to_address(),
+            rng.gen(),
+        );
+        let mining_reward = cb_utxo.get_native_currency_amount();
 
         // Add block to wallet state
         own_wallet_state
@@ -650,8 +652,12 @@ mod wallet_tests {
         let mut next_block = block_1.clone();
         for _ in 0..21 {
             let previous_block = next_block;
-            let (next_block_prime, cb_utxo_prime, cb_output_randomness_prime) =
-                make_mock_block(&previous_block, None, own_spending_key.to_address());
+            let (next_block_prime, cb_utxo_prime, cb_output_randomness_prime) = make_mock_block(
+                &previous_block,
+                None,
+                own_spending_key.to_address(),
+                rng.gen(),
+            );
             own_wallet_state
                 .expected_utxos
                 .add_expected_utxo(
@@ -731,8 +737,12 @@ mod wallet_tests {
             next_block.kernel.header.height
         );
         let msa_tip_previous = next_block.kernel.body.mutator_set_accumulator.clone();
-        (next_block, _, _) =
-            make_mock_block(&next_block.clone(), None, own_spending_key.to_address());
+        (next_block, _, _) = make_mock_block(
+            &next_block.clone(),
+            None,
+            own_spending_key.to_address(),
+            rng.gen(),
+        );
         assert_eq!(
             Into::<BlockHeight>::into(23u64),
             next_block.kernel.header.height
@@ -784,33 +794,38 @@ mod wallet_tests {
     #[traced_test]
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
+        let mut rng = thread_rng();
         // An archival state is needed for how we currently add inputs to a transaction.
         // So it's just used to generate test data, not in any of the functions that are
         // actually tested.
         let network = Network::Alpha;
         let own_wallet_secret = WalletSecret::new_random();
-        let mut own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
+        let mut own_wallet_state = get_mock_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
         let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block();
-        let premine_wallet = get_mock_wallet_state(None, network).await.wallet_secret;
+        let premine_wallet = get_mock_wallet_state(WalletSecret::devnet_wallet(), network)
+            .await
+            .wallet_secret;
         let premine_receiver_global_state_lock =
-            get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
+            get_mock_global_state(Network::Alpha, 2, premine_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
+        let launch = genesis_block.kernel.header.timestamp.value();
+        let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         let preminers_original_balance = premine_receiver_global_state
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_amount;
+            .synced_unspent_available_amount(launch + seven_months.as_millis() as u64);
         assert!(
             !preminers_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
         );
 
         let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
-        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address);
+        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address, rng.gen());
 
         let receiver_data_12_to_other = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
@@ -843,15 +858,20 @@ mod wallet_tests {
             },
         };
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
+        let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
         let valid_tx = premine_receiver_global_state
-            .create_transaction(receiver_data_to_other.clone(), NeptuneCoins::new(2))
+            .create_transaction(
+                receiver_data_to_other.clone(),
+                NeptuneCoins::new(2),
+                now + seven_months,
+            )
             .await
             .unwrap();
 
         block_1.accumulate_transaction(valid_tx, &previous_msa);
 
         // Verify the validity of the merged transaction and block
-        assert!(block_1.is_valid(&genesis_block));
+        assert!(block_1.is_valid(&genesis_block, now + seven_months));
 
         // Update wallet state with block_1
         let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
@@ -882,6 +902,7 @@ mod wallet_tests {
             .wallet_state
             .update_wallet_state_with_new_block(&previous_msa, &block_1)
             .await?;
+
         assert_eq!(
             preminers_original_balance
                 .checked_sub(&NeptuneCoins::new(15))
@@ -889,7 +910,7 @@ mod wallet_tests {
             premine_receiver_global_state
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_amount,
+                .synced_unspent_available_amount(launch + seven_months.as_millis() as u64),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
@@ -920,7 +941,7 @@ mod wallet_tests {
         let mut next_block = block_1.clone();
         for _ in 0..17 {
             let previous_block = next_block;
-            let ret = make_mock_block(&previous_block, None, own_address);
+            let ret = make_mock_block(&previous_block, None, own_address, rng.gen());
             next_block = ret.0;
             own_wallet_state
                 .expected_utxos
@@ -1000,8 +1021,12 @@ mod wallet_tests {
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let (block_2_b, _, _) =
-            make_mock_block(&block_1, None, premine_wallet_spending_key.to_address());
+        let (block_2_b, _, _) = make_mock_block(
+            &block_1,
+            None,
+            premine_wallet_spending_key.to_address(),
+            rng.gen(),
+        );
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &block_1.kernel.body.mutator_set_accumulator,
@@ -1045,8 +1070,12 @@ mod wallet_tests {
 
         // Fork back again to the long chain and verify that the membership proofs
         // all work again
-        let (block_19, _, _) =
-            make_mock_block(&block_18, None, premine_wallet_spending_key.to_address());
+        let (block_19, _, _) = make_mock_block(
+            &block_18,
+            None,
+            premine_wallet_spending_key.to_address(),
+            rng.gen(),
+        );
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &block_18.kernel.body.mutator_set_accumulator,
@@ -1080,9 +1109,10 @@ mod wallet_tests {
         // Fork back to the B-chain with `block_3b` which contains two outputs for `own_wallet`,
         // one coinbase UTXO and one other UTXO
         let (mut block_3_b, cb_utxo, cb_sender_randomness) =
-            make_mock_block(&block_2_b, None, own_address);
+            make_mock_block(&block_2_b, None, own_address, rng.gen());
+        now = Duration::from_millis(block_3_b.kernel.header.timestamp.value());
         assert!(
-            block_3_b.is_valid(&block_2_b),
+            block_3_b.is_valid(&block_2_b, now),
             "Block must be valid before merging txs"
         );
 
@@ -1096,7 +1126,7 @@ mod wallet_tests {
             sender_randomness: random(),
         };
         let tx_from_preminer = premine_receiver_global_state
-            .create_transaction(vec![receiver_data_six.clone()], NeptuneCoins::new(4))
+            .create_transaction(vec![receiver_data_six.clone()], NeptuneCoins::new(4), now)
             .await
             .unwrap();
         block_3_b.accumulate_transaction(
@@ -1104,7 +1134,7 @@ mod wallet_tests {
             &block_2_b.kernel.body.mutator_set_accumulator,
         );
         assert!(
-            block_3_b.is_valid(&block_2_b),
+            block_3_b.is_valid(&block_2_b, now),
             "Block must be valid after accumulating txs"
         );
         own_wallet_state
@@ -1166,8 +1196,12 @@ mod wallet_tests {
         }
 
         // Then fork back to A-chain
-        let (block_20, _, _) =
-            make_mock_block(&block_19, None, premine_wallet_spending_key.to_address());
+        let (block_20, _, _) = make_mock_block(
+            &block_19,
+            None,
+            premine_wallet_spending_key.to_address(),
+            rng.gen(),
+        );
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &block_19.kernel.body.mutator_set_accumulator,

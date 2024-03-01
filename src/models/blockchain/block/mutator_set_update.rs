@@ -23,28 +23,44 @@ impl MutatorSetUpdate {
         }
     }
 
-    /// Apply a mutator set update to a mutator set accumulator. Changes the input mutator set
-    /// accumulator according to the provided additions and removals.
-    pub fn apply(&self, ms_accumulator: &mut MutatorSetAccumulator) -> Result<()> {
-        let mut addition_records: Vec<AdditionRecord> = self.additions.clone();
-        addition_records.reverse();
-        let mut removal_records = self.removals.clone();
-        removal_records.reverse();
-        let mut removal_records: Vec<&mut RemovalRecord> =
-            removal_records.iter_mut().collect::<Vec<_>>();
-        while let Some(addition_record) = addition_records.pop() {
+    /// Apply a mutator-set-update to a mutator-set-accumulator. Changes the mutator
+    /// set accumulator according to the provided addition and removal records.
+    pub fn apply_to_accumulator(&self, ms_accumulator: &mut MutatorSetAccumulator) -> Result<()> {
+        self.apply_to_accumulator_and_records(ms_accumulator, &mut [])
+    }
+
+    /// Apply a mutator-set-update to a mutator-set-accumulator and a bunch of
+    /// removal records. Changes the mutator set accumulator according to the
+    /// to-be-applied addition and removal records. This method assumes that the
+    /// removal records in the update are distinct from the ones that are to be
+    /// updated.
+    pub fn apply_to_accumulator_and_records(
+        &self,
+        ms_accumulator: &mut MutatorSetAccumulator,
+        removal_records: &mut [&mut RemovalRecord],
+    ) -> Result<()> {
+        let mut cloned_removals = self.removals.clone();
+        let mut applied_removal_records = cloned_removals.iter_mut().rev().collect::<Vec<_>>();
+        for addition_record in self.additions.iter() {
             RemovalRecord::batch_update_from_addition(
-                &mut removal_records,
+                &mut applied_removal_records,
                 &mut ms_accumulator.kernel,
             );
 
-            ms_accumulator.add(&addition_record);
+            RemovalRecord::batch_update_from_addition(removal_records, &mut ms_accumulator.kernel);
+
+            ms_accumulator.add(addition_record);
         }
 
-        while let Some(removal_record) = removal_records.pop() {
-            RemovalRecord::batch_update_from_remove(&mut removal_records, removal_record);
+        while let Some(applied_removal_record) = applied_removal_records.pop() {
+            RemovalRecord::batch_update_from_remove(
+                &mut applied_removal_records,
+                applied_removal_record,
+            );
 
-            ms_accumulator.remove(removal_record);
+            RemovalRecord::batch_update_from_remove(removal_records, applied_removal_record);
+
+            ms_accumulator.remove(applied_removal_record);
         }
 
         Ok(())

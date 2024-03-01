@@ -52,6 +52,7 @@ impl RustyWalletDatabase {
         &mut self.monitored_utxos
     }
 
+    /// Get the hash of the block to which this database is synced.
     pub fn get_sync_label(&self) -> Digest {
         self.sync_label.get()
     }

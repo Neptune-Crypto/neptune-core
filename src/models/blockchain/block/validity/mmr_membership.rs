@@ -3,9 +3,9 @@ use crate::models::blockchain::block::Deserialize;
 use crate::models::blockchain::block::GetSize;
 use crate::models::blockchain::block::Serialize;
 use crate::models::blockchain::shared::Hash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::models::consensus::SecretWitness;
-use crate::models::consensus::SupportedClaim;
-use crate::triton_vm::program::Program;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::NonDeterminism;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
@@ -21,16 +21,26 @@ impl SecretWitness for MmrMembershipWitness {
         todo!()
     }
 
-    fn subprogram(&self) -> Program {
+    fn standard_input(&self) -> PublicInput {
         todo!()
     }
 
-    fn standard_input(&self) -> PublicInput {
+    fn program(&self) -> tasm_lib::prelude::triton_vm::program::Program {
         todo!()
     }
 }
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MmrMembership {
-    supported_claim: SupportedClaim<MmrMembershipWitness>,
+    witness: MmrMembershipWitness,
+}
+
+impl ConsensusProgram for MmrMembership {
+    fn source(&self) {
+        todo!()
+    }
+
+    fn code(&self) -> Vec<LabelledInstruction> {
+        todo!()
+    }
 }

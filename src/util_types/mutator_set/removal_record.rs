@@ -165,7 +165,7 @@ impl RemovalRecord {
             mmra.append(new_chunk_digest);
 
         // Collect all indices for all removal records that are being updated
-        let mut chunk_index_to_mp_index: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut chunk_index_to_rr_index: HashMap<u64, Vec<usize>> = HashMap::new();
         removal_records.iter().enumerate().for_each(|(i, rr)| {
             let indices = &rr.absolute_indices;
             let chunks_set: HashSet<u64> = indices
@@ -173,25 +173,27 @@ impl RemovalRecord {
                 .iter()
                 .map(|x| (x / CHUNK_SIZE as u128) as u64)
                 .collect();
+
             chunks_set
                 .iter()
-                .for_each(|chnkidx| chunk_index_to_mp_index.entry(*chnkidx).or_default().push(i));
+                .for_each(|chnkidx| chunk_index_to_rr_index.entry(*chnkidx).or_default().push(i));
         });
 
-        // Find the removal records that need a new dictionary entry for the chunk that's being
-        // added to the inactive part by this addition.
+        // Find the removal records that need a new dictionary entry for the chunk
+        // that's being added to the inactive part by this addition.
         let batch_index = new_item_index / BATCH_SIZE as u64;
         let old_window_start_batch_index = batch_index - 1;
+
         let rrs_for_new_chunk_dictionary_entry: Vec<usize> =
-            match chunk_index_to_mp_index.get(&old_window_start_batch_index) {
+            match chunk_index_to_rr_index.get(&old_window_start_batch_index) {
                 Some(vals) => vals.clone(),
                 None => vec![],
             };
 
-        // Find the removal records that have dictionary entry MMR membership proofs that need
-        // to be updated because of the window sliding.
+        // Find the removal records that have dictionary entry MMR membership proofs
+        // that need to be updated because of the window sliding.
         let mut rrs_for_batch_append: HashSet<usize> = HashSet::new();
-        for (chunk_index, mp_indices) in chunk_index_to_mp_index.into_iter() {
+        for (chunk_index, mp_indices) in chunk_index_to_rr_index.into_iter() {
             if chunk_index < old_window_start_batch_index {
                 for mp_index in mp_indices {
                     rrs_for_batch_append.insert(mp_index);

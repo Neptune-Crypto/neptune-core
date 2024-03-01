@@ -80,7 +80,7 @@ impl NeptuneCoins {
     /// Create a `coins` object for use in a UTXO
     pub fn to_native_coins(&self) -> Vec<Coin> {
         let dictionary = vec![Coin {
-            type_script_hash: NativeCurrency::hash(),
+            type_script_hash: NativeCurrency.hash(),
             state: self.encode(),
         }];
         dictionary
