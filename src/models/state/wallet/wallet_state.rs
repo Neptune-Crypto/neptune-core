@@ -23,6 +23,7 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::traits::*;
 use twenty_first::util_types::storage_vec::traits::*;
 
+use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
 use super::wallet_status::{WalletStatus, WalletStatusElement};
@@ -714,6 +715,28 @@ impl WalletState {
             .as_millis() as u64;
         self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
             .await
+    }
+
+    pub async fn get_all_own_coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
+        let monitored_utxos = self.wallet_db.monitored_utxos();
+        let mut own_coins = vec![];
+
+        for (_i, mutxo) in monitored_utxos.iter() {
+            if mutxo.spent_in_block.is_some()
+                || mutxo.abandoned_at.is_some()
+                || mutxo.get_latest_membership_proof_entry().is_none()
+                || mutxo.confirmed_in_block.is_none()
+            {
+                continue;
+            }
+            let coin = CoinWithPossibleTimeLock {
+                amount: mutxo.utxo.get_native_currency_amount(),
+                confirmed: mutxo.confirmed_in_block.unwrap().1,
+                release_date: mutxo.utxo.release_date(),
+            };
+            own_coins.push(coin);
+        }
+        own_coins
     }
 }
 

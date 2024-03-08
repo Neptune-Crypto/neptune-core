@@ -12,6 +12,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use std::time::Duration;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::triton_asm;
@@ -85,6 +86,15 @@ impl Utxo {
                 Err(_) => NeptuneCoins::zero(),
             })
             .sum()
+    }
+
+    /// If the UTXO has a timelock, find out what the release date is.
+    pub fn release_date(&self) -> Option<Duration> {
+        self.coins
+            .iter()
+            .find(|coin| coin.type_script_hash == TimeLock.hash())
+            .map(|coin| coin.state[0].value())
+            .map(Duration::from_millis)
     }
 
     /// Determine whether the UTXO has coins that contain only known type

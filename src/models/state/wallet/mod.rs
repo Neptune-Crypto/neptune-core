@@ -1,6 +1,7 @@
 use crate::prelude::twenty_first;
 
 pub mod address;
+pub mod coin_with_possible_timelock;
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
 pub mod utxo_notification_pool;
