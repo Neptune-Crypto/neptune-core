@@ -10,17 +10,16 @@ use num_traits::One;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use tasm_lib::data_type::DataType;
+use tasm_lib::hashing::algebraic_hasher::hash_varlen::HashVarlen;
 use tasm_lib::library::Library;
+use tasm_lib::list::get::Get;
+use tasm_lib::list::new::New;
+use tasm_lib::list::set::Set;
+use tasm_lib::list::set_length::SetLength;
 use tasm_lib::snippet_bencher::BenchmarkCase;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
-use tasm_lib::{
-    hashing::hash_varlen::HashVarlen,
-    list::unsafeimplu32::{
-        get::UnsafeGet, new::UnsafeNew, set::UnsafeSet, set_length::UnsafeSetLength,
-    },
-    rust_shadowing_helper_functions, ExecutionState,
-};
+use tasm_lib::{rust_shadowing_helper_functions, ExecutionState};
 use triton_vm::{prelude::BFieldElement, triton_asm};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::{
@@ -56,7 +55,6 @@ impl TransactionKernelMastHash {
             stack,
             std_in: vec![],
             nondeterminism: NonDeterminism::default().with_ram(memory),
-            words_allocated: 0,
         }
     }
 }
@@ -76,16 +74,16 @@ impl BasicSnippet for TransactionKernelMastHash {
 
     fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
         let entrypoint = self.entrypoint();
-        let new_list = library.import(Box::new(UnsafeNew {
+        let new_list = library.import(Box::new(New {
             data_type: DataType::Digest,
         }));
-        let get_element = library.import(Box::new(UnsafeGet {
+        let get_element = library.import(Box::new(Get {
+            element_type: DataType::Digest,
+        }));
+        let set_element = library.import(Box::new(Set {
             data_type: DataType::Digest,
         }));
-        let set_element = library.import(Box::new(UnsafeSet {
-            data_type: DataType::Digest,
-        }));
-        let set_length = library.import(Box::new(UnsafeSetLength {
+        let set_length = library.import(Box::new(SetLength {
             data_type: DataType::Digest,
         }));
 
@@ -108,7 +106,6 @@ impl BasicSnippet for TransactionKernelMastHash {
         {entrypoint}:
             // allocate new list of 16 digests
             push 16                      // _ *kernel 16
-            dup 0                        // _ *kernel 16 16
             call {new_list}              // _ *kernel 16 *list
             swap 1                       // _ *kernel *list 16
             call {set_length}            // _ *kernel *list
@@ -390,16 +387,9 @@ impl Function for TransactionKernelMastHash {
         let root = nodes[1].to_owned();
 
         // populate memory with merkle tree
-        let list_address = rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(
-            16 * DIGEST_LENGTH,
-            memory,
-        );
-        rust_shadowing_helper_functions::unsafe_list::unsafe_list_new(list_address, memory);
-        rust_shadowing_helper_functions::unsafe_list::unsafe_list_set_length(
-            list_address,
-            16,
-            memory,
-        );
+        let list_address = rust_shadowing_helper_functions::dyn_malloc::dynamic_allocator(memory);
+        rust_shadowing_helper_functions::list::list_new(list_address, memory);
+        rust_shadowing_helper_functions::list::list_set_length(list_address, 16, memory);
         for (i, node) in nodes.into_iter().enumerate().skip(1) {
             for j in 0..DIGEST_LENGTH {
                 memory.insert(
@@ -444,8 +434,8 @@ mod tests {
     use tasm_lib::test_helpers::test_rust_equivalence_given_complete_state;
     use tasm_lib::traits::function::ShadowedFunction;
     use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::twenty_first::shared_math::tip5::Tip5;
     use twenty_first::shared_math::bfield_codec::BFieldCodec;
-    use twenty_first::shared_math::tip5::Tip5State;
     use twenty_first::util_types::algebraic_hasher::Domain;
 
     use crate::models::consensus::mast_hash::MastHash;
@@ -469,8 +459,7 @@ mod tests {
             &execution_state.stack,
             &execution_state.std_in,
             &nondeterminism,
-            &Some(Tip5State::new(Domain::FixedLength)),
-            0,
+            &Some(Tip5::new(Domain::FixedLength)),
             None,
         );
 

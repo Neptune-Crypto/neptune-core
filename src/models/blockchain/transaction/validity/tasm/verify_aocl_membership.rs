@@ -13,9 +13,9 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use tasm_lib::data_type::DataType;
 use tasm_lib::empty_stack;
 use tasm_lib::library::Library;
+use tasm_lib::mmr::verify_from_memory::MmrVerifyFromMemory;
 use tasm_lib::traits::basic_snippet::BasicSnippet;
 use tasm_lib::traits::function::{Function, FunctionInitialState};
-use tasm_lib::{list::ListType, mmr::verify_from_memory::MmrVerifyFromMemory};
 use triton_vm::{
     prelude::{BFieldElement, Digest},
     triton_asm,
@@ -51,9 +51,7 @@ impl BasicSnippet for VerifyAoclMembership {
     }
 
     fn code(&self, library: &mut Library) -> Vec<triton_vm::instruction::LabelledInstruction> {
-        let verify_mmr_membership = library.import(Box::new(MmrVerifyFromMemory {
-            list_type: ListType::Unsafe,
-        }));
+        let verify_mmr_membership = library.import(Box::new(MmrVerifyFromMemory {}));
         // We do not need to use get field for MmrMembershipProof because
         // it has a custom implementation of BFieldCodec. However, we do
         // need it for MsMembershipProof.

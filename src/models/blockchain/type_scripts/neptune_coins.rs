@@ -1,5 +1,8 @@
-use crate::{models::blockchain::transaction::utxo::Coin, prelude::twenty_first};
+use crate::models::{
+    blockchain::transaction::utxo::Coin, consensus::tasm::program::ConsensusProgram,
+};
 
+use super::native_currency::NativeCurrency;
 use anyhow::bail;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
@@ -15,30 +18,40 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
     str::FromStr,
 };
-use twenty_first::{amount::u32s::U32s, shared_math::bfield_codec::BFieldCodec};
+use tasm_lib::{
+    structure::tasm_object::TasmObject, twenty_first::shared_math::bfield_codec::BFieldCodec,
+};
 
-use super::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
-
-const NUM_LIMBS: usize = 4;
-
-/// An amount of Neptune coins. Amounts of Neptune coins are internally represented in an
-/// atomic unit called Neptune atomic units (nau).
+/// `NeptuneCoins` records an amount of Neptune coins. Amounts are internally represented
+/// by an atomic unit called Neptune atomic units (nau), which itself is represented as a 128
+/// bit integer.
 ///
 /// 1 Neptune coin = 10^30 * 2^2 nau.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec)]
-pub struct NeptuneCoins(U32s<NUM_LIMBS>);
+///
+/// This conversion factor was chosen such that:
+///  - The largest possible amount, corresponding to 42 000 000 Neptune coins, takes 127 bits.
+///    The top bit is the sign bit and is used for negative amounts (in two's complement).
+///  - When expanding amounts of Neptune coins in decimal form, we can represent them exactly
+///    up to 30 decimal digits.
+///
+/// When using `NeptuneCoins` in a type script or a lock script, or even another consensus
+/// program related to block validity, it is important to use `safe_add` rather than `+` as
+/// the latter operation does not care about overflow. Not testing for overflow can cause
+/// inflation bugs.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, BFieldCodec, TasmObject)]
+pub struct NeptuneCoins(u128);
 
 impl NeptuneCoins {
     /// The conversion factor is 10^30 * 2^2.
     /// It is such that 42 000 000 * 10^30 * 2^4 is just one bit shy of being 128 bits
     /// wide. The one shy bit is used for the sign.
-    fn conversion_factor() -> U32s<NUM_LIMBS> {
-        let mut product = U32s::<NUM_LIMBS>::one();
-        let ten: U32s<NUM_LIMBS> = 10.into();
+    fn conversion_factor() -> u128 {
+        let mut product = 1u128;
+        let ten = 10u128;
         for _ in 0..30 {
             product = product.mul(ten)
         }
-        let two: U32s<NUM_LIMBS> = 2.into();
+        let two = 2u128;
         for _ in 0..2 {
             product = product.mul(two);
         }
@@ -47,9 +60,7 @@ impl NeptuneCoins {
 
     /// Return the element that corresponds to 1. Use in tests only.
     pub fn one() -> NeptuneCoins {
-        let mut values = [0u32; NUM_LIMBS];
-        values[0] = 1;
-        NeptuneCoins(U32s::new(values))
+        NeptuneCoins(1u128)
     }
 
     /// Create an Amount object of the given number of coins.
@@ -58,18 +69,18 @@ impl NeptuneCoins {
             num_coins <= 42000000,
             "Number of coins must be less than 42000000"
         );
-        let number: U32s<NUM_LIMBS> = num_coins.into();
+        let number: u128 = num_coins.into();
         Self(Self::conversion_factor() * number)
     }
 
     pub fn div_two(&mut self) {
-        self.0.div_two();
+        self.0 /= 2;
     }
 
     /// Create a `coins` object for use in a UTXO
     pub fn to_native_coins(&self) -> Vec<Coin> {
         let dictionary = vec![Coin {
-            type_script_hash: NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
+            type_script_hash: NativeCurrency::hash(),
             state: self.encode(),
         }];
         dictionary
@@ -95,15 +106,15 @@ impl NeptuneCoins {
 
     /// Convert the amount to Neptune atomic units (nau)
     pub fn to_nau(&self) -> BigInt {
-        BigInt::from_slice(num_bigint::Sign::Plus, self.0.as_ref())
+        BigInt::from_u128(self.0).unwrap()
     }
 
     /// Convert the number of Neptune atomic units (nau) to an amount of Neptune coins
     pub fn from_nau(nau: BigInt) -> Option<Self> {
-        let (sign, digits) = nau.to_u32_digits();
+        let (sign, digits) = nau.to_u64_digits();
 
         // we can't represent numbers with too many limbs
-        if digits.len() > NUM_LIMBS {
+        if digits.len() > 2 {
             return None;
         }
 
@@ -112,36 +123,43 @@ impl NeptuneCoins {
             let Some(positive_nau) = Self::from_nau(-nau) else {
                 return None;
             };
-            let all_ones = [u32::MAX; NUM_LIMBS];
-            return Some(Self(
-                U32s::<NUM_LIMBS>::new(all_ones) - positive_nau.0 + U32s::<NUM_LIMBS>::one(),
-            ));
+            return Some(Self(u128::MAX - positive_nau.0 + 1u128));
         }
 
         // pad with zeros if necessary
         let mut limbs = digits.clone();
-        while limbs.len() < NUM_LIMBS {
+        while limbs.len() < 2 {
             limbs.push(0);
         }
 
         // if the top bit is set then we can't represent this number using this struct
-        if limbs.last().unwrap() >> 31 != 0 {
+        if limbs.last().unwrap() >> 63 != 0 {
             return None;
         }
 
         // compute and return conversion
-        let number = U32s::<NUM_LIMBS>::new(limbs.try_into().unwrap());
+        let number = (limbs[0] as u128) | ((limbs[1] as u128) << 64);
         Some(Self(number))
     }
 
     pub fn is_negative(&self) -> bool {
-        let values = self.0.as_ref();
-        values[NUM_LIMBS - 1] >> 31 == 1
+        self.0 & (1 << 127) != 0
     }
 
     pub fn scalar_mul(&self, factor: u32) -> Self {
-        let factor_as_u32s: U32s<NUM_LIMBS> = factor.into();
-        NeptuneCoins(factor_as_u32s * self.0)
+        let factor_as_u128 = factor as u128;
+        NeptuneCoins(factor_as_u128 * self.0)
+    }
+
+    /// Add two amounts of Neptune coins but return None if the top bit in the sum is set
+    /// (which would make the sum negative)
+    pub fn safe_add(&self, other: NeptuneCoins) -> Option<NeptuneCoins> {
+        let number = self.0 + other.0;
+        if number & (1u128 << 127) == 0 {
+            Some(NeptuneCoins(number))
+        } else {
+            None
+        }
     }
 }
 
@@ -201,8 +219,7 @@ impl Neg for NeptuneCoins {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        let all_ones = [0xffffffffu32; NUM_LIMBS];
-        Self(U32s::<NUM_LIMBS>::new(all_ones) - self.0 + U32s::<NUM_LIMBS>::one())
+        Self(u128::MAX - self.0 + 1u128)
     }
 }
 
@@ -220,11 +237,11 @@ impl PartialOrd for NeptuneCoins {
 
 impl Zero for NeptuneCoins {
     fn zero() -> Self {
-        NeptuneCoins(U32s::<NUM_LIMBS>::zero())
+        NeptuneCoins(0u128)
     }
 
     fn is_zero(&self) -> bool {
-        self.0 == U32s::<NUM_LIMBS>::zero()
+        self.0 == 0u128
     }
 }
 
@@ -262,8 +279,7 @@ impl FromStr for NeptuneCoins {
             BigInt::zero()
         } else {
             let denominator = decimal_shift;
-            let conversion_factor =
-                BigInt::from_slice(num_bigint::Sign::Plus, Self::conversion_factor().as_ref());
+            let conversion_factor = BigInt::from_u128(Self::conversion_factor()).unwrap();
             let nau_rational = BigRational::new(numerator * conversion_factor, denominator).round();
             match sign {
                 num_bigint::Sign::Minus => -nau_rational.numer(),
@@ -280,20 +296,16 @@ impl FromStr for NeptuneCoins {
 
 impl Display for NeptuneCoins {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let conversion_factor =
-            BigInt::from_slice(num_bigint::Sign::Plus, Self::conversion_factor().as_ref());
+        let conversion_factor = Self::conversion_factor();
         let sign = self.is_negative();
         let sign_symbol = if sign { "-" } else { "" };
         let nau = if sign {
-            U32s::<NUM_LIMBS>::new([u32::MAX; NUM_LIMBS]) - self.0 + U32s::<NUM_LIMBS>::one()
+            u128::MAX - self.0 + 1u128
         } else {
             self.0
         };
-        let rational = BigRational::new(
-            BigInt::from_slice(num_bigint::Sign::Plus, nau.as_ref()),
-            conversion_factor,
-        );
-        let rounded = (BigRational::from_i8(100).unwrap() * rational.clone()).round();
+        let rational = (nau as f64) / (conversion_factor as f64);
+        let rounded = (100.0 * rational).round();
         if rounded.is_zero() {
             write!(f, "0")
         } else {
@@ -313,32 +325,28 @@ impl Display for NeptuneCoins {
 
 pub fn pseudorandom_amount(seed: [u8; 32]) -> NeptuneCoins {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
-    let number: [u32; 4] = rng.gen();
-    let mut nau = U32s::new(number);
-    for _ in 0..10 {
-        nau.div_two();
-    }
-    NeptuneCoins(nau)
+    let number: u128 = rng.gen::<u128>() >> 10;
+    NeptuneCoins(number)
 }
 
 impl<'a> Arbitrary<'a> for NeptuneCoins {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut nau: U32s<NUM_LIMBS> = U32s::new(u.arbitrary()?);
-        for _ in 0..10 {
-            nau.div_two();
-        }
-        Ok(NeptuneCoins(nau))
+        let nau: u128 = u.arbitrary()?;
+        Ok(NeptuneCoins(nau >> 10))
     }
 }
 
 #[cfg(test)]
 mod amount_tests {
+    use arbitrary::{Arbitrary, Unstructured};
     use get_size::GetSize;
     use itertools::Itertools;
     use num_bigint::Sign;
     use num_traits::FromPrimitive;
+    use proptest_arbitrary_interop::arb;
     use rand::{thread_rng, Rng, RngCore};
     use std::{ops::ShlAssign, str::FromStr};
+    use test_strategy::proptest;
 
     use super::*;
 
@@ -371,12 +379,8 @@ mod amount_tests {
         let mut rng = thread_rng();
 
         for _ in 0..5 {
-            let limbs: [u32; NUM_LIMBS] = (0..NUM_LIMBS)
-                .map(|_| rng.next_u32())
-                .collect_vec()
-                .try_into()
-                .unwrap();
-            let amount = NeptuneCoins(U32s::new(limbs));
+            let amount =
+                NeptuneCoins::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>())).unwrap();
             let bfes = amount.encode();
             let reconstructed_amount = *NeptuneCoins::decode(&bfes).unwrap();
 
@@ -389,16 +393,12 @@ mod amount_tests {
         let mut rng = thread_rng();
 
         for _ in 0..10 {
-            let limbs: [u32; NUM_LIMBS] = (0..NUM_LIMBS)
-                .map(|_| rng.next_u32())
-                .collect_vec()
-                .try_into()
-                .unwrap();
-            let amount = Some(NeptuneCoins(U32s::new(limbs)));
-            let bfes = amount.encode();
+            let amount =
+                NeptuneCoins::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>())).unwrap();
+            let bfes = Some(amount).encode();
             let reconstructed_amount = *Option::<NeptuneCoins>::decode(&bfes).unwrap();
 
-            assert_eq!(amount, reconstructed_amount);
+            assert_eq!(Some(amount), reconstructed_amount);
         }
 
         let amount: Option<NeptuneCoins> = None;
@@ -461,8 +461,7 @@ mod amount_tests {
     #[test]
     fn conversion_factor_is_optimal() {
         let forty_two_million = BigInt::from_i32(42000000).unwrap();
-        let conversion_factor =
-            BigInt::from_slice(Sign::Plus, NeptuneCoins::conversion_factor().as_ref());
+        let conversion_factor = BigInt::from_u128(NeptuneCoins::conversion_factor()).unwrap();
         let mut two_pow_127 = BigInt::one();
         two_pow_127.shl_assign(127);
         assert!(conversion_factor.clone() * forty_two_million.clone() < two_pow_127);
@@ -478,14 +477,9 @@ mod amount_tests {
     #[test]
     fn from_decimal_test() {
         let parsed = NeptuneCoins::from_str("-10.125").unwrap();
-        let mut cf = NeptuneCoins::conversion_factor();
-        cf.div_two();
-        cf.div_two();
-        cf.div_two();
-        let fixed =
-            -(NeptuneCoins::from_nau(BigInt::from_slice(num_bigint::Sign::Plus, cf.as_ref()))
-                .unwrap()
-                + NeptuneCoins::new(10));
+        let cf = NeptuneCoins::conversion_factor() >> 3;
+        let fixed = -(NeptuneCoins::from_nau(BigInt::from_u128(cf).unwrap()).unwrap()
+            + NeptuneCoins::new(10));
         assert_eq!(parsed.clone(), fixed);
         assert!(parsed.is_negative());
         println!("parsed: {}", parsed);
@@ -535,5 +529,20 @@ mod amount_tests {
                 NeptuneCoins::from_str(s).unwrap()
             );
         }
+    }
+
+    #[proptest]
+    fn small_amounts_can_be_safely_added(
+        #[strategy(arb())] a0: NeptuneCoins,
+        #[strategy(arb())] a1: NeptuneCoins,
+    ) {
+        a0.safe_add(a1).unwrap();
+    }
+
+    #[test]
+    fn unsafe_amounts_fail() {
+        let a0 = NeptuneCoins(1u128 << 126);
+        let a1 = NeptuneCoins(1u128 << 126);
+        assert!(a0.safe_add(a1).is_none());
     }
 }

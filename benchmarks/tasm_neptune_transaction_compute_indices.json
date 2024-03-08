@@ -1,16 +1,16 @@
 [
   {
     "name": "tasm_neptune_transaction_compute_indices",
-    "clock_cycle_count": 5375,
-    "hash_table_height": 607,
-    "u32_table_height": 4378,
+    "clock_cycle_count": 5570,
+    "hash_table_height": 601,
+    "u32_table_height": 4604,
     "case": "CommonCase"
   },
   {
     "name": "tasm_neptune_transaction_compute_indices",
-    "clock_cycle_count": 5375,
-    "hash_table_height": 607,
-    "u32_table_height": 4514,
+    "clock_cycle_count": 5570,
+    "hash_table_height": 601,
+    "u32_table_height": 4740,
     "case": "WorstCase"
   }
 ]

@@ -188,7 +188,7 @@ fn make_coinbase_transaction(
     let coinbase_amount = coinbase_utxo
         .coins
         .iter()
-        .filter(|coin| coin.type_script_hash == TypeScript::native_coin().hash())
+        .filter(|coin| coin.type_script_hash == TypeScript::native_currency().hash())
         .map(|coin| {
             *NeptuneCoins::decode(&coin.state)
                 .expect("Make coinbase transaction: failed to parse coin state as amount.")
@@ -219,7 +219,7 @@ fn make_coinbase_transaction(
 
     let primitive_witness = PrimitiveWitness {
         input_utxos: SaltedUtxos::empty(),
-        type_scripts: vec![TypeScript::native_coin()],
+        type_scripts: vec![TypeScript::native_currency()],
         input_lock_scripts: vec![],
         lock_script_witnesses: vec![],
         input_membership_proofs: vec![],

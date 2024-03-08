@@ -513,7 +513,7 @@ impl GlobalState {
         // stored and managed in some non-hardcoded database. See issue #92 [1].
         //
         // [1]: https://github.com/Neptune-Crypto/neptune-core/issues/92
-        let type_scripts = vec![TypeScript::native_coin()];
+        let type_scripts = vec![TypeScript::native_currency()];
         let input_lock_scripts = spendable_utxos_and_mps
             .iter()
             .map(|(_utxo, lock_script, _mp)| lock_script.to_owned())

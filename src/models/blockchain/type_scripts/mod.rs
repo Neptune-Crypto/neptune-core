@@ -1,5 +1,7 @@
 use crate::{
-    models::consensus::{mast_hash::MastHash, SecretWitness, ValidationLogic},
+    models::consensus::{
+        mast_hash::MastHash, tasm::program::ConsensusProgram, SecretWitness, ValidationLogic,
+    },
     Hash,
 };
 use get_size::GetSize;
@@ -16,7 +18,7 @@ use tasm_lib::{
     Digest,
 };
 
-use native_currency::native_currency_program;
+use self::native_currency::NativeCurrency;
 
 use super::transaction::{
     primitive_witness::{PrimitiveWitness, SaltedUtxos},
@@ -72,14 +74,15 @@ impl TypeScript {
         self.program.hash::<Hash>()
     }
 
-    pub fn native_coin() -> Self {
+    pub fn native_currency() -> Self {
         Self {
-            program: native_currency_program(),
+            program: NativeCurrency::program(),
         }
     }
 }
 
 pub trait TypeScriptWitness {
+    fn from_primitive_witness(primitive_transaction_witness: &PrimitiveWitness) -> Self;
     fn transaction_kernel(&self) -> TransactionKernel;
     fn salted_input_utxos(&self) -> SaltedUtxos;
     fn salted_output_utxos(&self) -> SaltedUtxos;

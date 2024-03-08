@@ -14,8 +14,6 @@ use tasm_lib::{
         contiguous_list::get_pointer_list::GetPointerList,
         higher_order::{all::All, inner_function::InnerFunction, map::Map, zip::Zip},
         multiset_equality::MultisetEquality,
-        unsafeimplu32::get::UnsafeGet,
-        ListType,
     },
     mmr::bag_peaks::BagPeaks,
     DIGEST_LENGTH,
@@ -185,42 +183,29 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             data_type: DataType::Digest,
         }));
         let map_hash_utxo = library.import(Box::new(Map {
-            list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(HashUtxo)),
         }));
-        let get_pointer_list = library.import(Box::new(GetPointerList {
-            output_list_type: ListType::Unsafe,
-        }));
+        let get_pointer_list = library.import(Box::new(GetPointerList {}));
         let zip_digest_with_void_pointer = library.import(Box::new(Zip {
-            list_type: ListType::Unsafe,
             left_type: DataType::Digest,
             right_type: DataType::VoidPointer,
         }));
         let map_compute_indices = library.import(Box::new(Map {
-            list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(ComputeIndices)),
         }));
         let map_hash_index_list = library.import(Box::new(Map {
-            list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(HashIndexList)),
         }));
         let map_hash_removal_record_indices = library.import(Box::new(Map {
-            list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(HashRemovalRecordIndices)),
         }));
-        let multiset_equality = library.import(Box::new(MultisetEquality(ListType::Unsafe)));
+        let multiset_equality = library.import(Box::new(MultisetEquality));
 
         let map_compute_canonical_commitment = library.import(Box::new(Map {
-            list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(ComputeCanonicalCommitment)),
         }));
         let all_verify_aocl_membership = library.import(Box::new(All {
-            list_type: ListType::Unsafe,
             f: InnerFunction::BasicSnippet(Box::new(VerifyAoclMembership)),
-        }));
-
-        let _get_element = library.import(Box::new(UnsafeGet {
-            data_type: DataType::Digest,
         }));
         let _compute_indices = library.import(Box::new(ComputeIndices));
 
@@ -372,7 +357,7 @@ mod tests {
     use crate::tests::shared::pseudorandom_removal_record_integrity_witness;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use tasm_lib::{memory::encode_to_memory, traits::compiled_program::test_rust_shadow};
-    use triton_vm::prelude::{Claim, StarkParameters};
+    use triton_vm::prelude::{Claim, Stark};
 
     // #[test]
     // fn test_validation_logic() {
@@ -433,12 +418,11 @@ mod tests {
                 input: stdin,
                 output: vec![],
             };
-            let maybe_proof =
-                triton_vm::prove(StarkParameters::default(), &claim, &program, nondeterminism);
+            let maybe_proof = triton_vm::prove(Stark::default(), &claim, &program, nondeterminism);
             assert!(maybe_proof.is_ok());
 
             assert!(triton_vm::verify(
-                StarkParameters::default(),
+                Stark::default(),
                 &claim,
                 &maybe_proof.unwrap()
             ));

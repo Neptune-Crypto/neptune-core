@@ -1,8 +1,9 @@
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::type_scripts::native_currency;
+use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use num_traits::Zero;
@@ -16,7 +17,6 @@ use triton_vm::triton_asm;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
 
-use crate::models::blockchain::type_scripts::native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
@@ -27,7 +27,7 @@ pub struct Coin {
     pub state: Vec<BFieldElement>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec, Arbitrary)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
 pub struct Utxo {
     pub lock_script_hash: Digest,
     pub coins: Vec<Coin>,
@@ -66,7 +66,7 @@ impl Utxo {
         Self::new(
             lock_script,
             vec![Coin {
-                type_script_hash: native_currency::NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST,
+                type_script_hash: NativeCurrency::hash(),
                 state: amount.encode(),
             }],
         )
@@ -75,7 +75,7 @@ impl Utxo {
     pub fn get_native_coin_amount(&self) -> NeptuneCoins {
         self.coins
             .iter()
-            .filter(|coin| coin.type_script_hash == NATIVE_CURRENCY_TYPE_SCRIPT_DIGEST)
+            .filter(|coin| coin.type_script_hash == NativeCurrency::hash())
             .map(|coin| match NeptuneCoins::decode(&coin.state) {
                 Ok(boxed_amount) => *boxed_amount,
                 Err(_) => NeptuneCoins::zero(),
@@ -101,6 +101,22 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     Utxo {
         lock_script_hash: rng.gen(),
         coins: NeptuneCoins::new(rng.next_u32() % 42000000).to_native_coins(),
+    }
+}
+
+impl<'a> Arbitrary<'a> for Utxo {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let lock_script_hash: Digest = Digest::arbitrary(u)?;
+        let type_script_hash = NativeCurrency::hash();
+        let amount = NeptuneCoins::arbitrary(u)?;
+        let coins = vec![Coin {
+            type_script_hash,
+            state: amount.encode(),
+        }];
+        Ok(Utxo {
+            lock_script_hash,
+            coins,
+        })
     }
 }
 
@@ -144,6 +160,13 @@ impl LockScript {
     }
 }
 
+impl<'a> Arbitrary<'a> for LockScript {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let program = Program::arbitrary(u)?;
+        Ok(LockScript { program })
+    }
+}
+
 #[cfg(test)]
 mod utxo_tests {
     use crate::models::blockchain::type_scripts::TypeScript;
@@ -160,7 +183,7 @@ mod utxo_tests {
         let num_coins = rng.gen_range(0..10);
         let mut coins = vec![];
         for _i in 0..num_coins {
-            let type_script = TypeScript::native_coin();
+            let type_script = TypeScript::native_currency();
             let state: Vec<BFieldElement> = random_elements(rng.gen_range(0..10));
             coins.push(Coin {
                 type_script_hash: type_script.hash(),

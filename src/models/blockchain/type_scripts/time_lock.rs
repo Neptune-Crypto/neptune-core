@@ -9,7 +9,6 @@ use crate::models::blockchain::transaction::utxo::Coin;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::SecretWitness;
-use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -388,45 +387,10 @@ pub struct TimeLockWitness {
     /// assigned timestamp 0, which is automatically satisfied.
     release_dates: Vec<u64>,
     input_utxos: SaltedUtxos,
-    input_membership_proofs: Vec<MsMembershipProof>,
     transaction_kernel: TransactionKernel,
 }
 
-impl TimeLockWitness {
-    pub fn from_primitive_witness(transaction_primitive_witness: &PrimitiveWitness) -> Self {
-        let release_dates = transaction_primitive_witness
-            .input_utxos
-            .utxos
-            .iter()
-            .map(|utxo| {
-                utxo.coins
-                    .iter()
-                    .find(|coin| coin.type_script_hash == TimeLock::hash())
-                    .cloned()
-                    .map(|coin| {
-                        coin.state
-                            .first()
-                            .copied()
-                            .unwrap_or_else(|| BFieldElement::new(0))
-                    })
-                    .unwrap_or_else(|| BFieldElement::new(0))
-            })
-            .map(|b| b.value())
-            .collect_vec();
-        let transaction_kernel =
-            TransactionKernel::from_primitive_witness(transaction_primitive_witness);
-        let input_utxos = transaction_primitive_witness.input_utxos.clone();
-        let input_mps = transaction_primitive_witness
-            .input_membership_proofs
-            .clone();
-        Self {
-            release_dates,
-            input_utxos,
-            input_membership_proofs: input_mps,
-            transaction_kernel,
-        }
-    }
-}
+impl TimeLockWitness {}
 
 impl SecretWitness for TimeLockWitness {
     fn nondeterminism(&self) -> NonDeterminism<BFieldElement> {
@@ -466,6 +430,35 @@ impl SecretWitness for TimeLockWitness {
 }
 
 impl TypeScriptWitness for TimeLockWitness {
+    fn from_primitive_witness(transaction_primitive_witness: &PrimitiveWitness) -> Self {
+        let release_dates = transaction_primitive_witness
+            .input_utxos
+            .utxos
+            .iter()
+            .map(|utxo| {
+                utxo.coins
+                    .iter()
+                    .find(|coin| coin.type_script_hash == TimeLock::hash())
+                    .cloned()
+                    .map(|coin| {
+                        coin.state
+                            .first()
+                            .copied()
+                            .unwrap_or_else(|| BFieldElement::new(0))
+                    })
+                    .unwrap_or_else(|| BFieldElement::new(0))
+            })
+            .map(|b| b.value())
+            .collect_vec();
+        let transaction_kernel =
+            TransactionKernel::from_primitive_witness(transaction_primitive_witness);
+        let input_utxos = transaction_primitive_witness.input_utxos.clone();
+        Self {
+            release_dates,
+            input_utxos,
+            transaction_kernel,
+        }
+    }
     fn transaction_kernel(&self) -> TransactionKernel {
         self.transaction_kernel.clone()
     }
@@ -528,7 +521,7 @@ impl Arbitrary for TimeLockWitness {
                     }
 
                     // generate valid output amounts
-                    PrimitiveWitness::find_valid_output_amounts_and_fee(
+                    PrimitiveWitness::find_balanced_output_amounts_and_fee(
                         total_inputs,
                         maybe_coinbase,
                         &mut output_amounts,
