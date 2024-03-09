@@ -3,12 +3,13 @@ use std::{fmt::Display, time::Duration};
 use chrono::DateTime;
 use itertools::Itertools;
 use num_traits::Zero;
+use serde::{Deserialize, Serialize};
 
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 
 /// An amount of Neptune coins, with confirmation timestamp and (if time-locked) its
 /// release date. For reporting purposes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinWithPossibleTimeLock {
     pub amount: NeptuneCoins,
     pub confirmed: Duration,
@@ -39,7 +40,7 @@ impl Display for CoinWithPossibleTimeLock {
 
         let amount_total_length = 15;
         let amount_as_string = self.amount.to_string();
-        let amount_parts = amount_as_string.split(".").collect_vec();
+        let amount_parts = amount_as_string.split('.').collect_vec();
         let amount_padding_front = " ".repeat(amount_total_length - 3 - amount_parts[0].len());
         let amount_padding_back = if amount_parts.len() > 1 {
             "".to_string()
@@ -127,12 +128,12 @@ mod test {
         let mut coins = vec![];
         for _ in 0..num_coins {
             let coin = CoinWithPossibleTimeLock {
-                amount: if rng.gen::<bool>() == true {
+                amount: if rng.gen::<bool>() {
                     NeptuneCoins::new(rng.next_u32() % 100000)
                 } else {
                     NeptuneCoins::arbitrary(&mut Unstructured::new(&rng.gen::<[u8; 32]>())).unwrap()
                 },
-                release_date: if rng.gen::<bool>() == true {
+                release_date: if rng.gen::<bool>() {
                     Some(Duration::from_millis(rng.next_u64() % (1 << 35)))
                 } else {
                     None

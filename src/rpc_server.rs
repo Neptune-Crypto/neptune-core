@@ -1,4 +1,5 @@
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::prelude::twenty_first;
 
 use anyhow::Result;
@@ -123,6 +124,9 @@ pub trait RPC {
 
     /// Determine whether the given amount is less than (or equal to) the balance
     async fn amount_leq_synced_balance(amount: NeptuneCoins) -> bool;
+
+    /// Generate a report of all owned and unspent coins, whether time-locked or not.
+    async fn list_own_coins() -> Vec<CoinWithPossibleTimeLock>;
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
@@ -633,6 +637,19 @@ impl RPC for NeptuneRPCServer {
                 0
             }
         }
+    }
+
+    #[doc = r" Generate a report of all owned and unspent coins, whether time-locked or not."]
+    async fn list_own_coins(
+        self,
+        _context: ::tarpc::context::Context,
+    ) -> Vec<CoinWithPossibleTimeLock> {
+        self.state
+            .lock_guard()
+            .await
+            .wallet_state
+            .get_all_own_coins_with_possible_timelocks()
+            .await
     }
 }
 
