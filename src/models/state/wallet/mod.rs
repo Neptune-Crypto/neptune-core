@@ -539,10 +539,14 @@ mod wallet_tests {
                 .body
                 .mutator_set_accumulator
                 .verify(block_1_tx_output_digest, &ms_membership_proof);
-            assert!(
-                !membership_proof_is_valid,
-                "membership proof must be invalid before updating wallet state"
-            );
+
+            // Actually, new blocks / transactions / UTXOs do not necessarily
+            // invalidate existing mutator set membership proofs (although that is
+            // what usually happens). So there is no point asserting it.
+            // assert!(
+            //     !membership_proof_is_valid,
+            //     "membership proof must be invalid before updating wallet state"
+            // );
         }
         // Verify that the membership proof is valid *after* running the updater
         own_wallet_state
