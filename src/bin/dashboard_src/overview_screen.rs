@@ -33,7 +33,8 @@ use super::screen::Screen;
 
 #[derive(Debug, Clone)]
 pub struct OverviewData {
-    synced_balance: Option<NeptuneCoins>,
+    available_balance: Option<NeptuneCoins>,
+    timelocked_balance: Option<NeptuneCoins>,
     confirmations: Option<BlockHeight>,
     synchronization_percentage: Option<f64>,
 
@@ -66,7 +67,8 @@ pub struct OverviewData {
 impl OverviewData {
     pub fn new(network: Network, listen_address: Option<SocketAddr>) -> Self {
         Self {
-            synced_balance: Default::default(),
+            available_balance: Default::default(),
+            timelocked_balance: Default::default(),
             confirmations: Default::default(),
             synchronization_percentage: Default::default(),
             network,
@@ -93,7 +95,8 @@ impl OverviewData {
     }
     pub fn test() -> Self {
         OverviewData {
-            synced_balance: Some(NeptuneCoins::zero()),
+            available_balance: Some(NeptuneCoins::zero()),
+            timelocked_balance: Some(NeptuneCoins::zero()),
             confirmations: Some(17.into()),
             synchronization_percentage: Some(99.5),
 
@@ -202,7 +205,8 @@ impl OverviewScreen {
                                 own_overview_data.peer_count=resp.peer_count;
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
-                                own_overview_data.synced_balance = Some(resp.synced_balance);
+                                own_overview_data.available_balance = Some(resp.available_balance);
+                                own_overview_data.timelocked_balance = Some(resp.timelocked_balance);
                                 own_overview_data.is_mining = resp.is_mining;
                                 own_overview_data.confirmations = resp.confirmations;
                             }
@@ -358,12 +362,16 @@ impl Widget for OverviewScreen {
 
         // balance
         lines.push(format!(
-            "synced balance: {} {}",
-            dashifnotset!(data.synced_balance),
+            "available balance: {} {}",
+            dashifnotset!(data.available_balance),
             match data.confirmations {
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),
             },
+        ));
+        lines.push(format!(
+            "time-locked balance: {}",
+            dashifnotset!(data.timelocked_balance),
         ));
         lines.push(format!(
             "synchronization: {}",

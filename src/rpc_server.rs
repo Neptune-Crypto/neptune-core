@@ -35,7 +35,8 @@ use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 pub struct DashBoardOverviewDataFromClient {
     pub tip_header: BlockHeader,
     pub syncing: bool,
-    pub synced_balance: NeptuneCoins,
+    pub available_balance: NeptuneCoins,
+    pub timelocked_balance: NeptuneCoins,
     pub mempool_size: usize,
     pub mempool_tx_count: usize,
 
@@ -433,7 +434,8 @@ impl RPC for NeptuneRPCServer {
         DashBoardOverviewDataFromClient {
             tip_header,
             syncing,
-            synced_balance: wallet_status.synced_unspent_available_amount(now),
+            available_balance: wallet_status.synced_unspent_available_amount(now),
+            timelocked_balance: wallet_status.synced_unspent_timelocked_amount(now),
             mempool_size,
             mempool_tx_count,
             peer_count,
