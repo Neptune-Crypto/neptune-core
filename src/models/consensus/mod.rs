@@ -24,6 +24,7 @@ use self::tasm::program::ConsensusProgram;
 
 pub mod mast_hash;
 pub mod tasm;
+pub mod timestamp;
 
 /// The claim to validiy of a block or transaction (a *validity claim*) is a Boolean
 /// expression for which we build an abstract syntax tree. Nodes in this tree assume

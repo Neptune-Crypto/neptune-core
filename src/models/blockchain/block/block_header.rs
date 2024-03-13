@@ -1,3 +1,4 @@
+use crate::models::consensus::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
 use crate::models::consensus::mast_hash::HasDiscriminant;
@@ -26,7 +27,7 @@ pub struct BlockHeader {
 
     // TODO: Reject blocks that are more than 10 seconds into the future
     // number of milliseconds since unix epoch
-    pub timestamp: BFieldElement,
+    pub timestamp: Timestamp,
 
     // TODO: Consider making a type for `nonce`
     pub nonce: [BFieldElement; 3],

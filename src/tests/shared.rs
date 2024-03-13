@@ -2,6 +2,7 @@ use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::ValidityTree;
 use crate::prelude::twenty_first;
 
@@ -24,15 +25,8 @@ use rand::RngCore;
 use rand::SeedableRng;
 use std::path::Path;
 use std::path::PathBuf;
-use std::{
-    collections::HashMap,
-    env,
-    net::SocketAddr,
-    pin::Pin,
-    str::FromStr,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::SystemTime;
+use std::{collections::HashMap, env, net::SocketAddr, pin::Pin, str::FromStr, sync::Arc};
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::{broadcast, mpsc};
@@ -767,19 +761,14 @@ pub fn make_mock_transaction_with_generation_key(
         .iter()
         .map(|x| x.public_announcement.clone())
         .collect_vec();
-    let timestamp: u64 = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis()
-        .try_into()
-        .unwrap();
+    let timestamp = Timestamp::now();
 
     let kernel = TransactionKernel {
         inputs,
         outputs,
         public_announcements,
         fee,
-        timestamp: BFieldElement::new(timestamp),
+        timestamp,
         coinbase: None,
         mutator_set_hash: tip_msa.hash(),
     };
@@ -828,14 +817,7 @@ pub fn make_mock_transaction(
     inputs: Vec<RemovalRecord>,
     outputs: Vec<AdditionRecord>,
 ) -> Transaction {
-    let timestamp: BFieldElement = BFieldElement::new(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Got bad timestamp")
-            .as_millis()
-            .try_into()
-            .unwrap(),
-    );
+    let timestamp = Timestamp::now();
 
     Transaction {
         kernel: TransactionKernel {
@@ -860,18 +842,11 @@ pub fn make_mock_transaction_with_wallet(
     outputs: Vec<AdditionRecord>,
     fee: NeptuneCoins,
     _wallet_state: &WalletState,
-    timestamp: Option<BFieldElement>,
+    timestamp: Option<Timestamp>,
 ) -> Transaction {
     let timestamp = match timestamp {
         Some(ts) => ts,
-        None => BFieldElement::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Timestamp generation must work")
-                .as_millis()
-                .try_into()
-                .expect("Timestamp in ms must be representable as u64"),
-        ),
+        None => Timestamp::now(),
     };
     let kernel = TransactionKernel {
         inputs,
@@ -899,7 +874,7 @@ pub fn make_mock_transaction_with_wallet(
 pub fn make_mock_block(
     previous_block: &Block,
     // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
-    block_timestamp: Option<u64>,
+    block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
@@ -925,7 +900,7 @@ pub fn make_mock_block(
 
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
-        None => previous_block.kernel.header.timestamp.value() + TARGET_BLOCK_INTERVAL,
+        None => previous_block.kernel.header.timestamp + Timestamp::millis(TARGET_BLOCK_INTERVAL),
     };
 
     let tx_kernel = TransactionKernel {
@@ -933,7 +908,7 @@ pub fn make_mock_block(
         outputs: vec![coinbase_addition_record],
         public_announcements: vec![],
         fee: NeptuneCoins::zero(),
-        timestamp: BFieldElement::new(block_timestamp),
+        timestamp: block_timestamp,
         coinbase: Some(coinbase_amount),
         mutator_set_hash: previous_mutator_set.hash(),
     };
@@ -990,7 +965,7 @@ pub fn make_mock_block(
 
 pub fn make_mock_block_with_valid_pow(
     previous_block: &Block,
-    block_timestamp: Option<u64>,
+    block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
@@ -1017,7 +992,7 @@ pub fn make_mock_block_with_valid_pow(
 
 pub fn make_mock_block_with_invalid_pow(
     previous_block: &Block,
-    block_timestamp: Option<u64>,
+    block_timestamp: Option<Timestamp>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {

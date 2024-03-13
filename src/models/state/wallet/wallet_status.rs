@@ -1,11 +1,11 @@
 use std::fmt::Display;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -39,7 +39,7 @@ pub struct WalletStatus {
 }
 
 impl WalletStatus {
-    pub fn synced_unspent_available_amount(&self, timestamp: u64) -> NeptuneCoins {
+    pub fn synced_unspent_available_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)
@@ -47,7 +47,7 @@ impl WalletStatus {
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>()
     }
-    pub fn synced_unspent_timelocked_amount(&self, timestamp: u64) -> NeptuneCoins {
+    pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
         self.synced_unspent
             .iter()
             .map(|(wse, _msmp)| &wse.utxo)
@@ -77,10 +77,7 @@ impl WalletStatus {
 
 impl Display for WalletStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now = Timestamp::now();
         let synced_unspent_available_count: usize = self
             .synced_unspent
             .iter()

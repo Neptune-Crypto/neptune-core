@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use strum::EnumIter;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 
+use crate::models::consensus::timestamp::Timestamp;
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {
     /// First iteration of testnet. Not feature-complete. Soon to be deprecated.
@@ -31,7 +33,7 @@ pub enum Network {
     RegTest,
 }
 impl Network {
-    pub(crate) fn launch_date(&self) -> BFieldElement {
+    pub(crate) fn launch_date(&self) -> Timestamp {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -39,10 +41,10 @@ impl Network {
         let ten_minutes = 1000 * 60 * 10;
         let now_rounded = (now / ten_minutes) * ten_minutes;
         match self {
-            Network::RegTest => BFieldElement::new(now_rounded),
+            Network::RegTest => Timestamp(BFieldElement::new(now_rounded)),
             // 1 July 2024 (might be revised though)
             Network::Alpha | Network::Testnet | Network::Beta | Network::Main => {
-                BFieldElement::new(1719792000000u64)
+                Timestamp(BFieldElement::new(1719792000000u64))
             }
         }
     }

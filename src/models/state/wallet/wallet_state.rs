@@ -1,6 +1,7 @@
 use crate::models::blockchain::type_scripts::native_currency::NativeCurrency;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::tasm::program::ConsensusProgram;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
 use anyhow::{bail, Result};
@@ -11,7 +12,6 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, error, info, warn};
@@ -463,7 +463,7 @@ impl WalletState {
                 let mut mutxo = MonitoredUtxo::new(utxo, self.number_of_mps_per_utxo);
                 mutxo.confirmed_in_block = Some((
                     new_block.hash(),
-                    Duration::from_millis(new_block.kernel.header.timestamp.value()),
+                    new_block.kernel.header.timestamp,
                     new_block.kernel.header.height,
                 ));
                 monitored_utxos.push(mutxo);
@@ -528,7 +528,7 @@ impl WalletState {
                     let mut spent_mutxo = monitored_utxos.get(*mutxo_list_index);
                     spent_mutxo.spent_in_block = Some((
                         new_block.hash(),
-                        Duration::from_millis(new_block.kernel.header.timestamp.value()),
+                        new_block.kernel.header.timestamp,
                         new_block.kernel.header.height,
                     ));
                     monitored_utxos.set(*mutxo_list_index, spent_mutxo);
@@ -659,7 +659,7 @@ impl WalletState {
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
-        timestamp: u64,
+        timestamp: Timestamp,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
@@ -709,10 +709,7 @@ impl WalletState {
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let now = Timestamp::now();
         self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
             .await
     }
@@ -1031,7 +1028,7 @@ mod tests {
         assert_eq!(
             (
                 block_12.hash(),
-                Duration::from_millis(block_12.kernel.header.timestamp.value()),
+                block_12.kernel.header.timestamp,
                 12u64.into()
             ),
             own_global_state

@@ -344,8 +344,6 @@ impl WalletSecret {
 
 #[cfg(test)]
 mod wallet_tests {
-    use std::time::Duration;
-
     use itertools::Itertools;
     use num_traits::CheckedSub;
     use rand::random;
@@ -364,6 +362,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::utxo::{LockScript, Utxo};
     use crate::models::blockchain::transaction::PublicAnnouncement;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::consensus::timestamp::Timestamp;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
@@ -818,12 +817,12 @@ mod wallet_tests {
             get_mock_global_state(network, 2, premine_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
-        let launch = genesis_block.kernel.header.timestamp.value();
-        let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
+        let launch = genesis_block.kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
         let preminers_original_balance = premine_receiver_global_state
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_available_amount(launch + seven_months.as_millis() as u64);
+            .synced_unspent_available_amount(launch + seven_months);
         assert!(
             !preminers_original_balance.is_zero(),
             "Premine must have non-zero synced balance"
@@ -863,7 +862,7 @@ mod wallet_tests {
             },
         };
         let receiver_data_to_other = vec![receiver_data_12_to_other, receiver_data_one_to_other];
-        let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
+        let mut now = genesis_block.kernel.header.timestamp;
         let valid_tx = premine_receiver_global_state
             .create_transaction(
                 receiver_data_to_other.clone(),
@@ -915,7 +914,7 @@ mod wallet_tests {
             premine_receiver_global_state
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_available_amount(launch + seven_months.as_millis() as u64),
+                .synced_unspent_available_amount(launch + seven_months),
             "Preminer must have spent 15: 12 + 1 for sent, 2 for fees"
         );
 
@@ -1115,7 +1114,7 @@ mod wallet_tests {
         // one coinbase UTXO and one other UTXO
         let (mut block_3_b, cb_utxo, cb_sender_randomness) =
             make_mock_block(&block_2_b, None, own_address, rng.gen());
-        now = Duration::from_millis(block_3_b.kernel.header.timestamp.value());
+        now = block_3_b.kernel.header.timestamp;
         assert!(
             block_3_b.is_valid(&block_2_b, now),
             "Block must be valid before merging txs"

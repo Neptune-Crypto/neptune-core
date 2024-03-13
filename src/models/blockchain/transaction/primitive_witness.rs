@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
@@ -22,7 +20,7 @@ use tasm_lib::{
 
 use crate::models::{
     blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
-    consensus::tasm::program::ConsensusProgram,
+    consensus::{tasm::program::ConsensusProgram, timestamp::Timestamp},
 };
 use crate::{
     models::{blockchain::type_scripts::TypeScript, state::wallet::address::generation_address},
@@ -361,12 +359,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
                             public_announcements: public_announcements.to_vec(),
                             fee,
                             coinbase,
-                            timestamp: BFieldElement::new(
-                                SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_millis() as u64,
-                            ),
+                            timestamp: Timestamp::now(),
                             mutator_set_hash: mutator_set_accumulator.hash(),
                         };
 

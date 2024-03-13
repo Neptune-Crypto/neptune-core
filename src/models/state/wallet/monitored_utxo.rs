@@ -1,6 +1,6 @@
-use crate::prelude::twenty_first;
+use crate::{models::consensus::timestamp::Timestamp, prelude::twenty_first};
 
-use std::{collections::VecDeque, time::Duration};
+use std::collections::VecDeque;
 
 use crate::{
     models::{blockchain::block::block_height::BlockHeight, state::archival_state::ArchivalState},
@@ -21,14 +21,14 @@ pub struct MonitoredUtxo {
     pub number_of_mps_per_utxo: usize,
 
     // hash of the block, if any, in which this UTXO was spent
-    pub spent_in_block: Option<(Digest, Duration, BlockHeight)>,
+    pub spent_in_block: Option<(Digest, Timestamp, BlockHeight)>,
 
     // hash of the block, if any, in which this UTXO was confirmed
-    pub confirmed_in_block: Option<(Digest, Duration, BlockHeight)>,
+    pub confirmed_in_block: Option<(Digest, Timestamp, BlockHeight)>,
 
     /// Indicator used to mark the UTXO as belonging to an abandoned fork
     /// Indicates what was the block tip when UTXO was marked as abandoned
-    pub abandoned_at: Option<(Digest, Duration, BlockHeight)>,
+    pub abandoned_at: Option<(Digest, Timestamp, BlockHeight)>,
 }
 
 impl MonitoredUtxo {

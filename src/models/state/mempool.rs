@@ -9,7 +9,10 @@
 //! density'.
 
 use crate::{
-    models::{blockchain::type_scripts::neptune_coins::NeptuneCoins, consensus::WitnessType},
+    models::{
+        blockchain::type_scripts::neptune_coins::NeptuneCoins,
+        consensus::{timestamp::Timestamp, WitnessType},
+    },
     prelude::twenty_first,
     util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator,
 };
@@ -21,7 +24,6 @@ use priority_queue::{double_priority_queue::iterators::IntoSortedIter, DoublePri
 use std::{
     collections::{hash_map::RandomState, HashMap, HashSet},
     iter::Rev,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
@@ -57,11 +59,6 @@ pub const MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD: u64 = 5 * 60;
 pub const TRANSACTION_NOTIFICATION_AGE_LIMIT_IN_SECS: u64 = 60 * 60 * 24;
 
 type LookupItem<'a> = (Digest, &'a Transaction);
-
-/// Timestamp of 'now' encoded as the duration since epoch.
-fn now() -> Duration {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
 pub struct Mempool {
@@ -276,10 +273,10 @@ impl Mempool {
     /// Prune based on `Transaction.timestamp`
     /// Computes in O(n)
     pub fn prune_stale_transactions(&mut self) {
-        let cutoff = now() - Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
+        let cutoff = Timestamp::now() - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
-            cutoff.as_secs() < transaction.kernel.timestamp.value()
+            cutoff < transaction.kernel.timestamp
         };
 
         self.retain(keep);
@@ -416,11 +413,9 @@ mod tests {
     use num_bigint::BigInt;
     use num_traits::Zero;
     use rand::{random, rngs::StdRng, thread_rng, Rng, SeedableRng};
+    use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
     use tracing::debug;
     use tracing_test::traced_test;
-    use twenty_first::{
-        shared_math::b_field_element::BFieldElement, util_types::emojihash_trait::Emojihash,
-    };
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
@@ -511,8 +506,8 @@ mod tests {
             "Mempool must be empty after initialization"
         );
 
-        let eight_days_ago = now() - Duration::from_secs(8 * 24 * 60 * 60);
-        let timestamp = Some(BFieldElement::new(eight_days_ago.as_secs()));
+        let eight_days_ago = Timestamp::now() - Timestamp::days(8);
+        let timestamp = Some(eight_days_ago);
 
         for i in 0u32..5 {
             let t = make_mock_transaction_with_wallet(
@@ -632,8 +627,8 @@ mod tests {
                 utxo: new_utxo,
             });
         }
-        let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
-        let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
+        let mut now = genesis_block.kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
         let tx_by_preminer = premine_receiver_global_state
             .create_transaction(
                 output_utxos_generated_by_me,
@@ -722,7 +717,7 @@ mod tests {
             tx_by_other_updated.clone(),
             &block_2.kernel.body.mutator_set_accumulator,
         );
-        now = Duration::from_millis(block_2.kernel.header.timestamp.value());
+        now = block_2.kernel.header.timestamp;
         assert!(
             block_3_with_updated_tx.is_valid(&block_2, now + seven_months),
             "Block with tx with updated mutator set data must be valid"
@@ -750,7 +745,7 @@ mod tests {
             tx_by_other_updated,
             &previous_block.kernel.body.mutator_set_accumulator,
         );
-        now = Duration::from_millis(previous_block.kernel.header.timestamp.value());
+        now = previous_block.kernel.header.timestamp;
         assert!(
             block_14.is_valid(&previous_block, now+seven_months),
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
@@ -776,14 +771,8 @@ mod tests {
         let network = Network::RegTest;
         let preminer_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let now = Duration::from_millis(
-            Block::genesis_block(network)
-                .kernel
-                .header
-                .timestamp
-                .value(),
-        );
-        let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
+        let now = Block::genesis_block(network).kernel.header.timestamp;
+        let seven_months = Timestamp::months(7);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
         let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);

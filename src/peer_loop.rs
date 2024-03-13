@@ -1,4 +1,5 @@
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
 use crate::connect_to_peers::close_peer_connected_callback;
@@ -20,7 +21,7 @@ use itertools::Itertools;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
@@ -113,7 +114,7 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let now = Timestamp::now();
         let mut previous_block = &parent_of_first_block;
         for new_block in received_blocks.iter() {
             if !new_block.has_proof_of_work(previous_block) {
@@ -148,8 +149,7 @@ impl PeerLoopHandler {
                 info!(
                     "Block with height {} is valid. mined: {}",
                     new_block.kernel.header.height,
-                    crate::utc_timestamp_to_localtime(new_block.kernel.header.timestamp.value())
-                        .to_string()
+                    new_block.kernel.header.timestamp.standard_format()
                 );
             }
 
@@ -384,7 +384,7 @@ impl PeerLoopHandler {
                     "Got new block from peer {}, height {}, mined {}",
                     self.peer_address,
                     t_block.header.height,
-                    crate::utc_timestamp_to_localtime(t_block.header.timestamp.value()).to_string()
+                    t_block.header.timestamp.standard_format()
                 );
                 let new_block_height = t_block.header.height;
 
@@ -798,19 +798,11 @@ impl PeerLoopHandler {
                 }
 
                 // Get transaction timestamp
-                let tx_timestamp = match transaction.get_timestamp() {
-                    Ok(ts) => ts,
-                    Err(_) => {
-                        warn!("Received tx with invalid timestamp");
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
-                };
+                let tx_timestamp = transaction.kernel.timestamp;
 
                 // 2. Ignore if transaction is too old
-                let now = SystemTime::now();
-                if tx_timestamp
-                    < now - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
-                {
+                let now = Timestamp::now();
+                if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -818,10 +810,7 @@ impl PeerLoopHandler {
 
                 // 3. Ignore if transaction is too far into the future
                 if tx_timestamp
-                    > now
-                        + std::time::Duration::from_secs(
-                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
-                        )
+                    > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {
                     // TODO: Consider punishing here
                     warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
