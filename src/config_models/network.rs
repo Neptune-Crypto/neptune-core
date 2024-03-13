@@ -1,14 +1,50 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 use strum::EnumIter;
+use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default, EnumIter)]
 pub enum Network {
+    /// First iteration of testnet. Not feature-complete. Soon to be deprecated.
     #[default]
     Alpha,
+
+    /// Upcoming iteration of testnet. Not feature-complete either but moreso than
+    /// Alpha. Soon to be set as default.
+    Beta,
+
+    /// Main net. Feature-complete. Fixed launch date. Not ready yet.
+    Main,
+
+    /// Feature-complete (or as feature-complete as possible) test network separate
+    /// from whichever network is currently running. For integration tests involving
+    /// multiple nodes over a network.
     Testnet,
+
+    /// Network for individual unit and integration tests. The timestamp for the
+    /// RegTest genesis block is set to now, rounded down to the first block of
+    /// 10 minutes.
     RegTest,
+}
+impl Network {
+    pub(crate) fn launch_date(&self) -> BFieldElement {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let ten_minutes = 1000 * 60 * 10;
+        let now_rounded = (now / ten_minutes) * ten_minutes;
+        match self {
+            // TODO: use now_rounded
+            Network::RegTest => BFieldElement::new(now_rounded),
+            // 1 July 2024 (might be revised though)
+            Network::Alpha | Network::Testnet | Network::Beta | Network::Main => {
+                BFieldElement::new(1719792000000u64)
+            }
+        }
+    }
 }
 
 impl fmt::Display for Network {
@@ -17,6 +53,8 @@ impl fmt::Display for Network {
             Network::Alpha => "alpha".to_string(),
             Network::Testnet => "testnet".to_string(),
             Network::RegTest => "regtest".to_string(),
+            Network::Beta => "beta".to_string(),
+            Network::Main => "main".to_string(),
         };
         write!(f, "{}", string)
     }
@@ -29,6 +67,8 @@ impl FromStr for Network {
             "alpha" => Ok(Network::Alpha),
             "testnet" => Ok(Network::Testnet),
             "regtest" => Ok(Network::RegTest),
+            "beta" => Ok(Network::Beta),
+            "main" => Ok(Network::Main),
             _ => Err(format!("Failed to parse {} as network", input)),
         }
     }
