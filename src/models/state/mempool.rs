@@ -559,9 +559,10 @@ mod tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
+        let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let premine_receiver_global_state_lock =
-            get_mock_global_state(Network::Alpha, 2, devnet_wallet).await;
+            get_mock_global_state(network, 2, devnet_wallet).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
 
@@ -571,13 +572,13 @@ mod tests {
         let other_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
 
         let other_global_state_lock =
-            get_mock_global_state(Network::Alpha, 2, other_wallet_secret.clone()).await;
+            get_mock_global_state(network, 2, other_wallet_secret.clone()).await;
         let mut other_global_state = other_global_state_lock.lock_guard_mut().await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
         let other_receiver_address = other_receiver_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
             make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
 
@@ -772,9 +773,16 @@ mod tests {
     #[tokio::test]
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
+        let network = Network::RegTest;
         let preminer_state_lock =
-            get_mock_global_state(Network::Alpha, 2, WalletSecret::devnet_wallet()).await;
-        let now = Duration::from_millis(Block::genesis_block().kernel.header.timestamp.value());
+            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
+        let now = Duration::from_millis(
+            Block::genesis_block(network)
+                .kernel
+                .header
+                .timestamp
+                .value(),
+        );
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;

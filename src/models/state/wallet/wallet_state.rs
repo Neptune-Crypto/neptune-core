@@ -203,7 +203,7 @@ impl WalletState {
             // Check if we are premine recipients
             let own_spending_key = wallet_state.wallet_secret.nth_generation_spending_key(0);
             let own_receiving_address = own_spending_key.to_address();
-            for utxo in Block::premine_utxos() {
+            for utxo in Block::premine_utxos(cli_args.network) {
                 if utxo.lock_script_hash == own_receiving_address.lock_script().hash() {
                     wallet_state
                         .expected_utxos
@@ -220,7 +220,7 @@ impl WalletState {
             wallet_state
                 .update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
-                    &Block::genesis_block(),
+                    &Block::genesis_block(cli_args.network),
                 )
                 .await
                 .expect("Updating wallet state with genesis block must succeed");
@@ -771,12 +771,12 @@ mod tests {
         // Prune
         // Verify that MUTXO *is* marked as abandoned
 
-        let network = Network::Testnet;
+        let network = Network::RegTest;
         let own_wallet_secret = WalletSecret::new_random();
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_global_state_lock = get_mock_global_state(network, 0, own_wallet_secret).await;
         let mut own_global_state = own_global_state_lock.lock_guard_mut().await;
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let monitored_utxos_count_init = own_global_state
             .wallet_state
             .wallet_db
@@ -1054,7 +1054,7 @@ mod tests {
     async fn mock_wallet_state_is_synchronized_to_genesis_block() {
         let network = Network::RegTest;
         let wallet = WalletSecret::devnet_wallet();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
 
         let wallet_state = get_mock_wallet_state(wallet, network).await;
 

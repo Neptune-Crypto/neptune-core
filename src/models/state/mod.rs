@@ -1286,11 +1286,11 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn premine_recipient_cannot_spend_premine_before_and_can_after_release_date() {
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let other_wallet = WalletSecret::new_random();
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let twenty_neptune: NeptuneCoins = NeptuneCoins::new(20);
         let twenty_coins = twenty_neptune.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
@@ -1413,14 +1413,14 @@ mod global_state_tests {
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let mut rng = thread_rng();
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let global_state_lock = get_mock_global_state(network, 2, devnet_wallet).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let other_receiver_address = WalletSecret::new_random()
             .nth_generation_spending_key(0)
             .to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let (mock_block_1, _, _) =
             make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
         crate::tests::shared::add_block_to_archival_state(
@@ -1501,7 +1501,7 @@ mod global_state_tests {
             .to_address();
 
         // 1. Create new block 1 and store it to the DB
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp.value();
         let seven_months = 7 * 30 * 24 * 60 * 60 * 1000;
         let (mock_block_1a, _, _) =
@@ -1911,7 +1911,7 @@ mod global_state_tests {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         // Test various parts of the state update when a block contains multiple inputs and outputs
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let genesis_wallet_state =
             get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_spending_key = genesis_wallet_state
@@ -1928,7 +1928,7 @@ mod global_state_tests {
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let bob_state_lock = get_mock_global_state(network, 3, wallet_secret_bob).await;
 
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp.value();
         let seven_months = 7 * 30 * 24 * 60 * 60 * 1000;
 
@@ -2214,7 +2214,7 @@ mod global_state_tests {
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
         let wallet_secret = WalletSecret::new_random();

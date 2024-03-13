@@ -705,7 +705,8 @@ mod rpc_server_tests {
         // We don't care about the actual response data in this test, just that the
         // requests do not crash the server.
 
-        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let network = Network::RegTest;
+        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let ctx = context::current();
         let _ = rpc_server.clone().network(ctx).await;
         let _ = rpc_server.clone().own_listen_address_for_peers(ctx).await;

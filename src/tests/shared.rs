@@ -144,8 +144,9 @@ pub fn get_dummy_version() -> String {
 pub fn get_dummy_latest_block(
     input_block: Option<Block>,
 ) -> (Block, LatestBlockInfo, Arc<std::sync::Mutex<BlockHeader>>) {
+    let network = Network::RegTest;
     let block = match input_block {
-        None => Block::genesis_block(),
+        None => Block::genesis_block(network),
         Some(block) => block,
     };
 
@@ -1046,6 +1047,7 @@ pub fn make_mock_block_with_invalid_pow(
 pub async fn get_mock_wallet_state(wallet_secret: WalletSecret, network: Network) -> WalletState {
     let cli_args: cli_args::Args = cli_args::Args {
         number_of_mps_per_utxo: 30,
+        network,
         ..Default::default()
     };
     let data_dir = unit_test_data_directory(network).unwrap();
@@ -1061,7 +1063,7 @@ pub async fn make_unit_test_archival_state(
         .await
         .unwrap();
 
-    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams).await;
+    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams, network).await;
 
     (archival_state, peer_db, data_dir)
 }

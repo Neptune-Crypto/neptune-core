@@ -124,16 +124,11 @@ impl Block {
         reward
     }
 
-    // 1 July 2024 (might be revised before then)
-    pub fn launch() -> u64 {
-        1719792000000u64
-    }
-
-    pub fn genesis_block() -> Self {
+    pub fn genesis_block(network: Network) -> Self {
         let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
 
-        let premine_distribution = Self::premine_distribution();
+        let premine_distribution = Self::premine_distribution(network);
         let total_premine_amount = premine_distribution
             .iter()
             .map(|(_receiving_address, amount)| *amount)
@@ -144,7 +139,7 @@ impl Block {
                 inputs: vec![],
                 outputs: vec![],
                 fee: NeptuneCoins::new(0),
-                timestamp: BFieldElement::new(Self::launch()),
+                timestamp: network.launch_date(),
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
                 mutator_set_hash: MutatorSetAccumulator::new().hash(),
@@ -158,8 +153,9 @@ impl Block {
             },
         };
 
-        for ((receiving_address, _amount), utxo) in
-            premine_distribution.iter().zip(Self::premine_utxos())
+        for ((receiving_address, _amount), utxo) in premine_distribution
+            .iter()
+            .zip(Self::premine_utxos(network))
         {
             let utxo_digest = Hash::hash(&utxo);
             // generate randomness for mutator set commitment
@@ -188,7 +184,7 @@ impl Block {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
             prev_block_digest: Digest::default(),
-            timestamp: BFieldElement::new(Self::launch()),
+            timestamp: network.launch_date(),
             nonce: [
                 BFieldElement::zero(),
                 BFieldElement::zero(),
@@ -203,7 +199,9 @@ impl Block {
         Self::new(header, body, None)
     }
 
-    fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
+    fn premine_distribution(
+        _network: Network,
+    ) -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
         // The premine UTXOs can be hardcoded here.
         let authority_wallet = WalletSecret::devnet_wallet();
         let authority_receiving_address =
@@ -218,14 +216,14 @@ impl Block {
         ]
     }
 
-    pub fn premine_utxos() -> Vec<Utxo> {
+    pub fn premine_utxos(network: Network) -> Vec<Utxo> {
         let mut utxos = vec![];
-        for (receiving_address, amount) in Self::premine_distribution() {
+        for (receiving_address, amount) in Self::premine_distribution(network) {
             // generate utxo
             let mut utxo = Utxo::new_native_coin(receiving_address.lock_script(), amount);
             let six_months = 365 * 24 * 60 * 60 * 1000 / 2;
             utxo.coins
-                .push(TimeLock::until(Self::launch() + six_months));
+                .push(TimeLock::until(network.launch_date().value() + six_months));
             utxos.push(utxo);
         }
         utxos
@@ -370,11 +368,8 @@ impl Block {
         }
 
         // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
-        // (but only check this if "now" is after launch)
         let future_limit = now + Duration::from_secs(60 * 60 * 2);
-        if now.as_millis() as u64 > Block::launch()
-            && (block_copy.kernel.header.timestamp.value() as u128) >= future_limit.as_millis()
-        {
+        if (block_copy.kernel.header.timestamp.value() as u128) >= future_limit.as_millis() {
             warn!("block time is too far in the future");
             return false;
         }
@@ -563,6 +558,7 @@ mod block_tests {
         },
         tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
     };
+    use strum::IntoEnumIterator;
     use tasm_lib::twenty_first::{
         storage::level_db::DB,
         util_types::{
@@ -583,7 +579,7 @@ mod block_tests {
         let mut rng = thread_rng();
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let network = Network::Alpha;
+        let network = Network::RegTest;
         let global_state_lock =
             get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let spending_key = global_state_lock
@@ -597,7 +593,7 @@ mod block_tests {
         let other_address = other_wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
 
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen());
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
@@ -689,7 +685,8 @@ mod block_tests {
     #[test]
     fn block_with_wrong_mmra_is_invalid() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis_block(network);
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -706,7 +703,8 @@ mod block_tests {
     #[test]
     fn block_with_far_future_timestamp_is_invalid() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis_block(network);
         let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
         let a_wallet_secret = WalletSecret::new_random();
@@ -744,7 +742,8 @@ mod block_tests {
     #[test]
     fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
-        let genesis_block = Block::genesis_block();
+        let network = Network::RegTest;
+        let genesis_block = Block::genesis_block(network);
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
         let db = DB::open_new_test_database(true, None, None, None).unwrap();
@@ -806,13 +805,14 @@ mod block_tests {
         // 831600 = 42000000 * 0.0198
         // where 42000000 is the asymptotical limit of the token supply
         // and 1.98% is the relative size of the premine
-        let premine_max_size = NeptuneCoins::new(831600);
+        for network in Network::iter() {
+            let premine_max_size = NeptuneCoins::new(831600);
+            let total_premine = Block::premine_distribution(network)
+                .iter()
+                .map(|(_receiving_address, amount)| *amount)
+                .sum::<NeptuneCoins>();
 
-        let total_premine = Block::premine_distribution()
-            .iter()
-            .map(|(_receiving_address, amount)| *amount)
-            .sum::<NeptuneCoins>();
-
-        assert!(total_premine <= premine_max_size);
+            assert!(total_premine <= premine_max_size);
+        }
     }
 }

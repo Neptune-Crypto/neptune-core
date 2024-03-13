@@ -459,8 +459,9 @@ mod mine_loop_tests {
     #[tokio::test]
     async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
+        let network = Network::RegTest;
         let premine_receiver_global_state_lock =
-            get_mock_global_state(Network::Alpha, 2, WalletSecret::devnet_wallet()).await;
+            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut premine_receiver_global_state =
             premine_receiver_global_state_lock.lock_guard_mut().await;
         assert!(
@@ -469,7 +470,7 @@ mod mine_loop_tests {
         );
 
         // Verify constructed coinbase transaction and block template when mempool is empty
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block(network);
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
         let (transaction_empty_mempool, _coinbase_sender_randomness) =
             create_block_transaction(&genesis_block, &premine_receiver_global_state, now);

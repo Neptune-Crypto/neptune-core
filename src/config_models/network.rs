@@ -25,7 +25,9 @@ pub enum Network {
 
     /// Network for individual unit and integration tests. The timestamp for the
     /// RegTest genesis block is set to now, rounded down to the first block of
-    /// 10 minutes.
+    /// 10 minutes. As a result, there is a small probability that tests fail
+    /// because they generate the genesis block twice on two opposite sides of a
+    /// round timestamp.
     RegTest,
 }
 impl Network {
@@ -37,7 +39,6 @@ impl Network {
         let ten_minutes = 1000 * 60 * 10;
         let now_rounded = (now / ten_minutes) * ten_minutes;
         match self {
-            // TODO: use now_rounded
             Network::RegTest => BFieldElement::new(now_rounded),
             // 1 July 2024 (might be revised though)
             Network::Alpha | Network::Testnet | Network::Beta | Network::Main => {
