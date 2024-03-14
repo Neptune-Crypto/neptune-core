@@ -576,8 +576,8 @@ impl Arbitrary for TimeLockWitness {
 
 #[cfg(test)]
 mod test {
+    use num_traits::Zero;
     use proptest::{collection::vec, strategy::Just};
-    use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
     use test_strategy::proptest;
 
     use crate::models::{
@@ -586,15 +586,14 @@ mod test {
     };
 
     use super::TimeLockWitness;
-    use itertools::Itertools;
 
     #[proptest]
     fn test_unlocked(
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Just(0u64), #_num_inputs))] _release_dates: Vec<u64>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates.iter().cloned().map(BFieldElement::new).map(Timestamp).collect_vec(), #_num_outputs, #_num_public_announcements)))]
+        #[strategy(vec(Just(Timestamp::zero()), #_num_inputs))] _release_dates: Vec<Timestamp>,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
         time_lock_witness: TimeLockWitness,
     ) {
         assert!(
@@ -613,9 +612,9 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::now().0.value()+Timestamp::days(1).0.value()..Timestamp::now().0.value()+Timestamp::days(7).0.value(), #_num_inputs))]
-        _release_dates: Vec<u64>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates.iter().cloned().map(BFieldElement::new).map(Timestamp).collect_vec(), #_num_outputs, #_num_public_announcements)))]
+        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()+Timestamp::days(1),Timestamp::now()+Timestamp::days(7)), #_num_inputs))]
+        _release_dates: Vec<Timestamp>,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());
@@ -635,9 +634,9 @@ mod test {
         #[strategy(1usize..=3)] _num_inputs: usize,
         #[strategy(1usize..=3)] _num_outputs: usize,
         #[strategy(1usize..=3)] _num_public_announcements: usize,
-        #[strategy(vec(Timestamp::now().0.value()-Timestamp::days(7).0.value()..Timestamp::now().0.value()-Timestamp::days(1).0.value(), #_num_inputs))]
-        _release_dates: Vec<u64>,
-        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates.iter().cloned().map(BFieldElement::new).map(Timestamp).collect_vec(), #_num_outputs, #_num_public_announcements)))]
+        #[strategy(vec(Timestamp::arbitrary_between(Timestamp::now()-Timestamp::days(7),Timestamp::now()-Timestamp::days(1)), #_num_inputs))]
+        _release_dates: Vec<Timestamp>,
+        #[strategy(TimeLockWitness::arbitrary_with((#_release_dates, #_num_outputs, #_num_public_announcements)))]
         time_lock_witness: TimeLockWitness,
     ) {
         println!("now: {}", Timestamp::now());

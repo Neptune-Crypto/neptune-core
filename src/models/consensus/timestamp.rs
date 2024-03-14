@@ -8,6 +8,7 @@ use arbitrary::Arbitrary;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use get_size::GetSize;
 use num_traits::Zero;
+use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 use serde::{Deserialize, Serialize};
 use tasm_lib::twenty_first::shared_math::{
@@ -107,6 +108,12 @@ impl Timestamp {
         let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
         let offset: DateTime<Local> = DateTime::from(utc);
         offset.to_rfc2822()
+    }
+
+    pub fn arbitrary_between(start: Timestamp, stop: Timestamp) -> BoxedStrategy<Timestamp> {
+        (start.0.value()..stop.0.value())
+            .prop_map(|v| Timestamp(BFieldElement::new(v)))
+            .boxed()
     }
 }
 
