@@ -1,19 +1,19 @@
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 
-use crate::models::blockchain::transaction::PrimitiveWitness;
+use crate::models::blockchain::transaction::{self};
 use crate::models::blockchain::transaction::{
     transaction_kernel::TransactionKernelField, utxo::Utxo,
 };
 
-use crate::models::consensus::{ClaimSupport, SupportedClaim};
-use crate::models::consensus::{SecretWitness, ValidationLogic};
+use crate::models::consensus::SecretWitness;
 use get_size::GetSize;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tasm_lib::library::Library;
 use tasm_lib::traits::compiled_program::CompiledProgram;
-use triton_vm::prelude::{BFieldElement, Claim, Digest, NonDeterminism, Program, PublicInput};
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
+use triton_vm::prelude::{BFieldElement, Digest, NonDeterminism, PublicInput};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -27,67 +27,41 @@ impl SecretWitness for KernelToLockScriptsWitness {
         todo!()
     }
 
-    fn subprogram(&self) -> Program {
+    fn standard_input(&self) -> PublicInput {
         todo!()
     }
 
-    fn standard_input(&self) -> PublicInput {
+    fn program(&self) -> triton_vm::prelude::Program {
         todo!()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct KernelToLockScripts {
-    pub supported_claim: SupportedClaim<KernelToLockScriptsWitness>,
+    pub witness: KernelToLockScriptsWitness,
 }
 
-impl KernelToLockScripts {
-    // TODO: Remove after implementing this struct
-    pub fn dummy() -> Self {
-        Self {
-            supported_claim: SupportedClaim::dummy(),
-        }
+impl ConsensusProgram for KernelToLockScripts {
+    fn source(&self) {
+        todo!()
+    }
+
+    fn code(&self) -> Vec<LabelledInstruction> {
+        todo!()
     }
 }
 
-impl ValidationLogic<KernelToLockScriptsWitness> for KernelToLockScripts {
-    type PrimitiveWitness = PrimitiveWitness;
-
-    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
-        let claim = Claim {
-            input: primitive_witness.kernel.mast_hash().into(),
-            output: primitive_witness
-                .input_lock_scripts
-                .iter()
-                .flat_map(|ls| ls.hash().values().to_vec())
-                .collect_vec(),
-            // program_digest: Self::program().hash::<Hash>(),
-            program_digest: Digest::default(),
-        };
-        let _kernel_to_lock_scripts_witness = KernelToLockScriptsWitness {
+impl From<transaction::PrimitiveWitness> for KernelToLockScripts {
+    fn from(primitive_witness: transaction::PrimitiveWitness) -> Self {
+        let kernel_to_lock_scripts_witness = KernelToLockScriptsWitness {
             input_utxos: primitive_witness.input_utxos.utxos.clone(),
             mast_path: primitive_witness
                 .kernel
                 .mast_path(TransactionKernelField::InputUtxos),
         };
-        let supported_claim = SupportedClaim {
-            claim,
-            // support: ClaimSupport::SecretWitness(kernel_to_lock_scripts_witness),
-            support: ClaimSupport::DummySupport,
-        };
-        Self { supported_claim }
-    }
-
-    fn validation_program(&self) -> Program {
-        todo!()
-    }
-
-    fn support(&self) -> ClaimSupport<KernelToLockScriptsWitness> {
-        self.supported_claim.support.clone()
-    }
-
-    fn claim(&self) -> Claim {
-        self.supported_claim.claim.clone()
+        Self {
+            witness: kernel_to_lock_scripts_witness,
+        }
     }
 }
 

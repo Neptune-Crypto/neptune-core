@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, error, info, warn};
@@ -23,6 +23,7 @@ use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::traits::*;
 use twenty_first::util_types::storage_vec::traits::*;
 
+use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
 use super::utxo_notification_pool::{UtxoNotificationPool, UtxoNotifier};
 use super::wallet_status::{WalletStatus, WalletStatusElement};
@@ -182,7 +183,7 @@ impl WalletState {
 
         let sync_label = rusty_wallet_database.get_sync_label();
 
-        let mut ret = Self {
+        let mut wallet_state = Self {
             wallet_db: rusty_wallet_database,
             wallet_secret,
             number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
@@ -200,15 +201,12 @@ impl WalletState {
         // outputs.
         if sync_label == Digest::default() {
             // Check if we are premine recipients
-            let own_spending_key = ret.wallet_secret.nth_generation_spending_key(0);
+            let own_spending_key = wallet_state.wallet_secret.nth_generation_spending_key(0);
             let own_receiving_address = own_spending_key.to_address();
-            for (premine_receiving_address, amount) in Block::premine_distribution() {
-                if premine_receiving_address == own_receiving_address {
-                    let coins = amount.to_native_coins();
-                    let lock_script = own_receiving_address.lock_script();
-                    let utxo = Utxo::new(lock_script, coins);
-
-                    ret.expected_utxos
+            for utxo in Block::premine_utxos() {
+                if utxo.lock_script_hash == own_receiving_address.lock_script().hash() {
+                    wallet_state
+                        .expected_utxos
                         .add_expected_utxo(
                             utxo,
                             Digest::default(),
@@ -219,15 +217,16 @@ impl WalletState {
                 }
             }
 
-            ret.update_wallet_state_with_new_block(
-                &MutatorSetAccumulator::default(),
-                &Block::genesis_block(),
-            )
-            .await
-            .expect("Updating wallet state with genesis block must succeed");
+            wallet_state
+                .update_wallet_state_with_new_block(
+                    &MutatorSetAccumulator::default(),
+                    &Block::genesis_block(),
+                )
+                .await
+                .expect("Updating wallet state with genesis block must succeed");
         }
 
-        ret
+        wallet_state
     }
 
     /// Return a list of UTXOs spent by this wallet in the transaction
@@ -287,7 +286,7 @@ impl WalletState {
             .collect_vec()
     }
 
-    /// Update wallet state with new block. Assumes the given block
+    /// Update wallet state with new block. Assume the given block
     /// is valid and that the wallet state is not up to date yet.
     pub async fn update_wallet_state_with_new_block(
         &mut self,
@@ -372,6 +371,7 @@ impl WalletState {
                         warn!(
                         "Unable to find valid membership proof for UTXO with digest {utxo_digest}. {confirmed_in_block_info} Current block height is {}", new_block.kernel.header.height
                     );
+                        // panic!("Unable to find valid membership proof.");
                     }
                 }
             }
@@ -430,7 +430,7 @@ impl WalletState {
                     new_block.kernel.header.height,
                     utxo.coins
                         .iter()
-                        .filter(|coin| coin.type_script_hash == NativeCurrency::hash())
+                        .filter(|coin| coin.type_script_hash == NativeCurrency.hash())
                         .map(|coin| *NeptuneCoins::decode(&coin.state)
                             .expect("Failed to decode coin state as amount"))
                         .sum::<NeptuneCoins>(),
@@ -625,44 +625,32 @@ impl WalletState {
             let spent = mutxo.spent_in_block.is_some();
             if let Some(mp) = mutxo.get_membership_proof_for_block(tip_digest) {
                 if spent {
-                    synced_spent.push(WalletStatusElement(mp.auth_path_aocl.leaf_index, utxo));
+                    synced_spent.push(WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo));
                 } else {
                     synced_unspent.push((
-                        WalletStatusElement(mp.auth_path_aocl.leaf_index, utxo),
+                        WalletStatusElement::new(mp.auth_path_aocl.leaf_index, utxo),
                         mp.clone(),
                     ));
                 }
             } else {
                 let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
                 if spent {
-                    unsynced_spent
-                        .push(WalletStatusElement(any_mp.auth_path_aocl.leaf_index, utxo));
+                    unsynced_spent.push(WalletStatusElement::new(
+                        any_mp.auth_path_aocl.leaf_index,
+                        utxo,
+                    ));
                 } else {
-                    unsynced_unspent
-                        .push(WalletStatusElement(any_mp.auth_path_aocl.leaf_index, utxo));
+                    unsynced_unspent.push(WalletStatusElement::new(
+                        any_mp.auth_path_aocl.leaf_index,
+                        utxo,
+                    ));
                 }
             }
         }
         WalletStatus {
-            synced_unspent_amount: synced_unspent
-                .iter()
-                .map(|x| x.0 .1.get_native_coin_amount())
-                .sum(),
             synced_unspent,
-            unsynced_unspent_amount: unsynced_unspent
-                .iter()
-                .map(|x| x.1.get_native_coin_amount())
-                .sum(),
             unsynced_unspent,
-            synced_spent_amount: synced_spent
-                .iter()
-                .map(|x| x.1.get_native_coin_amount())
-                .sum(),
             synced_spent,
-            unsynced_spent_amount: unsynced_spent
-                .iter()
-                .map(|x| x.1.get_native_coin_amount())
-                .sum(),
             unsynced_spent,
         }
     }
@@ -671,6 +659,7 @@ impl WalletState {
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
+        timestamp: u64,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
@@ -678,12 +667,16 @@ impl WalletState {
         let wallet_status = self.get_wallet_status_from_lock(tip_digest);
 
         // First check that we have enough. Otherwise return an error.
-        if wallet_status.synced_unspent_amount < requested_amount {
-            // TODO: Change this to `Display` print once available.
+        if wallet_status.synced_unspent_available_amount(timestamp) < requested_amount {
             bail!(
-                "Insufficient synced amount to create transaction. Requested: {:?}, synced unspent amount: {:?}. Unsynced unspent amount: {:?}. Block is: {}",
+                "Insufficient synced amount to create transaction. Requested: {}, Total synced UTXOs: {}. Total synced amount: {}. Synced unspent available amount: {}. Synced unspent timelocked amount: {}. Total unsynced UTXOs: {}. Unsynced unspent amount: {}. Block is: {}",
                 requested_amount,
-                wallet_status.synced_unspent_amount, wallet_status.unsynced_unspent_amount,
+                wallet_status.synced_unspent.len(),
+                wallet_status.synced_unspent.iter().map(|(wse, _msmp)| wse.utxo.get_native_currency_amount()).sum::<NeptuneCoins>(),
+                wallet_status.synced_unspent_available_amount(timestamp),
+                wallet_status.synced_unspent_timelocked_amount(timestamp),
+                wallet_status.unsynced_unspent.len(),
+                wallet_status.unsynced_unspent_amount(),
                 tip_digest.emojihash());
         }
 
@@ -697,9 +690,10 @@ impl WalletState {
         while allocated_amount < requested_amount {
             let (wallet_status_element, membership_proof) =
                 wallet_status.synced_unspent[ret.len()].clone();
-            allocated_amount = allocated_amount + wallet_status_element.1.get_native_coin_amount();
+            allocated_amount =
+                allocated_amount + wallet_status_element.utxo.get_native_currency_amount();
             ret.push((
-                wallet_status_element.1,
+                wallet_status_element.utxo,
                 lock_script.clone(),
                 membership_proof,
             ));
@@ -715,19 +709,46 @@ impl WalletState {
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof)>> {
-        self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
             .await
+    }
+
+    pub async fn get_all_own_coins_with_possible_timelocks(&self) -> Vec<CoinWithPossibleTimeLock> {
+        let monitored_utxos = self.wallet_db.monitored_utxos();
+        let mut own_coins = vec![];
+
+        for (_i, mutxo) in monitored_utxos.iter() {
+            if mutxo.spent_in_block.is_some()
+                || mutxo.abandoned_at.is_some()
+                || mutxo.get_latest_membership_proof_entry().is_none()
+                || mutxo.confirmed_in_block.is_none()
+            {
+                continue;
+            }
+            let coin = CoinWithPossibleTimeLock {
+                amount: mutxo.utxo.get_native_currency_amount(),
+                confirmed: mutxo.confirmed_in_block.unwrap().1,
+                release_date: mutxo.utxo.release_date(),
+            };
+            own_coins.push(coin);
+        }
+        own_coins
     }
 }
 
 #[cfg(test)]
 mod tests {
     use num_traits::One;
+    use rand::{thread_rng, Rng};
     use tracing_test::traced_test;
 
     use crate::{
         config_models::network::Network,
-        tests::shared::{get_mock_global_state, make_mock_block},
+        tests::shared::{get_mock_global_state, get_mock_wallet_state, make_mock_block},
     };
 
     use super::*;
@@ -735,6 +756,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn wallet_state_prune_abandoned_mutxos() {
+        let mut rng = thread_rng();
         // Get genesis block. Verify wallet is empty
         // Add two blocks to state containing no UTXOs for own wallet
         // Add a UTXO (e.g. coinbase) in block 3a (height = 3)
@@ -752,8 +774,7 @@ mod tests {
         let network = Network::Testnet;
         let own_wallet_secret = WalletSecret::new_random();
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
-        let own_global_state_lock =
-            get_mock_global_state(network, 0, Some(own_wallet_secret)).await;
+        let own_global_state_lock = get_mock_global_state(network, 0, own_wallet_secret).await;
         let mut own_global_state = own_global_state_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis_block();
         let monitored_utxos_count_init = own_global_state
@@ -778,7 +799,7 @@ mod tests {
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, other_recipient_address);
+                make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
             own_global_state
                 .wallet_state
                 .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
@@ -818,7 +839,12 @@ mod tests {
         // Add block 3a with a coinbase UTXO for us
         let own_recipient_address = own_spending_key.to_address();
         let (block_3a, block_3a_coinbase_utxo, block_3a_coinbase_sender_randomness) =
-            make_mock_block(&latest_block.clone(), None, own_recipient_address);
+            make_mock_block(
+                &latest_block.clone(),
+                None,
+                own_recipient_address,
+                rng.gen(),
+            );
         own_global_state
             .wallet_state
             .expected_utxos
@@ -875,7 +901,7 @@ mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
-            make_mock_block(&latest_block, None, other_recipient_address);
+            make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
         own_global_state
             .wallet_state
             .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_3b)
@@ -921,7 +947,7 @@ mod tests {
         mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, other_recipient_address);
+                make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
             own_global_state
                 .wallet_state
                 .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
@@ -966,7 +992,8 @@ mod tests {
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
-        let (block_12, _, _) = make_mock_block(&latest_block, None, other_recipient_address);
+        let (block_12, _, _) =
+            make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
         own_global_state
             .wallet_state
             .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_12)
@@ -1020,5 +1047,46 @@ mod tests {
             own_global_state.get_latest_balance_height().await.is_none(),
             "Latest balance height must be None at height 12"
         );
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn mock_wallet_state_is_synchronized_to_genesis_block() {
+        let network = Network::RegTest;
+        let wallet = WalletSecret::devnet_wallet();
+        let genesis_block = Block::genesis_block();
+
+        let wallet_state = get_mock_wallet_state(wallet, network).await;
+
+        // are we synchronized to the genesis block?
+        assert_eq!(
+            wallet_state.wallet_db.get_sync_label(),
+            genesis_block.hash()
+        );
+
+        // Do we have valid membership proofs for all UTXOs received in the genesis block?
+        let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
+        let num_monitored_utxos = monitored_utxos.len();
+        assert!(num_monitored_utxos > 0);
+        for i in 0..num_monitored_utxos {
+            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
+            if let Some((digest, _duration, _height)) = monitored_utxo.confirmed_in_block {
+                assert_eq!(digest, genesis_block.hash());
+            } else {
+                panic!();
+            }
+            let utxo = monitored_utxo.utxo;
+            let ms_membership_proof = monitored_utxo
+                .blockhash_to_membership_proof
+                .iter()
+                .find(|(bh, _mp)| *bh == genesis_block.hash())
+                .unwrap()
+                .1
+                .clone();
+            assert!(genesis_block
+                .body()
+                .mutator_set_accumulator
+                .verify(Hash::hash(&utxo), &ms_membership_proof));
+        }
     }
 }

@@ -1,4 +1,5 @@
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_core::prelude::twenty_first;
 
 use anyhow::{bail, Result};
@@ -44,6 +45,7 @@ enum Command {
     SyncedBalance,
     WalletStatus,
     OwnReceivingAddress,
+    ListCoins,
     MempoolTxCount,
     MempoolSize,
 
@@ -262,6 +264,10 @@ async fn main() -> Result<()> {
         | Command::ImportSeedPhrase { .. } => unreachable!("Case should be handled earlier."),
 
         /******** READ STATE ********/
+        Command::ListCoins => {
+            let list = client.list_own_coins(ctx).await?;
+            println!("{}", CoinWithPossibleTimeLock::report(&list));
+        }
         Command::Network => {
             let network = client.network(ctx).await?;
             println!("{network}")

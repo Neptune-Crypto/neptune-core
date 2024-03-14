@@ -48,11 +48,10 @@ pub struct TransactionKernel {
 
     pub mutator_set_hash: Digest,
 }
-impl TransactionKernel {
-    pub(crate) fn from_primitive_witness(
-        transaction_primitive_witness: &PrimitiveWitness,
-    ) -> TransactionKernel {
-        transaction_primitive_witness.kernel.clone()
+
+impl From<PrimitiveWitness> for TransactionKernel {
+    fn from(transaction_primitive_witness: PrimitiveWitness) -> Self {
+        transaction_primitive_witness.kernel
     }
 }
 

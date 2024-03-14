@@ -1,6 +1,8 @@
+use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::type_scripts::neptune_coins::pseudorandom_amount;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::consensus::ValidityTree;
 use crate::prelude::twenty_first;
 
 use anyhow::Result;
@@ -42,7 +44,6 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::other::random_elements_array;
 
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
@@ -60,7 +61,6 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::validity::removal_records_integrity::RemovalRecordsIntegrityWitness;
 use crate::models::blockchain::transaction::validity::TransactionValidationLogic;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::blockchain::transaction::TransactionWitness;
 use crate::models::blockchain::transaction::{utxo::Utxo, Transaction};
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::channel::{MainToPeerThread, PeerThreadToMain};
@@ -194,7 +194,7 @@ pub fn get_dummy_peer_connection_data_genesis(
 pub async fn get_mock_global_state(
     network: Network,
     peer_count: u8,
-    wallet: Option<WalletSecret>,
+    wallet: WalletSecret,
 ) -> GlobalStateLock {
     let (archival_state, peer_db, _data_dir) = make_unit_test_archival_state(network).await;
 
@@ -207,7 +207,7 @@ pub async fn get_mock_global_state(
     }
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
     let (block, _, _) = get_dummy_latest_block(None);
-    let light_state: LightState = LightState::from(block);
+    let light_state: LightState = LightState::from(block.clone());
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
         archival_state,
@@ -218,8 +218,10 @@ pub async fn get_mock_global_state(
         ..Default::default()
     };
 
+    let wallet_state = get_mock_wallet_state(wallet, network).await;
+
     GlobalStateLock::new(
-        get_mock_wallet_state(wallet, network).await,
+        wallet_state,
         blockchain_state,
         networking_state,
         cli_args.clone(),
@@ -249,7 +251,8 @@ pub async fn get_test_genesis_setup(
     let (to_main_tx, mut _to_main_rx1) = mpsc::channel::<PeerThreadToMain>(PEER_CHANNEL_CAPACITY);
     let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
-    let state = get_mock_global_state(network, peer_count, None).await;
+    let devnet_wallet = WalletSecret::devnet_wallet();
+    let state = get_mock_global_state(network, peer_count, devnet_wallet).await;
     Ok((
         peer_broadcast_tx,
         from_main_rx_clone,
@@ -800,7 +803,7 @@ pub fn make_mock_transaction_with_generation_key(
         .map(|(_utxo, _mp, sk)| sk.to_address().lock_script())
         .collect_vec();
     let output_utxos = receiver_data.into_iter().map(|rd| rd.utxo).collect();
-    let primitive_witness = PrimitiveWitness {
+    let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(input_utxos),
         type_scripts,
         input_lock_scripts,
@@ -810,11 +813,11 @@ pub fn make_mock_transaction_with_generation_key(
         mutator_set_accumulator: tip_msa,
         kernel: kernel.clone(),
     };
-    let validity_logic = TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
+    let validity_logic = TransactionValidationLogic::from(primitive_witness);
 
     Transaction {
         kernel,
-        witness: TransactionWitness::ValidationLogic(validity_logic),
+        witness: validity_logic,
     }
 }
 
@@ -843,7 +846,10 @@ pub fn make_mock_transaction(
             coinbase: None,
             mutator_set_hash: random(),
         },
-        witness: TransactionWitness::Faith,
+        witness: TransactionValidationLogic {
+            vast: ValidityTree::axiom(),
+            maybe_primitive_witness: None,
+        },
     }
 }
 
@@ -878,7 +884,10 @@ pub fn make_mock_transaction_with_wallet(
 
     Transaction {
         kernel,
-        witness: TransactionWitness::Faith,
+        witness: TransactionValidationLogic {
+            vast: ValidityTree::axiom(),
+            maybe_primitive_witness: None,
+        },
     }
 }
 
@@ -891,14 +900,16 @@ pub fn make_mock_block(
     // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
+    seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
     let new_block_height: BlockHeight = previous_block.kernel.header.height.next();
 
     // Build coinbase UTXO and associated data
     let lock_script = coinbase_beneficiary.lock_script();
     let coinbase_amount = Block::get_mining_reward(new_block_height);
     let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
-    let coinbase_output_randomness: Digest = Digest::new(random_elements_array());
+    let coinbase_output_randomness: Digest = rng.gen();
     let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
 
     let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
@@ -936,11 +947,11 @@ pub fn make_mock_block(
         input_lock_scripts: vec![],
         kernel: tx_kernel.clone(),
     };
-    let validation_logic =
-        TransactionValidationLogic::new_from_primitive_witness(&primitive_witness);
+    let mut validation_logic = TransactionValidationLogic::from(primitive_witness);
+    validation_logic.vast.prove();
 
     let transaction = Transaction {
-        witness: TransactionWitness::ValidationLogic(validation_logic),
+        witness: validation_logic,
         kernel: tx_kernel,
     };
 
@@ -980,12 +991,22 @@ pub fn make_mock_block_with_valid_pow(
     previous_block: &Block,
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
+    seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
-    let (mut block, mut utxo, mut digest) =
-        make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let (mut block, mut utxo, mut digest) = make_mock_block(
+        previous_block,
+        block_timestamp,
+        coinbase_beneficiary,
+        rng.gen(),
+    );
     while !block.has_proof_of_work(previous_block) {
-        let (block_new, utxo_new, digest_new) =
-            make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+        let (block_new, utxo_new, digest_new) = make_mock_block(
+            previous_block,
+            block_timestamp,
+            coinbase_beneficiary,
+            rng.gen(),
+        );
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;
@@ -997,12 +1018,22 @@ pub fn make_mock_block_with_invalid_pow(
     previous_block: &Block,
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
+    seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
-    let (mut block, mut utxo, mut digest) =
-        make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
+    let (mut block, mut utxo, mut digest) = make_mock_block(
+        previous_block,
+        block_timestamp,
+        coinbase_beneficiary,
+        rng.gen(),
+    );
     while block.has_proof_of_work(previous_block) {
-        let (block_new, utxo_new, digest_new) =
-            make_mock_block(previous_block, block_timestamp, coinbase_beneficiary);
+        let (block_new, utxo_new, digest_new) = make_mock_block(
+            previous_block,
+            block_timestamp,
+            coinbase_beneficiary,
+            rng.gen(),
+        );
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;
@@ -1012,21 +1043,13 @@ pub fn make_mock_block_with_invalid_pow(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(
-    maybe_wallet_secret: Option<WalletSecret>,
-    network: Network,
-) -> WalletState {
-    let wallet_secret = match maybe_wallet_secret {
-        Some(wallet) => wallet,
-        None => WalletSecret::devnet_wallet(),
-    };
-
+pub async fn get_mock_wallet_state(wallet_secret: WalletSecret, network: Network) -> WalletState {
     let cli_args: cli_args::Args = cli_args::Args {
         number_of_mps_per_utxo: 30,
         ..Default::default()
     };
     let data_dir = unit_test_data_directory(network).unwrap();
-    WalletState::new_from_wallet_secret(&data_dir, wallet_secret, &cli_args).await
+    WalletState::new_from_wallet_secret(&data_dir, wallet_secret.clone(), &cli_args).await
 }
 
 pub async fn make_unit_test_archival_state(

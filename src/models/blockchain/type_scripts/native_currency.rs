@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+use crate::models::blockchain::transaction;
 use crate::models::blockchain::transaction::transaction_kernel::{
     TransactionKernel, TransactionKernelField,
 };
 use crate::models::consensus::mast_hash::MastHash;
-use crate::models::consensus::SecretWitness;
+use crate::models::consensus::{
+    SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
+};
 use crate::models::{
     blockchain::transaction::primitive_witness::SaltedUtxos,
     consensus::tasm::program::ConsensusProgram,
@@ -37,11 +39,11 @@ use super::TypeScriptWitness;
 /// Transactions that are not balanced in this way are invalid. Furthermore, the
 /// type script checks that no overflow occurs while computing the sums.
 #[derive(Debug, Clone, Serialize, Deserialize, BFieldCodec, GetSize, PartialEq, Eq)]
-pub struct NativeCurrency {}
+pub struct NativeCurrency;
 
 impl ConsensusProgram for NativeCurrency {
     #[allow(clippy::needless_return)]
-    fn source() {
+    fn source(&self) {
         // get in the current program's hash digest
         let self_digest: Digest = tasm::own_program_digest();
 
@@ -160,10 +162,8 @@ impl ConsensusProgram for NativeCurrency {
         assert_eq!(total_input_plus_coinbase, total_output_plus_coinbase);
     }
 
-    fn code() -> Vec<LabelledInstruction> {
-        triton_asm! {
-            push 1337
-        }
+    fn code(&self) -> Vec<LabelledInstruction> {
+        triton_asm! {}
     }
 }
 
@@ -172,6 +172,19 @@ pub struct NativeCurrencyWitness {
     pub input_salted_utxos: SaltedUtxos,
     pub output_salted_utxos: SaltedUtxos,
     pub kernel: TransactionKernel,
+}
+
+impl ValidationLogic for NativeCurrencyWitness {
+    fn vast(&self) -> ValidityTree {
+        ValidityTree::new(
+            ValidityAstType::Atomic(
+                Some(Box::new(NativeCurrency.program())),
+                self.claim(),
+                WhichProgram::NativeCurrency,
+            ),
+            WitnessType::RawWitness(self.nondeterminism().into()),
+        )
+    }
 }
 
 impl TypeScriptWitness for NativeCurrencyWitness {
@@ -186,17 +199,23 @@ impl TypeScriptWitness for NativeCurrencyWitness {
     fn salted_output_utxos(&self) -> SaltedUtxos {
         self.output_salted_utxos.clone()
     }
+}
 
-    fn from_primitive_witness(primitive_transaction_witness: &PrimitiveWitness) -> Self {
+impl From<transaction::primitive_witness::PrimitiveWitness> for NativeCurrencyWitness {
+    fn from(primitive_witness: transaction::primitive_witness::PrimitiveWitness) -> Self {
         Self {
-            input_salted_utxos: primitive_transaction_witness.input_utxos.clone(),
-            output_salted_utxos: primitive_transaction_witness.output_utxos.clone(),
-            kernel: primitive_transaction_witness.kernel.clone(),
+            input_salted_utxos: primitive_witness.input_utxos.clone(),
+            output_salted_utxos: primitive_witness.output_utxos.clone(),
+            kernel: primitive_witness.kernel.clone(),
         }
     }
 }
 
 impl SecretWitness for NativeCurrencyWitness {
+    fn program(&self) -> Program {
+        NativeCurrency.program()
+    }
+
     fn standard_input(&self) -> PublicInput {
         self.type_script_standard_input()
     }
@@ -246,10 +265,6 @@ impl SecretWitness for NativeCurrencyWitness {
             .with_digests(mast_paths)
             .with_ram(memory)
     }
-
-    fn subprogram(&self) -> Program {
-        NativeCurrency::program()
-    }
 }
 
 #[cfg(test)]
@@ -263,6 +278,8 @@ pub mod test {
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
+    use self::transaction::primitive_witness::PrimitiveWitness;
+
     use super::*;
 
     #[proptest]
@@ -274,14 +291,14 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // PrimitiveWitness::arbitrary_with already ensures the transaction is balanced
-        let native_currency_witness =
-            NativeCurrencyWitness::from_primitive_witness(&primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         assert!(
-            NativeCurrency::run(
-                &native_currency_witness.standard_input().individual_tokens,
-                native_currency_witness.nondeterminism(),
-            )
-            .is_ok(),
+            NativeCurrency
+                .run(
+                    &native_currency_witness.standard_input().individual_tokens,
+                    native_currency_witness.nondeterminism(),
+                )
+                .is_ok(),
             "native currency program did not halt gracefully"
         );
     }
@@ -304,14 +321,14 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
-        let native_currency_witness =
-            NativeCurrencyWitness::from_primitive_witness(&primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         assert!(
-            NativeCurrency::run(
-                &native_currency_witness.standard_input().individual_tokens,
-                native_currency_witness.nondeterminism(),
-            )
-            .is_err(),
+            NativeCurrency
+                .run(
+                    &native_currency_witness.standard_input().individual_tokens,
+                    native_currency_witness.nondeterminism(),
+                )
+                .is_err(),
             "native currency program failed to panic"
         );
     }
@@ -335,14 +352,14 @@ pub mod test {
         primitive_witness: PrimitiveWitness,
     ) {
         // with high probability the amounts (which are random) do not add up
-        let native_currency_witness =
-            NativeCurrencyWitness::from_primitive_witness(&primitive_witness);
+        let native_currency_witness = NativeCurrencyWitness::from(primitive_witness);
         assert!(
-            NativeCurrency::run(
-                &native_currency_witness.standard_input().individual_tokens,
-                native_currency_witness.nondeterminism(),
-            )
-            .is_err(),
+            NativeCurrency
+                .run(
+                    &native_currency_witness.standard_input().individual_tokens,
+                    native_currency_witness.nondeterminism(),
+                )
+                .is_err(),
             "native currency program failed to panic"
         );
     }

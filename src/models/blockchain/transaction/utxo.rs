@@ -1,4 +1,5 @@
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 
@@ -11,6 +12,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
+use std::time::Duration;
 use triton_vm::instruction::LabelledInstruction;
 use triton_vm::program::Program;
 use triton_vm::triton_asm;
@@ -66,21 +68,110 @@ impl Utxo {
         Self::new(
             lock_script,
             vec![Coin {
-                type_script_hash: NativeCurrency::hash(),
+                type_script_hash: NativeCurrency.hash(),
                 state: amount.encode(),
             }],
         )
     }
 
-    pub fn get_native_coin_amount(&self) -> NeptuneCoins {
+    /// Get the amount of Neptune coins that are encapsulated in this UTXO,
+    /// regardless of which other coins are present. (Even if that makes the
+    /// Neptune coins unspendable.)
+    pub fn get_native_currency_amount(&self) -> NeptuneCoins {
         self.coins
             .iter()
-            .filter(|coin| coin.type_script_hash == NativeCurrency::hash())
+            .filter(|coin| coin.type_script_hash == NativeCurrency.hash())
             .map(|coin| match NeptuneCoins::decode(&coin.state) {
                 Ok(boxed_amount) => *boxed_amount,
                 Err(_) => NeptuneCoins::zero(),
             })
             .sum()
+    }
+
+    /// If the UTXO has a timelock, find out what the release date is.
+    pub fn release_date(&self) -> Option<Duration> {
+        self.coins
+            .iter()
+            .find(|coin| coin.type_script_hash == TimeLock.hash())
+            .map(|coin| coin.state[0].value())
+            .map(Duration::from_millis)
+    }
+
+    /// Determine whether the UTXO has coins that contain only known type
+    /// scripts. If other type scripts are included, then we cannot spend
+    /// this UTXO.
+    pub fn has_known_type_scripts(&self) -> bool {
+        let known_type_script_hashes = [NativeCurrency.hash(), TimeLock.hash()];
+        if !self
+            .coins
+            .iter()
+            .all(|c| known_type_script_hashes.contains(&c.type_script_hash))
+        {
+            return false;
+        }
+        true
+    }
+
+    /// Determine if the UTXO can be spent at a given date in the future,
+    /// assuming it can be unlocked. Currently, this boils down to checking
+    /// whether it has a time lock and if it does, verifying that the release
+    /// date is in the past.
+    pub fn can_spend_at(&self, timestamp: u64) -> bool {
+        // unknown type script
+        if !self.has_known_type_scripts() {
+            return false;
+        }
+
+        // decode and test release date(s) (if any)
+        for state in self
+            .coins
+            .iter()
+            .filter(|c| c.type_script_hash == TimeLock.hash())
+            .map(|c| c.state.clone())
+        {
+            match BFieldElement::decode(&state) {
+                Ok(release_date) => {
+                    if timestamp <= release_date.value() {
+                        return false;
+                    }
+                }
+                Err(_) => {
+                    return false;
+                }
+            };
+        }
+
+        true
+    }
+
+    /// Determine whether the only thing preventing the UTXO from being spendable
+    /// is the timelock whose according release date is in the future.
+    pub fn is_timelocked_but_otherwise_spendable_at(&self, timestamp: u64) -> bool {
+        if !self.has_known_type_scripts() {
+            return false;
+        }
+
+        // decode and test release date(s) (if any)
+        let mut have_future_release_date = false;
+        for state in self
+            .coins
+            .iter()
+            .filter(|c| c.type_script_hash == TimeLock.hash())
+            .map(|c| c.state.clone())
+        {
+            match BFieldElement::decode(&state) {
+                Ok(release_date) => {
+                    if timestamp <= release_date.value() {
+                        have_future_release_date = true;
+                    }
+                }
+                Err(_) => {
+                    return false;
+                }
+            };
+        }
+
+        have_future_release_date
     }
 }
 
@@ -107,7 +198,7 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
 impl<'a> Arbitrary<'a> for Utxo {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let lock_script_hash: Digest = Digest::arbitrary(u)?;
-        let type_script_hash = NativeCurrency::hash();
+        let type_script_hash = NativeCurrency.hash();
         let amount = NeptuneCoins::arbitrary(u)?;
         let coins = vec![Coin {
             type_script_hash,
@@ -210,5 +301,26 @@ mod utxo_tests {
         let serialized: String = serde_json::to_string(&utxo).unwrap();
         let utxo_again: Utxo = serde_json::from_str(&serialized).unwrap();
         assert_eq!(utxo, utxo_again);
+    }
+
+    #[test]
+    fn utxo_timelock_test() {
+        let mut rng = thread_rng();
+        let release_date = rng.next_u64() >> 1;
+        let mut delta = release_date + 1;
+        while delta > release_date {
+            delta = rng.next_u64() >> 1;
+        }
+        let mut utxo = Utxo::new(
+            LockScript {
+                program: Program::new(&[]),
+            },
+            NeptuneCoins::new(1).to_native_coins(),
+        );
+        utxo.coins.push(TimeLock::until(release_date));
+        assert!(!utxo.can_spend_at(release_date - delta));
+        assert!(utxo.is_timelocked_but_otherwise_spendable_at(release_date - delta));
+        assert!(utxo.can_spend_at(release_date + delta));
+        assert!(!utxo.is_timelocked_but_otherwise_spendable_at(release_date + delta));
     }
 }

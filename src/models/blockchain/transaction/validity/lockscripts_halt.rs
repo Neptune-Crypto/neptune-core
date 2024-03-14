@@ -1,19 +1,64 @@
 use crate::{
-    models::consensus::mast_hash::MastHash,
+    models::{
+        blockchain::transaction,
+        consensus::{
+            mast_hash::MastHash, tasm::program::ConsensusProgram, RawWitness, ValidationLogic,
+            ValidityAstType, ValidityTree, WhichProgram, WitnessType,
+        },
+    },
     prelude::{triton_vm, twenty_first},
 };
 
 use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use tasm_lib::{triton_vm::program::PublicInput, Digest};
-use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
+use tasm_lib::{
+    triton_vm::{
+        instruction::LabelledInstruction,
+        program::{Program, PublicInput},
+        proof::Claim,
+    },
+    Digest,
+};
+use triton_vm::prelude::{BFieldElement, NonDeterminism};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use crate::models::{
-    blockchain::transaction::{utxo::LockScript, PrimitiveWitness},
-    consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic},
-};
+use crate::models::{blockchain::transaction::utxo::LockScript, consensus::SecretWitness};
+
+pub struct LockScriptHalts {
+    pub program: Program,
+    pub claim: Claim,
+    pub raw_witness: RawWitness,
+}
+
+impl From<LockScriptHaltsWitness> for LockScriptHalts {
+    fn from(witness: LockScriptHaltsWitness) -> Self {
+        Self {
+            claim: Claim::new(witness.lock_script.hash()).with_input(
+                witness
+                    .transaction_kernel_mast_hash
+                    .reversed()
+                    .values()
+                    .to_vec(),
+            ),
+            program: witness.clone().lock_script.program,
+            raw_witness: witness.nondeterminism().into(),
+        }
+    }
+}
+
+impl ValidationLogic for LockScriptHalts {
+    fn vast(&self) -> ValidityTree {
+        ValidityTree::new(
+            ValidityAstType::Atomic(
+                Some(Box::new(self.program.clone())),
+                self.claim.clone(),
+                WhichProgram::LockScriptHalts,
+            ),
+            WitnessType::RawWitness(self.raw_witness.clone()),
+        )
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct LockScriptHaltsWitness {
@@ -32,10 +77,6 @@ impl SecretWitness for LockScriptHaltsWitness {
         )
     }
 
-    fn subprogram(&self) -> Program {
-        self.lock_script.program.clone()
-    }
-
     fn standard_input(&self) -> PublicInput {
         PublicInput::new(
             self.transaction_kernel_mast_hash
@@ -44,80 +85,64 @@ impl SecretWitness for LockScriptHaltsWitness {
                 .to_vec(),
         )
     }
+
+    fn program(&self) -> Program {
+        self.lock_script.program.clone()
+    }
+}
+
+impl ConsensusProgram for LockScriptHalts {
+    fn source(&self) {
+        todo!()
+    }
+
+    fn code(&self) -> Vec<LabelledInstruction> {
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, Default, BFieldCodec)]
 pub struct LockScriptsHalt {
-    pub supported_claims: Vec<SupportedClaim<LockScriptHaltsWitness>>,
+    pub witnesses: Vec<LockScriptHaltsWitness>,
 }
 
-impl ValidationLogic<LockScriptHaltsWitness> for LockScriptsHalt {
-    type PrimitiveWitness = PrimitiveWitness;
-
-    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> LockScriptsHalt {
+impl From<transaction::PrimitiveWitness> for LockScriptsHalt {
+    fn from(primitive_witness: transaction::PrimitiveWitness) -> Self {
         let program_and_program_digests_and_spending_keys = primitive_witness
             .input_lock_scripts
             .iter()
             .zip_eq(primitive_witness.lock_script_witnesses.iter())
             .map(|(lockscr, spendkey)| (lockscr, lockscr.hash(), spendkey));
         let tx_kernel_mast_hash = primitive_witness.kernel.mast_hash();
-        let empty_string = vec![];
 
         Self {
-            supported_claims: program_and_program_digests_and_spending_keys
+            witnesses: program_and_program_digests_and_spending_keys
                 .into_iter()
-                .map(|(lockscript, lockscript_digest, spendkey)| {
+                .map(|(lockscript, _lockscript_digest, spendkey)| {
                     let mut nondeterministic_tokens = spendkey.to_owned();
                     nondeterministic_tokens.reverse();
-                    SupportedClaim {
-                        claim: triton_vm::prelude::Claim {
-                            program_digest: lockscript_digest,
-                            input: tx_kernel_mast_hash.values().to_vec(),
-                            output: empty_string.clone(),
-                        },
-                        support: ClaimSupport::SecretWitness(LockScriptHaltsWitness {
-                            lock_script: lockscript.to_owned(),
-                            nondeterministic_tokens,
-                            transaction_kernel_mast_hash: tx_kernel_mast_hash,
-                        }),
+                    LockScriptHaltsWitness {
+                        lock_script: lockscript.to_owned(),
+                        nondeterministic_tokens,
+                        transaction_kernel_mast_hash: tx_kernel_mast_hash,
                     }
                 })
                 .collect(),
         }
     }
+}
 
-    fn validation_program(&self) -> Program {
-        todo!()
-    }
-
-    fn support(&self) -> ClaimSupport<LockScriptHaltsWitness> {
-        ClaimSupport::MultipleSupports(
-            self.supported_claims
-                .clone()
-                .into_iter()
-                .map(|sc| match sc.support {
-                    ClaimSupport::Proof(_) => todo!(),
-                    ClaimSupport::MultipleSupports(_) => todo!(),
-                    ClaimSupport::SecretWitness(sw) => sw.to_owned(),
-                    ClaimSupport::DummySupport => todo!(),
-                })
-                .collect(),
+impl ValidationLogic for LockScriptsHalt {
+    fn vast(&self) -> ValidityTree {
+        ValidityTree::new(
+            ValidityAstType::All(
+                self.witnesses
+                    .iter()
+                    .cloned()
+                    .map(|witness| LockScriptHalts::from(witness).vast())
+                    .collect_vec(),
+            ),
+            WitnessType::Decomposition,
         )
-    }
-
-    fn claim(&self) -> Claim {
-        let input = self
-            .supported_claims
-            .iter()
-            .flat_map(|sc| sc.claim.program_digest.values().to_vec())
-            .collect_vec();
-        let output = vec![];
-        // let program_hash = AllLockScriptsHalt::program().hash();
-        let program_digest = Default::default();
-        Claim {
-            program_digest,
-            input,
-            output,
-        }
     }
 }

@@ -1,4 +1,6 @@
+use crate::models::blockchain::transaction;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
@@ -17,16 +19,19 @@ use std::collections::HashMap;
 use tasm_lib::memory::{encode_to_memory, FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS};
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
+use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use triton_vm::prelude::{BFieldElement, Claim, NonDeterminism, Program};
+use triton_vm::prelude::{BFieldElement, NonDeterminism};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
 };
 
-use crate::models::consensus::{ClaimSupport, SecretWitness, SupportedClaim, ValidationLogic};
+use crate::models::consensus::{
+    SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
+};
 use crate::{
     models::blockchain::{
         shared::Hash,
@@ -88,55 +93,55 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
         NonDeterminism::default().with_ram(memory)
     }
 
-    fn subprogram(&self) -> Program {
-        RemovalRecordsIntegrity::program()
-    }
-
     fn standard_input(&self) -> PublicInput {
         PublicInput::new(self.kernel.mast_hash().reversed().values().to_vec())
+    }
+
+    fn program(&self) -> triton_vm::prelude::Program {
+        RemovalRecordsIntegrity {
+            witness: self.clone(),
+        }
+        .program()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct RemovalRecordsIntegrity {
-    pub supported_claim: SupportedClaim<RemovalRecordsIntegrityWitness>,
+    pub witness: RemovalRecordsIntegrityWitness,
 }
 
-impl ValidationLogic<RemovalRecordsIntegrityWitness> for RemovalRecordsIntegrity {
-    type PrimitiveWitness = PrimitiveWitness;
+impl ConsensusProgram for RemovalRecordsIntegrity {
+    fn source(&self) {
+        todo!()
+    }
 
-    fn new_from_primitive_witness(primitive_witness: &PrimitiveWitness) -> Self {
+    fn code(&self) -> Vec<LabelledInstruction> {
+        let program = <Self as CompiledProgram>::program();
+        program.labelled_instructions()
+    }
+}
+
+impl From<transaction::PrimitiveWitness> for RemovalRecordsIntegrity {
+    fn from(primitive_witness: transaction::PrimitiveWitness) -> Self {
         let removal_records_integrity_witness =
-            RemovalRecordsIntegrityWitness::new(primitive_witness);
+            RemovalRecordsIntegrityWitness::new(&primitive_witness);
 
         Self {
-            supported_claim: SupportedClaim {
-                claim: Claim {
-                    program_digest: Hash::hash_varlen(&Self::program().encode()),
-                    input: primitive_witness
-                        .kernel
-                        .mast_hash()
-                        .values()
-                        .into_iter()
-                        .rev()
-                        .collect_vec(),
-                    output: vec![],
-                },
-                support: ClaimSupport::SecretWitness(removal_records_integrity_witness),
-            },
+            witness: removal_records_integrity_witness,
         }
     }
+}
 
-    fn validation_program(&self) -> Program {
-        Self::program()
-    }
-
-    fn support(&self) -> ClaimSupport<RemovalRecordsIntegrityWitness> {
-        self.supported_claim.support.clone()
-    }
-
-    fn claim(&self) -> Claim {
-        self.supported_claim.claim.clone()
+impl ValidationLogic for RemovalRecordsIntegrity {
+    fn vast(&self) -> ValidityTree {
+        ValidityTree {
+            vast_type: ValidityAstType::Atomic(
+                Some(Box::new(self.witness.program())),
+                self.witness.claim(),
+                WhichProgram::RemovalRecordsIntegrity,
+            ),
+            witness_type: WitnessType::RawWitness(self.witness.nondeterminism().into()),
+        }
     }
 }
 

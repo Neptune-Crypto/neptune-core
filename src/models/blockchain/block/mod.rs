@@ -1,5 +1,6 @@
 use crate::config_models::network::Network;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::{ValidityAstType, ValidityTree, WitnessType};
 use crate::prelude::twenty_first;
 
 use get_size::GetSize;
@@ -9,7 +10,7 @@ use num_traits::{abs, Zero};
 
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -41,10 +42,11 @@ use self::mutator_set_update::MutatorSetUpdate;
 use self::transfer_block::TransferBlock;
 use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
+use super::transaction::validity::TransactionValidationLogic;
 use super::transaction::Transaction;
 use super::type_scripts::neptune_coins::NeptuneCoins;
+use super::type_scripts::time_lock::TimeLock;
 use crate::models::blockchain::shared::Hash;
-use crate::models::consensus::Witness;
 use crate::models::state::wallet::address::generation_address::{self, ReceivingAddress};
 use crate::models::state::wallet::WalletSecret;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -122,6 +124,11 @@ impl Block {
         reward
     }
 
+    // 1 July 2024 (might be revised before then)
+    pub fn launch() -> u64 {
+        1719792000000u64
+    }
+
     pub fn genesis_block() -> Self {
         let mut genesis_mutator_set = MutatorSetAccumulator::default();
         let mut ms_update = MutatorSetUpdate::default();
@@ -132,27 +139,29 @@ impl Block {
             .map(|(_receiving_address, amount)| *amount)
             .sum();
 
-        // This is the UNIX timestamp in ms when this code was written the 1st time
-        let timestamp: BFieldElement = BFieldElement::new(1655916990000u64);
-
         let mut genesis_coinbase_tx = Transaction {
             kernel: TransactionKernel {
                 inputs: vec![],
                 outputs: vec![],
                 fee: NeptuneCoins::new(0),
-                timestamp,
+                timestamp: BFieldElement::new(Self::launch()),
                 public_announcements: vec![],
                 coinbase: Some(total_premine_amount),
                 mutator_set_hash: MutatorSetAccumulator::new().hash(),
             },
-            witness: Witness::Faith,
+            witness: TransactionValidationLogic {
+                vast: ValidityTree {
+                    vast_type: ValidityAstType::Axiom,
+                    witness_type: WitnessType::Faith,
+                },
+                maybe_primitive_witness: None,
+            },
         };
 
-        for (receiving_address, amount) in premine_distribution {
-            // generate utxo
-            let utxo = Utxo::new_native_coin(receiving_address.lock_script(), amount);
+        for ((receiving_address, _amount), utxo) in
+            premine_distribution.iter().zip(Self::premine_utxos())
+        {
             let utxo_digest = Hash::hash(&utxo);
-
             // generate randomness for mutator set commitment
             // Sender randomness cannot be random because there is no sender.
             let bad_randomness = Digest::default();
@@ -179,7 +188,7 @@ impl Block {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
             prev_block_digest: Digest::default(),
-            timestamp,
+            timestamp: BFieldElement::new(Self::launch()),
             nonce: [
                 BFieldElement::zero(),
                 BFieldElement::zero(),
@@ -194,7 +203,7 @@ impl Block {
         Self::new(header, body, None)
     }
 
-    pub fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
+    fn premine_distribution() -> Vec<(generation_address::ReceivingAddress, NeptuneCoins)> {
         // The premine UTXOs can be hardcoded here.
         let authority_wallet = WalletSecret::devnet_wallet();
         let authority_receiving_address =
@@ -205,7 +214,21 @@ impl Block {
 
             // also for testing, but for internal use only
             (ReceivingAddress::from_bech32m("nolgam1t6h52ck34mkvvmkk8nnzesf5sdcks3mlj23k8hgp5gc39qaxx76qnltllx465np340n0mf9zrv2e04425q69xlhjgy35v3zu7jmnljev9n38t2a86d9sqq84g8y9egy23etpkewp4ad64s66qq9cruyp0r0vz50urcalgxerv6xcuet6j5tcdx6tqm6d772dxu29r6kq8mkzkyrc07072rlvkx4tkmwy29aqq8qmwwd0n4at3qllgvd427um3jsjed696rddert6dzlamqtn66mz997xt8nslrq8dqvl2nx4k7vu50ul7584m7243pdzdczgnxcd0a8q8aspfd66s5spaa5nk8sqfh29htak8lzf853edgqw99fu4v4ess3d9z0gcqjpclks9p2w5srta9n65r5w2rj89jmagtuklz838lj726frzdvlfj7t992hz8n355raxy2xnm4fpfr20zvk38caatsd74lzx370mfhqrakf6achx5fv858wpchjlmu3h55s5kqkmfu0zhw05wfx7meu33fnmw0fju6p0m940nfrsqkv0e8q25g3sgjk4t0qfun0st7h2k4ef6cau3zyrc5dsqukvzwd85kxxf9ksk6jw7k5ny7wku6wf90mx5xyd7p6q5w6eu4wxxfeqryyfw2rdprr7fkzg9hrt97s4hn9cgpr6qz8x0j59gm885ekde9czanpksqq0c0kmefzfha3lqw8v2xeme5nmf93u59z8luq4wprlxj6v7mpp80t3sjvmv3a6t2kxsh9qaw9spj789ft8jswzm2kmfywxn80caccqf4d38kkjg5ahdrkmfvec242rg47ewzwsfy590hxyvz5v3dpg2a99vwc20a749rmygj74k2uw794t66dz0n9chmhd47gg84y8qc62jvjl8num4j7s2c0gtc88t3pun4zwuq55vf66mg4n8urn50lm7ww4he5x5ya4yyaqlrn2ag5sdnqt46magvw90hh9chyq3q9qc36pq4tattn6lvzfjp9trxuske84yttf6pa3le9z0z8y06gv7925dshhfjn4y5y3aykfg2g7ujrlly8dgpk3srlvq0zmdvgu5jsxwqvngvp6fh6he8fyrlqgrs58qklrg3zyu2jl9nrp2hdvj3hwh29fk5mjl9tpjx0tnyys5gkqlvxxhel4yh53ms0rxpkw3sa6teqgpe4yej5sk7edyqn7w8xr4mgm2asww53gzv95fwpud7mzg4rrnpvdk40m0vna8w8y0w9y240r6m7ja58gfk3stfra9qsm0lt7npkv4w0ghzypdrrg04kp7kkepnm4qmwmjxdg2tx3ejtdmzp0w08alv7x3zxgxsu35yhlvrnkpl9mxgejkfcxdgccper4f7llaaux9hcpul5uy47lhr065qwkgxc6jfylq5raqeczryz089syr4aj7z908e4e3t49qd40x3ueyrgxcdj37dkd5ysezj45kgtv546e7m3fj8ga920lztrgmmx0a98qwnk2ep5k9qh2x05mm5snu5d88lm4lrad8hc639jx97hrx9mywkw6c7yvj9jv0mjmsq0xqpqt0kc4hsh24kndhtsc0ezfzw9h79mjw239s804t2f4jucd3x57mvvnsyp82xy9jvp4yzlq5qhrpu87frkfwkx62r8rjsdkdlx4yhss2ly4q8425ta3je6rym35lapxesd9dhsj44pfhmq92g4tmfr8qnajpn2cgj8ngtzrkc9ygsvx76633p8ksru7g8cda5dfnhf50ax47rde5fhnk8dt7k5sltkhknha697gyqsjg4hytslxmaazdjqj4earaf098uz6gpcgu27zsy4v5arc3vjmum90ngf8e00exjr4nsqs3wr4w93h42ucnllyu5ck09yundjkjqsqetrhzvc3q0smssg6vcw9hlns363grqyt92azpvml632wffpuq5wtsh9vxwdse0g0w0wl3e320hnp3vlmzde3c8xa42yye90gnmmyjdq5atmlnulga4pcapk4t6ut82w057ed3rawx42vn7rl5kzyg84cvulg8yfjeu3ff0wprytkhk85dr63u9elq5ju0c9vd2yyjkqnhxh6xwxnt4nw32pefm9aengdasjn7lsyaeldz93spfnn02uke83xkwytj0wkxhgknde5jnjgg6yegwuw8rklvh6cvyvzqkgwaj857cz7xt3u8mhxlh8xevud3vj5dvq6kpxqd4jftt5h4gcmf9qpj3e2nw87j9une3vu75ahewdrqg7avfquw79fva59f8f3xpmk6lpmlkx9x7ejaw97f8nu86r2yhaepr50cdew82c3fmpnma2gr5vatjy3luqsyf8fpqp2zrjzcymemt3f3t99rn689ucyaj8vc2eapgw4knjyaque29hk3t7swcdvrwcf5myg33ghmg2s8xrqjwzeghzmqq68278lrw5rxn4jf3y93z7ztuwz67s0qa5lldcqe44qsshpuxx36dmna5cn7yy5v5f449gf26hygmj6qk8hm7rkvv44w3cu9fdv7sq0hqy67p3tvyxc8fl640z7pdsjfraznvqpnvcepggdnf3qypgs8vu82wsj2yd8nkhfv6sv6xs3wf5d7nkqsd5k8ehk7dtfqnsvcz26yazc32cv669qn7dhxr25j0etmmz7xh8azj7dn0d4u309m0rc2yhfegds60smuqtxn4l4nhmdqj9x6se4sultl5cwy4qja66cvnjz6mqwqet4n5zcswywqd6gcpec4q2vek9g4086ys4x35hwa47dk3zj2m03yuqz7ap66dah3r73j96q00cwmqw0lxvvqq4u0kvt6vrc0urd2hfhrxkrkmr9yx48uw94vmnjyq7sgyc0szkyuq07cjhg0fhx5z5mr9ua24wx9qnh32cjult3mu8kzhlj7se2nm4jr937j64656q7vp98dh9dhvlge8p02ejse5r0nsk22aa5cexvuqcaulnxw690vm3vdagdckfwps06jjd49kd4ls4jkf0nxkhqx2rm73pcepr4u6xjxw2fhjptk95tt0rq2ramq57lfg3sw3tsee2af355lt53w4f5wmpcvctsntyl2sp8m04l3nds7acv4uqnznudmkasgdf7l9df4484ym2njjzy0c26v2zv7pkv30f06uuptdvuxmgnuqcgd4els7gehp0fwxam0vskt34e3z3kfft6kkdz2c7ftn3dcvz5wvpwqf8458ade6995vdkxkalqzfs5epjfnn3c27mnzlx6cv5fhlephxpa3mj3hu6wafd8em8jhzcguru797p6m2fes55ha23putxrtly4wufl6rpp3ydta57zcxl40pvhpps7sgr7zc2cvz57xdlxpvclsjdgp5q3up9tu5csfdkaa762mk7zrqad93506l0kj".to_string(), Network::Alpha).unwrap(), NeptuneCoins::new(1337)),
+            (ReceivingAddress::from_bech32m("nolgam1hfgnle0202fgz75wh5cqpxkzz29775pqudt9z9v0s6h2e3gkfqkgv3xqn4xfq809k880cspd4dw4mmmcy3dus2pyxwcfysle3hsw2qc62qk3d4hesv56q45d539s28e267mzdvcgyrnwuz358edzjcpzwkep3wxccxrss7qqj0806uff26waqg2z37g7g8erew0eyaq83lv4wuqhql89rsmz8gxhwna4r2s48vww94vyvw9xllydqfygc8890qhhxa2sr3p70p3rdkgt7xuulh66uarnd3l0e0wl2ld7hw4klalacw6yk0u29g0eqx2vsvz29krw9s5n8vfckazhmx4f7393lxwp8aje47j9fpnvlgqr9p990qrmhx9vk8pvfc70wec3fn2c7sz9mttpzv74084pzcmrycqwd5c6qv95ks8duxv325yay48xs9zlgtf9d0zleneemhwzwknsct7ea7quj00359urmuvsvrftvht9wmhtkdzwe6jr6jqvjyn8ew8artcme97smx5dxy4m8yug67xcpfz8chtx0t7eerce7gtpfdn0cryx4s2erhedxk883jykck9ryj3akv7pqrvyldy3ruckgpcm9g6w6fc75yt9g466wemkhftx7tp6uskcvjnvrpn6wzadp44qmua3c23c3pylpdcx0wsv5vl3rspn36zwuzmzpma9ndpppa4dluqag8kfw7xj055szhrf4lsyquxmxq2efp74y75e535y3mgvhqgultm2f7m33hc6vk8ztymz59efth64msyqkmqx5mshm42kqwhqvznkw0ezmh22lfcd6fsh0l4gdujnmz7yfvyfdajkx80j87zmz2nhnv50qdpqjkrhem9ankxw3f06yhc6m5ltfeyhm7nq98glcgtljwss2r7m0gl8d8p2hlesa6cm0ld2y8s7prhz8gywl20dh89ve7qknljygdd5w7l5ueykmz736atgg5vevludsdut9xamwmtsye0fca6c2tl0ne8wpnsdljttt97qrf0mxemdm90v44v9wqet0utf4x0ahqqrlhf647rytaesj6j7dzqpan03za3lkqfcx7pymngzwl29rm62yklh3p884e5hz6qdwfaz98lsq9lke5ntmg2w55xvraleegkn6nftdr2ztgs58zfndpzafqs6v7tcm75hapw6hptzqwnpfwcvw38ghru55y003xm76tsd2fe6565fv5snakw74act2k2lsfg8ntaxf62ksgusdt9a6pw7mfypv2n2y9phddpj62yg93fxyqcujxw7vjced4eteendff28nmwmr3mtclyqhrry8palcsekavj8dstmkgezw6l3vq98p254mkxxye2uumaw8zh2mzvuqsgn0jfkymq76rlvx2d8e2xe6tv34vtpr09lhlehh4cwl48mjq7h0pnwlkrxyf0k0scw3szrc6wqg4hnc9whpx3whmdd2neme9j8lzauzyq45fqks6qt5vmq7lqx0a0flurpleyaq5466dzajma5vlqlgaggxxs3r3glumrpqtu6pd5mnemnuuc6f4gdjr65jdy3em8whcxwjnex6smkrxv5kjdag7cx0j8m8cg26hkkwyra9a0xqauzu0vaxd5qnx6cpm0w68evt4v960axzzuaevkagsyft9df6tnq0g2yqm7w7frht8wsxy4s0p227psd92d3vd5t45zesrvny4lvfvkn0cnwyf7p60gtx3er45xs4u4zy2ntrkx64elmp8k4v6kv0w8sh76ychxn384m4hhrrg523ex6ux0fhs63fkk7r68p3jlm4wcmxvxt872gg930m30l5v9vw6g4txy84w2wvvh7vxdu7tq50we9yp7x0wv2f6kfe4dthcmp2sjxf5l2myhegj3u8uz0m652flmsdyu57f8ncszjtkzh44afw4quw4j7dx6m322p6q2nkcw2x0n5lxwr3u2qd7t2rc28c4wgzdfgl2qvqpf95z0uv5m7p9crhl2hjzje3zqgyzgxxd4zku3yuhmj4saqeff78r78fth39p6mryyk95m4r76x30etzf7mcaudthhzrw3ae2fts576kh0c5ksnnzamtyr8ak6t4dn86a5zupn4kv426wwy7j688aasxupw7nu9qvkagm2a44ssk88ffyjxznrjtdln45vejx5ghaewzju6qze507shwtmu8evxcxv7h4axwqyvufxrvsmw3n88600af973r3k3nn3crs063j7ncc36luckfgajmqu6qtxt5emyzzmfy4pp9u4swfqtacaqgqmfjmmzansw9qv7zmhzz0wzllcv8a82f6apyt5kgrkdxg58a854rc4940gq2wy6y8lwtrkp3uf9fgms64d5d6990jzrfcr7xdkwp3fh8p66q7mfu03wpk0jzulqnu7dt6qppal3gkxhk384dvh8makve69vht6lcn032f2pavs0x4uq94s2lycmuvrevv6jrf76c90e6juz0q5w3744me7xagrunr3qpg4p8pqmyae4d7gzz8wr2znqg8wp32n2zdegz3qsmct9rhc4w5ne97epn5xdzzfa3rnqqllfqdu2672pk9a5uqldewz3v5haxnrxdhl3h52srthlv3c8ythj4m692rp74mzl2wx3svw864weq8437gqq9ejkhmkqnpzwzq7mtgp6c9r6sw2qqz4u2688wqet3yxf8rdqe0l9r9glhl5jq4arrx5f45k6l79mn9x44mmersqcrk3kmyfnptqe023rk5349a878n6qymd36tp6pvpxyxnuksyvw6yetyk4kvth6yqx5ke0q2v5ka49ewh787pgz4cnsvc2plyjwky8nurldynf44e9h0vaeukdk7xhs3slfydmmy2y84lez9uwqkj76e68fsws4g4jjlck902hs6ymmuhw52th2e82myf77wcxph7ka75qhhd4x35gd2lz8rajhjnfnns65gp3kqmwmq52st273jx7xs0xpper2s0jawgs38s3x8ggn3nk7a8k3dwlr7hry38xgyyjpvm6qlwvdyv5sau6a0rdyumrmut6uuxk90jqm2s4mp9u5rnyasedzeugegcygj72u29t7t2swvdr4mwrynryusp24d4s3l8ppj7tpks2nj8a3tlwzqh2feew6swzkf839lczs5rq4pcvmsgcy5ck5x0p759vwzqxwn7trtg0x7grfzpdc50x8zudrwad7fye8ca2zc7f8m689e34u003wc5dzs32cd8mxljkdpt4elasxcxse08948zeq239k8c442yffxz85uyqzcjyc86rfw3g79x5h3zkjq35t9v8vwskawag2vzmjtrmn4knst75kf3pfgt3mnkavs3fgyq9nfut343nmne8cct4uhj8zp0hrplpwf65kjvw8gqwstyg0gqejy4aur5".to_string(), Network::Alpha).unwrap(), NeptuneCoins::new(42)),
         ]
+    }
+
+    pub fn premine_utxos() -> Vec<Utxo> {
+        let mut utxos = vec![];
+        for (receiving_address, amount) in Self::premine_distribution() {
+            // generate utxo
+            let mut utxo = Utxo::new_native_coin(receiving_address.lock_script(), amount);
+            let six_months = 365 * 24 * 60 * 60 * 1000 / 2;
+            utxo.coins
+                .push(TimeLock::until(Self::launch() + six_months));
+            utxos.push(utxo);
+        }
+        utxos
     }
 
     pub fn new(header: BlockHeader, body: BlockBody, proof: Option<Proof>) -> Self {
@@ -220,7 +243,7 @@ impl Block {
     pub fn accumulate_transaction(
         &mut self,
         transaction: Transaction,
-        old_mutator_set_accumulator: &MutatorSetAccumulator,
+        previous_mutator_set_accumulator: &MutatorSetAccumulator,
     ) {
         // merge transactions
         let merged_timestamp = BFieldElement::new(max(
@@ -239,23 +262,15 @@ impl Block {
 
         // accumulate mutator set updates
         // Can't use the current mutator sat accumulator because it is in an in-between state.
-        let mut new_mutator_set_accumulator = old_mutator_set_accumulator.clone();
+        let mut new_mutator_set_accumulator = previous_mutator_set_accumulator.clone();
         let mutator_set_update = MutatorSetUpdate::new(
-            [
-                self.kernel.body.transaction.kernel.inputs.clone(),
-                transaction.kernel.inputs,
-            ]
-            .concat(),
-            [
-                self.kernel.body.transaction.kernel.outputs.clone(),
-                transaction.kernel.outputs.clone(),
-            ]
-            .concat(),
+            new_transaction.kernel.inputs.clone(),
+            new_transaction.kernel.outputs.clone(),
         );
 
         // Apply the mutator set update to get the `next_mutator_set_accumulator`
         mutator_set_update
-            .apply(&mut new_mutator_set_accumulator)
+            .apply_to_accumulator(&mut new_mutator_set_accumulator)
             .expect("Mutator set mutation must work");
 
         let block_body: BlockBody = BlockBody {
@@ -285,7 +300,7 @@ impl Block {
     /// Verify a block. It is assumed that `previous_block` is valid.
     /// Note that this function does **not** check that the PoW digest is below the threshold.
     /// That must be done separately by the caller.
-    pub(crate) fn is_valid(&self, previous_block: &Block) -> bool {
+    pub(crate) fn is_valid(&self, previous_block: &Block, now: Duration) -> bool {
         // The block value doesn't actually change. Some function calls just require
         // mutable references because that's how the interface was defined for them.
         let block_copy = self.to_owned();
@@ -311,7 +326,11 @@ impl Block {
 
         // 0.a) Block height is previous plus one
         if previous_block.kernel.header.height.next() != block_copy.kernel.header.height {
-            warn!("Height does not match previous height");
+            warn!(
+                "Block height ({}) does not match previous height plus one ({})",
+                block_copy.kernel.header.height,
+                previous_block.kernel.header.height.next()
+            );
             return false;
         }
 
@@ -329,11 +348,16 @@ impl Block {
             return false;
         }
 
-        // 0.d) Block timestamp is greater than that of previuos block
+        // 0.d) Block timestamp is greater than (or equal to) that of previous block
         if previous_block.kernel.header.timestamp.value()
-            >= block_copy.kernel.header.timestamp.value()
+            > block_copy.kernel.header.timestamp.value()
         {
-            warn!("Block does not have greater timestamp than that of previous block");
+            warn!(
+                "Block's timestamp ({}) should be greater than or equal to that of previous block ({})\nprevious <= current ?? {}",
+                block_copy.kernel.header.timestamp.value(),
+                previous_block.kernel.header.timestamp.value(),
+                previous_block.kernel.header.timestamp.value() <= block_copy.kernel.header.timestamp.value()
+            );
             return false;
         }
 
@@ -346,11 +370,11 @@ impl Block {
         }
 
         // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
-        let future_limit = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            + Duration::from_secs(60 * 60 * 2);
-        if (block_copy.kernel.header.timestamp.value() as u128) >= future_limit.as_millis() {
+        // (but only check this if "now" is after launch)
+        let future_limit = now + Duration::from_secs(60 * 60 * 2);
+        if now.as_millis() as u64 > Block::launch()
+            && (block_copy.kernel.header.timestamp.value() as u128) >= future_limit.as_millis()
+        {
             warn!("block time is too far in the future");
             return false;
         }
@@ -396,7 +420,7 @@ impl Block {
             block_copy.kernel.body.transaction.kernel.outputs.clone(),
         );
         let mut ms = previous_block.kernel.body.mutator_set_accumulator.clone();
-        let ms_update_result = mutator_set_update.apply(&mut ms);
+        let ms_update_result = mutator_set_update.apply_to_accumulator(&mut ms);
         match ms_update_result {
             Ok(()) => (),
             Err(err) => {
@@ -420,7 +444,11 @@ impl Block {
         if block_copy.kernel.body.transaction.kernel.timestamp.value()
             > block_copy.kernel.header.timestamp.value()
         {
-            warn!("Transaction with invalid timestamp found");
+            warn!(
+                "Transaction timestamp ({}) is is larger than that of block ({})",
+                block_copy.kernel.body.transaction.kernel.timestamp.value(),
+                block_copy.kernel.header.timestamp.value()
+            );
             return false;
         }
 
@@ -526,6 +554,7 @@ impl Block {
 
 #[cfg(test)]
 mod block_tests {
+
     use crate::{
         config_models::network::Network,
         models::{
@@ -551,10 +580,12 @@ mod block_tests {
     #[traced_test]
     #[tokio::test]
     async fn merge_transaction_test() {
+        let mut rng = thread_rng();
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
         let network = Network::Alpha;
-        let global_state_lock = get_mock_global_state(network, 2, None).await;
+        let global_state_lock =
+            get_mock_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let spending_key = global_state_lock
             .lock_guard()
             .await
@@ -568,9 +599,11 @@ mod block_tests {
             .to_address();
         let genesis_block = Block::genesis_block();
 
-        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address);
+        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen());
+        let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
+        let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         assert!(
-            block_1.is_valid(&genesis_block),
+            block_1.is_valid(&genesis_block, now),
             "Block 1 must be valid with only coinbase output"
         );
 
@@ -585,14 +618,18 @@ mod block_tests {
         let new_tx = global_state_lock
             .lock_guard_mut()
             .await
-            .create_transaction(vec![reciever_data], NeptuneCoins::new(1))
+            .create_transaction(
+                vec![reciever_data],
+                NeptuneCoins::new(1),
+                now + seven_months,
+            )
             .await
             .unwrap();
         assert!(new_tx.is_valid(), "Created tx must be valid");
 
         block_1.accumulate_transaction(new_tx, &genesis_block.kernel.body.mutator_set_accumulator);
         assert!(
-            block_1.is_valid(&genesis_block),
+            block_1.is_valid(&genesis_block, now + seven_months),
             "Block 1 must be valid after adding a transaction; previous mutator set hash: {} and next mutator set hash: {}",
             genesis_block.kernel
                 .body
@@ -651,62 +688,62 @@ mod block_tests {
 
     #[test]
     fn block_with_wrong_mmra_is_invalid() {
+        let mut rng = thread_rng();
         let genesis_block = Block::genesis_block();
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
 
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
+        let timestamp = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
-        assert!(!block_1.is_valid(&genesis_block));
+        assert!(!block_1.is_valid(&genesis_block, timestamp));
     }
 
     #[traced_test]
     #[test]
     fn block_with_far_future_timestamp_is_invalid() {
+        let mut rng = thread_rng();
         let genesis_block = Block::genesis_block();
+        let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
 
         // Set block timestamp 1 hour in the future.  (is valid)
-        let future_time1 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            + Duration::from_secs(60 * 60);
+        let future_time1 = now + Duration::from_secs(60 * 60);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time1.as_millis().try_into().unwrap());
-        assert!(block_1.is_valid(&genesis_block));
+        assert!(block_1.is_valid(&genesis_block, now));
 
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
+        now = Duration::from_millis(block_1.kernel.header.timestamp.value());
 
         // Set block timestamp 2 hours - 1 sec in the future.  (is valid)
         let future_time2 = now + Duration::from_secs(60 * 60 * 2 - 1);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time2.as_millis().try_into().unwrap());
-        assert!(block_1.is_valid(&genesis_block));
+        assert!(block_1.is_valid(&genesis_block, now));
 
         // Set block timestamp 2 hours + 10 secs in the future. (not valid)
         let future_time3 = now + Duration::from_secs(60 * 60 * 2 + 10);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time3.as_millis().try_into().unwrap());
-        assert!(!block_1.is_valid(&genesis_block));
+        assert!(!block_1.is_valid(&genesis_block, now));
 
         // Set block timestamp 2 days in the future. (not valid)
         let future_time4 = now + Duration::from_secs(86400 * 2);
         block_1.kernel.header.timestamp =
             BFieldElement::new(future_time4.as_millis().try_into().unwrap());
-        assert!(!block_1.is_valid(&genesis_block));
+        assert!(!block_1.is_valid(&genesis_block, now));
     }
 
     #[test]
     fn can_prove_block_ancestry() {
+        let mut rng = thread_rng();
         let genesis_block = Block::genesis_block();
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
@@ -722,7 +759,7 @@ mod block_tests {
             let wallet_secret = WalletSecret::new_random();
             let recipient_address = wallet_secret.nth_generation_spending_key(0).to_address();
             let (new_block, _, _) =
-                make_mock_block(blocks.last().unwrap(), None, recipient_address);
+                make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen());
             if i != 54 {
                 ammr.append(new_block.hash());
                 mmra.append(new_block.hash());

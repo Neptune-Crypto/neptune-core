@@ -20,7 +20,7 @@ use itertools::Itertools;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
@@ -113,6 +113,7 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let mut previous_block = &parent_of_first_block;
         for new_block in received_blocks.iter() {
             if !new_block.has_proof_of_work(previous_block) {
@@ -132,7 +133,7 @@ impl PeerLoopHandler {
                 )))
                 .await?;
                 bail!("Failed to validate block due to insufficient PoW");
-            } else if !new_block.is_valid(previous_block) {
+            } else if !new_block.is_valid(previous_block, now) {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
                     new_block.kernel.header.height, self.peer_address
@@ -1175,6 +1176,7 @@ impl PeerLoopHandler {
 
 #[cfg(test)]
 mod peer_loop_tests {
+    use rand::{thread_rng, Rng};
     use tokio::sync::mpsc::error::TryRecvError;
     use tracing_test::traced_test;
 
@@ -1267,6 +1269,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn different_genesis_test() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario a peer provides another genesis block than what has been
         // hardcoded. This should lead to the closing of the connection to this peer
         // and a ban.
@@ -1287,8 +1290,12 @@ mod peer_loop_tests {
         different_genesis_block.kernel.header.nonce[2].increment();
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1_with_different_genesis, _, _) =
-            make_mock_block_with_valid_pow(&different_genesis_block, None, a_recipient_address);
+        let (block_1_with_different_genesis, _, _) = make_mock_block_with_valid_pow(
+            &different_genesis_block,
+            None,
+            a_recipient_address,
+            rng.gen(),
+        );
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
             block_1_with_different_genesis.into(),
         )))]);
@@ -1346,6 +1353,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_without_valid_pow_test() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario, a block without a valid PoW is received. This block should be rejected
         // by the peer loop and a notification should never reach the main loop.
         let network = Network::Alpha;
@@ -1365,7 +1373,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_without_valid_pow, _, _) =
-            make_mock_block_with_invalid_pow(&genesis_block, None, a_recipient_address);
+            make_mock_block_with_invalid_pow(&genesis_block, None, a_recipient_address, rng.gen());
 
         // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
         // tolerance that is set in the client. For this reason, we include a "Bye" here.
@@ -1436,6 +1444,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_block_with_block_in_db() -> Result<()> {
+        let mut rng = thread_rng();
         // The scenario tested here is that a client receives a block that is already
         // known and stored. The expected behavior is to ignore the block and not send
         // a message to the main thread.
@@ -1453,7 +1462,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
@@ -1501,6 +1510,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_request_batch_in_order_test() -> Result<()> {
+        let mut rng = thread_rng();
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a batch of blocks starting from block 1. Ensure that the correct blocks
         // are returned.
@@ -1517,13 +1527,15 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
-        let (block_2_a, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+        let (block_2_a, _, _) =
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
         let (block_3_a, _, _) =
-            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address); // <--- canonical
-        let (block_2_b, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()); // <--- canonical
+        let (block_2_b, _, _) =
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
         let (block_3_b, _, _) =
-            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
         add_block(&mut global_state_mut, block_1.clone()).await?;
         add_block(&mut global_state_mut, block_2_a.clone()).await?;
@@ -1591,6 +1603,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_request_batch_out_of_order_test() -> Result<()> {
+        let mut rng = thread_rng();
         // Scenario: Same as above, but the peer supplies their hashes in a wrong order.
         // Ensure that the correct blocks are returned, in the right order.
         let network = Network::Alpha;
@@ -1606,13 +1619,15 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
-        let (block_2_a, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+        let (block_2_a, _, _) =
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
         let (block_3_a, _, _) =
-            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address); // <--- canonical
-        let (block_2_b, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()); // <--- canonical
+        let (block_2_b, _, _) =
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
         let (block_3_b, _, _) =
-            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
         add_block(&mut global_state_mut, block_1.clone()).await?;
         add_block(&mut global_state_mut, block_2_a.clone()).await?;
@@ -1654,6 +1669,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn find_canonical_chain_when_multiple_blocks_at_same_height_test() -> Result<()> {
+        let mut rng = thread_rng();
         // Scenario: A fork began at block 2, node knows two blocks of height 2 and two of height 3.
         // A peer requests a block at height 2. Verify that the correct block at height 2 is returned.
         let network = Network::Alpha;
@@ -1669,13 +1685,15 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
-        let (block_2_a, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+        let (block_2_a, _, _) =
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
         let (block_3_a, _, _) =
-            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address); // <--- canonical
-        let (block_2_b, _, _) = make_mock_block_with_valid_pow(&block_1, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()); // <--- canonical
+        let (block_2_b, _, _) =
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
         let (block_3_b, _, _) =
-            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
 
         add_block(&mut global_state_mut, block_1.clone()).await?;
         add_block(&mut global_state_mut, block_2_a.clone()).await?;
@@ -1714,6 +1732,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
+        let mut rng = thread_rng();
         // Scenario: client only knows genesis block. Then receives block 1.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(Network::Alpha, 0).await?;
@@ -1729,7 +1748,7 @@ mod peer_loop_tests {
             .await;
 
         let (mock_block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(mock_block_1.into()))),
             Action::Read(PeerMessage::Bye),
@@ -1774,6 +1793,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_receival_of_second_block_no_blocks_in_db() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 2, meaning that block 1 will have to be requested.
         let network = Network::Testnet;
@@ -1790,9 +1810,9 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -1845,6 +1865,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn prevent_ram_exhaustion_test() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario the peer sends more blocks than the client allows to store in the
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
         // process as the alternative is that the program will crash because it runs out of RAM.
@@ -1875,14 +1896,30 @@ mod peer_loop_tests {
             .wallet_secret
             .nth_generation_spending_key(0)
             .to_address();
-        let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block.clone(), None, own_recipient_address);
-        let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, own_recipient_address);
-        let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, own_recipient_address);
-        let (block_4, _, _) =
-            make_mock_block_with_valid_pow(&block_3.clone(), None, own_recipient_address);
+        let (block_1, _, _) = make_mock_block_with_valid_pow(
+            &genesis_block.clone(),
+            None,
+            own_recipient_address,
+            rng.gen(),
+        );
+        let (block_2, _, _) = make_mock_block_with_valid_pow(
+            &block_1.clone(),
+            None,
+            own_recipient_address,
+            rng.gen(),
+        );
+        let (block_3, _, _) = make_mock_block_with_valid_pow(
+            &block_2.clone(),
+            None,
+            own_recipient_address,
+            rng.gen(),
+        );
+        let (block_4, _, _) = make_mock_block_with_valid_pow(
+            &block_3.clone(),
+            None,
+            own_recipient_address,
+            rng.gen(),
+        );
         add_block(&mut global_state_mut, block_1.clone()).await?;
 
         drop(global_state_mut);
@@ -1940,6 +1977,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_receival_of_fourth_block_one_block_in_db() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
         let network = Network::Testnet;
@@ -1954,14 +1992,18 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_1, _, _) = make_mock_block_with_valid_pow(
+            &genesis_block.clone(),
+            None,
+            a_recipient_address,
+            rng.gen(),
+        );
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         let (block_4, _, _) =
-            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
@@ -2021,6 +2063,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_receival_of_third_block_no_blocks_in_db() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 3, meaning that block 2 and 1 will have to be requested.
         let network = Network::RegTest;
@@ -2032,12 +2075,16 @@ mod peer_loop_tests {
         let genesis_block: Block = global_state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_1, _, _) = make_mock_block_with_valid_pow(
+            &genesis_block.clone(),
+            None,
+            a_recipient_address,
+            rng.gen(),
+        );
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         drop(global_state);
 
         let mock = Mock::new(vec![
@@ -2096,6 +2143,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_block_reconciliation_interrupted_by_block_notification() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         // But the requests are interrupted by the peer sending another message: a new block
@@ -2112,16 +2160,20 @@ mod peer_loop_tests {
             .archival_state()
             .get_latest_block()
             .await;
-        let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_1, _, _) = make_mock_block_with_valid_pow(
+            &genesis_block.clone(),
+            None,
+            a_recipient_address,
+            rng.gen(),
+        );
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         let (block_4, _, _) =
-            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
         let (block_5, _, _) =
-            make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address, rng.gen());
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
@@ -2196,6 +2248,7 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_block_reconciliation_interrupted_by_peer_list_request() -> Result<()> {
+        let mut rng = thread_rng();
         // In this scenario, the client knows the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3, 2, and 1 will have to be requested.
         // But the requests are interrupted by the peer sending another message: a request
@@ -2218,14 +2271,18 @@ mod peer_loop_tests {
             .await;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
-        let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
+        let (block_1, _, _) = make_mock_block_with_valid_pow(
+            &genesis_block.clone(),
+            None,
+            a_recipient_address,
+            rng.gen(),
+        );
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
         let (block_4, _, _) =
-            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 

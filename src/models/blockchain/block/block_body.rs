@@ -58,7 +58,7 @@ impl MastHash for BlockBody {
 
     fn mast_sequences(&self) -> Vec<Vec<BFieldElement>> {
         vec![
-            self.transaction.encode(),
+            self.transaction.kernel.encode(),
             self.mutator_set_accumulator.encode(),
             self.lock_free_mmr_accumulator.encode(),
             self.block_mmr_accumulator.encode(),

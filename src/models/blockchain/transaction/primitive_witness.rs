@@ -324,7 +324,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
                         let input_membership_proofs = msa_and_records.membership_proofs;
                         let input_removal_records = msa_and_records.removal_records;
 
-                        let type_scripts = vec![TypeScript::new(NativeCurrency::program())];
+                        let type_scripts = vec![TypeScript::new(NativeCurrency.program())];
 
                         // prepare to unwrap
                         let input_utxos = input_utxos.clone();
@@ -400,12 +400,13 @@ mod test {
         transaction::validity::TransactionValidationLogic,
         type_scripts::neptune_coins::NeptuneCoins,
     };
+    use crate::models::consensus::mast_hash::MastHash;
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;
     use test_strategy::proptest;
 
-    #[proptest(cases = 1)]
+    #[proptest(cases = 5)]
     fn arbitrary_transaction_is_valid(
         #[strategy(1usize..3)] _num_inputs: usize,
         #[strategy(1usize..3)] _num_outputs: usize,
@@ -413,10 +414,12 @@ mod test {
         #[strategy(PrimitiveWitness::arbitrary_with((#_num_inputs, #_num_outputs, #_num_public_announcements)))]
         transaction_primitive_witness: PrimitiveWitness,
     ) {
-        prop_assert!(TransactionValidationLogic::new_from_primitive_witness(
-            &transaction_primitive_witness
-        )
-        .verify());
+        let kernel_hash = transaction_primitive_witness.kernel.mast_hash();
+        prop_assert!(
+            TransactionValidationLogic::from(transaction_primitive_witness)
+                .vast
+                .verify(kernel_hash)
+        );
     }
 
     #[proptest]
