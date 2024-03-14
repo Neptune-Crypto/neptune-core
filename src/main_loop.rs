@@ -415,10 +415,7 @@ impl MainLoopHandler {
                             "Storing block {} in database. Height: {}, Mined: {}",
                             new_block.hash().emojihash(),
                             new_block.kernel.header.height,
-                            crate::utc_timestamp_to_localtime(
-                                new_block.kernel.header.timestamp.value()
-                            )
-                            .to_string()
+                            new_block.kernel.header.timestamp.standard_format()
                         );
 
                         global_state_mut.store_block(new_block).await?;

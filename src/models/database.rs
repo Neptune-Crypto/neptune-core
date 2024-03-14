@@ -2,11 +2,11 @@ use crate::prelude::twenty_first;
 
 use serde::{Deserialize, Serialize};
 use std::{fmt, net::IpAddr};
-use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::digest::Digest;
 
 use super::blockchain::block::block_header::BlockHeader;
 use super::blockchain::block::block_height::BlockHeight;
+use super::consensus::timestamp::Timestamp;
 use super::peer::PeerStanding;
 use crate::database::NeptuneLevelDb;
 
@@ -35,8 +35,8 @@ pub struct FileRecord {
     pub max_block_height: BlockHeight,
 
     // min and max block timestamp in file, both inclusive
-    pub min_block_timestamp: BFieldElement,
-    pub max_block_timestamp: BFieldElement,
+    pub min_block_timestamp: Timestamp,
+    pub max_block_timestamp: Timestamp,
 }
 
 impl FileRecord {
@@ -59,16 +59,14 @@ impl FileRecord {
         ret.file_size += block_size;
         ret.min_block_height = std::cmp::min(self.max_block_height, block_header.height);
         ret.max_block_height = std::cmp::max(self.max_block_height, block_header.height);
-        ret.min_block_timestamp = std::cmp::min_by(
-            ret.min_block_timestamp,
-            block_header.timestamp,
-            |x: &BFieldElement, y: &BFieldElement| x.value().cmp(&y.value()),
-        );
-        ret.max_block_timestamp = std::cmp::max_by(
-            ret.min_block_timestamp,
-            block_header.timestamp,
-            |x: &BFieldElement, y: &BFieldElement| x.value().cmp(&y.value()),
-        );
+        ret.min_block_timestamp =
+            std::cmp::min_by(ret.min_block_timestamp, block_header.timestamp, |x, y| {
+                x.cmp(y)
+            });
+        ret.max_block_timestamp =
+            std::cmp::max_by(ret.min_block_timestamp, block_header.timestamp, |x, y| {
+                x.cmp(y)
+            });
         ret
     }
 }

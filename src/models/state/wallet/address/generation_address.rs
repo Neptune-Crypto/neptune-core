@@ -389,7 +389,7 @@ impl ReceivingAddress {
         // NOLGA: Neptune lattice-based generation address
         let mut hrp = "nolga".to_string();
         let network_byte: char = match network {
-            Network::Alpha => 'm',
+            Network::Alpha | Network::Beta | Network::Main => 'm',
             Network::Testnet => 't',
             Network::RegTest => 'r',
         };

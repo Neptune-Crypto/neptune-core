@@ -1,6 +1,7 @@
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::{
     ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
 };
@@ -89,8 +90,7 @@ impl TransactionValidationLogic {
             || own_kernel.coinbase.unwrap_or(NeptuneCoins::new(0))
                 + other_kernel.coinbase.unwrap_or(NeptuneCoins::new(0))
                 != new_kernel.coinbase.unwrap_or(NeptuneCoins::new(0))
-            || u64::max(own_kernel.timestamp.value(), other_kernel.timestamp.value())
-                != new_kernel.timestamp.value()
+            || Timestamp::max(own_kernel.timestamp, other_kernel.timestamp) != new_kernel.timestamp
             || own_kernel.mutator_set_hash != other_kernel.mutator_set_hash
             || other_kernel.mutator_set_hash != new_kernel.mutator_set_hash
         {

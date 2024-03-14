@@ -1,4 +1,5 @@
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
 use crate::connect_to_peers::close_peer_connected_callback;
@@ -20,7 +21,7 @@ use itertools::Itertools;
 use std::cmp;
 use std::marker::Unpin;
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
@@ -113,7 +114,7 @@ impl PeerLoopHandler {
                 "blocks"
             }
         );
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let now = Timestamp::now();
         let mut previous_block = &parent_of_first_block;
         for new_block in received_blocks.iter() {
             if !new_block.has_proof_of_work(previous_block) {
@@ -148,8 +149,7 @@ impl PeerLoopHandler {
                 info!(
                     "Block with height {} is valid. mined: {}",
                     new_block.kernel.header.height,
-                    crate::utc_timestamp_to_localtime(new_block.kernel.header.timestamp.value())
-                        .to_string()
+                    new_block.kernel.header.timestamp.standard_format()
                 );
             }
 
@@ -384,7 +384,7 @@ impl PeerLoopHandler {
                     "Got new block from peer {}, height {}, mined {}",
                     self.peer_address,
                     t_block.header.height,
-                    crate::utc_timestamp_to_localtime(t_block.header.timestamp.value()).to_string()
+                    t_block.header.timestamp.standard_format()
                 );
                 let new_block_height = t_block.header.height;
 
@@ -798,19 +798,11 @@ impl PeerLoopHandler {
                 }
 
                 // Get transaction timestamp
-                let tx_timestamp = match transaction.get_timestamp() {
-                    Ok(ts) => ts,
-                    Err(_) => {
-                        warn!("Received tx with invalid timestamp");
-                        return Ok(KEEP_CONNECTION_ALIVE);
-                    }
-                };
+                let tx_timestamp = transaction.kernel.timestamp;
 
                 // 2. Ignore if transaction is too old
-                let now = SystemTime::now();
-                if tx_timestamp
-                    < now - std::time::Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS)
-                {
+                let now = Timestamp::now();
+                if tx_timestamp < now - Timestamp::seconds(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS) {
                     // TODO: Consider punishing here
                     warn!("Received too old tx");
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -818,10 +810,7 @@ impl PeerLoopHandler {
 
                 // 3. Ignore if transaction is too far into the future
                 if tx_timestamp
-                    > now
-                        + std::time::Duration::from_secs(
-                            MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD,
-                        )
+                    > now + Timestamp::seconds(MEMPOOL_IGNORE_TRANSACTIONS_THIS_MANY_SECS_AHEAD)
                 {
                     // TODO: Consider punishing here
                     warn!("Received tx too far into the future. Got timestamp: {tx_timestamp:?}");
@@ -1732,10 +1721,11 @@ mod peer_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn test_peer_loop_receival_of_first_block() -> Result<()> {
+        let network = Network::RegTest;
         let mut rng = thread_rng();
         // Scenario: client only knows genesis block. Then receives block 1.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
-            get_test_genesis_setup(Network::Alpha, 0).await?;
+            get_test_genesis_setup(network, 0).await?;
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_address = get_dummy_socket_address(0);
@@ -1796,7 +1786,7 @@ mod peer_loop_tests {
         let mut rng = thread_rng();
         // In this scenario, the client only knows the genesis block (block 0) and then
         // receives block 2, meaning that block 1 will have to be requested.
-        let network = Network::Testnet;
+        let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
@@ -1866,6 +1856,7 @@ mod peer_loop_tests {
     #[tokio::test]
     async fn prevent_ram_exhaustion_test() -> Result<()> {
         let mut rng = thread_rng();
+        let network = Network::RegTest;
         // In this scenario the peer sends more blocks than the client allows to store in the
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
         // process as the alternative is that the program will crash because it runs out of RAM.
@@ -1876,7 +1867,7 @@ mod peer_loop_tests {
             mut to_main_rx1,
             mut state_lock,
             _hsd,
-        ) = get_test_genesis_setup(Network::Alpha, 1).await?;
+        ) = get_test_genesis_setup(network, 1).await?;
 
         // Restrict max number of blocks held in memory to 2.
         let mut cli = state_lock.cli().clone();
@@ -1980,7 +1971,7 @@ mod peer_loop_tests {
         let mut rng = thread_rng();
         // In this scenario, the client know the genesis block (block 0) and block 1, it
         // then receives block 4, meaning that block 3 and 2 will have to be requested.
-        let network = Network::Testnet;
+        let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let mut global_state_mut = state_lock.lock_guard_mut().await;
