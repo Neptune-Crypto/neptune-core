@@ -720,10 +720,12 @@ mod tests {
             "tx_by_other_updated has mutator set hash: {}",
             tx_by_other_updated.kernel.mutator_set_hash.emojihash()
         );
-        block_3_with_updated_tx.accumulate_transaction(
-            tx_by_other_updated.clone(),
-            &block_2.kernel.body.mutator_set_accumulator,
-        ).await;
+        block_3_with_updated_tx
+            .accumulate_transaction(
+                tx_by_other_updated.clone(),
+                &block_2.kernel.body.mutator_set_accumulator,
+            )
+            .await;
         now = Duration::from_millis(block_2.kernel.header.timestamp.value());
         assert!(
             block_3_with_updated_tx.is_valid(&block_2, now + seven_months),
@@ -737,10 +739,12 @@ mod tests {
         for _ in 0..10 {
             let (next_block, _, _) =
                 make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
-            mempool.update_with_block(
-                previous_block.kernel.body.mutator_set_accumulator,
-                &next_block,
-            ).await;
+            mempool
+                .update_with_block(
+                    previous_block.kernel.body.mutator_set_accumulator,
+                    &next_block,
+                )
+                .await;
             previous_block = next_block;
         }
 
@@ -748,10 +752,12 @@ mod tests {
             make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
         assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
-        block_14.accumulate_transaction(
-            tx_by_other_updated,
-            &previous_block.kernel.body.mutator_set_accumulator,
-        ).await;
+        block_14
+            .accumulate_transaction(
+                tx_by_other_updated,
+                &previous_block.kernel.body.mutator_set_accumulator,
+            )
+            .await;
         now = Duration::from_millis(previous_block.kernel.header.timestamp.value());
         assert!(
             block_14.is_valid(&previous_block, now+seven_months),

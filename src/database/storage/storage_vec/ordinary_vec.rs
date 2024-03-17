@@ -116,12 +116,15 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec
 {
 }
 
-impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec<T> for OrdinaryVec<T> {}
+impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec<T>
+    for OrdinaryVec<T>
+{
+}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::traits::tests as trait_tests;
+    use super::*;
 
     pub fn mk_test_vec_u64() -> OrdinaryVec<u64> {
         OrdinaryVec::from(vec![])

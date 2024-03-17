@@ -26,8 +26,8 @@ use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
 };
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSetAsync;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::mutator_set_trait::MutatorSetAsync;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
@@ -853,26 +853,26 @@ mod archival_state_tests {
         // Ensure that the archival state can be initialized without overflowing the stack
         let seed: [u8; 32] = thread_rng().gen();
         // tokio::task::spawn_local(async move {
-            let mut rng: StdRng = SeedableRng::from_seed(seed);
-            let network = Network::Alpha;
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let network = Network::Alpha;
 
-            let mut archival_state0 = make_test_archival_state(network).await;
+        let mut archival_state0 = make_test_archival_state(network).await;
 
-            let b = Block::genesis_block();
-            let some_wallet_secret = WalletSecret::new_random();
-            let some_spending_key = some_wallet_secret.nth_generation_spending_key(0);
-            let some_receiving_address = some_spending_key.to_address();
+        let b = Block::genesis_block();
+        let some_wallet_secret = WalletSecret::new_random();
+        let some_spending_key = some_wallet_secret.nth_generation_spending_key(0);
+        let some_receiving_address = some_spending_key.to_address();
 
-            let (block_1, _, _) =
-                make_mock_block_with_valid_pow(&b, None, some_receiving_address, rng.gen());
-            add_block_to_archival_state(&mut archival_state0, block_1.clone())
-                .await
-                .unwrap();
-            let _c = archival_state0
-                .get_block(block_1.hash())
-                .await
-                .unwrap()
-                .unwrap();
+        let (block_1, _, _) =
+            make_mock_block_with_valid_pow(&b, None, some_receiving_address, rng.gen());
+        add_block_to_archival_state(&mut archival_state0, block_1.clone())
+            .await
+            .unwrap();
+        let _c = archival_state0
+            .get_block(block_1.hash())
+            .await
+            .unwrap()
+            .unwrap();
         // })
         // .await?;
 
@@ -1563,10 +1563,12 @@ mod archival_state_tests {
             .unwrap();
 
             // Absorb and verify validity
-            block_1.accumulate_transaction(
-                tx_to_alice_and_bob,
-                &genesis_block.kernel.body.mutator_set_accumulator,
-            ).await;
+            block_1
+                .accumulate_transaction(
+                    tx_to_alice_and_bob,
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                )
+                .await;
             assert!(block_1.is_valid(&genesis_block, launch + seven_months));
         }
 
@@ -1768,7 +1770,9 @@ mod archival_state_tests {
                 genesis_spending_key.to_address(),
                 rng.gen(),
             );
-        block_2.accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator).await;
+        block_2
+            .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
+            .await;
         assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
         assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
 

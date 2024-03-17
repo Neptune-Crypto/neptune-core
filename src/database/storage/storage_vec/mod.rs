@@ -33,7 +33,10 @@ mod tests {
     use std::collections::HashMap;
 
     /// Return a persisted vector and a regular in-memory vector with the same elements
-    async fn get_persisted_vec_with_length(length: Index, _name: &str) -> (OrdinaryVec<u64>, Vec<u64>) {
+    async fn get_persisted_vec_with_length(
+        length: Index,
+        _name: &str,
+    ) -> (OrdinaryVec<u64>, Vec<u64>) {
         let mut persisted_vec: OrdinaryVec<u64> = Default::default();
         let mut regular_vec = vec![];
 
@@ -70,31 +73,53 @@ mod tests {
         // Check `get`, `set`, and `get_many`
         assert_eq!([44; 13], delegated_db_vec.get(1).await);
         assert_eq!([42; 13], delegated_db_vec.get(0).await);
-        assert_eq!(vec![[42; 13], [44; 13]], delegated_db_vec.get_many(&[0, 1]).await);
-        assert_eq!(vec![[44; 13], [42; 13]], delegated_db_vec.get_many(&[1, 0]).await);
+        assert_eq!(
+            vec![[42; 13], [44; 13]],
+            delegated_db_vec.get_many(&[0, 1]).await
+        );
+        assert_eq!(
+            vec![[44; 13], [42; 13]],
+            delegated_db_vec.get_many(&[1, 0]).await
+        );
         assert_eq!(vec![[42; 13]], delegated_db_vec.get_many(&[0]).await);
         assert_eq!(vec![[44; 13]], delegated_db_vec.get_many(&[1]).await);
-        assert_eq!(Vec::<[u8; 13]>::default(), delegated_db_vec.get_many(&[]).await);
+        assert_eq!(
+            Vec::<[u8; 13]>::default(),
+            delegated_db_vec.get_many(&[]).await
+        );
 
         delegated_db_vec.set(0, [101; 13]).await;
         delegated_db_vec.set(1, [200; 13]).await;
         assert_eq!(vec![[101; 13]], delegated_db_vec.get_many(&[0]).await);
-        assert_eq!(Vec::<[u8; 13]>::default(), delegated_db_vec.get_many(&[]).await);
+        assert_eq!(
+            Vec::<[u8; 13]>::default(),
+            delegated_db_vec.get_many(&[]).await
+        );
         assert_eq!(vec![[200; 13]], delegated_db_vec.get_many(&[1]).await);
         assert_eq!(vec![[200; 13]; 2], delegated_db_vec.get_many(&[1, 1]).await);
-        assert_eq!(vec![[200; 13]; 3], delegated_db_vec.get_many(&[1, 1, 1]).await);
+        assert_eq!(
+            vec![[200; 13]; 3],
+            delegated_db_vec.get_many(&[1, 1, 1]).await
+        );
         assert_eq!(
             vec![[200; 13], [101; 13], [200; 13]],
             delegated_db_vec.get_many(&[1, 0, 1]).await
         );
 
         // test set_many, get_many.  pass array to set_many
-        delegated_db_vec.set_many([(0, [41; 13]), (1, [42; 13])]).await;
+        delegated_db_vec
+            .set_many([(0, [41; 13]), (1, [42; 13])])
+            .await;
         // get in reverse order
-        assert_eq!(vec![[42; 13], [41; 13]], delegated_db_vec.get_many(&[1, 0]).await);
+        assert_eq!(
+            vec![[42; 13], [41; 13]],
+            delegated_db_vec.get_many(&[1, 0]).await
+        );
 
         // set values back how they were before prior set_many() passing HashMap
-        delegated_db_vec.set_many(HashMap::from([(0, [101; 13]), (1, [200; 13])])).await;
+        delegated_db_vec
+            .set_many(HashMap::from([(0, [101; 13]), (1, [200; 13])]))
+            .await;
 
         // Pop two values, check length and return value of further pops
         assert_eq!([200; 13], delegated_db_vec.pop().await.unwrap());
@@ -103,7 +128,10 @@ mod tests {
         assert!(delegated_db_vec.pop().await.is_none());
         assert_eq!(0, delegated_db_vec.len().await);
         assert!(delegated_db_vec.pop().await.is_none());
-        assert_eq!(Vec::<[u8; 13]>::default(), delegated_db_vec.get_many(&[]).await);
+        assert_eq!(
+            Vec::<[u8; 13]>::default(),
+            delegated_db_vec.get_many(&[]).await
+        );
     }
 
     #[tokio::test]
@@ -137,13 +165,19 @@ mod tests {
 
         // Allow `set_many` with empty input
         delegated_db_vec_a.set_many([]).await;
-        assert_eq!(vec![10, 20, 30], delegated_db_vec_a.get_many(&[0, 1, 2]).await);
+        assert_eq!(
+            vec![10, 20, 30],
+            delegated_db_vec_a.get_many(&[0, 1, 2]).await
+        );
 
         // Perform an actual update with `set_many`
         let updates = [(0, 100), (1, 200), (2, 300), (3, 400)];
         delegated_db_vec_a.set_many(updates).await;
 
-        assert_eq!(vec![100, 200, 300], delegated_db_vec_a.get_many(&[0, 1, 2]).await);
+        assert_eq!(
+            vec![100, 200, 300],
+            delegated_db_vec_a.get_many(&[0, 1, 2]).await
+        );
 
         #[allow(clippy::shadow_unrelated)]
         let updates = HashMap::from([(0, 1000), (1, 2000), (2, 3000)]);
@@ -153,7 +187,6 @@ mod tests {
             vec![1000, 2000, 3000],
             delegated_db_vec_a.get_many(&[0, 1, 2]).await
         );
-
     }
 
     #[tokio::test]
@@ -167,7 +200,10 @@ mod tests {
         let updates = [100, 200, 300];
         delegated_db_vec_a.set_all(updates).await;
 
-        assert_eq!(vec![100, 200, 300], delegated_db_vec_a.get_many(&[0, 1, 2]).await);
+        assert_eq!(
+            vec![100, 200, 300],
+            delegated_db_vec_a.get_many(&[0, 1, 2]).await
+        );
 
         #[allow(clippy::shadow_unrelated)]
         let updates = vec![1000, 2000, 3000];
@@ -177,7 +213,6 @@ mod tests {
             vec![1000, 2000, 3000],
             delegated_db_vec_a.get_many(&[0, 1, 2]).await
         );
-
     }
 
     #[tokio::test]
@@ -213,7 +248,6 @@ mod tests {
             vec![1000, 3000, 2000],
             delegated_db_vec_a.get_many(&[0, 2, 1]).await
         );
-
     }
 
     #[tokio::test]
@@ -240,14 +274,19 @@ mod tests {
                     // `get_many`
                     let index = rng.gen_range(0..normal_vector.len());
                     assert_eq!(Vec::<u64>::default(), persisted_vector.get_many(&[]).await);
-                    assert_eq!(normal_vector[index], persisted_vector.get(index as u64).await);
+                    assert_eq!(
+                        normal_vector[index],
+                        persisted_vector.get(index as u64).await
+                    );
                     assert_eq!(
                         vec![normal_vector[index]],
                         persisted_vector.get_many(&[index as u64]).await
                     );
                     assert_eq!(
                         vec![normal_vector[index], normal_vector[index]],
-                        persisted_vector.get_many(&[index as u64, index as u64]).await
+                        persisted_vector
+                            .get_many(&[index as u64, index as u64])
+                            .await
                     );
                 }
                 3 => {
@@ -284,7 +323,9 @@ mod tests {
         // Check equality using `get_many`
         assert_eq!(
             normal_vector,
-            persisted_vector.get_many(&(0..normal_vector.len() as u64).collect_vec()).await
+            persisted_vector
+                .get_many(&(0..normal_vector.len() as u64).collect_vec())
+                .await
         );
     }
 
@@ -343,4 +384,3 @@ mod tests {
         delegated_db_vec.set(11, 5000).await;
     }
 }
-

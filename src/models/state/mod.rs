@@ -731,9 +731,13 @@ impl GlobalState {
         let mut recovery_data_for_missing_mutxos = vec![];
 
         {
-
             // todo: use stream() instead of get_all()
-            let stream = self.wallet_state.wallet_db.monitored_utxos().stream_values().await;
+            let stream = self
+                .wallet_state
+                .wallet_db
+                .monitored_utxos()
+                .stream_values()
+                .await;
             pin_mut!(stream); // needed for iteration
 
             // let mutxos = self
@@ -933,7 +937,8 @@ impl GlobalState {
                     debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
                     // revert removals
-                    let removal_records = revert_block.kernel.body.transaction.kernel.inputs.clone();
+                    let removal_records =
+                        revert_block.kernel.body.transaction.kernel.inputs.clone();
                     for removal_record in removal_records.iter().rev() {
                         // membership_proof.revert_update_from_removal(&removal);
                         membership_proof
@@ -1074,8 +1079,7 @@ impl GlobalState {
             //     .into_iter()
             //     .enumerate()
             let mut i: Index = 0;
-            while let Some(mut mutxo) = stream.next().await
-            {
+            while let Some(mut mutxo) = stream.next().await {
                 // 1. Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
                 //    once the spending block is buried sufficiently deep
                 // 2. If synced to current tip, there is nothing more to do with this MUTXO
@@ -1389,7 +1393,8 @@ mod global_state_tests {
             .wallet_state
             .wallet_db
             .monitored_utxos()
-            .get_all().await;
+            .get_all()
+            .await;
         assert_ne!(monitored_utxos.len(), 0);
 
         // one month before release date, we should not be able to create the transaction
@@ -2082,10 +2087,12 @@ mod global_state_tests {
             .unwrap();
 
             // Absorb and verify validity
-            block_1.accumulate_transaction(
-                tx_to_alice_and_bob,
-                &genesis_block.kernel.body.mutator_set_accumulator,
-            ).await;
+            block_1
+                .accumulate_transaction(
+                    tx_to_alice_and_bob,
+                    &genesis_block.kernel.body.mutator_set_accumulator,
+                )
+                .await;
             let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
             assert!(block_1.is_valid(&genesis_block, now + Duration::from_millis(seven_months)));
         }
@@ -2283,11 +2290,15 @@ mod global_state_tests {
                 genesis_spending_key.to_address(),
                 rng.gen(),
             );
-        block_2.accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator).await;
+        block_2
+            .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
+            .await;
         assert_eq!(2, block_2.kernel.body.transaction.kernel.inputs.len());
         assert_eq!(3, block_2.kernel.body.transaction.kernel.outputs.len());
 
-        block_2.accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator).await;
+        block_2
+            .accumulate_transaction(tx_from_bob, &block_1.kernel.body.mutator_set_accumulator)
+            .await;
     }
 
     #[traced_test]

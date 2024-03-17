@@ -531,7 +531,8 @@ mod mine_loop_tests {
                 &genesis_block,
                 &premine_receiver_global_state,
                 now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 1000),
-            ).await;
+            )
+            .await;
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
@@ -544,7 +545,8 @@ mod mine_loop_tests {
             &genesis_block,
             transaction_non_empty_mempool,
             now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000),
-        ).await;
+        )
+        .await;
         let block_template_non_empty_mempool = Block::new(block_header_template, block_body, None);
         assert!(
             block_template_non_empty_mempool.is_valid(
