@@ -355,7 +355,6 @@ where
 
     #[inline]
     pub(super) async fn push(&mut self, value: V) {
-
         // record in cache
         let current_length = self.len().await;
         let new_length = current_length + 1;

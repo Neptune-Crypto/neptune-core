@@ -53,7 +53,6 @@ pub trait MutatorSet {
     fn hash(&self) -> Digest;
 }
 
-
 // #[allow(async_fn_in_trait)]
 #[async_trait::async_trait]
 pub trait MutatorSetAsync {

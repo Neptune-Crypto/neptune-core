@@ -248,10 +248,9 @@ where
                 .prove_membership_async(chunk_index)
                 .await
                 .0;
-            target_chunks.dictionary.insert(
-                chunk_index,
-                (chunk_membership_proof, chunk.to_owned()),
-            );
+            target_chunks
+                .dictionary
+                .insert(chunk_index, (chunk_membership_proof, chunk.to_owned()));
         }
 
         Ok(MsMembershipProof {

@@ -101,7 +101,6 @@ where
     V: Clone,
     V: Serialize + DeserializeOwned + Send + Sync,
 {
-
     #[inline]
     async fn restore_or_new(&mut self) {
         if let Some(length) = self
@@ -118,8 +117,9 @@ where
 }
 
 /// Async Streams (ie async iterators)
-impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVecStream<T> for DbtVec<T> {
-
+impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVecStream<T>
+    for DbtVec<T>
+{
     async fn stream<'a>(&'a self) -> impl Stream<Item = (Index, T)> + 'a
     where
         T: 'a,
@@ -135,14 +135,16 @@ impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> St
     }
 }
 
-impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec<T> for DbtVec<T> {}
-
+impl<T: Debug + Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec<T>
+    for DbtVec<T>
+{
+}
 
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use super::super::SimpleRustyStorage;
+    use super::*;
     use crate::database::NeptuneLevelDb;
 
     pub async fn mk_test_vec_u64() -> DbtVec<u64> {
@@ -155,8 +157,8 @@ mod tests {
     }
 
     pub mod streams {
-        use super::*;
         use super::super::super::super::storage_vec::traits::tests::streams as stream_tests;
+        use super::*;
 
         #[tokio::test]
         pub async fn stream() {

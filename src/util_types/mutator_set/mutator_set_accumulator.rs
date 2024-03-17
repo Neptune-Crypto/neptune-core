@@ -157,11 +157,10 @@ mod ms_accumulator_tests {
         }
 
         // Remove the entries with batch_remove
-        accumulator
-            .batch_remove(
-                removal_records,
-                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
-            );
+        accumulator.batch_remove(
+            removal_records,
+            &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+        );
 
         // Verify that the expected membership proofs fail/pass
         for (mp, &item, skipped) in izip!(

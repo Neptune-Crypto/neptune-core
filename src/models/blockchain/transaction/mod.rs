@@ -155,12 +155,7 @@ impl Transaction {
         }
 
         // Sanity check of block validity
-        let block_msa_hash = block
-            .kernel
-            .body
-            .mutator_set_accumulator
-            .clone()
-            .hash();
+        let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash();
         assert_eq!(
             msa_state.hash(),
             block_msa_hash,
@@ -466,10 +461,7 @@ impl Transaction {
                 );
                 debug!(
                     "witness mutator set hash: {}",
-                    primitive_witness
-                        .mutator_set_accumulator
-                        .hash()
-                        .emojihash()
+                    primitive_witness.mutator_set_accumulator.hash().emojihash()
                 );
                 debug!(
                     "kernel mutator set hash: {}",
@@ -592,10 +584,7 @@ impl Transaction {
             );
             debug!(
                 "Witness mutator set hash: {}",
-                primitive_witness
-                    .mutator_set_accumulator
-                    .hash()
-                    .emojihash()
+                primitive_witness.mutator_set_accumulator.hash().emojihash()
             );
             return false;
         }

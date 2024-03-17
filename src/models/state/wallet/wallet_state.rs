@@ -360,10 +360,11 @@ impl WalletState {
                 {
                     Some(ms_mp) => {
                         debug!("Found valid mp for UTXO");
-                        let replacement_success = valid_membership_proofs_and_own_utxo_count.insert(
-                            StrongUtxoKey::new(utxo_digest, ms_mp.auth_path_aocl.leaf_index),
-                            (ms_mp, i),
-                        );
+                        let replacement_success = valid_membership_proofs_and_own_utxo_count
+                            .insert(
+                                StrongUtxoKey::new(utxo_digest, ms_mp.auth_path_aocl.leaf_index),
+                                (ms_mp, i),
+                            );
                         assert!(
                             replacement_success.is_none(),
                             "Strong key must be unique in wallet DB"
@@ -493,10 +494,12 @@ impl WalletState {
             pin_mut!(stream); // needed for iteration
 
             let mutxo_with_valid_mps = stream
-                .filter(|mutxo| futures::future::ready(
-                    mutxo.is_synced_to(new_block.kernel.header.prev_block_digest)
-                        || mutxo.blockhash_to_membership_proof.is_empty()
-                ))
+                .filter(|mutxo| {
+                    futures::future::ready(
+                        mutxo.is_synced_to(new_block.kernel.header.prev_block_digest)
+                            || mutxo.blockhash_to_membership_proof.is_empty(),
+                    )
+                })
                 .count()
                 .await;
 
@@ -570,12 +573,7 @@ impl WalletState {
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
-            new_block
-                .kernel
-                .body
-                .mutator_set_accumulator
-                .clone()
-                .hash(),
+            new_block.kernel.body.mutator_set_accumulator.clone().hash(),
             msa_state.hash(),
             "Mutator set in wallet-handler must agree with that from applied block"
         );
