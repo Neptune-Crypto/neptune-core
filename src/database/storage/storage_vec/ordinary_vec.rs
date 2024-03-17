@@ -118,54 +118,27 @@ impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec
 
 impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> StorageVec<T> for OrdinaryVec<T> {}
 
-/*
 #[cfg(test)]
 mod tests {
-    use super::super::traits::tests as traits_tests;
     use super::*;
+    use super::super::traits::tests as trait_tests;
 
-    mod concurrency {
+    pub fn mk_test_vec_u64() -> OrdinaryVec<u64> {
+        OrdinaryVec::from(vec![])
+    }
+
+    pub mod streams {
         use super::*;
+        use trait_tests::streams as stream_tests;
 
-        fn gen_concurrency_test_vec() -> OrdinaryVec<u64> {
-            Default::default()
+        #[tokio::test]
+        pub async fn stream() {
+            stream_tests::stream(mk_test_vec_u64()).await
         }
 
-        #[test]
-        #[should_panic(expected = "called `Result::unwrap()` on an `Err` value: Any { .. }")]
-        fn non_atomic_set_and_get() {
-            traits_tests::concurrency::non_atomic_set_and_get(&mut gen_concurrency_test_vec());
-        }
-
-        #[test]
-        #[should_panic(expected = "called `Result::unwrap()` on an `Err` value: Any { .. }")]
-        fn non_atomic_set_and_get_wrapped_atomic_rw() {
-            traits_tests::concurrency::non_atomic_set_and_get_wrapped_atomic_rw(
-                &mut gen_concurrency_test_vec(),
-            );
-        }
-
-        #[test]
-        fn atomic_set_and_get_wrapped_atomic_rw() {
-            traits_tests::concurrency::atomic_set_and_get_wrapped_atomic_rw(
-                &mut gen_concurrency_test_vec(),
-            );
-        }
-
-        #[test]
-        fn atomic_setmany_and_getmany() {
-            traits_tests::concurrency::atomic_setmany_and_getmany(&mut gen_concurrency_test_vec());
-        }
-
-        #[test]
-        fn atomic_setall_and_getall() {
-            traits_tests::concurrency::atomic_setall_and_getall(&mut gen_concurrency_test_vec());
-        }
-
-        #[test]
-        fn atomic_iter_mut_and_iter() {
-            traits_tests::concurrency::atomic_iter_mut_and_iter(&mut gen_concurrency_test_vec());
+        #[tokio::test]
+        pub async fn stream_many() {
+            stream_tests::stream_many(mk_test_vec_u64()).await
         }
     }
 }
-*/
