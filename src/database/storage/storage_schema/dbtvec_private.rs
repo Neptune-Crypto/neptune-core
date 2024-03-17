@@ -1,4 +1,3 @@
-// use super::super::storage_vec::traits::*;
 use super::super::storage_vec::Index;
 use super::RustyKey;
 use super::{traits::StorageReader, PendingWrites, RustyValue, SimpleRustyReader, WriteOperation};
@@ -9,14 +8,11 @@ use serde::Serialize;
 use std::fmt::{Debug, Formatter};
 use std::{collections::HashMap, sync::Arc};
 
-// note: no locking is required in `DbtVecPrivate` because locking
-// is performed in the `DbtVec` public wrapper.
-pub struct DbtVecPrivate<V> {
+pub(super) struct DbtVecPrivate<V> {
     pub(super) pending_writes: AtomicRw<PendingWrites>,
     pub(super) reader: Arc<SimpleRustyReader>,
     pub(super) current_length: Option<Index>,
     pub(super) key_prefix: u8,
-    // pub(super) write_queue: VecDeque<VecWriteOperation<V>>,
     pub(super) cache: HashMap<Index, V>,
     persist_count: usize,
     pub(super) name: String,
@@ -32,14 +28,12 @@ where
             .field("reader", &"Arc<SimpleRustyReader + Send + Sync>")
             .field("current_length", &self.current_length)
             .field("key_prefix", &self.key_prefix)
-            // .field("write_queue", &self.write_queue)
             .field("cache", &self.cache)
             .field("name", &self.name)
             .finish()
     }
 }
 
-// impl<V: Clone + Serialize + DeserializeOwned> StorageVecLockedData<V> for DbtVecPrivate<V> {
 impl<V: Clone + Serialize + DeserializeOwned> DbtVecPrivate<V> {
     #[inline]
     pub(super) async fn get(&self, index: Index) -> V {
@@ -63,7 +57,6 @@ impl<V: Clone + Serialize + DeserializeOwned> DbtVecPrivate<V> {
 
         // then try persistent storage
         let key: RustyKey = self.get_index_key(index);
-        println!("get-key: {:?}", key);
         let val = self.reader.get(key).await.unwrap_or_else(|| {
             panic!(
                 "Element with index {index} does not exist in {}. This should not happen",
@@ -138,7 +131,6 @@ where
             pending_writes,
             key_prefix,
             reader,
-            // write_queue: VecDeque::default(),
             current_length: length,
             cache,
             persist_count,
@@ -152,8 +144,6 @@ where
         let persist_count = {
             let mut pending_writes = self.pending_writes.lock_guard_mut().await;
 
-            println!("set-key: {:?}", self.get_index_key(index));
-
             pending_writes.write_ops.push(WriteOperation::Write(
                 self.get_index_key(index),
                 RustyValue::from_any(&value),
@@ -163,25 +153,6 @@ where
         self.process_persist_count(persist_count);
 
         self.cache.insert(index, value.clone());
-
-        // note: benchmarks have revealed this code to slow down
-        //       set operations by about 7x, eg 10us to 70us.
-        //       Disabling for now.
-        //
-        // if let Some(_old_val) = self.cache.insert(index, value.clone()) {
-        // If cache entry exists, we remove any corresponding
-        // OverWrite ops in the `write_queue` to reduce disk IO.
-
-        // logic: retain all ops that are not overwrite, and
-        // overwrite ops that do not have an index matching cache_index.
-        // self.write_queue.retain(|op| match op {
-        //     VecWriteOperation::OverWrite((i, _)) => *i != index,
-        //     _ => true,
-        // })
-        // }
-
-        // self.write_queue
-        //     .push_back(VecWriteOperation::OverWrite((index, value)));
     }
 
     fn process_persist_count(&mut self, pending_writes_persist_count: usize) {
@@ -229,8 +200,6 @@ where
             self.len().await,
             self.name
         );
-
-        // let fake_cache: HashMap<Index, V> = HashMap::new();
 
         let (indices_of_elements_in_cache, indices_of_elements_not_in_cache): (Vec<_>, Vec<_>) =
             indices
@@ -345,12 +314,8 @@ where
     pub(super) async fn pop(&mut self) -> Option<V> {
         // If vector is empty, return None
         if self.is_empty().await {
-            println!("pop: is_empty --> None");
             return None;
         }
-
-        // add to write queue
-        // self.write_queue.push_back(VecWriteOperation::Pop);
 
         // Update length
         let current_length = self
@@ -380,11 +345,9 @@ where
         // try cache first
         let current_length = self.len().await;
         if self.cache.contains_key(&current_length) {
-            println!("pop: found {} in cache", current_length);
             self.cache.remove(&current_length)
         } else {
             // then try persistent storage
-            println!("pop: {} not in cache. fetching from DB", new_length);
             let key = self.get_index_key(current_length);
             self.reader.get(key).await.map(|value| value.into_any())
         }
@@ -392,9 +355,6 @@ where
 
     #[inline]
     pub(super) async fn push(&mut self, value: V) {
-        // add to write queue
-        // self.write_queue
-        //     .push_back(VecWriteOperation::Push(value.clone()));
 
         // record in cache
         let current_length = self.len().await;
@@ -402,8 +362,6 @@ where
 
         let persist_count = {
             let mut pending_writes = self.pending_writes.lock_guard_mut().await;
-
-            // println!("push-key: {:?}", self.get_index_key(index));
 
             pending_writes.write_ops.push(WriteOperation::Write(
                 self.get_index_key(current_length),
@@ -418,10 +376,6 @@ where
         self.process_persist_count(persist_count);
 
         let _old_val = self.cache.insert(current_length, value.clone());
-
-        // note: we cannot naively remove any previous `Push` ops with
-        // this value from the write_queue (to reduce disk i/o) because
-        // there might be corresponding `Pop` op(s).
 
         // update length
         self.current_length = Some(new_length);

@@ -1,18 +1,15 @@
 use super::super::super::neptune_leveldb::NeptuneLevelDb;
-// use super::enums::WriteOperation;
 use super::{traits::StorageWriter, DbtSchema, SimpleRustyReader, WriteOperation};
 use crate::database::neptune_leveldb::WriteBatchAsync;
 use crate::locks::tokio::LockCallbackFn;
-// use leveldb::batch::WriteBatch;
 use super::{RustyKey, RustyValue};
-// use std::collections::HashMap;
 
-/// Database schema and tables logic for RustyLevelNeptuneLevelDb. You probably
+/// Database schema and tables logic for RustyLevelDB. You probably
 /// want to implement your own storage class after this example so
 /// that you can hardcode the schema in new(). But it is nevertheless
 /// possible to use this struct and add to the schema.
 pub struct SimpleRustyStorage {
-    /// dynamic NeptuneLevelDb Schema.  (new tables may be added)
+    /// dynamic DB Schema.  (new tables may be added)
     pub schema: DbtSchema,
     db: NeptuneLevelDb<RustyKey, RustyValue>,
 }

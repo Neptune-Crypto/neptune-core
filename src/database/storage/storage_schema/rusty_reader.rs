@@ -7,7 +7,7 @@ use super::{traits::StorageReader, RustyKey, RustyValue};
 /// A read-only database interface
 #[derive(Debug, Clone)]
 pub struct RustyReader {
-    /// levelNeptuneLevelDb Database
+    /// LevelDB Database
     pub db: NeptuneLevelDb<RustyKey, RustyValue>,
 }
 
