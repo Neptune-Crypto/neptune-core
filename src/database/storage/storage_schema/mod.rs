@@ -1,10 +1,23 @@
-//! Provides a virtual NeptuneLevelDb Schema with atomic writes across "tables".
+//! LevelDB provides atomic writes to a database.  However each database is a
+//! simple key/value store.  There is no logical sub-unit of a database that we
+//! might call a "Table" or `struct`.
 //!
-//! This module provides [`DbtSchema`] that can generate any number of
-//! [`DbtVec`] and [`DbtSingleton`] collection types.
+//! This makes it difficult for rust code to have multiple `struct` stored in a
+//! single DB with atomic updates.
 //!
-//! Mutating operations to these "tables" are cached and written to the
-//! database in a single atomic batch operation.
+//! This module provides a virtual DB Schema with logical "tables" that are
+//! backed by key/val pairs in a single LevelDB database.
+//!
+//! Atomic writes are supported across multiple "tables".
+//!
+//! [`DbtSchema`] that can generate any number of [`DbtVec`] and
+//! [`DbtSingleton`] collection types.
+//!
+//! Mutating operations to these "tables" are cached and written to the database
+//! in a single atomic batch operation.
+//!
+//! Important: write operations are not written until
+//! SimpleRustyStorage::persist() is called.
 
 mod dbtsingleton;
 mod dbtsingleton_private;
@@ -18,20 +31,18 @@ mod rusty_value;
 mod schema;
 mod simple_rusty_reader;
 mod simple_rusty_storage;
-// mod dbtable_type;
 pub mod traits;
 
 pub use dbtsingleton::*;
 pub use dbtvec::*;
 pub use enums::*;
-pub use pending_writes::*;
+use pending_writes::*;
 pub use rusty_key::*;
 pub use rusty_reader::*;
 pub use rusty_value::*;
 pub use schema::*;
 pub use simple_rusty_reader::*;
 pub use simple_rusty_storage::*;
-// pub use dbtable_type::*;
 
 #[cfg(test)]
 mod tests {
@@ -47,10 +58,7 @@ mod tests {
 
     use crate::database::NeptuneLevelDb;
     use crate::twenty_first::shared_math::other::random_elements;
-    // use crate::{
-    //     // shared_math::other::random_elements,
-    //     // storage::storage_vec::{traits::*, Index},
-    // };
+
     use itertools::Itertools;
 
     #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -282,8 +290,8 @@ mod tests {
         assert_eq!(last, S([8u8].to_vec()));
 
         // drop without persisting
-        drop(rusty_storage); // <--- NeptuneLevelDb ref dropped.
-        drop(vector); //        <--- Final NeptuneLevelDb ref dropped. NeptuneLevelDb closes
+        drop(rusty_storage); // <--- DB ref dropped.
+        drop(vector); //        <--- Final DB ref dropped. NeptuneLevelDb closes
 
         // Open existing database.
         let new_db = NeptuneLevelDb::open_test_database(&db_path, true, None, None, None)
@@ -295,7 +303,7 @@ mod tests {
 
         // modify
         new_vector.set(2, S([3u8].to_vec())).await;
-        println!("vec: {:?}", new_vector);
+
         let last_again = new_vector.pop().await.unwrap();
         assert_eq!(last_again, S([8u8].to_vec()));
 
@@ -470,9 +478,6 @@ mod tests {
         // set the initial values
         vector.set_many(init_keyvals).await;
 
-        let all = vector.get_all().await;
-        println!("all: {:?}", all);
-
         // generate some random indices to read
         let read_indices: Vec<u64> = random_elements::<u64>(30)
             .into_iter()
@@ -620,27 +625,23 @@ mod tests {
         }
         rusty_storage.persist().await;
 
-        for i in 0..1000 {
+        for _i in 0..1000 {
             assert_eq!(normal_vector.len() as u64, persisted_vector.len().await);
 
             match rng.gen_range(0..=5) {
                 0 => {
-                    println!("case 0: push");
                     // `push`
                     let push_val = rng.next_u64();
                     persisted_vector.push(push_val).await;
                     normal_vector.push(push_val);
                 }
                 1 => {
-                    println!("case 1: pop");
                     // `pop`
                     let normal_pop_val = normal_vector.pop().unwrap();
-                    println!("{}: popped val: {}", i, normal_pop_val);
                     let persisted_pop_val = persisted_vector.pop().await.unwrap();
                     assert_eq!(persisted_pop_val, normal_pop_val);
                 }
                 2 => {
-                    println!("case 2: get_many");
                     // `get_many`
                     assert_eq!(normal_vector.len(), persisted_vector.len().await as usize);
 
@@ -662,8 +663,6 @@ mod tests {
                     );
                 }
                 3 => {
-                    println!("case 3: set");
-
                     // `set`
                     let value = rng.next_u64();
                     let index = rng.gen_range(0..normal_vector.len());
@@ -671,7 +670,6 @@ mod tests {
                     persisted_vector.set(index as u64, value).await;
                 }
                 4 => {
-                    println!("case 4: set_many");
                     // `set_many`
                     let indices: Vec<u64> = (0..rng.gen_range(0..10))
                         .map(|_| rng.gen_range(0..normal_vector.len() as u64))
@@ -686,7 +684,6 @@ mod tests {
                     persisted_vector.set_many(update).await;
                 }
                 5 => {
-                    println!("case 5: persist");
                     // persist
                     rusty_storage.persist().await;
                 }
@@ -744,9 +741,9 @@ mod tests {
         rusty_storage.persist().await;
         assert!(vector1.is_empty().await);
 
-        drop(rusty_storage); // <-- NeptuneLevelDb ref dropped
-        drop(vector1); //       <-- NeptuneLevelDb ref dropped
-        drop(singleton); //     <-- final NeptuneLevelDb ref dropped (NeptuneLevelDb closes)
+        drop(rusty_storage); // <-- DB ref dropped
+        drop(vector1); //       <-- DB ref dropped
+        drop(singleton); //     <-- final DB ref dropped (NeptuneLevelDb closes)
 
         // re-open NeptuneLevelDb / restore from disk
         let new_db = NeptuneLevelDb::open_test_database(&db_path, true, None, None, None)
@@ -875,10 +872,10 @@ mod tests {
             vector2.get_many(&[2, 1]).await,
             vec![vector2.get(2).await, vector2.get(1).await]
         );
-        drop(rusty_storage); // <-- NeptuneLevelDb ref dropped
-        drop(vector1); //       <-- NeptuneLevelDb ref dropped
-        drop(vector2); //       <-- NeptuneLevelDb ref dropped
-        drop(singleton); //     <-- final NeptuneLevelDb ref dropped (NeptuneLevelDb closes)
+        drop(rusty_storage); // <-- DB ref dropped
+        drop(vector1); //       <-- DB ref dropped
+        drop(vector2); //       <-- DB ref dropped
+        drop(singleton); //     <-- final DB ref dropped (NeptuneLevelDb closes)
 
         // re-open NeptuneLevelDb / restore from disk
         let new_db = NeptuneLevelDb::open_test_database(&db_path, true, None, None, None)

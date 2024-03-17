@@ -1,4 +1,3 @@
-// use super::traits::*;
 use super::{PendingWrites, RustyValue, SimpleRustyReader, WriteOperation};
 use crate::locks::tokio::AtomicRw;
 use serde::Serialize;
@@ -7,7 +6,7 @@ use std::sync::Arc;
 
 // note: no locking is required in `DbtSingletonPrivate` because locking
 // is performed in the `DbtSingleton` public wrapper.
-pub(crate) struct DbtSingletonPrivate<V> {
+pub(super) struct DbtSingletonPrivate<V> {
     pub(super) pending_writes: AtomicRw<PendingWrites>,
     pub(super) key: u8,
     pub(super) current_value: V,
