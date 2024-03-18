@@ -1,22 +1,16 @@
 use crate::prelude::twenty_first;
 use crate::Hash;
-
-// use crate::database::NeptuneLevelDb;
-// use crate::database::storage::storage_schema::{traits::*, DbtSingleton, DbtVec, SimpleRustyStorage};
-
+use crate::database::NeptuneLevelDb;
 use crate::database::storage::storage_schema::{
     traits::*, DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage,
 };
-use crate::database::NeptuneLevelDb;
-// use crate::database::storage::storage_vec::traits::*;
 
-// use twenty_first::{shared_math::tip5::Digest, util_types::mmr::archival_mmr::ArchivalMmr};
-use super::archival_mmr::ArchivalMmr;
 use twenty_first::shared_math::tip5::Digest;
 
 use super::{
     active_window::ActiveWindow, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
     mutator_set_kernel::MutatorSetKernel,
+    archival_mmr::ArchivalMmr,
 };
 
 type AmsMmrStorage = DbtVec<Digest>;
@@ -44,7 +38,6 @@ impl RustyArchivalMutatorSet {
             .new_singleton::<Vec<u32>>("active_window")
             .await;
         let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
-        // storage.restore_or_new();
 
         let kernel = MutatorSetKernel::<ArchivalMmr<Hash, AmsMmrStorage>> {
             aocl: ArchivalMmr::<Hash, AmsMmrStorage>::new(aocl).await,
@@ -83,8 +76,6 @@ impl RustyArchivalMutatorSet {
     }
 
     pub async fn restore_or_new(&mut self) {
-        // self.storage.restore_or_new();
-
         // The field `digests` of ArchivalMMR should always have at
         // least one element (a dummy digest), owing to 1-indexation.
         self.ams_mut().kernel.aocl.fix_dummy_async().await;
@@ -103,18 +94,6 @@ impl StorageWriter for RustyArchivalMutatorSet {
 
         self.storage.persist().await;
     }
-
-    // fn restore_or_new(&mut self) {
-    //     self.storage.restore_or_new();
-
-    //     // The field `digests` of ArchivalMMR should always have at
-    //     // least one element (a dummy digest), owing to 1-indexation.
-    //     self.ams_mut().kernel.aocl.fix_dummy();
-    //     self.ams_mut().kernel.swbf_inactive.fix_dummy();
-
-    //     // populate active window
-    //     self.ams_mut().kernel.swbf_active.sbf = self.active_window_storage.get();
-    // }
 }
 
 #[cfg(test)]

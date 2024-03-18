@@ -534,7 +534,7 @@ mod wallet_tests {
             let ms_membership_proof = monitored_utxos[0]
                 .get_membership_proof_for_block(block_1.hash())
                 .unwrap();
-            let membership_proof_is_valid = block_3
+            let _membership_proof_is_valid = block_3
                 .kernel
                 .body
                 .mutator_set_accumulator

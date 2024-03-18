@@ -749,7 +749,6 @@ mod block_tests {
             .await
             .unwrap();
         let mut storage = SimpleRustyStorage::new(db);
-        // storage.restore_or_new();
         let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
         let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage).await;
         ammr.append(genesis_block.hash());
