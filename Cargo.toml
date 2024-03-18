@@ -58,14 +58,12 @@ unicode-width = "0"
 zeroize = "1.7.0"
 rs-leveldb = "0.1.5"
 leveldb-sys = "2.0.9"
-lending-iterator = "0.1.7"
 async-trait = "0.1.77"
 async-stream = "0.3.5"
 
 [dev-dependencies]
 test-strategy = "0.3"
 pin-project-lite = "0.2.13"
-tokio-scoped = "0.2.0"
 tokio-test = "0"
 
 [dev-dependencies.cargo-husky]
@@ -101,4 +99,4 @@ opt-level = 0
 # tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "f711ae27d1402d733989624bbadd59b7e82a1972" }
 tasm-lib = { path = "/home/danda/dev/neptune/tasm-lib/tasm-lib" }
 #twenty-first = { path = "/home/danda/dev/neptune/tasm-lib/tasm-lib" }
-tokio-scoped = { git = "https://github.com/dan-da/tokio-scoped-redux.git", rev = "90ad5f09ca68552bd9430605bd7d7101e44a83dd" }
+# tokio-scoped = { git = "https://github.com/dan-da/tokio-scoped-redux.git", rev = "90ad5f09ca68552bd9430605bd7d7101e44a83dd" }

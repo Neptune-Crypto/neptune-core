@@ -290,12 +290,12 @@ impl Drop for DbIntMut {
     }
 }
 
-// impl Batch for DbIntMut {
-//     #[inline]
-//     fn write(&self, options: &WriteOptions, batch: &WriteBatch) -> Result<(), DbError> {
-//         self.db.write(options, batch)
-//     }
-// }
+impl Batch for DbIntMut {
+    #[inline]
+    fn write(&self, options: &WriteOptions, batch: &WriteBatch) -> Result<(), DbError> {
+        self.db.as_ref().unwrap().write(options, batch)
+    }
+}
 
 impl<'a> Compaction<'a> for DbIntMut {
     #[inline]

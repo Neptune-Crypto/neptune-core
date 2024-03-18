@@ -1,21 +1,16 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
-
-use std::collections::{BTreeSet, HashMap};
-// use std::collections::HashMap;
-use std::error::Error;
-use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-
-use twenty_first::util_types::mmr;
-// use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
-use super::archival_mmr::ArchivalMmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-// use twenty_first::util_types::mmr::mmr_trait::Mmr;
-
-// use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::traits::*;
 
+use std::collections::{BTreeSet, HashMap};
+use std::error::Error;
+
+use twenty_first::shared_math::tip5::Digest;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::mmr;
+use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+
+use super::archival_mmr::ArchivalMmr;
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
 use super::chunk::Chunk;
@@ -26,8 +21,6 @@ use super::mutator_set_kernel::{get_swbf_indices, MutatorSetKernel, MutatorSetKe
 use super::mutator_set_trait::*;
 use super::removal_record::RemovalRecord;
 use super::shared::CHUNK_SIZE;
-
-use futures::{pin_mut, StreamExt};
 
 pub struct ArchivalMutatorSet<MmrStorage, ChunkStorage>
 where
@@ -98,7 +91,6 @@ where
             .kernel
             .batch_remove(removal_records, preserved_membership_proofs);
 
-        // note: set_many() is atomic.
         self.chunks.set_many(chunk_index_to_chunk_mutation).await
     }
 }
@@ -128,27 +120,6 @@ where
             chunks,
         }
     }
-
-    // todo: remove.  This fn is unused.
-    //
-    // pub async fn new_or_restore(
-    //     aocl: MmrStorage,
-    //     swbf_inactive: MmrStorage,
-    //     chunks: ChunkStorage,
-    //     active_window: ActiveWindow,
-    // ) -> Self {
-    //     let aocl: ArchivalMmr<Hash, MmrStorage> = ArchivalMmr::new(aocl).await;
-    //     let swbf_inactive: ArchivalMmr<Hash, MmrStorage> = ArchivalMmr::new(swbf_inactive).await;
-
-    //     Self {
-    //         kernel: MutatorSetKernel {
-    //             aocl,
-    //             swbf_inactive,
-    //             swbf_active: active_window,
-    //         },
-    //         chunks,
-    //     }
-    // }
 
     /// Returns an authentication path for an element in the append-only commitment list
     pub async fn get_aocl_authentication_path(
@@ -226,17 +197,10 @@ where
             .map(|bi| (*bi / CHUNK_SIZE as u128) as u64)
             .collect();
         let mut target_chunks: ChunkDictionary = ChunkDictionary::default();
-        // for (chunk_index, chunk) in self.chunks.many_iter(chunk_indices) {
 
         let stream = self.chunks.stream_many(chunk_indices).await;
         pin_mut!(stream); // needed for iteration
 
-        // for (chunk, chunk_index) in self
-        //     .chunks
-        //     .get_many(&chunk_indices)
-        //     .await
-        //     .iter()
-        //     .zip(chunk_indices)
         while let Some((chunk_index, chunk)) = stream.next().await {
             assert!(
                 self.chunks.len().await > chunk_index,

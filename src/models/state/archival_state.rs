@@ -12,9 +12,6 @@ use tokio::io::SeekFrom;
 use tracing::{debug, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
-// use crate::database::NeptuneLevelDb;
-// use twenty_first::util_types::mmr::mmr_trait::Mmr;
-// use crate::database::storage::storage_schema::traits::*;
 use crate::database::storage::storage_schema::traits::*;
 
 use super::shared::new_block_file_is_needed;
@@ -26,8 +23,7 @@ use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
 };
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSetAsync;
+use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
@@ -852,7 +848,6 @@ mod archival_state_tests {
     async fn initialize_archival_state_test() -> Result<()> {
         // Ensure that the archival state can be initialized without overflowing the stack
         let seed: [u8; 32] = thread_rng().gen();
-        // tokio::task::spawn_local(async move {
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let network = Network::Alpha;
 
@@ -873,8 +868,6 @@ mod archival_state_tests {
             .await
             .unwrap()
             .unwrap();
-        // })
-        // .await?;
 
         Ok(())
     }

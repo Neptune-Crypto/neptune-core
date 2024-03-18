@@ -40,9 +40,7 @@ use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
 
-// use crate::twenty_first::sync::{LockCallbackFn, LockEvent};
 use crate::locks::tokio::{LockCallbackFn, LockEvent};
-// use crate::locks::tokio as sync_tokio;
 use crate::locks::tokio as sync_tokio;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use futures::future;
@@ -241,13 +239,10 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
                     rpc_server_to_main_tx: rpc_server_to_main_tx.clone(),
                 };
 
-                // let f  = assert_stream_send(Box::pin(server.serve()));
-                let f = server.serve();
-
-                channel.execute(f).for_each(spawn)
+                channel.execute(server.serve()).for_each(spawn)
             })
             // Max 10 channels.
-            // .buffer_unordered(10)
+            .buffer_unordered(10)
             .for_each(|_| async {})
             .await;
     });

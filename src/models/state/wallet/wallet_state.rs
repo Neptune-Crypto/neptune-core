@@ -17,11 +17,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, error, info, warn};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
-// use crate::database::NeptuneLevelDb;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
-// use crate::database::storage::storage_schema::traits::*;
-// use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_schema::traits::*;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::NeptuneLevelDb;
@@ -43,8 +40,6 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use crate::Hash;
-
-use futures::{pin_mut, StreamExt};
 
 pub struct WalletState {
     pub wallet_db: RustyWalletDatabase,
@@ -185,8 +180,6 @@ impl WalletState {
         };
 
         let rusty_wallet_database = RustyWalletDatabase::connect(wallet_db).await;
-        // rusty_wallet_database.restore_or_new();
-
         let sync_label = rusty_wallet_database.get_sync_label().await;
 
         let mut wallet_state = Self {
@@ -248,10 +241,11 @@ impl WalletState {
             .collect_vec();
 
         let monitored_utxos = self.wallet_db.monitored_utxos();
-
         let mut spent_own_utxos = vec![];
+
         let stream = monitored_utxos.stream().await;
         pin_mut!(stream); // needed for iteration
+
         while let Some((i, monitored_utxo)) = stream.next().await {
             let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
                 Some(msmp) => msmp.1.compute_indices(Hash::hash(&monitored_utxo.utxo)),
@@ -351,7 +345,6 @@ impl WalletState {
             let stream = monitored_utxos.stream().await;
             pin_mut!(stream); // needed for iteration
 
-            // for (j, monitored_utxo) in monitored_utxos.get_all().await.iter().enumerate() {
             while let Some((i, monitored_utxo)) = stream.next().await {
                 let utxo_digest = Hash::hash(&monitored_utxo.utxo);
 
@@ -384,8 +377,8 @@ impl WalletState {
                                 None => String::from("No info about when UTXO was confirmed."),
                             };
                             warn!(
-                            "Unable to find valid membership proof for UTXO with digest {utxo_digest}. {confirmed_in_block_info} Current block height is {}", new_block.kernel.header.height
-                        );
+                                "Unable to find valid membership proof for UTXO with digest {utxo_digest}. {confirmed_in_block_info} Current block height is {}", new_block.kernel.header.height
+                            );
                         }
                     }
                 }
@@ -503,15 +496,6 @@ impl WalletState {
                 .count()
                 .await;
 
-            // let mutxo_with_valid_mps = monitored_utxos
-            //     .get_all()
-            //     .await
-            //     .iter()
-            //     .filter(|mutxo| {
-            //         mutxo.is_synced_to(new_block.kernel.header.prev_block_digest)
-            //             || mutxo.blockhash_to_membership_proof.is_empty()
-            //     })
-            //     .count();
             assert_eq!(
                 mutxo_with_valid_mps,
                 valid_membership_proofs_and_own_utxo_count.len(),
@@ -592,13 +576,6 @@ impl WalletState {
                 .await
         };
 
-        // let num_unspent_utxos = monitored_utxos
-        //     .get_all()
-        //     .await
-        //     .iter()
-        //     .filter(|m| m.spent_in_block.is_none())
-        //     .count();
-
         debug!("Number of unspent UTXOs: {}", num_unspent_utxos);
 
         for (&strong_utxo_key, (updated_ms_mp, own_utxo_index)) in
@@ -659,11 +636,6 @@ impl WalletState {
             .all(|m| futures::future::ready(m.get_membership_proof_for_block(tip_hash).is_some()))
             .await;
 
-        // let synced = monitored_utxos
-        //     .get_all()
-        //     .await
-        //     .iter()
-        //     .all(|m| m.get_membership_proof_for_block(tip_hash).is_some());
         synced
     }
 
@@ -782,7 +754,6 @@ impl WalletState {
         let stream = monitored_utxos.stream_values().await;
         pin_mut!(stream); // needed for iteration
 
-        // for mutxo in monitored_utxos.get_all().await.iter() {
         while let Some(mutxo) = stream.next().await {
             if mutxo.spent_in_block.is_some()
                 || mutxo.abandoned_at.is_some()

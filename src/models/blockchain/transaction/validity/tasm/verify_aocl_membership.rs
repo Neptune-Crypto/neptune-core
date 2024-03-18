@@ -21,7 +21,9 @@ use triton_vm::{
     triton_asm,
 };
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
-// use twenty_first::mock::mmr::get_mock_ammr_from_digests;
+
+// note: perhaps twenty_first::mock::mmr should not be mock
+// at all, since we are depending on it.
 use twenty_first::mock::mmr::get_mock_ammr_from_digests;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 

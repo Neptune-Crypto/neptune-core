@@ -1,16 +1,11 @@
 use crate::prelude::twenty_first;
-use std::marker::PhantomData;
-
-// use leveldb::batch::WriteBatch;
-
 use crate::database::storage::storage_vec::traits::*;
-// use crate::database::storage::storage_schema::traits::*;
 
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::shared::bag_peaks;
-// use twenty_first::utils::has_unique_elements;
 
+use std::marker::PhantomData;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -457,23 +452,6 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
         })
     }
 
-    /// Append an element to the archival MMR
-    // pub async fn append_raw_async(&mut self, new_leaf: Digest) {
-    //     let node_index = self.digests.len().await;
-    //     self.digests.push(new_leaf).await;
-    //     let (right_parent_count, own_height) =
-    //         shared_advanced::right_lineage_length_and_own_height(node_index);
-
-    //     // This function could be rewritten with a while-loop instead of being recursive.
-    //     if right_parent_count != 0 {
-    //         let left_sibling_hash = self
-    //             .digests
-    //             .get(shared_advanced::left_sibling(node_index, own_height)).await;
-    //         let parent_hash: Digest = H::hash_pair(left_sibling_hash, new_leaf);
-    //         self.append_raw_async(parent_hash).await;
-    //     }
-    // }
-
     /// Remove the last leaf from the archival MMR
     pub async fn remove_last_leaf_async(&mut self) -> Option<Digest> {
         if self.is_empty_async().await {
@@ -492,17 +470,7 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
     }
 }
 
-// instead?  impl StorageWriter for ArchivalMmr ...
-
-// impl<H: AlgebraicHasher> ArchivalMmr<H, RustyLevelDbVec<Digest>> {
-// impl<H: AlgebraicHasher, Storage: StorageVec<Digest> + StorageWriter> ArchivalMmr<H, Storage> {
-//     /// Add write queue to referenced write batch. Leaves cache and write queue empty.
-//     pub fn persist(&mut self, write_batch: &mut WriteBatch) {
-//         self.digests.pull_queue(write_batch);
-//     }
-// }
-
-/*
+/* todo: re-enable these tests, async.
 #[cfg(test)]
 mod mmr_test {
 

@@ -24,13 +24,12 @@ pub struct RustyWalletDatabase {
 
 impl RustyWalletDatabase {
     pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
-        let mut storage = SimpleRustyStorage::new(db);
 
-        // let mut storage = SimpleRustyStorage::new_with_callback(
-        //     db,
-        //     "RustyWalletDatabase-Schema",
-        //     crate::LOG_LOCK_EVENT_CB,
-        // );
+        let mut storage = SimpleRustyStorage::new_with_callback(
+            db,
+            "RustyWalletDatabase-Schema",
+            crate::LOG_LOCK_EVENT_CB,
+        );
 
         let monitored_utxos_storage = storage
             .schema
@@ -38,8 +37,6 @@ impl RustyWalletDatabase {
             .await;
         let sync_label_storage = storage.schema.new_singleton::<Digest>("sync_label").await;
         let counter_storage = storage.schema.new_singleton::<u64>("counter").await;
-
-        // storage.restore_or_new();
 
         Self {
             storage,
@@ -81,8 +78,4 @@ impl StorageWriter for RustyWalletDatabase {
     async fn persist(&mut self) {
         self.storage.persist().await
     }
-
-    // fn restore_or_new(&mut self) {
-    //     self.storage.restore_or_new()
-    // }
 }
