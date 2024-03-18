@@ -308,7 +308,7 @@ where
         read_options: Option<ReadOptions>,
         write_options: Option<WriteOptions>,
     ) -> Result<Self> {
-        let options_async = options.map(|o| OptionsAsync::from(o));
+        let options_async = options.map(OptionsAsync::from);
 
         let db = task::spawn_blocking(move || {
             DB::open_new_test_database(
@@ -336,7 +336,7 @@ where
         write_options: Option<WriteOptions>,
     ) -> Result<Self> {
         let path = db_path.to_path_buf();
-        let options_async = options.map(|o| OptionsAsync::from(o));
+        let options_async = options.map(OptionsAsync::from);
 
         let db = task::spawn_blocking(move || {
             DB::open_test_database(
@@ -437,5 +437,11 @@ impl<K, V> WriteBatchAsync<K, V> {
 
     pub fn op_delete(&mut self, key: K) {
         self.0.push(WriteBatchOpAsync::Delete(key));
+    }
+}
+
+impl<K, V> Default for WriteBatchAsync<K, V> {
+    fn default() -> Self {
+        Self::new()
     }
 }

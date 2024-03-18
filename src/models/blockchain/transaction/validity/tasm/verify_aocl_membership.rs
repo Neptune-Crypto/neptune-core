@@ -105,30 +105,27 @@ impl BasicSnippet for VerifyAoclMembership {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
 
-    use tasm_lib::traits::function::ShadowedFunction;
-    use tasm_lib::traits::rust_shadow::RustShadow;
-    use tasm_lib::empty_stack;
-    use tasm_lib::traits::function::{Function, FunctionInitialState};
-    use tasm_lib::triton_vm::prelude::BFieldCodec;
     use rand::RngCore;
     use rand::{rngs::StdRng, Rng, SeedableRng};
+    use tasm_lib::empty_stack;
+    use tasm_lib::traits::function::ShadowedFunction;
+    use tasm_lib::traits::function::{Function, FunctionInitialState};
+    use tasm_lib::traits::rust_shadow::RustShadow;
+    use tasm_lib::triton_vm::prelude::BFieldCodec;
 
     use itertools::Itertools;
 
     use std::collections::HashMap;
 
-    use triton_vm::{
-        prelude::{BFieldElement, Digest},
-    };
+    use triton_vm::prelude::{BFieldElement, Digest};
 
-    use twenty_first::mock::mmr::get_mock_ammr_from_digests;
+    use crate::util_types::mutator_set::archival_mmr::mmr_test::mock;
 
     impl Function for VerifyAoclMembership {
         fn rust_shadow(
@@ -161,7 +158,8 @@ mod tests {
             println!("peaks_size: {peaks_size}");
             let mut peaks_list_encoding = vec![];
             for i in 0..peaks_size {
-                peaks_list_encoding.push(*memory.get(&(peaks_ptr + BFieldElement::new(i))).unwrap());
+                peaks_list_encoding
+                    .push(*memory.get(&(peaks_ptr + BFieldElement::new(i))).unwrap());
             }
             let peaks = *Vec::<Digest>::decode(&peaks_list_encoding).unwrap();
             println!("peaks: {}", peaks.iter().join(","));
@@ -203,54 +201,70 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
         ) -> FunctionInitialState {
-            let mut rng: StdRng = SeedableRng::from_seed(seed);
-            let num_leafs = rng.gen_range(1..100);
-            let leafs = (0..num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();
-            let mmr = get_mock_ammr_from_digests::<Hash>(leafs);
 
-            let leaf_index = rng.next_u64() % num_leafs;
-            let leaf = mmr.get_leaf(leaf_index);
-            let (mmr_mp, peaks) = mmr.prove_membership(leaf_index);
-            let mut msmp = pseudorandom_mutator_set_membership_proof(rng.gen());
-            msmp.auth_path_aocl = mmr_mp;
+            async fn pseudorandom_initial_state_async(
+                seed: [u8; 32],
+            ) -> FunctionInitialState {
 
-            // populate memory
-            let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
-            let mut address = BFieldElement::new(rng.next_u64() % (1 << 20));
+                let mut rng: StdRng = SeedableRng::from_seed(seed);
+                let num_leafs = rng.gen_range(1..100);
+                let leafs = (0..num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();
 
-            let peaks_si_ptr = address;
-            memory.insert(address, BFieldElement::new(peaks.encode().len() as u64));
-            address.increment();
-            for v in peaks.encode().iter() {
-                memory.insert(address, *v);
+                let mmr = mock::get_ammr_from_digests::<Hash>(leafs).await;
+
+                let leaf_index = rng.next_u64() % num_leafs;
+                let leaf = mmr.get_leaf_async(leaf_index).await;
+                let (mmr_mp, peaks) = mmr.prove_membership_async(leaf_index).await;
+                let mut msmp = pseudorandom_mutator_set_membership_proof(rng.gen());
+                msmp.auth_path_aocl = mmr_mp;
+
+                // populate memory
+                let mut memory: HashMap<BFieldElement, BFieldElement> = HashMap::new();
+                let mut address = BFieldElement::new(rng.next_u64() % (1 << 20));
+
+                let peaks_si_ptr = address;
+                memory.insert(address, BFieldElement::new(peaks.encode().len() as u64));
                 address.increment();
+                for v in peaks.encode().iter() {
+                    memory.insert(address, *v);
+                    address.increment();
+                }
+
+                let msmp_si_ptr = address;
+                memory.insert(msmp_si_ptr, BFieldElement::new(msmp.encode().len() as u64));
+                address.increment();
+                for v in msmp.encode().iter() {
+                    memory.insert(address, *v);
+                    address.increment();
+                }
+
+                // populate stack
+                // *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
+                let mut stack = empty_stack();
+                stack.push(peaks_si_ptr + BFieldElement::new(1));
+                stack.push(BFieldElement::new(num_leafs >> 32));
+                stack.push(BFieldElement::new(num_leafs & u32::MAX as u64));
+                stack.push(rng.gen());
+                stack.push(rng.gen());
+                stack.push(rng.gen());
+                stack.push(msmp_si_ptr + BFieldElement::new(1));
+                stack.push(leaf.values()[4]);
+                stack.push(leaf.values()[3]);
+                stack.push(leaf.values()[2]);
+                stack.push(leaf.values()[1]);
+                stack.push(leaf.values()[0]);
+
+                FunctionInitialState { stack, memory }
             }
 
-            let msmp_si_ptr = address;
-            memory.insert(msmp_si_ptr, BFieldElement::new(msmp.encode().len() as u64));
-            address.increment();
-            for v in msmp.encode().iter() {
-                memory.insert(address, *v);
-                address.increment();
-            }
-
-            // populate stack
-            // *peaks leaf_count_hi leaf_count_lo [bu ff er] *msmp c4 c3 c2 c1 c0
-            let mut stack = empty_stack();
-            stack.push(peaks_si_ptr + BFieldElement::new(1));
-            stack.push(BFieldElement::new(num_leafs >> 32));
-            stack.push(BFieldElement::new(num_leafs & u32::MAX as u64));
-            stack.push(rng.gen());
-            stack.push(rng.gen());
-            stack.push(rng.gen());
-            stack.push(msmp_si_ptr + BFieldElement::new(1));
-            stack.push(leaf.values()[4]);
-            stack.push(leaf.values()[3]);
-            stack.push(leaf.values()[2]);
-            stack.push(leaf.values()[1]);
-            stack.push(leaf.values()[0]);
-
-            FunctionInitialState { stack, memory }
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    let runtime = tokio::runtime::Runtime::new().unwrap();
+                    runtime.block_on(pseudorandom_initial_state_async(seed))
+                })
+                .join()
+                .unwrap()
+            })
         }
     }
 

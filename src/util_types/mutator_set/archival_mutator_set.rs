@@ -1,6 +1,6 @@
+use crate::database::storage::storage_vec::traits::*;
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
-use crate::database::storage::storage_vec::traits::*;
 
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
@@ -10,9 +10,9 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 
-use super::archival_mmr::ArchivalMmr;
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
+use super::archival_mmr::ArchivalMmr;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;

@@ -3,6 +3,9 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::twenty_first;
 
+use crate::database::storage::storage_schema::traits::*;
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::NeptuneLevelDb;
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::Zero;
@@ -19,9 +22,6 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
-use crate::database::storage::storage_schema::traits::*;
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::NeptuneLevelDb;
 
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::rusty_wallet_database::RustyWalletDatabase;
@@ -632,11 +632,9 @@ impl WalletState {
         let stream = monitored_utxos.stream_values().await;
         pin_mut!(stream); // needed for iteration
 
-        let synced = stream
+        stream
             .all(|m| futures::future::ready(m.get_membership_proof_for_block(tip_hash).is_some()))
-            .await;
-
-        synced
+            .await
     }
 
     pub async fn get_wallet_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {

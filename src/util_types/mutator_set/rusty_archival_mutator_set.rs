@@ -1,16 +1,15 @@
-use crate::prelude::twenty_first;
-use crate::Hash;
-use crate::database::NeptuneLevelDb;
 use crate::database::storage::storage_schema::{
     traits::*, DbtSingleton, DbtVec, RustyKey, RustyValue, SimpleRustyStorage,
 };
+use crate::database::NeptuneLevelDb;
+use crate::prelude::twenty_first;
+use crate::Hash;
 
 use twenty_first::shared_math::tip5::Digest;
 
 use super::{
-    active_window::ActiveWindow, archival_mutator_set::ArchivalMutatorSet, chunk::Chunk,
-    mutator_set_kernel::MutatorSetKernel,
-    archival_mmr::ArchivalMmr,
+    active_window::ActiveWindow, archival_mmr::ArchivalMmr,
+    archival_mutator_set::ArchivalMutatorSet, chunk::Chunk, mutator_set_kernel::MutatorSetKernel,
 };
 
 type AmsMmrStorage = DbtVec<Digest>;

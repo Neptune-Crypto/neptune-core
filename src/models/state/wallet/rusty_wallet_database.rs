@@ -24,7 +24,6 @@ pub struct RustyWalletDatabase {
 
 impl RustyWalletDatabase {
     pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
-
         let mut storage = SimpleRustyStorage::new_with_callback(
             db,
             "RustyWalletDatabase-Schema",
