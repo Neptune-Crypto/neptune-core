@@ -201,11 +201,7 @@ mod tests {
             seed: [u8; 32],
             _bench_case: Option<tasm_lib::snippet_bencher::BenchmarkCase>,
         ) -> FunctionInitialState {
-
-            async fn pseudorandom_initial_state_async(
-                seed: [u8; 32],
-            ) -> FunctionInitialState {
-
+            async fn pseudorandom_initial_state_async(seed: [u8; 32]) -> FunctionInitialState {
                 let mut rng: StdRng = SeedableRng::from_seed(seed);
                 let num_leafs = rng.gen_range(1..100);
                 let leafs = (0..num_leafs).map(|_| rng.gen::<Digest>()).collect_vec();

@@ -476,8 +476,6 @@ pub(crate) mod mmr_test {
     use super::*;
 
     use itertools::*;
-    // use leveldb::iterator::Iterable;
-    // use leveldb::options::ReadOptions;
     use rand::random;
     use test_strategy::proptest;
 
@@ -507,9 +505,7 @@ pub(crate) mod mmr_test {
             ArchivalMmr::new(pv).await
         }
 
-        pub async fn get_ammr_from_digests<H>(
-            digests: Vec<Digest>,
-        ) -> ArchivalMmr<H, Storage>
+        pub async fn get_ammr_from_digests<H>(digests: Vec<Digest>) -> ArchivalMmr<H, Storage>
         where
             H: AlgebraicHasher,
         {
