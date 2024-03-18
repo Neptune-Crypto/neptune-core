@@ -96,8 +96,8 @@ opt-level = 0
 # rpath = false
 
 [patch.crates-io]
-# rev = "f711ae27d1402d733989624bbadd59b7e82a1972" is tip of tasm-lib master as of 2024-01-25
-# tasm-lib = { git = "https://github.com/TritonVM/tasm-lib.git", rev = "f711ae27d1402d733989624bbadd59b7e82a1972" }
-tasm-lib = { path = "/home/danda/dev/neptune/tasm-lib/tasm-lib" }
-#twenty-first = { path = "/home/danda/dev/neptune/tasm-lib/tasm-lib" }
-# tokio-scoped = { git = "https://github.com/dan-da/tokio-scoped-redux.git", rev = "90ad5f09ca68552bd9430605bd7d7101e44a83dd" }
+# 15a708cf6fcbd9ed3e65e5e2067be6e622176328 is tip of branch: make_storage_async as of 2024-03-18
+tasm-lib = { git = "https://github.com/dan-da/tasm-lib.git", rev = "15a708cf6fcbd9ed3e65e5e2067be6e622176328" }
+
+# 81573735e9df4836ca16655fd31884271984bac7 = tip of branch: make_storage_async on 2024-03-18
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "81573735e9df4836ca16655fd31884271984bac7"}
