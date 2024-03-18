@@ -2,6 +2,9 @@ use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
+use crate::database::storage::storage_schema::traits::StorageWriter as SW;
+use crate::database::storage::storage_vec::traits::*;
+use crate::database::storage::storage_vec::Index;
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::CheckedSub;
@@ -12,9 +15,6 @@ use tracing::{debug, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
-use crate::database::storage::storage_schema::traits::StorageWriter as SW;
-use crate::database::storage::storage_vec::traits::*;
-use crate::database::storage::storage_vec::Index;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::blockchain_state::BlockchainState;
@@ -320,9 +320,9 @@ impl GlobalState {
         // of stream_values() we use stream_many_values() and supply
         // an iterator of indexes that are already reversed.
 
-        let stream = monitored_utxos.stream_many_values(
-            (0..monitored_utxos.len().await).rev()
-        ).await;
+        let stream = monitored_utxos
+            .stream_many_values((0..monitored_utxos.len().await).rev())
+            .await;
         pin_mut!(stream); // needed for iteration
 
         while let Some(mutxo) = stream.next().await {
@@ -909,8 +909,7 @@ impl GlobalState {
                 debug!("MUTXO confirmed at height {confirming_block_height}, reverting for height {} on abandoned chain", revert_block.kernel.header.height);
 
                 // revert removals
-                let removal_records =
-                    revert_block.kernel.body.transaction.kernel.inputs.clone();
+                let removal_records = revert_block.kernel.body.transaction.kernel.inputs.clone();
                 for removal_record in removal_records.iter().rev() {
                     // membership_proof.revert_update_from_removal(&removal);
                     membership_proof
@@ -1227,7 +1226,7 @@ mod global_state_tests {
         tip_block: &Block,
     ) -> bool {
         let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
-        for (_idx, monitored_utxo) in monitored_utxos.get_all().await.iter().enumerate() {
+        for monitored_utxo in monitored_utxos.get_all().await.iter() {
             let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash());
 
             match current_mp {
@@ -1928,18 +1927,21 @@ mod global_state_tests {
 
     #[tokio::test]
     async fn flaky_mutator_set_test() {
-        let mut rng: StdRng =
-            SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
-        let seed: [u8; 32] = rng.gen();
-        // let seed = [
-        //     0xf4, 0xc2, 0x1c, 0xd0, 0x5a, 0xac, 0x99, 0xe7, 0x3a, 0x1e, 0x29, 0x7f, 0x16, 0xc1,
-        //     0x50, 0x5e, 0x1e, 0xd, 0x4b, 0x49, 0x51, 0x9c, 0x1b, 0xa0, 0x38, 0x3c, 0xd, 0x83, 0x29,
-        //     0xdb, 0xab, 0xe2,
-        // ];
-        println!(
-            "seed: [{}]",
-            seed.iter().map(|h| format!("{:#x}", h)).join(", ")
-        );
+        let seed = {
+            let mut rng: StdRng =
+                SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
+            let seed: [u8; 32] = rng.gen();
+            // let seed = [
+            //     0xf4, 0xc2, 0x1c, 0xd0, 0x5a, 0xac, 0x99, 0xe7, 0x3a, 0x1e, 0x29, 0x7f, 0x16, 0xc1,
+            //     0x50, 0x5e, 0x1e, 0xd, 0x4b, 0x49, 0x51, 0x9c, 0x1b, 0xa0, 0x38, 0x3c, 0xd, 0x83, 0x29,
+            //     0xdb, 0xab, 0xe2,
+            // ];
+            println!(
+                "seed: [{}]",
+                seed.iter().map(|h| format!("{:#x}", h)).join(", ")
+            );
+            seed
+        };
         let mut rng: StdRng = SeedableRng::from_seed(seed);
 
         // Test various parts of the state update when a block contains multiple inputs and outputs

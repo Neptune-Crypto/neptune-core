@@ -1,5 +1,6 @@
 use crate::prelude::twenty_first;
 
+use crate::database::storage::storage_schema::traits::*;
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
@@ -12,7 +13,6 @@ use tokio::io::SeekFrom;
 use tracing::{debug, warn};
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
-use crate::database::storage::storage_schema::traits::*;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;

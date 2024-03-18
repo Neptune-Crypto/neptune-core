@@ -343,12 +343,12 @@ where
         self.process_persist_count(persist_count);
 
         // try cache first
-        let current_length = self.len().await;
-        if self.cache.contains_key(&current_length) {
-            self.cache.remove(&current_length)
+        // let current_length = self.len().await;
+        if self.cache.contains_key(&new_length) {
+            self.cache.remove(&new_length)
         } else {
             // then try persistent storage
-            let key = self.get_index_key(current_length);
+            let key = self.get_index_key(new_length);
             self.reader.get(key).await.map(|value| value.into_any())
         }
     }

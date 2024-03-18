@@ -543,18 +543,21 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn remove_transactions_with_block_test() -> Result<()> {
-        let mut rng: StdRng =
-            SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
-        let seed: [u8; 32] = rng.gen();
-        // let seed = [
-        //     0x19, 0xba, 0xc1, 0x55, 0xa7, 0xa0, 0x33, 0xcc, 0x85, 0x73, 0x47, 0xad, 0xd2, 0x1b,
-        //     0x4e, 0x30, 0x54, 0x4b, 0xd3, 0x2e, 0xe0, 0xc2, 0x21, 0xe6, 0x96, 0x82, 0x2a, 0x6, 0xe,
-        //     0xe2, 0xa, 0xda,
-        // ];
-        println!(
-            "seed: [{}]",
-            seed.iter().map(|h| format!("{:#x}", h)).join(", ")
-        );
+        let seed = {
+            let mut rng: StdRng =
+                SeedableRng::from_rng(thread_rng()).expect("failure lifting thread_rng to StdRng");
+            let seed: [u8; 32] = rng.gen();
+            // let seed = [
+            //     0x19, 0xba, 0xc1, 0x55, 0xa7, 0xa0, 0x33, 0xcc, 0x85, 0x73, 0x47, 0xad, 0xd2, 0x1b,
+            //     0x4e, 0x30, 0x54, 0x4b, 0xd3, 0x2e, 0xe0, 0xc2, 0x21, 0xe6, 0x96, 0x82, 0x2a, 0x6, 0xe,
+            //     0xe2, 0xa, 0xda,
+            // ];
+            println!(
+                "seed: [{}]",
+                seed.iter().map(|h| format!("{:#x}", h)).join(", ")
+            );
+            seed
+        };
 
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         // We need the global state to construct a transaction. This global state

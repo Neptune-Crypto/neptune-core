@@ -40,8 +40,8 @@ use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
 
-use crate::locks::tokio::{LockCallbackFn, LockEvent};
 use crate::locks::tokio as sync_tokio;
+use crate::locks::tokio::{LockCallbackFn, LockEvent};
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use futures::future;
 use futures::Future;
