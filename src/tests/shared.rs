@@ -33,7 +33,6 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
@@ -986,7 +985,7 @@ pub fn make_mock_block(
     };
 
     (
-        Block::new(block_header, block_body, Some(Proof(vec![]))),
+        Block::new(block_header, block_body, Block::mk_std_block_type(None)),
         coinbase_utxo,
         coinbase_output_randomness,
     )
