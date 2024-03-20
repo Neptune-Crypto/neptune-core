@@ -66,6 +66,7 @@ test-strategy = "0.3"
 pin-project-lite = "0.2.13"
 tokio-test = "0"
 blake3 = "1.5.1"
+divan = "0.1.14"
 
 [dev-dependencies.cargo-husky]
 default-features = false
@@ -95,9 +96,14 @@ opt-level = 0
 # codegen-units = 256
 # rpath = false
 
+[[bench]]
+name = "sync_atomic"
+harness = false
+
 [patch.crates-io]
 # 15a708cf6fcbd9ed3e65e5e2067be6e622176328 is tip of branch: make_storage_async as of 2024-03-18
 tasm-lib = { git = "https://github.com/dan-da/tasm-lib.git", rev = "15a708cf6fcbd9ed3e65e5e2067be6e622176328" }
 
 # 81573735e9df4836ca16655fd31884271984bac7 = tip of branch: make_storage_async on 2024-03-18
 twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "81573735e9df4836ca16655fd31884271984bac7"}
+
